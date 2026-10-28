@@ -767,13 +767,35 @@ be durable BEFORE the realm is touched: nested, it would roll back together
 with the step that failed, leaving a realm client that no `pending` row names
 and that the reconciler could therefore neither finish nor sweep.
 
-**Cursors are opaque, not trusted.** Both halves of a keyset reach a typed
-expression — the id a `uuid` column, a date sort's value a `timestamptz` cast —
-so `decodeCursor` checks each against the shape the database renders before
-anything is bound. The query fingerprint does not cover this: it keeps a cursor
-from resuming the wrong SET and is deliberately not a security boundary, being
-derived from public inputs. A malformed cursor is the declared `400 VALIDATION`
-rather than PostgreSQL's invalid-input-syntax error surfacing as a 500.
+**Cursors are opaque, bounded, and not trusted.** A keyset cursor names the
+previous page's last row by id and carries no sort value. That is what makes it
+a fixed size: a cursor that carried the value was as long as the value, and
+`display_name` is unbounded `text` which the older REST and GraphQL mints
+accept any length of — so every bound on such a cursor was also a bound on a
+name some row already holds, and a row past it was a page the listing emitted
+and would not take back. The value to resume after is read back out of the
+anchor row per request, under the same tenant and subject predicates the page
+itself carries, so an id outside that set resolves to no row and is refused
+rather than guessed at. The only caller-supplied text left is the uuid, checked
+against what the `uuid` type accepts before it is bound. The query fingerprint
+does not cover any of this: it keeps a cursor from resuming the wrong SET and is
+deliberately not a security boundary, being derived from public inputs. Every
+refusal — a payload that will not parse, a sort or filter the cursor was not
+issued under, an anchor no row answers to — is the same declared
+`400 VALIDATION` with the same message, so a cursor is not a probe for another
+tenant's ids.
+
+**The catalog's input bounds are the Operations', not the service's.** Both
+minting Operations declare `displayName` as 1..200 characters and the
+dispatcher applies that before a handler runs. The service does not repeat it:
+`/api/api-keys` and the GraphQL mint mutations reach the same functions and have
+accepted a name of any length since before the Operations existed, and an empty
+credential name besides (the REST mount substitutes `rotated` only when the
+field is absent). Adding the Operations' bound to the service would narrow both
+published contracts without either of them changing. Nothing downstream needs
+it: the realm's copy of the name is cut to what `CLIENT.NAME` holds, and the
+cursor carries the row's id. An integration still needs a non-empty name, which
+those surfaces also required — it names the realm client.
 
 **Credential lifetime.** Three bounds, kept apart in
 `auth/api-key/lifetime.ts` because they answer different questions.
@@ -844,8 +866,13 @@ Proven:
   transaction while the `pending` intent row survives; a realm that refuses
   leaves one `pending` row, no credential, one realm client and a declared
   `502`;
-- a malformed cursor id or date is the declared `400` before any cast, and a
-  cursor the listing issued still walks a date-sorted page one row at a time;
+- a malformed cursor anchor, and an anchor no row of the set answers to
+  (forged, another tenant's, or deleted mid-walk), are the declared `400`
+  before any cast; every cursor either listing issues walks to the end of every
+  sort in both directions, one row per page, under four `DateStyle`/`TimeZone`
+  pairs and over display names of 200, 1,000 and 20,000 code points — the last
+  two being what the older surfaces accept and no value-carrying cursor could
+  have taken back (`apps/api/src/operations/api-key-cursor-db.test.ts`);
 - `no-store` on both minting surfaces of a booted stack, and the carrier
   refusal of an unclassified bundle on both
   (`apps/api/src/auth/api-key/credential-no-store-db.test.ts`).

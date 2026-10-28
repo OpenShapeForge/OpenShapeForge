@@ -47,6 +47,7 @@ import { API_KEY_MANAGE_ROLE } from "../auth/api-key/ceiling.js";
 import {
   createIntegration,
   issueKey,
+  listKeys,
   pageIntegrations,
   revokeKey,
   MAX_DISPLAY_NAME_LENGTH,
@@ -501,11 +502,12 @@ describe("the catalog over the real dispatcher, as a person with a Relation", ()
   test("pages a name at the contract's limit, in code points rather than units", async () => {
     if (!booted) return;
     // 200 emoji: 200 characters to the input schema that accepts them, 400
-    // UTF-16 units to JavaScript, 800 bytes to UTF-8 — and a cursor of some
-    // 1.1 kB, which a fixed 512-character ceiling refused before parsing. The
-    // administrator could create the integration and then could not page past
-    // it. Driven here over the real dispatcher, so the schema's own
-    // `maxLength` is what admits the name.
+    // UTF-16 units to JavaScript, 800 bytes to UTF-8 — and, on a cursor that
+    // carried the row's sort value, some 1.1 kB of base64 that the ceiling
+    // refused before parsing. The administrator could create the integration
+    // and then could not page past it. Driven here over the real dispatcher,
+    // so the schema's own `maxLength` is what admits the name and the authored
+    // `after` bound is what has to admit the cursor.
     const names = [
       "\u{1f389}".repeat(MAX_DISPLAY_NAME_LENGTH),
       "\u56de".repeat(MAX_DISPLAY_NAME_LENGTH),
@@ -572,39 +574,84 @@ describe("the catalog over the real dispatcher, as a person with a Relation", ()
     }
   }, TEST_TIMEOUT);
 
-  test("refuses a name past the limit as a declared 400, on both minting paths", async () => {
+  test("refuses a name past the Operation's limit as a declared 400", async () => {
     if (!booted) return;
-    // The bound is the service's, not the schema's alone: the older REST and
-    // GraphQL mounts call the same functions, so a name no listing could page
-    // past is refused wherever it is sent.
+    // The bound is the OPERATION's. The dispatcher applies it from the
+    // authored input schema, which is what every caller of these Operations
+    // meets.
     const parent = await operation("create", {
       displayName: "Length subject", roles: [READ_ROLE], expiresInDays: 30,
     });
     expect(parent.status).toBe(200);
+    const integrationId = parent.body.integration.integrationId as string;
     const tooLong = "\u{1f389}".repeat(MAX_DISPLAY_NAME_LENGTH + 1);
     for (const [path, input] of [
       ["create", { displayName: tooLong, roles: [READ_ROLE], expiresInDays: 30 }],
-      ["issue-credential", {
-        integrationId: parent.body.integration.integrationId, displayName: tooLong,
-        expiresInDays: 30,
-      }],
+      ["issue-credential", { integrationId, displayName: tooLong, expiresInDays: 30 }],
     ] as const) {
       const response = await operation(path, input);
-      // The declared input schema catches it at the transport, as the
-      // dispatcher's own input violation; what matters here is that it is a
-      // declared client error and not a 500 or a stored row.
+      // A declared client error and not a 500 or a stored row.
       expect({ path, status: response.status, code: response.body.error?.code })
         .toEqual({ path, status: 400, code: "BAD_USER_INPUT" });
     }
-    // And the service refuses it directly too, which is what the other two
-    // surfaces reach.
-    await expect(createIntegration(booted.deps, provisioningSession(), {
-      displayName: tooLong, roles: [READ_ROLE], expiresInDays: 30,
-    })).rejects.toThrow(/at most 200 characters/);
-    await expect(issueKey(booted.deps, provisioningSession(), {
-      integrationId: parent.body.integration.integrationId as string,
-      displayName: tooLong, expiresInDays: 30,
-    })).rejects.toThrow(/at most 200 characters/);
+  }, TEST_TIMEOUT);
+
+  test("keeps the input the older surfaces have always accepted", async () => {
+    if (!booted) return;
+    // These two functions are not reached only through the Operations above:
+    // `auth/api-key/rest-routes.ts` and `graphql-schema.ts` have called them
+    // since before the Operations existed, and they bound the name nowhere —
+    // a `String!` and a `typeof body.displayName === "string"`. A service-level
+    // bound added for the sake of paging would narrow both of those published
+    // contracts without either of them changing, so this is what they sent and
+    // what they must still be answered with. Called directly, as those mounts
+    // call them, rather than through the dispatcher that declares more.
+    const deps = booted.deps;
+    const far = "\u{1f389}".repeat(MAX_DISPLAY_NAME_LENGTH * 5);
+    const created = await createIntegration(deps, provisioningSession(), {
+      displayName: far, roles: [READ_ROLE], expiresInDays: 30,
+    });
+    expect(created.integration.displayName).toBe(far);
+    expect(created.token).toMatch(/^osf_/);
+
+    // And a credential's name, which the REST mount substitutes when absent
+    // and passes through when empty — so an empty one is stored, not refused.
+    const issued = await issueKey(deps, provisioningSession(), {
+      integrationId: created.integrationId, displayName: "", expiresInDays: 30,
+    });
+    expect(issued.token).toMatch(/^osf_/);
+    const credentials = await listKeys(deps, provisioningSession(), {
+      integrationId: created.integrationId,
+    });
+    expect(credentials.map((key) => key.displayName).sort())
+      .toEqual(["", far].sort());
+
+    // An integration still needs a name, because that one names the realm
+    // client and the row every later call addresses — which is what the older
+    // surfaces refused too.
+    await expect(createIntegration(deps, provisioningSession(), {
+      displayName: "   ", roles: [READ_ROLE], expiresInDays: 30,
+    })).rejects.toThrow(/needs a display name/);
+
+    // The long-named integration pages, over the dispatcher, past the row a
+    // value-carrying cursor could not have taken back.
+    let after: string | undefined;
+    const seen: string[] = [];
+    for (let page = 0; page < 400; page += 1) {
+      const response = await operation("list", {
+        sortField: "displayName", sortDirection: "asc", first: 1,
+        ...(after === undefined ? {} : { after }),
+      });
+      expect({ page, status: response.status }).toEqual({ page, status: 200 });
+      for (const row of response.body.integrations as { integrationId: string }[]) {
+        seen.push(row.integrationId);
+      }
+      after = response.body.nextCursor ?? undefined;
+      if (!after) break;
+    }
+    expect(after).toBeUndefined();
+    expect(seen).toContain(created.integrationId);
+    expect(seen.length).toBe(new Set(seen).size);
   }, TEST_TIMEOUT);
 });
 

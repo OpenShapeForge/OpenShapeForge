@@ -26,7 +26,7 @@
  * credential.
  */
 import { randomUUID } from "node:crypto";
-import { sql } from "kysely";
+import { sql, type RawBuilder } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import {
@@ -36,14 +36,17 @@ import {
 } from "../../db/session.js";
 import { encryptSecret, type SecretKeyring } from "../../platform/secrets.js";
 import {
+  anchorValueQuery,
   containsFilter,
   exactFilter,
   keysetPredicate,
   limitWithProbe,
   orderBy,
-  renderSortValue,
   takePage,
+  UNUSABLE_CURSOR,
+  type KeysetCursor,
   type Page,
+  type PageAnchor,
   type PageQuery,
   type SortColumn,
 } from "./catalog-page.js";
@@ -112,41 +115,43 @@ export class ApiKeyValidationError extends Error {
 }
 
 /**
- * The longest display name this service will store, in Unicode code points.
+ * The longest display name the catalog's OPERATIONS accept, in Unicode code
+ * points: the `maxLength` every `displayName` in
+ * `config/authoring/operations/api-key-integrations.yaml` is authored with,
+ * named here so a test can pin the two together.
  *
- * It is the `maxLength` every `displayName` in the catalog's Operations is
- * authored with (`config/authoring/operations/api-key-integrations.yaml`),
- * enforced HERE because the Operation is not the only caller: the REST and
- * GraphQL mounts reach these same functions, and a name one surface stores and
- * another declares invalid is not one contract. Code points, because that is
- * what `maxLength` counts — 200 emoji are 200 characters to the schema and 400
- * UTF-16 units to JavaScript.
+ * It is declared, not enforced below, and that is deliberate. Operations are
+ * the canonical contract and the dispatcher applies this bound before a
+ * handler runs; the REST and GraphQL mounts, however, have been reaching these
+ * same functions since before the Operations existed, and they accept a name
+ * of any length — a `String!` and a `typeof body.displayName === "string"`.
+ * Enforcing 200 code points here would narrow both of those published
+ * contracts, silently, as a side effect of a listing being added.
  *
- * The cursor's own bound is derived from this one
- * (`operations/api-key-cursor.ts`): a name the service is willing to store has
- * to be a name its listings can page past, so the two cannot drift.
+ * Nothing downstream needs the bound either, which is what makes leaving it to
+ * the Operation safe rather than merely compatible:
+ *
+ *   - the realm's copy of the name is cut to what `CLIENT.NAME` holds
+ *     (`keycloak-admin.ts`, `realmClientName`), so a long name provisions;
+ *   - the cursor carries the row's ID and not its name
+ *     (`operations/api-key-cursor.ts`), so a long name pages.
+ *
+ * Code points, because that is what `maxLength` counts — 200 emoji are 200
+ * characters to the schema and 400 UTF-16 units to JavaScript.
  */
 export const MAX_DISPLAY_NAME_LENGTH = 200;
 
-/** Code points, not UTF-16 units — the count `maxLength` means. */
-export function codePointLength(value: string): number {
-  return [...value].length;
-}
-
 /**
- * The display name as it will be stored: trimmed, present, and within the
- * contract's length. A name that is only whitespace is absent, whichever
- * surface sent it, and `minLength: 1` cannot see that.
+ * The display name as it will be stored: trimmed, and present.
+ *
+ * Trimmed for every surface, because a name that is only whitespace is absent
+ * whichever surface sent it and `minLength: 1` cannot see that. Bounded by
+ * none of them — see {@link MAX_DISPLAY_NAME_LENGTH}.
  */
 function displayNameOrThrow(value: string, subject: string): string {
   const name = value.trim();
   if (name === "") {
     throw new ApiKeyNotFoundError(`${subject} needs a display name.`);
-  }
-  if (codePointLength(name) > MAX_DISPLAY_NAME_LENGTH) {
-    throw new ApiKeyValidationError(
-      `displayName must be at most ${MAX_DISPLAY_NAME_LENGTH} characters.`,
-    );
   }
   return name;
 }
@@ -483,9 +488,15 @@ export async function issueKey(
 ): Promise<CreatedApiKey> {
   assertMayManageApiKeys(session);
   const roleSubset = roleSubsetOrThrow(input.roleSubset);
-  // Checked before the transaction, like every other input: a refusal must not
-  // have taken the integration's row lock on its way out.
-  const displayName = displayNameOrThrow(input.displayName, "A credential");
+  // Trimmed only. A credential's name is a label on a row the caller already
+  // identified by its integration, so an empty one is not an ambiguity — and
+  // the REST and GraphQL mounts have been storing it that way since before
+  // these Operations existed (REST even substitutes "rotated" when the field
+  // is absent, so an explicit empty string is the caller's own choice). The
+  // Operation's `minLength: 1` is what asks for more than that, on the surface
+  // that declares it. An integration's name is checked instead, because that
+  // one names the realm client and the row everything else is addressed by.
+  const displayName = input.displayName.trim();
 
   const minted = mintApiKey();
   const keyId = randomUUID();
@@ -638,7 +649,38 @@ function boundedFirst(first: number): number {
   return Math.min(MAX_PAGE_SIZE, Math.max(1, Math.trunc(first)));
 }
 
-export type ListedKeyPage = Page<ListedKey & { cursorValue: string | null }>;
+/**
+ * Resolve a cursor's anchor into the value the page resumes after, or refuse
+ * the cursor.
+ *
+ * One statement, inside the page's own transaction and session, so the value
+ * it reads is the one the page about to be ordered will compare against. The
+ * `fence` is the caller's, built around the anchor id it is given — the tenant
+ * and the subject binding are the caller's to supply and are never assumed
+ * here.
+ *
+ * No row means the cursor is unusable: an anchor outside this set, which a
+ * forged id, another tenant's id and a row removed out from under the caller
+ * all look like. Refused as a client error rather than resumed from a guess,
+ * which would skip or repeat a page's worth of rows.
+ */
+async function resumeAfter(
+  trx: unknown,
+  column: SortColumn,
+  anchor: PageAnchor | undefined,
+  from: RawBuilder<unknown>,
+  fence: (anchor: string) => RawBuilder<unknown>,
+): Promise<KeysetCursor | undefined> {
+  if (!anchor) return undefined;
+  const found = await sql<{ sort_value: string | null }>`
+    ${anchorValueQuery(column, from, fence(anchor.id))}
+  `.execute(trx as never);
+  const row = found.rows[0];
+  if (!row) throw new ApiKeyValidationError(UNUSABLE_CURSOR);
+  return { value: row.sort_value, id: anchor.id };
+}
+
+export type ListedKeyPage = Page<ListedKey>;
 
 /**
  * One keyset page of the credentials under ONE integration.
@@ -680,21 +722,30 @@ export async function pageKeys(
        where ${fence}
     `.execute(trx);
 
-    const result = await sql<KeyRow & { sort_value: string | null }>`
-      select ${KEY_METADATA_COLUMNS}, ${renderSortValue(column)} as sort_value
+    // The cursor names the row the previous page ended on; what to resume
+    // AFTER is read back out of that row here, under the tenant and the same
+    // integration binding the page itself is fenced on. The filters are left
+    // out on purpose: the anchor only has to be a row of this subject, and a
+    // name edited out of the filter since the cursor was issued is still a
+    // definite point in the order.
+    const after = await resumeAfter(trx, column, query.after, sql`
+      platform.api_keys k`, (anchor) => sql`
+      k.tenant_id = ${session.tenantId}
+        and k.integration_id = ${scope.integrationId}
+        and k.id = ${anchor}`);
+
+    const result = await sql<KeyRow>`
+      select ${KEY_METADATA_COLUMNS}
         from platform.api_keys k
         join platform.api_key_integrations i on i.id = k.integration_id
        where ${fence}
-         ${keysetPredicate(column, sql`k.id`, { ...query, ...(query.after ? { after: query.after } : {}) })}
+         ${keysetPredicate(column, sql`k.id`, query.sortDirection, after)}
        ${orderBy(column, sql`k.id`, query.sortDirection)}
        ${limitWithProbe(first)}
     `.execute(trx);
 
     const page = takePage(result.rows, first, Number(counted.rows[0]?.total ?? 0));
-    return {
-      ...page,
-      rows: page.rows.map((row) => ({ ...listedKey(row), cursorValue: row.sort_value })),
-    };
+    return { ...page, rows: page.rows.map(listedKey) };
   });
 }
 
@@ -817,7 +868,7 @@ function listedIntegration(row: IntegrationRow): ListedIntegration {
   };
 }
 
-export type ListedIntegrationPage = Page<ListedIntegration & { cursorValue: string | null }>;
+export type ListedIntegrationPage = Page<ListedIntegration>;
 
 /**
  * One keyset page of the caller's integrations, with each one's key counts.
@@ -852,23 +903,27 @@ export async function pageIntegrations(
        where ${fence}
     `.execute(trx);
 
-    const result = await sql<IntegrationRow & { sort_value: string | null }>`
-      select ${integrationMetadataColumns(now)}, ${renderSortValue(column)} as sort_value
+    // See pageKeys: the resume value comes from the anchor row rather than
+    // from the cursor, under the tenant predicate alone — the filters are not
+    // part of what makes an anchor a row of this tenant's catalog.
+    const after = await resumeAfter(trx, column, query.after, sql`
+      platform.api_key_integrations i`, (anchor) => sql`
+      i.tenant_id = ${session.tenantId} and i.id = ${anchor}`);
+
+    const result = await sql<IntegrationRow>`
+      select ${integrationMetadataColumns(now)}
         from platform.api_key_integrations i
         left join platform.api_keys k
           on k.integration_id = i.id and k.tenant_id = i.tenant_id
        where ${fence}
-         ${keysetPredicate(column, sql`i.id`, { ...query, ...(query.after ? { after: query.after } : {}) })}
+         ${keysetPredicate(column, sql`i.id`, query.sortDirection, after)}
        group by i.id
        ${orderBy(column, sql`i.id`, query.sortDirection)}
        ${limitWithProbe(first)}
     `.execute(trx);
 
     const page = takePage(result.rows, first, Number(counted.rows[0]?.total ?? 0));
-    return {
-      ...page,
-      rows: page.rows.map((row) => ({ ...listedIntegration(row), cursorValue: row.sort_value })),
-    };
+    return { ...page, rows: page.rows.map(listedIntegration) };
   });
 }
 

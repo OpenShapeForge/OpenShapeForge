@@ -86,18 +86,21 @@ operations:
             x-osf-i18n: { title: { en: Page size, nl: Paginagrootte } }
           after: &after
             type: string
-            # The opaque keyset cursor this listing issued, which carries the
-            # last row's SORT VALUE. A display name at this contract's own
-            # maxLength therefore makes a cursor of roughly a kilobyte of
-            # base64url, so a 200-character bound refused the listing's own
-            # `nextCursor` at the transport for any name past a short one — the
-            # page was reachable and the page after it was not. The exact
-            # ceiling is derived from the display-name bound in
-            # apps/api/src/operations/api-key-cursor.ts (MAX_CURSOR_LENGTH);
-            # this is the outer bound that stays above it, pinned by a test in
+            # The opaque keyset cursor this listing issued. It names the
+            # previous page's last row by id and carries no sort value, so it
+            # is a fixed size for every row — which is why a bound can be
+            # declared here at all. A cursor that carried the value was as long
+            # as the value, and `display_name` is unbounded `text`: a
+            # 200-character bound refused the listing's own `nextCursor` at the
+            # transport for any name past a short one, and no larger number
+            # would have been right either, because the two older surfaces
+            # accept a name of any length. The decoder's own ceiling is derived
+            # from the payload in apps/api/src/operations/api-key-cursor.ts
+            # (MAX_CURSOR_LENGTH); this is the outer bound that stays above it,
+            # pinned by a test in
             # apps/api/src/operations/api-key-operations.test.ts so the two
             # cannot cross.
-            maxLength: 4096
+            maxLength: 256
             x-osf-i18n: { title: { en: Cursor, nl: Cursor } }
     output:
       schema:

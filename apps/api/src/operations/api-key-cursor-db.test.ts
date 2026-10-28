@@ -2,27 +2,36 @@
 /**
  * The cursor round trip against a real PostgreSQL: every cursor one of these
  * listings ISSUES is one it takes back, whatever the session's date settings
- * are and whatever Unicode the customer named their integration.
+ * are, whatever Unicode the customer named their integration, and however long
+ * that name is.
  *
- * Both of these are properties of the SQL and of the data, so neither can be
- * shown with a fake connection:
+ * All three are properties of the SQL and of the data, so none can be shown
+ * with a fake connection:
  *
  *   - `(expr)::text` renders a timestamptz under the session's `DateStyle` and
  *     `TimeZone`. Under `German, DMY` the same row reads
- *     `28.10.2026 07:34:35.96 UTC`, in Amsterdam it reads `+01`. The cursor the
- *     page handed out therefore depended on settings this code neither sets nor
- *     owns, and the next page refused it — a listing that cannot be paged past
- *     its first page, for a database that is configured, not broken. The
- *     projection now renders the value itself (`catalog-page.ts`,
+ *     `28.10.2026 07:34:35.96 UTC`, in Amsterdam it reads `+01`. The resume
+ *     value is rendered by one statement and cast back by the next, so that
+ *     spelling depended on settings this code neither sets nor owns and the
+ *     cast then answered with an error instead of a page — a listing that
+ *     cannot be paged past its first page, for a database that is configured,
+ *     not broken. The projection renders the value itself (`catalog-page.ts`,
  *     `renderSortValue`), so the walks below run under four different
- *     DateStyle/TimeZone pairs and produce the identical cursor each time.
- *   - a display name of 200 emoji is 200 characters to the input schema that
- *     accepted it, 400 UTF-16 units to JavaScript and 800 bytes to UTF-8. Its
- *     cursor is some 1.1 kB of base64, so a fixed 512-character ceiling refused
- *     it before parsing and a 200-unit value bound refused it after — for a
- *     name the contract permits and the database holds. The bounds are now
- *     derived from the service's own display-name bound, and the walk below
- *     pages a set of such names one row at a time.
+ *     DateStyle/TimeZone pairs and produce the identical value each time.
+ *   - a cursor that CARRIED that value was as long as the value. A display
+ *     name of 200 emoji is 400 UTF-16 units and 800 bytes, so its cursor was
+ *     some 1.1 kB of base64 — past the ceiling that refused it, for a name the
+ *     Operations permit. Deriving the ceiling from the name's own bound fixed
+ *     that case and not the general one: `display_name` is `text`, and the
+ *     REST and GraphQL mounts have accepted a name of ANY length since before
+ *     these listings existed, so rows exist that no such ceiling admits. The
+ *     cursor now names the row by id, which is one length for every row, and
+ *     the walks below page a catalog seeded with names of 200, 1,000 and
+ *     20,000 code points through exactly the bound a handler applies.
+ *   - an anchor is RESOLVED against the row it names, under the tenant and the
+ *     subject binding. So an id this set has no row for is a declared client
+ *     error rather than a guessed resume point — proven here for a forged id,
+ *     for another tenant's real id, and for a row deleted mid-walk.
  *
  * Nothing here is doubled except the clock: the paging functions, the session
  * layer and the restricted app role are the shipped ones, in a scratch database
@@ -39,6 +48,7 @@ import { sql, type Kysely } from "kysely";
 import { API_KEY_MANAGE_ROLE } from "../auth/api-key/ceiling.js";
 import { mintApiKey } from "../auth/api-key/format.js";
 import {
+  ApiKeyValidationError,
   pageIntegrations,
   pageKeys,
   MAX_DISPLAY_NAME_LENGTH,
@@ -56,7 +66,7 @@ import {
   decodeCursor,
   encodeCursor,
   fingerprint,
-  isCursorTimestamp,
+  MAX_CURSOR_LENGTH,
 } from "./api-key-cursor.js";
 import type { DB } from "../generated/db/types.js";
 
@@ -222,9 +232,17 @@ function serviceDeps(appDb: Kysely<DB>): ApiKeyServiceDeps {
   };
 }
 
-/** Realistic names that are long, and long in code points rather than bytes. */
+/**
+ * Names rows really hold, and long in code points rather than bytes.
+ *
+ * The first four are at the Operations' own `maxLength`, in code points that
+ * are not one UTF-16 unit each. The last two are what the REST and GraphQL
+ * mounts accept and have been storing: nothing bounds `display_name`, so these
+ * are not hypothetical rows but the ones a cursor ceiling derived from the
+ * Operations' bound would have put out of reach.
+ */
 const UNICODE_NAMES = [
-  // The contract's limit in emoji: 200 code points, 400 UTF-16 units, 800 bytes.
+  // The Operations' limit in emoji: 200 code points, 400 UTF-16 units, 800 bytes.
   "🎉".repeat(MAX_DISPLAY_NAME_LENGTH),
   // The same length in a non-Latin script, which is three bytes per character.
   "回".repeat(MAX_DISPLAY_NAME_LENGTH),
@@ -232,8 +250,17 @@ const UNICODE_NAMES = [
   `İstanbul ${"Ş".repeat(MAX_DISPLAY_NAME_LENGTH - 9)}`,
   // Combining marks, which are their own code points.
   "é".repeat(MAX_DISPLAY_NAME_LENGTH),
+  // Five times the Operations' bound, through the older surfaces.
+  "🎉".repeat(MAX_DISPLAY_NAME_LENGTH * 5),
+  // A hundred times it: 20,000 code points, 80 kB of UTF-8, which as a carried
+  // cursor value would have been some 107 kB of base64 — past the authored
+  // `after` bound as well as the decoder's.
+  `legacy ${"回".repeat(MAX_DISPLAY_NAME_LENGTH * 100)}`,
   "Ordinary partner",
 ];
+
+/** The rows a walk reached, and every cursor it was handed on the way. */
+type Walk = { ids: string[]; cursors: string[] };
 
 /**
  * Walk one listing to its end THROUGH the cursor, one row per page: the page's
@@ -248,25 +275,23 @@ async function walkIntegrations(
   appDb: Kysely<DB>,
   sortField: IntegrationSortField,
   direction: "asc" | "desc",
-): Promise<{ ids: string[]; values: (string | null)[] }> {
+): Promise<Walk> {
   const identity = { f: sortField, d: direction };
   const query = fingerprint(["integrations", undefined, undefined]);
   const ids: string[] = [];
-  const values: (string | null)[] = [];
+  const cursors: string[] = [];
   let after: string | undefined;
-  for (let page = 0; page < 200; page += 1) {
+  for (let page = 0; page < 400; page += 1) {
     const result = await pageIntegrations(serviceDeps(appDb), manager(), {
       sortField,
       sortDirection: direction,
       first: 1,
       ...cursorSpread(decodeCursor(after, identity, query)),
     });
-    for (const row of result.rows) {
-      ids.push(row.id);
-      values.push(row.cursorValue);
-    }
+    for (const row of result.rows) ids.push(row.id);
     const next = encodeCursor(result.nextCursor, identity, query);
-    if (!next) return { ids, values };
+    if (!next) return { ids, cursors };
+    cursors.push(next);
     after = next;
   }
   throw new Error("The integration walk did not terminate.");
@@ -277,28 +302,38 @@ async function walkCredentials(
   integrationId: string,
   sortField: CredentialSortField,
   direction: "asc" | "desc",
-): Promise<{ ids: string[]; values: (string | null)[] }> {
+): Promise<Walk> {
   const identity = { f: sortField, d: direction };
   const query = fingerprint(["credentials", integrationId, undefined, undefined]);
   const ids: string[] = [];
-  const values: (string | null)[] = [];
+  const cursors: string[] = [];
   let after: string | undefined;
-  for (let page = 0; page < 200; page += 1) {
+  for (let page = 0; page < 400; page += 1) {
     const result = await pageKeys(serviceDeps(appDb), manager(), { integrationId }, {
       sortField,
       sortDirection: direction,
       first: 1,
       ...cursorSpread(decodeCursor(after, identity, query)),
     });
-    for (const row of result.rows) {
-      ids.push(row.id);
-      values.push(row.cursorValue);
-    }
+    for (const row of result.rows) ids.push(row.id);
     const next = encodeCursor(result.nextCursor, identity, query);
-    if (!next) return { ids, values };
+    if (!next) return { ids, cursors };
+    cursors.push(next);
     after = next;
   }
   throw new Error("The credential walk did not terminate.");
+}
+
+/**
+ * Every cursor the walk was handed fits the bound the decoder applies — which
+ * is the property the old value-carrying cursor could not have for the names
+ * seeded here, and the reason the bound is no longer a bound on a name.
+ */
+function expectBoundedCursors(walk: Walk, sortField: string, direction: string): void {
+  for (const cursor of walk.cursors) {
+    expect({ sortField, direction, within: cursor.length <= MAX_CURSOR_LENGTH })
+      .toEqual({ sortField, direction, within: true });
+  }
 }
 
 const INTEGRATION_SORTS: IntegrationSortField[] =
@@ -363,18 +398,7 @@ describe("a cursor this listing issued is one it takes back", () => {
               expect({ sortField, direction, rows: walk.ids.length })
                 .toEqual({ sortField, direction, rows: integrationIds.length });
               expect([...walk.ids].sort()).toEqual([...integrationIds].sort());
-              if (TIMESTAMP_SORTS.has(sortField)) {
-                // And the value the DATABASE rendered is the one spelling the
-                // decoder accepts — under this DateStyle and this zone.
-                for (const value of walk.values) {
-                  expect({ sortField, direction, value, canonical: true }).toEqual({
-                    sortField,
-                    direction,
-                    value,
-                    canonical: value === null || isCursorTimestamp(value),
-                  });
-                }
-              }
+              expectBoundedCursors(walk, sortField, direction);
             }
           }
 
@@ -384,16 +408,7 @@ describe("a cursor this listing issued is one it takes back", () => {
               expect({ sortField, direction, rows: walk.ids.length })
                 .toEqual({ sortField, direction, rows: keyIds.length });
               expect([...walk.ids].sort()).toEqual([...keyIds].sort());
-              if (TIMESTAMP_SORTS.has(sortField)) {
-                for (const value of walk.values) {
-                  expect({ sortField, direction, value, canonical: true }).toEqual({
-                    sortField,
-                    direction,
-                    value,
-                    canonical: value === null || isCursorTimestamp(value),
-                  });
-                }
-              }
+              expectBoundedCursors(walk, sortField, direction);
             }
           }
         });
@@ -402,11 +417,13 @@ describe("a cursor this listing issued is one it takes back", () => {
     );
   }
 
-  test("renders one instant as one cursor value, whatever the session is set to", async () => {
+  test("renders one instant as one value, whatever the session is set to", async () => {
     if (!(await serverReachable())) return;
-    // The same instant through the same projection under every session above:
-    // one spelling, and it casts back to the instant it came from. This is the
-    // property the walks rest on, stated on its own.
+    // The anchor lookup renders the resume value and the predicate casts it
+    // back, two statements in one transaction and one session. Under `German,
+    // DMY` an `(expr)::text` rendering would come back `28.10.2026 ...` and the
+    // cast would answer with an error rather than a page, so the projection is
+    // the property every walk above rests on — stated here on its own.
     const rendered = new Set<string>();
     for (const session of SESSIONS) {
       await withScratchDb(session, async ({ appDb }) => {
@@ -417,30 +434,140 @@ describe("a cursor this listing issued is one it takes back", () => {
                           'YYYY-MM-DD HH24:MI:SS.US') || '+00')::timestamptz
                    = '2026-10-28 02:01:45.123456+00'::timestamptz as same
         `.execute(appDb);
+        // Cast back to the same INSTANT, which is what the resume predicate's
+        // equality compares on — and to the microsecond, which a `Date` bound
+        // through the driver would have rounded away.
         expect(row.rows[0]!.same).toBe(true);
         rendered.add(row.rows[0]!.value);
       });
     }
     expect([...rendered]).toEqual(["2026-10-28 02:01:45.123456+00"]);
-    expect(isCursorTimestamp([...rendered][0]!)).toBe(true);
+  }, TEST_TIMEOUT);
+});
+
+describe("an anchor is resolved against a row of this very set", () => {
+  test("a cursor whose row this set has no answer for is a client error", async () => {
+    if (!(await serverReachable())) return;
+    await withScratchDb(SESSIONS[0], async ({ appDb, adminDb }) => {
+      const { keyIds } = await seedCatalog(adminDb);
+      // A second tenant with its own integration, so "another tenant's real
+      // id" is a real id and not merely an unknown one.
+      const other = randomUUID();
+      await sql`
+        insert into platform.tenants (id, slug, name, status, keycloak_realm)
+        values (${other}, 'cursor-other', 'Other', 'active', 'openshapeforge')
+      `.execute(adminDb);
+      const theirs = randomUUID();
+      await sql`
+        insert into platform.api_key_integrations
+          (id, tenant_id, display_name, keycloak_client_id, status, granted_roles,
+           created_by, created_at, updated_at)
+        values
+          (${theirs}, ${other}, 'Theirs', ${`osf-int-${theirs}`}, 'active',
+           cast(${[READ_ROLE]} as jsonb), ${USER}, now(), now())
+      `.execute(adminDb);
+
+      const identity = { f: "createdAt" as const, d: "asc" as const };
+      const query = fingerprint(["integrations", undefined, undefined]);
+      const cases: Array<[string, string]> = [
+        [randomUUID(), "an id no row of this deployment holds"],
+        [theirs, "another tenant's real integration"],
+        // A real row of the right shape in the wrong table: a credential's id
+        // on the integration listing. The anchor lookup is fenced on the
+        // table the page reads, so this resolves to nothing.
+        [keyIds[0]!, "a credential's id, on the integration listing"],
+      ];
+      for (const [id, why] of cases) {
+        const cursor = encodeCursor({ id }, identity, query)!;
+        let refused: unknown;
+        try {
+          await pageIntegrations(serviceDeps(appDb), manager(), {
+            sortField: identity.f,
+            sortDirection: identity.d,
+            first: 5,
+            ...cursorSpread(decodeCursor(cursor, identity, query)),
+          });
+        } catch (error) {
+          refused = error;
+        }
+        // Refused, and refused as the declared client error — never a 500 and
+        // never a page resumed from a guessed point.
+        expect({ why, declined: refused instanceof ApiKeyValidationError })
+          .toEqual({ why, declined: true });
+      }
+    });
   }, TEST_TIMEOUT);
 
-  test("every timestamp the decoder accepts is one the cast accepts", async () => {
+  test("a row removed mid-walk stops the walk rather than skipping a page", async () => {
     if (!(await serverReachable())) return;
-    // The two bounds the regular expression cannot decide, against the
-    // database that owns them: the last instant timestamptz holds casts, and
-    // the first one past it is an error the decoder must never let through.
-    await withScratchDb(SESSIONS[0], async ({ appDb }) => {
-      const last = "294276-12-31 23:59:59.999999+00";
-      expect(isCursorTimestamp(last)).toBe(true);
-      const cast = await sql<{ ok: boolean }>`
-        select ${last}::timestamptz = '294276-12-31 23:59:59.999999+00'::timestamptz as ok
-      `.execute(appDb);
-      expect(cast.rows[0]!.ok).toBe(true);
+    // The one behaviour an id-anchored cursor trades for being bounded. It is
+    // safe to trade HERE because nothing in this catalog removes a row — an
+    // integration is disabled and a credential revoked, both in place — so
+    // this is reachable only by a delete from outside the contract, and the
+    // answer to it is a declared client error rather than a wrong page.
+    await withScratchDb(SESSIONS[0], async ({ appDb, adminDb }) => {
+      const { integrationIds } = await seedCatalog(adminDb);
+      const identity = { f: "displayName" as const, d: "asc" as const };
+      const query = fingerprint(["integrations", undefined, undefined]);
+      const first = await pageIntegrations(serviceDeps(appDb), manager(), {
+        sortField: identity.f, sortDirection: identity.d, first: 1,
+      });
+      const anchor = first.nextCursor!.id;
+      expect(integrationIds).toContain(anchor);
+      await sql`delete from platform.api_key_integrations where id = ${anchor}`
+        .execute(adminDb);
+      const cursor = encodeCursor(first.nextCursor, identity, query)!;
+      await expect(pageIntegrations(serviceDeps(appDb), manager(), {
+        sortField: identity.f,
+        sortDirection: identity.d,
+        first: 1,
+        ...cursorSpread(decodeCursor(cursor, identity, query)),
+      })).rejects.toThrow(ApiKeyValidationError);
+    });
+  }, TEST_TIMEOUT);
 
-      const past = "294277-01-01 00:00:00.000000+00";
-      expect(isCursorTimestamp(past)).toBe(false);
-      await expect(sql`select ${past}::timestamptz`.execute(appDb)).rejects.toThrow();
+  test("the cursor stays one size for a row no name bound would have admitted", async () => {
+    if (!(await serverReachable())) return;
+    await withScratchDb(SESSIONS[0], async ({ appDb, adminDb }) => {
+      await seedCatalog(adminDb);
+      // What the listing issues for the longest-named row, and what a cursor
+      // that CARRIED that row's sort value would have been. The value is read
+      // from the database through the page's own projection, so this is the
+      // row's real resume value and not an estimate.
+      const identity = { f: "displayName" as const, d: "desc" as const };
+      const query = fingerprint(["integrations", undefined, undefined]);
+      // Read as the migration role: a bare statement on the app connection
+      // carries no tenant, which the row policy answers with nothing.
+      const longest = await sql<{ id: string; sort_value: string }>`
+        select id, (lower(display_name))::text as sort_value
+          from platform.api_key_integrations
+         where tenant_id = ${TENANT}
+         order by length(display_name) desc
+         limit 1
+      `.execute(adminDb);
+      const row = longest.rows[0]!;
+      expect([...row.sort_value].length).toBeGreaterThan(MAX_DISPLAY_NAME_LENGTH * 50);
+
+      const issued = encodeCursor({ id: row.id }, identity, query)!;
+      expect(issued.length).toBeLessThanOrEqual(MAX_CURSOR_LENGTH);
+      // Decoded by exactly the handler's decoder, and the page it resumes is
+      // answered rather than refused.
+      const resumed = await pageIntegrations(serviceDeps(appDb), manager(), {
+        sortField: identity.f,
+        sortDirection: identity.d,
+        first: 5,
+        ...cursorSpread(decodeCursor(issued, identity, query)),
+      });
+      expect(resumed.rows.map((listed) => listed.id)).not.toContain(row.id);
+
+      // The same cursor with the value in it, as the listing used to emit:
+      // orders of magnitude past the bound any decoder could declare, which is
+      // what made this row's page unreachable.
+      const carried = Buffer.from(
+        JSON.stringify({ f: identity.f, d: identity.d, q: query, v: row.sort_value, i: row.id }),
+        "utf8",
+      ).toString("base64url");
+      expect(carried.length).toBeGreaterThan(MAX_CURSOR_LENGTH * 100);
     });
   }, TEST_TIMEOUT);
 });

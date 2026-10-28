@@ -608,31 +608,37 @@ describe("integration catalog Operations", () => {
     });
 
     test("declares an `after` bound no cursor it issues can exceed", () => {
-      // The cursor carries the last row's SORT VALUE, so its length follows
-      // the display name's: at the authored maximum it is roughly a kilobyte
-      // of base64url. The transport bound was 200 characters, which refused
-      // the listing's own `nextCursor` for any name past a short one — the
-      // first page worked and there was no second. The decoder's ceiling is
-      // derived from the same display-name bound; this is what keeps the
-      // declared bound above it, on both listings, rather than leaving two
-      // numbers to drift.
+      // A declarable bound at all is what the cursor's shape buys. It names
+      // the previous page's last row by id, so one cursor is one length; when
+      // it carried the row's SORT VALUE its length followed the display name's,
+      // and `display_name` is unbounded `text` that two older surfaces accept
+      // any length of — the 200-character bound here refused the listing's own
+      // `nextCursor` for any name past a short one, and no larger number would
+      // have been right either. The decoder's ceiling is derived from the
+      // payload; this keeps the declared bound above it, on both listings,
+      // rather than leaving two numbers to drift.
       for (const handler of ["listIntegrations", "listCredentials"]) {
         const schema = contracts.get(handler)!.inputSchema as {
           properties: { after: { maxLength: number }; displayName: { maxLength: number } };
         };
         expect({ handler, fits: schema.properties.after.maxLength >= MAX_CURSOR_LENGTH })
           .toEqual({ handler, fits: true });
-        // And the name bound the service enforces is the one the contract
-        // declares, so a name one surface stores is a name the other accepts.
         expect({ handler, declared: schema.properties.displayName.maxLength })
           .toEqual({ handler, declared: MAX_DISPLAY_NAME_LENGTH });
       }
+      // The minting Operations declare the name bound these listings report
+      // in `MAX_DISPLAY_NAME_LENGTH`. It is the OPERATION's bound: the
+      // dispatcher applies it, and the service deliberately does not, because
+      // the REST and GraphQL mounts reached these same functions first and
+      // accept any length (see the service's note on the constant).
       for (const handler of ["createIntegration", "issueCredential"]) {
         const schema = contracts.get(handler)!.inputSchema as {
-          properties: { displayName: { maxLength: number } };
+          properties: { displayName: { maxLength: number; minLength: number } };
         };
         expect({ handler, declared: schema.properties.displayName.maxLength })
           .toEqual({ handler, declared: MAX_DISPLAY_NAME_LENGTH });
+        expect({ handler, declared: schema.properties.displayName.minLength })
+          .toEqual({ handler, declared: 1 });
       }
     });
 

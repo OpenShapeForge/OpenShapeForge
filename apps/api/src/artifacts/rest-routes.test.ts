@@ -11,10 +11,10 @@ const SECRET = "artifact-route-test-secret";
 const ARTIFACT_ID = "1658ad0b-e44b-4ef3-86ca-953dc6783885";
 const DOCUMENT_ID = "6180f0f3-b637-4b9b-ac44-eb00cf30570a";
 
-function authorizationHeaders(): Record<string, string> {
+function authorizationHeaders(tenantId = "tenant-a"): Record<string, string> {
   const headers = new Headers({ "content-type": "application/octet-stream", "x-file-name": encodeURIComponent("bewijs.pdf") });
   applyTrustedContextHeaders(headers, {
-    tenantId: "tenant-a",
+    tenantId,
     userId: "user-a",
     roles: ["CaseFile.All.ReadWrite"],
   }, { secret: SECRET });
@@ -140,6 +140,30 @@ describe("artifact REST adapter", () => {
       expect(() => assertUploadFileName(name)).toThrow("The file name is invalid.");
     }
   });
+test("a stalled tenant cannot occupy every download slot", async () => {
+  const app = Fastify();
+  let finish!: () => void, started!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const bothStarted = new Promise<void>((resolve) => { started = resolve; });
+  let pendingA = 0;
+  registerArtifactRestRoutes(app, { artifacts: {
+    stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
+    read: async (session, input) => {
+      if (session.tenantId === "tenant-a") { if (++pendingA === 2) started(); await gate; }
+      const bytes = Uint8Array.of(1);
+      return { descriptor: { artifactId: ARTIFACT_ID, version: 1, fileName: "a.bin", mediaType: "application/octet-stream", sha256: "a".repeat(64), byteSize: 1 }, bytes, owner: input.owner };
+    },
+  } });
+  const path = `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`;
+  const request = (tenant: string) => app.inject({ method: "GET", url: path, headers: authorizationHeaders(tenant) });
+  const pending = [Promise.resolve(request("tenant-a")), Promise.resolve(request("tenant-a"))];
+  try {
+    await bothStarted;
+    expect((await request("tenant-a")).statusCode).toBe(429);
+    expect((await request("tenant-b")).statusCode).toBe(200);
+  } finally { finish(); await Promise.all(pending); await app.close(); }
+});
+
 test("download capacity includes in-flight reads and recovers after they finish",async()=>{
  const app=Fastify(); let release!:()=>void;const gate=new Promise<void>(r=>{release=r;});let entered=0;
  let enteredAll!:()=>void; const all=new Promise<void>(r=>{enteredAll=r;});
@@ -148,8 +172,8 @@ test("download capacity includes in-flight reads and recovers after they finish"
   return {descriptor:{artifactId:ARTIFACT_ID,version:1,fileName:'test.bin',mediaType:'application/octet-stream',sha256:'a'.repeat(64),byteSize:3},bytes,owner:input.owner};
  }}});
  const headers=authorizationHeaders();delete headers['content-type'];
- const request=()=>app.inject({method:'GET',url:`/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`,headers});
- const pending=Array.from({length:4},()=>Promise.resolve(request()));
+ const request=(tenant = "tenant-a")=>app.inject({method:'GET',url:`/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`,headers:tenant === "tenant-a" ? headers : authorizationHeaders(tenant)});
+ const pending=Array.from({length:4},(_,i)=>Promise.resolve(request(i < 2 ? "tenant-a" : "tenant-b")));
  await all;
  try {expect((await request()).statusCode).toBe(429);}finally{release();}
  expect((await Promise.all(pending)).map(x=>x.statusCode)).toEqual([200,200,200,200]);
@@ -171,7 +195,7 @@ test("download capacity includes in-flight reads and recovers after they finish"
    }}});
    const headers = authorizationHeaders(); delete headers["content-type"];
    const path = `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`;
-   const pending = Array.from({length:4},()=>Promise.resolve(app.inject({method:"GET",url:path,headers})).catch(error => { expect(error.code).toBe("LIGHT_ECONNRESET"); }));
+   const pending = Array.from({length:4},(_,i)=>Promise.resolve(app.inject({method:"GET",url:path,headers:i < 2 ? headers : authorizationHeaders("tenant-b")})).catch(error => { expect(error.code).toBe("LIGHT_ECONNRESET"); }));
    try {
      await startedGate;
      // Deterministically reproduce the socket-close event while storage is suspended.

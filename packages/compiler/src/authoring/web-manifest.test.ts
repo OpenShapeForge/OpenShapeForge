@@ -1758,6 +1758,43 @@ describe("standalone Operation pages", () => {
     expect(Object.keys(tenant.relationships)).toEqual(["relationId"]);
   });
 
+  test("projects operation-backed references from authored result types, preserving the target read policy", () => {
+    const catalog = parse(readFileSync(join(authoringDir, "operations/api-key-integrations.yaml"), "utf8")) as OperationCatalogDefinition;
+    catalog.interfaces.web!.entities!.ApiKeyIntegration!.related = [];
+    const manifest = buildWebManifest([], {}, standalone(catalog));
+    const credential = manifest.entities.ApiKeyCredential!;
+    const integration = manifest.entities.ApiKeyIntegration!;
+    expect(credential.fields.integrationId).toMatchObject({ osfType: "ApiKeyIntegration", relationship: { targetEntityId: "ApiKeyIntegration" } });
+    expect(credential.relationships.integrationId).toMatchObject({ kind: "belongsTo", recordField: "integrationId", targetEntityId: "ApiKeyIntegration", operations: { get: integration.views.record!.operations.read } });
+    expect(integration.operationSource!.record!.bindings).toEqual({ integrationId: "integrationId" });
+    expect(credential.relationships.integrationId!.operations.get).toEqual(integration.views.record!.operations.read);
+  });
+
+  test("supports another operation-backed reference and refuses composite target routes", () => {
+    const list = controlCatalog.operations.listTenants!;
+    const catalog: OperationCatalogDefinition = {
+      ...controlCatalog,
+      operations: { ...controlCatalog.operations, listTenants: { ...list, output: { schema: { type: "object", properties: {
+        tenants: { type: "array", items: { type: "object", properties: {
+          slug: { type: "string" }, parent: { type: "string", "x-osf-type": "Tenant" },
+        } } },
+      } } } } },
+      interfaces: { ...controlCatalog.interfaces, web: { entities: {
+        Tenant: { title: text("Tenant"), route: "/tenants", recordRoute: "/tenants/:tenantKey", idField: "slug", displayField: "slug",
+          fields: ["slug", "parent"], columns: ["slug"], operations: {
+            list: { operation: "listTenants", resultField: "tenants" }, get: { operation: "getTenant", bindings: { slug: "tenantKey" } },
+          } },
+      } } },
+    };
+    const manifest = buildWebManifest([], {}, standalone(catalog));
+    expect(manifest.entities.Tenant!.relationships.parent).toMatchObject({ targetEntityId: "Tenant", recordField: "parent", kind: "belongsTo" });
+    catalog.interfaces.web!.entities!.Tenant!.recordRoute = "/tenants/:organization/:tenantKey";
+    expect(() => buildWebManifest([], {}, standalone(catalog))).toThrow(/single record route parameter/);
+    catalog.interfaces.web!.entities!.Tenant!.recordRoute = "/tenants/:tenantKey";
+    catalog.interfaces.web!.entities!.Tenant!.operations.get!.bindings = {};
+    expect(() => buildWebManifest([], {}, standalone(catalog))).toThrow(/required input/);
+  });
+
   test("projects catalog pages and their Operations next to the entities", () => {
     const manifest = buildWebManifest([], {}, standalone(controlCatalog));
     expect(Object.keys(manifest.operations!)).toEqual([

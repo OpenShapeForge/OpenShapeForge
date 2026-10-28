@@ -272,6 +272,7 @@ operations:
                 integrationId:
                   type: string
                   format: uuid
+                  x-osf-type: ApiKeyIntegration
                   x-osf-i18n: { title: { en: Integration, nl: Integratie } }
                 integrationName:
                   type: string
@@ -624,7 +625,7 @@ interfaces:
         recordRoute: /api-key-integrations/:integrationId/credentials/:id
         idField: id
         displayField: displayName
-        fields: [displayName, status, integrationName, createdAt, expiresAt, lastUsedAt, revokedAt, roleSubset, id]
+        fields: [displayName, status, integrationId, createdAt, expiresAt, lastUsedAt, revokedAt, roleSubset, id]
         columns: [displayName, status, expiresAt, lastUsedAt]
         operations:
           list: { operation: listCredentials, resultField: credentials, bindings: { integrationId: integrationId } }

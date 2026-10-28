@@ -1487,6 +1487,7 @@ function projectStandalone(
   const metadata: ProjectedStandalone["metadata"] = [];
   const refsByPage = new Map<string, WebStandaloneOperationRef[]>();
   const pageOwner = new Map<string, string>();
+  const pendingReferences: Array<{ entityName: string; key: string; targetName: string }> = [];
   const compiledByKey = new Map(input.operations.map((operation) => [operation.key, operation]));
   const catalogs = [...input.catalogs]
     .filter((catalog) => catalog.interfaces.web)
@@ -1621,6 +1622,14 @@ function projectStandalone(
         } | undefined;
         const title = i18n?.title;
         const target = referenceTarget(schema, targets);
+        const targetName = schema["x-osf-type"];
+        if (!target && typeof targetName === "string" && catalogs.some((item) => item.interfaces.web?.entities?.[targetName])) {
+          const types = Array.isArray(schema.type) ? schema.type : [schema.type];
+          if (!types.includes("string") || types.some((type) => type !== "string" && type !== "null")) {
+            throw new Error(`Operation-backed reference ${entityName}.${key} must be a single string identifier.`);
+          }
+          pendingReferences.push({ entityName, key, targetName });
+        }
         const rawType = Array.isArray(schema.type) ? schema.type.find((value) => value !== "null") : schema.type;
         // Plain text arrays use the existing collection renderer. Structured,
         // open, typed and enumerated items retain their prior projection until
@@ -1773,6 +1782,36 @@ function projectStandalone(
         relationships,
       } as unknown as WebEntityInterface;
     }
+  }
+  // Resolve provider-backed reference targets after every catalog entity exists.
+  // A single authored route parameter unambiguously identifies the destination;
+  // composite routes need explicit bindings, rather than guessing from names.
+  for (const { entityName, key, targetName } of pendingReferences) {
+    const owner = entities[entityName]!;
+    const target = entities[targetName]!;
+    const record = target.views.record;
+    const route = record?.routes.read;
+    const parameters = route?.match(/:([a-zA-Z][a-zA-Z0-9_]*)/g) ?? [];
+    const bindings = target.operationSource?.record?.bindings ?? {};
+    if (!record?.operations.read || !route || parameters.length !== 1 || Object.values(bindings).some((value) => `:${value}` !== parameters[0])) {
+      throw new Error(`Operation-backed reference ${entityName}.${key} needs a readable target with a single record route parameter and compatible get bindings.`);
+    }
+    const input = operations[record.operations.read.id]?.input.schema;
+    const properties = input ? objectProperties(input) : {};
+    const parameter = parameters[0]!.slice(1);
+    const availableInputs = new Set([...Object.keys(bindings), ...(properties[parameter] ? [parameter] : [])]);
+    const requiredInputs = input && Array.isArray(input.required) ? input.required : [];
+    if (!input || Object.keys(bindings).some((key) => !properties[key]) || requiredInputs.some((key) => typeof key !== "string" || !availableInputs.has(key))) {
+      throw new Error(`Operation-backed reference ${entityName}.${key} cannot supply the target read Operation's required input from its record route.`);
+    }
+    const field = owner.fields[key]!;
+    field.osfType = targetName;
+    field.relationship = { targetEntityId: targetName };
+    owner.relationships[key] = {
+      id: `${entityName}.${key}`, key, label: field.label, kind: "belongsTo",
+      targetEntityId: targetName, targetRoute: target.views.collection.route,
+      recordField: key, ownership: "reference", operations: { get: record.operations.read },
+    };
   }
   // A plugin may own a child resource while its parent Operation-backed entity
   // belongs to another catalog (for example a host capability below a core

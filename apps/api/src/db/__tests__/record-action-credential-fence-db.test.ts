@@ -206,7 +206,8 @@ function management(tenantId = tenantA): ProvisioningSession {
 test("management fixture is a verified person and rejects an unverified or service principal", () => {
   const session = management();
   expect(() => assertMayManageApiKeys(session)).not.toThrow();
-  expect(() => assertMayManageApiKeys({ ...session, principalKind: undefined })).toThrow();
+  const { principalKind: _principalKind, ...unverified } = session;
+  expect(() => assertMayManageApiKeys(unverified)).toThrow();
   expect(() => assertMayManageApiKeys({ ...session, principalKind: "service" })).toThrow();
 });
 
@@ -224,7 +225,7 @@ function managementSessionInput(tenantId = tenantA): DbSessionInput {
     userId: session.userId,
     roles: [...session.roles],
     groups: [],
-    principalKind: session.principalKind,
+    principalKind: "person",
     scope: "tenant",
   };
 }

@@ -130,6 +130,31 @@ describe("named record actions", () => {
     ]);
   });
 
+  test("carries an authored label and leaves an unlabelled action to its name", () => {
+    const compiled = buildAuthorization(
+      withActions([
+        { name: "start", principals: ["integration"], labels: { en: "Start run", nl: "Run starten" } },
+        { name: "follow", principals: ["integration"] },
+      ]),
+      [], [],
+    );
+    expect(compiled.rowAccess!.recordPermissions!.actions).toEqual([
+      { name: "follow", principals: ["integration"], lock: "exclusive" },
+      {
+        name: "start",
+        labels: { en: "Start run", nl: "Run starten" },
+        principals: ["integration"],
+        lock: "exclusive",
+      },
+    ]);
+  });
+
+  test("refuses a label that is authored but empty", () => {
+    expect(() => buildAuthorization(
+      withActions([{ name: "start", principals: ["integration"], labels: { en: "  " } }]), [], [],
+    )).toThrow(/labels\.en is empty/);
+  });
+
   test("refuses a lock mode that is neither exclusive nor shared", () => {
     expect(() => buildAuthorization(
       withActions([{ name: "start", principals: ["integration"], lock: "none" }]), [], [],

@@ -347,6 +347,10 @@
                         "not": { "enum": ["view", "edit", "delete"] },
                         "description": "lowerCamel action name, unique on the entity and never a record permission."
                       },
+                      "labels": {
+                        "$ref": "#/$defs/localizedText",
+                        "description": "What a person reading a screen calls this action. Optional: an action authored before this existed, or one whose name is already the word a reader needs, falls back to the name itself. This is the only canonical source of an action's label - a surface that needs one reads it from here rather than restating a product's vocabulary."
+                      },
                       "reads": {
                         "type": "array",
                         "uniqueItems": true,

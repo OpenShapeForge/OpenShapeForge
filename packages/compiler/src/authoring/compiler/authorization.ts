@@ -499,13 +499,43 @@ function compileRecordActions(
           `or "shared" (only for an effect that provably never locks the record more strongly).`,
       );
     }
+    const labels = compileRecordActionLabels(coreEntity, action);
     return {
       name: action.name,
+      ...(labels ? { labels } : {}),
       principals: principals.sort(),
       ...(reads.length > 0 ? { reads } : {}),
       lock: action.lock ?? "exclusive",
     };
   }).sort((left, right) => left.name.localeCompare(right.name));
+}
+
+/**
+ * The action's own label, in every language it was authored in.
+ *
+ * Optional by design: the fallback is the action NAME, which every action has
+ * and which no surface had to invent. What is NOT optional is that a label,
+ * once authored, is a real translation — an empty string would render as a
+ * nameless choice, so it is refused here rather than shipped.
+ */
+function compileRecordActionLabels(
+  coreEntity: CoreEntity,
+  action: import("../types/common.js").RowAccessRecordActionConfig,
+): import("../types/common.js").LocalizedText | undefined {
+  const labels = action.labels;
+  if (!labels) return undefined;
+  const entries = Object.entries(labels);
+  if (entries.length === 0) return undefined;
+  for (const [language, text] of entries) {
+    if (typeof text !== "string" || text.trim().length === 0) {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.rowAccess.recordPermissions.actions "${action.name}" labels.${language} is empty. ` +
+          `Author a label a person can read, or omit labels entirely and let the action name stand.`,
+      );
+    }
+  }
+  return { ...labels };
 }
 
 /**

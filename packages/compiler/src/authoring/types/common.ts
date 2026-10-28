@@ -116,6 +116,16 @@ export type RecordActionPrincipal = "person" | "integration";
 export interface RowAccessRecordActionConfig {
   /** lowerCamel identifier; never view, edit or delete. */
   name: RecordActionName;
+  /**
+   * What a person reading a screen calls this action.
+   *
+   * The entity that declares an action is the only honest place to name it:
+   * core knows the axis, not a product's vocabulary. Optional, so an action
+   * authored before this existed keeps compiling — a reader of this field
+   * falls back to the action NAME, which is the one label that is always
+   * available and never invented.
+   */
+  labels?: LocalizedText;
   /** Which principal kinds a grant of this action may name. */
   principals: RecordActionPrincipal[];
   /**

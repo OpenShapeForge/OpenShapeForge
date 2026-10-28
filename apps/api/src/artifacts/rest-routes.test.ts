@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import Fastify from "fastify";
 import { __resetSessionResolverForTests } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import { registerArtifactRestRoutes } from "./rest-routes.js";
+import { activeArtifactServices, registerArtifactRestRoutes } from "./rest-routes.js";
 import { ArtifactStorageRuntime } from "../modules/artifact-storage.js";
 import { ARTIFACT_UPLOAD_LIMIT_BYTES, assertUploadFileName, limitUploadBody } from "./upload-input.js";
 
@@ -169,8 +169,9 @@ test("a cooperative provider stops on deadline before its slot is released", asy
   const app = Fastify(); let started = 0, cleaned = 0;
   registerArtifactRestRoutes(app, { downloadTimeoutMs: 20, artifacts: {
     stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
-    read: async (_session, _input, options) => {
+    read: async (_session, input, options) => {
       started++;
+      if (started > 1) return { descriptor: { artifactId: ARTIFACT_ID, version: 1, fileName: "a.bin", mediaType: "application/octet-stream", sha256: "a".repeat(64), byteSize: 1 }, bytes: Uint8Array.of(1), owner: input.owner };
       try { await new Promise<void>((_resolve, reject) => options!.signal!.addEventListener("abort", () => reject(new Error("cancelled")), { once: true })); }
       finally { cleaned++; }
       throw Error("unreachable");
@@ -183,6 +184,7 @@ test("a cooperative provider stops on deadline before its slot is released", asy
     expect(response.json().error.code).toBe("ARTIFACT_DOWNLOAD_TIMEOUT");
     expect(started).toBe(1);
     expect(cleaned).toBe(1);
+    expect((await app.inject({ method: "GET", url: path, headers: authorizationHeaders() })).statusCode).toBe(200);
   } finally { await app.close(); }
 });
 
@@ -205,10 +207,13 @@ test("deadline abort flows through storage runtime and finishes transaction clea
       throw Error("unreachable");
     },
   } }], ["test"]);
-  registerArtifactRestRoutes(app, { artifacts: runtime.services, downloadTimeoutMs: 20 });
+  let activeBoundaryEntered = false;
+  const artifacts = activeArtifactServices(runtime.services, async (session, work) => { activeBoundaryEntered = true; return work(session); });
+  registerArtifactRestRoutes(app, { artifacts, downloadTimeoutMs: 20 });
   try {
     const response = await app.inject({ method: "GET", url: `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`, headers: authorizationHeaders() });
     expect(response.statusCode).toBe(504);
+    expect(activeBoundaryEntered).toBe(true);
     expect(providerStopped).toBe(true);
     expect(transactionOpen).toBe(false);
   } finally { await app.close(); }
@@ -225,7 +230,7 @@ test("download capacity includes in-flight reads and recovers after they finish"
  const request=(tenant = "tenant-a")=>app.inject({method:'GET',url:`/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`,headers:tenant === "tenant-a" ? headers : authorizationHeaders(tenant)});
  const pending=Array.from({length:4},(_,i)=>Promise.resolve(request(i < 2 ? "tenant-a" : "tenant-b")));
  await all;
- try {expect((await request()).statusCode).toBe(429);}finally{release();}
+ try {expect((await request()).statusCode).toBe(429); expect((await request("tenant-c")).statusCode).toBe(429);}finally{release();}
  expect((await Promise.all(pending)).map(x=>x.statusCode)).toEqual([200,200,200,200]);
  expect((await request()).statusCode).toBe(200);await app.close();
 });

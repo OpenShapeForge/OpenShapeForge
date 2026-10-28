@@ -60,6 +60,18 @@ function contentDisposition(name: string): string {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`;
 }
 
+/** Apply the same active-session boundary to every artifact call, preserving cancellation. */
+export function activeArtifactServices<Session>(
+  services: RuntimeArtifactServices<Session>,
+  withActive: <T>(session: Session, work: (active: Session) => Promise<T>) => Promise<T>,
+): RuntimeArtifactServices<Session> {
+  return {
+    stage: (session, input) => withActive(session, (active) => services.stage(active, input)),
+    bind: (session, input) => withActive(session, (active) => services.bind(active, input)),
+    read: (session, input, options) => withActive(session, (active) => services.read(active, input, options)),
+  };
+}
+
 export function registerArtifactRestRoutes(
   app: FastifyInstance,
   options: {
@@ -98,6 +110,7 @@ export function registerArtifactRestRoutes(
 
     instance.get(ARTIFACT_CONTENTS_PATH, async (request, reply) => {
       const verified = await session(request, options.db);
+      if (reply.raw.destroyed || reply.raw.writableEnded) return;
       const { artifactId } = request.params as { artifactId: string };
       const tenantId = verified.tenantId!.toLowerCase();
       const tenantDownloads = activeDownloadsByTenant.get(tenantId) ?? 0;
@@ -125,6 +138,11 @@ export function registerArtifactRestRoutes(
       const responseDone = () => { clearTimeout(deadline); if (!readSettled) abort.abort(); responseSettled = true; release(); };
       reply.raw.once("finish", responseDone);
       reply.raw.once("close", responseDone);
+      if (reply.raw.destroyed || reply.raw.writableEnded) {
+        readSettled = true;
+        responseDone();
+        return;
+      }
       try {
       const result = await options.artifacts.read(verified, {
         artifactId,

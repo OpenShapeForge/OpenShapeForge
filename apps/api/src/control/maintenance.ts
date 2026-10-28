@@ -22,6 +22,7 @@ import {
 } from "./organization-naming.js";
 import { provisionTenant } from "./provisioning.js";
 import { getTenant } from "./tenant-registry.js";
+import { normalizeKeycloakBase } from "./config.js";
 
 type Request = {
   action: "get" | "provision";
@@ -53,12 +54,13 @@ function origin(value: string): string {
 }
 /** A Keycloak base may include the deployment's reverse-proxy path prefix. */
 function keycloakBase(value: string): string {
-  const url = new URL(value);
-  if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) {
+  const normalized = normalizeKeycloakBase(value);
+  if (!normalized?.startsWith("https://")) {
     throw new ManagedMaintenanceError("MAINTENANCE_CONFIGURATION", "Managed maintenance requires an HTTPS Keycloak base URL.");
   }
-  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+  return normalized;
 }
+
 export function readManagedMaintenanceConfiguration(
   env: NodeJS.ProcessEnv,
 ): Configuration {

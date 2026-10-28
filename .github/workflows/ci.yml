@@ -164,6 +164,7 @@ jobs:
           src/auth/relation-group-memberships.test.ts
           src/auth/identity-link.test.ts
           src/auth/identity.test.ts
+          src/auth/principal-class.unit.test.ts
           src/auth/host-organization-session.test.ts
           src/auth/mcp-resource-header.test.ts
           src/auth/ui-locale.test.ts

@@ -370,6 +370,9 @@ async function lifecycle<T>(
           relationId: rows[0]!.id,
           displayName: rows[0]!.display_name,
           relationType: "person",
+          // The row above was selected on `relation_type = 'person'`, so this
+          // is that read's own answer and not a restatement of the literal.
+          relationIsPerson: true,
           candidateRelationId: null,
           linkedBy: contribution.name,
           needsRoleAssignment: false,

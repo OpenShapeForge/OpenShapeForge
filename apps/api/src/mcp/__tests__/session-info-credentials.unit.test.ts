@@ -36,6 +36,7 @@ const link = (overrides: Partial<IdentityLinkState> = {}): IdentityLinkState => 
   relationId: null,
   displayName: null,
   relationType: null,
+  relationIsPerson: false,
   candidateRelationId: null,
   linkedBy: null,
   needsRoleAssignment: false,

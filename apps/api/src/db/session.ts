@@ -20,7 +20,8 @@ export type DbSessionScope = "tenant" | "group" | "self";
  *
  *   person       verified bearer claims that are not a service account, or any
  *                carrier whose identity-Relation link was read back from
- *                `platform.identity_relations` (`verifiedAuditIdentity`)
+ *                `platform.identity_relations` AND names a person party
+ *                (`linkedPersonParty`)
  *   application  a resolved API-key integration, and only that
  *   service      a verified client-credentials principal with no integration
  *                behind it — organization automation included
@@ -276,12 +277,49 @@ function normalizeScope(scope: DbSessionScope | null | undefined): DbSessionScop
   return "self";
 }
 
+/**
+ * The identity ↔ Relation link a carrier supplied, narrowed to what this
+ * layer reads off it. A plugin sees `relation` as `unknown`; the auth layer
+ * builds it in one place (`auth/identity-link-store.ts`, `toState`).
+ */
+type SessionIdentityLink = {
+  identityId?: unknown;
+  issuer?: unknown;
+  subject?: unknown;
+  status?: unknown;
+  /**
+   * Whether the party the link names is a PERSON, as the deployment's identity
+   * contract spells "person". Derived where the Relation row is read, so it is
+   * a fact this server established; absent for every carrier that supplies no
+   * link, and false for a link with no party or a party of another type.
+   */
+  relationIsPerson?: unknown;
+};
+
+/**
+ * The link, when it is THIS session's own and this server read it back.
+ *
+ * One predicate for both things derived from a link — the audit identity and
+ * the person class — so the two cannot come to disagree about which links
+ * count. It establishes the identity half only: that a row of
+ * `platform.identity_relations` naming this session's subject was read under
+ * RLS. What that row's party IS is a separate question
+ * ({@link linkedPersonParty}).
+ */
+function verifiedLink(input: DbSessionInput): SessionIdentityLink | null {
+  const link = input.relation as SessionIdentityLink | null | undefined;
+  if (!link || typeof link !== "object") return null;
+  return ["linked", "pending_confirmation"].includes(String(link.status)) &&
+    link.subject === input.userId && typeof link.identityId === "string" &&
+    UUID_PATTERN.test(link.identityId) && typeof link.issuer === "string" && link.issuer
+    ? link
+    : null;
+}
+
 export function verifiedAuditIdentity(input: DbSessionInput): { auditIdentityId: string | null; auditIssuer: string | null } {
-  const link = input.relation as { identityId?: unknown; issuer?: unknown; subject?: unknown; status?: unknown } | undefined;
-  if (link && ["linked", "pending_confirmation"].includes(String(link.status)) &&
-      link.subject === input.userId && typeof link.identityId === "string" &&
-      UUID_PATTERN.test(link.identityId) && typeof link.issuer === "string" && link.issuer) {
-    return { auditIdentityId: link.identityId, auditIssuer: link.issuer };
+  const link = verifiedLink(input);
+  if (link) {
+    return { auditIdentityId: link.identityId as string, auditIssuer: link.issuer as string };
   }
   // A nested database session already carries the verified identity context.
   if (input.auditIdentityId) {
@@ -320,7 +358,41 @@ export function resolvePrincipalClass(input: DbSessionInput): DbPrincipalClass {
   if (input.appPrincipal) return "application";
   if (input.principalKind === "service") return "service";
   if (input.principalKind === "person") return "person";
-  return verifiedAuditIdentity(input).auditIdentityId ? "person" : "unknown";
+  return linkedPersonParty(input) ? "person" : "unknown";
+}
+
+/**
+ * Does the carrier's link name a PERSON — positively?
+ *
+ * The identity half is not the question. {@link verifiedLink} establishes that
+ * this server read a link row naming this session's subject, and that is as
+ * true of a service account's link as of a person's:
+ * `ensureServiceIdentityLink` records one for every API-key service account on
+ * its first session, and an administrator's `link_identity` may point any
+ * identity at any Relation the tenant holds — a supplier organization
+ * included. So "a link exists" classified a machine principal as a person
+ * whenever its carrier stated no kind, which is exactly the payload-v2
+ * trusted-context bundle this deployment still accepts for ordinary work.
+ *
+ * That reading was not idle. `person` is the one class that holds a named
+ * action's user, role and group subjects (`app.record_action_subject_allows`)
+ * and the class a generic route's `authorization.principalClasses` is matched
+ * against (`operations/entity/principal-classes.ts`), so a legacy linked
+ * service carrier was handed a person's record actions. The privilege check
+ * that admits key management reads the carrier's SIGNED `principalKind`
+ * (`auth/api-key/ceiling.ts`) and so was never reachable this way; the ones
+ * above were.
+ *
+ * The party's own kind is therefore required, positively. Anything else is
+ * `unknown`, which holds nothing: a link with no party, a party of another
+ * type, a carrier with no link at all, and a context rebuilt or copied from a
+ * session rather than handed back as itself. A person whose link is still
+ * `pending_confirmation` keeps the class it has today — the Relation the
+ * e-mail matched is a person party, and narrowing that would change what an
+ * ordinary v2 session may read, which is not what this closes.
+ */
+function linkedPersonParty(input: DbSessionInput): boolean {
+  return verifiedLink(input)?.relationIsPerson === true;
 }
 
 export function createDbSessionContext(input: DbSessionInput): DbSessionContext {

@@ -143,6 +143,7 @@ describe("sameStatefulMcpAuthorization", () => {
       relationId,
       displayName: "Someone",
       relationType: "person",
+      relationIsPerson: true,
       candidateRelationId: null,
       linkedBy: "jit",
       needsRoleAssignment: false,

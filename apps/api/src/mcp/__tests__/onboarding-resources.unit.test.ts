@@ -43,6 +43,7 @@ const session = (overrides: Partial<TrustedSessionContext> = {}): TrustedSession
     status: "linked",
     relationId: "66666666-6666-4666-8666-666666666666",
     relationType: "person",
+    relationIsPerson: true,
     displayName: "Hans Dev",
     candidateRelationId: null,
     linkedBy: "jit",

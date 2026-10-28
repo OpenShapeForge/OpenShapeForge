@@ -137,6 +137,7 @@ function verifiedPersonSession(): TrustedSessionContext {
       relationId: RELATION,
       displayName: "Alex Manager",
       relationType: "person",
+      relationIsPerson: true,
       candidateRelationId: null,
       linkedBy: "test",
       needsRoleAssignment: false,

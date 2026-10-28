@@ -9,6 +9,13 @@ import type {
   RuntimeModule,
 } from "./contract.js";
 
+/** Startup diagnostic without blocking installations that intentionally make no outbound requests. */
+export function missingEgressOwnerDiagnostic(environment: string | undefined, owner: unknown): { code: string; message: string } | undefined {
+  return environment === "production" && !owner
+    ? { code: "EGRESS_OWNER_REQUIRED", message: "No outbound egress owner is configured. Production outbound requests will be refused until one is installed." }
+    : undefined;
+}
+
 const trustedModuleEgressFailure = new WeakMap<
   TrustedModuleEgressError,
   { kind: ModuleEgressFailureKind; invocation: object }

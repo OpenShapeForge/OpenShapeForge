@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import type { ModuleEgressRequest, RuntimeModule } from "../contract.js";
 import {
   createModuleEgressInvocation,
+  missingEgressOwnerDiagnostic,
   fetchValidatedOutbound,
 } from "../egress.js";
 import externalRuntimeModule, {
@@ -24,6 +25,11 @@ const source = {
 };
 
 describe("canonical runtime-module egress boundary", () => {
+  it("identifies missing production egress configuration at startup without affecting offline deployments", () => {
+    expect(missingEgressOwnerDiagnostic("production", undefined)).toMatchObject({ code: "EGRESS_OWNER_REQUIRED" });
+    expect(missingEgressOwnerDiagnostic("production", {})).toBeUndefined();
+    expect(missingEgressOwnerDiagnostic("development", undefined)).toBeUndefined();
+  });
   it("delivers the exact trusted context and preserves Request semantics and signal", async () => {
     const signal = new AbortController().signal;
     let seen: ModuleEgressRequest | undefined;

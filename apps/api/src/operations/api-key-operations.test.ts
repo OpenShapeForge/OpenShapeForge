@@ -214,6 +214,7 @@ const PROVISIONING_ENV: Record<string, string> = {
   OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_ID: "provisioner",
   OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_SECRET: "provisioner-secret",
   OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID: "erp-provider",
+  OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE: "erp-provider",
 };
 
 const previous = new Map<string, string | undefined>();
@@ -371,12 +372,33 @@ describe("integration catalog Operations", () => {
       expect(store.keys).toEqual([]);
     });
 
-    test("refuses a role list that is empty or not a list", async () => {
-      for (const roles of [[], "Relations.All.Read", [1]]) {
+    test("accepts no general roles and refuses malformed role lists", async () => {
+      const roleFree = value((await run("createIntegration", {
+        displayName: "Role-free integration", roles: [],
+      }, { store: fixtureStore() })).result);
+      expect(roleFree.integration.grantedRoles).toEqual([]);
+      for (const roles of ["Relations.All.Read", [1]]) {
         expect(failure((await run("createIntegration", {
           displayName: "Bad roles", roles,
         }, { store: fixtureStore(), invalidInput: true })).result))
           .toMatchObject({ status: 400, code: "VALIDATION" });
+      }
+    });
+
+    test("refuses role-free creation before provisioning when API audience is absent", async () => {
+      const previousAudience = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE;
+      delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE;
+      try {
+        const store = fixtureStore();
+        const result = failure((await run("createIntegration", {
+          displayName: "No audience", roles: [],
+        }, { store })).result);
+        expect(result).toMatchObject({ status: 400, code: "VALIDATION" });
+        expect(store.integrations).toEqual([]);
+        expect(realm.requests).toEqual([]);
+      } finally {
+        if (previousAudience === undefined) delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE;
+        else process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = previousAudience;
       }
     });
   });
@@ -747,7 +769,8 @@ describe("integration catalog Operations", () => {
       for (const missing of Object.keys(PROVISIONING_ENV)) {
         // The role client id has a documented default, so its absence does not
         // disable the surface.
-        if (missing === "OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID") continue;
+        if (missing === "OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID" ||
+            missing === "OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE") continue;
         const saved = process.env[missing];
         delete process.env[missing];
         const refusal = failure((await run("listIntegrations", {})).result);

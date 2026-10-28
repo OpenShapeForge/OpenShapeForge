@@ -373,10 +373,9 @@ operations:
             x-osf-i18n: { title: { en: Name, nl: Naam } }
           roles:
             type: array
-            minItems: 1
             uniqueItems: true
             items: { type: string, minLength: 1 }
-            description: Roles the integration's service account receives. Every one must already be held by the caller.
+            description: Roles the integration's service account receives. Every one must already be held by the caller. An empty list grants no general roles; separately authorized record actions and operations open to authenticated sessions may still be available.
             x-osf-i18n: { title: { en: Roles, nl: Rollen } }
           expiresInDays: &expiresInDays
             type: integer

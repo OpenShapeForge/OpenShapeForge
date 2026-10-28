@@ -1,6 +1,18 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { intersectRoles } from "./resolve.js";
+import { integrationRoles, intersectRoles } from "./resolve.js";
+import { isRoleFreeIntegration } from "./store.js";
+
+test("only explicit empty integration grants remove Keycloak defaults", () => {
+  for (const stored of [null, undefined, ["A"], "invalid"]) {
+    expect(isRoleFreeIntegration(stored)).toBe(false);
+    expect(integrationRoles(["A", "B"], null, isRoleFreeIntegration(stored))).toEqual(["A", "B"]);
+    expect(integrationRoles(["A", "B"], ["B"], isRoleFreeIntegration(stored))).toEqual(["B"]);
+  }
+  expect(isRoleFreeIntegration([])).toBe(true);
+  expect(integrationRoles(["default", "A"], null, true)).toEqual([]);
+  expect(integrationRoles(["default", "A"], ["A"], true)).toEqual([]);
+});
 
 describe("intersectRoles", () => {
   test("a null subset passes the granted roles through unchanged", () => {

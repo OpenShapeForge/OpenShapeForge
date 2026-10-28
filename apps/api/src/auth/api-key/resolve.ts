@@ -61,6 +61,11 @@ export function intersectRoles(
   return subset.filter((role) => grantedSet.has(role));
 }
 
+/** Empty stored grants mean role-free; all other legacy inputs retain their prior semantics. */
+export function integrationRoles(granted: readonly string[], subset: readonly string[] | null, roleFree: boolean): string[] {
+  return roleFree ? [] : intersectRoles(granted, subset);
+}
+
 export async function resolveApiKeySession(
   deps: ApiKeyResolverDeps,
   candidate: string,
@@ -120,7 +125,10 @@ export async function resolveApiKeySession(
   }
   if (!identity.userId) return undefined;
 
-  const roles = intersectRoles(identity.roles, key.roleSubset);
+  // Keycloak attaches realm/account defaults even when no client roles were
+  // granted. An explicitly role-free integration must not inherit them.
+  // Keep the existing role-bearing path, including its composite semantics.
+  const roles = integrationRoles(identity.roles, key.roleSubset, key.roleFree);
 
   // Telemetry, never a gate: a failed write here must not fail an authenticated
   // request, and nothing on the hot path reads these columns back.

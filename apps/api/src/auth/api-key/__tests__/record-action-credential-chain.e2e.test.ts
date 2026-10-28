@@ -14,7 +14,7 @@
  *
  * So this file runs exactly one path and nothing else:
  *
- *   the real provisioning service mints an `osf_live_…` credential against a
+ *   the real provisioning service mints a role-free `osf_live_…` credential against a
  *   real realm client
  *     → the real session resolver (`auth/identity.ts`, the function every
  *       transport calls) reads the presented credential: indexed lookup,
@@ -84,7 +84,7 @@ const REALM_URL = `${KEYCLOAK_URL}/realms/${REALM}`;
 const ADMIN_CLIENT = "openshapeforge-apikey-provisioner";
 const ADMIN_SECRET = process.env.E2E_KEYCLOAK_ADMIN_SECRET ??
   "openshapeforge-apikey-provisioner-secret";
-const ROLE_CLIENT = process.env.OPENSHAPEFORGE_API_KEY_ROLE_CLIENT_ID ?? "erp-provider";
+const API_AUDIENCE = "urn:osf:role-free-credential-test";
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ??
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 const APP_ROLE_PASSWORD = process.env.SCRATCH_APP_ROLE_PASSWORD ?? "openshapeforge_app";
@@ -141,7 +141,7 @@ const ISSUER = process.env.E2E_KEYCLOAK_ISSUER ?? (await discoverIssuer());
 process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = ISSUER ?? "";
 process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI =
   `${REALM_URL}/protocol/openid-connect/certs`;
-process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = ROLE_CLIENT;
+process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = API_AUDIENCE;
 process.env.OPENSHAPEFORGE_API_KEY_SECRET_KEYS =
   `chain:${randomBytes(32).toString("base64")}`;
 process.env.OPENSHAPEFORGE_KEYCLOAK_BASE_URL = KEYCLOAK_URL;
@@ -154,7 +154,7 @@ const { mintApiKey } = await import("../format.js");
 const { readApiKeyProvisioningConfig } = await import("../runtime-config.js");
 const { createIntegration, issueKey, revokeKey } = await import("../service.js");
 const { resolveSessionContext, __resetSessionResolverForTests } = await import("../../identity.js");
-const { __resetExchangeCacheForTests } = await import("../exchange.js");
+const { __resetExchangeCacheForTests, exchangeForToken } = await import("../exchange.js");
 const { createDatabaseRuntime } = await import("../../../db/connection.js");
 const { runMigrationChain } = await import("../../../db/migration-chain.js");
 const { APP_ROLE } = await import("../../../db/migrations/app-role.js");
@@ -228,6 +228,7 @@ function management(tenantId = tenant) {
     roles: [API_KEY_MANAGE_ROLE, READ_ROLE],
     groups: [] as string[],
     credential: "bearer" as const,
+    principalKind: "person" as const,
   };
 }
 
@@ -370,11 +371,11 @@ beforeAll(async () => {
   `.execute(admin.db);
 
   // The real provisioning service, against the real realm: a realm client, a
-  // service account carrying the tenant, the entity read role, and one
+  // service account carrying the tenant, no general roles, and one
   // `osf_live_…` credential returned once.
   const created = await createIntegration(serviceDeps(), management(), {
     displayName: `credential chain ${randomUUID().slice(0, 8)}`,
-    roles: [READ_ROLE],
+    roles: [],
   });
   integrationId = created.integrationId;
   primaryKey = created.token;
@@ -392,7 +393,7 @@ beforeAll(async () => {
   // The other customer's own application, provisioned the same way.
   const abroad = await createIntegration(serviceDeps(), management(otherTenant), {
     displayName: `credential chain abroad ${randomUUID().slice(0, 8)}`,
-    roles: [READ_ROLE],
+    roles: [],
   });
   otherIntegrationId = abroad.integrationId;
   otherTenantKey = abroad.token;
@@ -464,6 +465,17 @@ describe("a credential this realm issued, resolved and dispatched", () => {
     // what this test wanted — asserted to be the rows the service wrote.
     expect(primarySession.credential).toBe("api-key");
     expect(primarySession.principalKind).toBe("service");
+    expect(primarySession.roles).toEqual([]);
+    const backing = (await sql<{ keycloak_client_id: string; client_secret_ciphertext: string; client_secret_key_id: string; client_secret_algorithm: string }>`
+      select keycloak_client_id, client_secret_ciphertext, client_secret_key_id, client_secret_algorithm
+      from platform.api_key_integrations where id = ${integrationId}::uuid
+    `.execute(admin.db)).rows[0]!;
+    const token = await exchangeForToken({ issuer: ISSUER!, keyring: provisioning.keyring }, integrationId,
+      backing.keycloak_client_id, { ciphertext: backing.client_secret_ciphertext,
+        keyId: backing.client_secret_key_id, algorithm: backing.client_secret_algorithm });
+    expect(typeof token).toBe("string");
+    const claims = JSON.parse(Buffer.from(token!.split(".")[1]!, "base64url").toString("utf8")) as { aud?: string | string[] };
+    expect(Array.isArray(claims.aud) ? claims.aud : [claims.aud]).toContain(API_AUDIENCE);
     expect(primarySession.tenantId).toBe(tenant);
     expect(primarySession.appPrincipal).toEqual({
       integrationId,
@@ -583,13 +595,13 @@ describe("a credential this realm issued, resolved and dispatched", () => {
   test("expiry is read at the gate, and an admitted action still finishes", async () => {
     // A real credential of the same real realm client, with a real expiry a
     // few seconds out. `expiresInDays` is the service's own parameter and the
-    // service's own arithmetic; a fraction of a day is the only way to ask
-    // for a window a test can outlive.
+    // service's own arithmetic; a backdated creation instant and a whole-day
+    // lifetime give the test a window it can outlive.
     const shortLived = await issueKey(serviceDeps(), management(), {
       integrationId,
       displayName: "expiring",
-      expiresInDays: EXPIRY_WINDOW_MS / 86_400_000,
-    });
+      expiresInDays: 1,
+    }, new Date(Date.now() - 86_400_000 + EXPIRY_WINDOW_MS));
     const expiresAt = shortLived.expiresAt!;
     expect(expiresAt).toBeInstanceOf(Date);
 

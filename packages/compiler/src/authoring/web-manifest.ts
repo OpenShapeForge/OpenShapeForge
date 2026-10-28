@@ -1628,6 +1628,8 @@ function projectStandalone(
         const candidate = rawType === "array" && schema.items && typeof schema.items === "object" && !Array.isArray(schema.items)
           ? schema.items as typeof schema : undefined;
         const plainStringArray = candidate?.type === "string" && candidate.format === undefined && candidate.enum === undefined
+          && candidate.const === undefined && candidate.oneOf === undefined && candidate.anyOf === undefined
+          && candidate.allOf === undefined && candidate.not === undefined && candidate.$ref === undefined
           && candidate["x-osf-type"] === undefined && candidate["x-osf-reference"] === undefined
           && candidate["x-osf-typed-by"] === undefined && candidate["x-osf-presentation"] === undefined
           && candidate["x-osf-exact"] === undefined && schema.format === undefined && schema.enum === undefined

@@ -103,10 +103,24 @@ describe("shipped integration and API-key catalog", () => {
   });
 
   test("does not guess a text collection for open, object, or enumerated array items", () => {
-    for (const items of [{}, { type: "object", properties: { name: { type: "string" } } }, { type: "string", enum: ["admin", "reader"] }, { type: ["string", "null"] }, { type: "string", format: "date" }]) {
+    for (const items of [
+      {}, { type: "object", properties: { name: { type: "string" } } },
+      { type: "string", enum: ["admin", "reader"] }, { type: ["string", "null"] },
+      { type: "string", format: "date" }, { type: "string", const: "admin" },
+      { type: "string", oneOf: [{ const: "admin" }, { const: "reader" }] },
+      { type: "string", anyOf: [{ const: "admin" }, { const: "reader" }] },
+      { type: "string", allOf: [{ minLength: 1 }] }, { type: "string", not: { const: "admin" } },
+      { type: "string", $ref: "#/$defs/role" },
+    ]) {
       const catalog = structuredClone(apiKeyCatalog());
       const schema = catalog.operations.listIntegrations!.output!.schema as any;
       schema.properties.integrations.items.properties.grantedRoles.items = items;
+      if ("$ref" in items) {
+        // The integration schema is a YAML anchor reused by several outputs.
+        for (const operation of Object.values(catalog.operations)) {
+          if (operation.output?.schema) (operation.output.schema as any).$defs = { role: { type: "string" } };
+        }
+      }
       expect(manifest(catalog).entities.ApiKeyIntegration!.fields.grantedRoles).toMatchObject({
         osfType: "array", baseType: "array", cardinality: "one",
       });

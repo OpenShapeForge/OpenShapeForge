@@ -513,7 +513,9 @@ export async function collectAllArtifacts(
     operations: [
       {
         path: "apps/api/src/generated/operations/audit.json",
-        contents: JSON.stringify({ version: 1, timelines: Object.fromEntries(entities
+        contents: JSON.stringify({ version: 1, entityNames: Object.fromEntries(entities
+          .toSorted((a,b) => a.contract.entity.id < b.contract.entity.id ? -1 : a.contract.entity.id > b.contract.entity.id ? 1 : 0)
+          .map(entity => [entity.contract.entity.id, entity.contract.entity.name])), timelines: Object.fromEntries(entities
           .filter(entity => entity.contract.audit?.timeline)
           .toSorted((a,b) => a.contract.entity.name < b.contract.entity.name ? -1 : a.contract.entity.name > b.contract.entity.name ? 1 : 0)
           .map(entity => [entity.contract.entity.name, entity.contract.audit!.timeline])) }, null, 2) + "\n",

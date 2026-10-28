@@ -101,6 +101,17 @@ describe("shipped integration and API-key catalog", () => {
       osfType: "string", baseType: "string", cardinality: "many",
     });
   });
+
+  test("does not guess a text collection for open, object, or enumerated array items", () => {
+    for (const items of [{}, { type: "object", properties: { name: { type: "string" } } }, { type: "string", enum: ["admin", "reader"] }]) {
+      const catalog = structuredClone(apiKeyCatalog());
+      const schema = catalog.operations.listIntegrations!.output!.schema as any;
+      schema.properties.integrations.items.properties.grantedRoles.items = items;
+      expect(manifest(catalog).entities.ApiKeyIntegration!.fields.grantedRoles).toMatchObject({
+        osfType: "array", baseType: "array", cardinality: "one",
+      });
+    }
+  });
   test("binds every Operation to the one provisioning service under the management role", () => {
     const operations = compiled(apiKeyCatalog());
     expect(operations.map(({ key }) => key).sort()).toEqual([

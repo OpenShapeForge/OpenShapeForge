@@ -1622,12 +1622,16 @@ function projectStandalone(
         const title = i18n?.title;
         const target = referenceTarget(schema, targets);
         const rawType = Array.isArray(schema.type) ? schema.type.find((value) => value !== "null") : schema.type;
-        // An operation's array is a collection of its item type, just like an
-        // entity field with cardinality many. Preserve open arrays as before:
-        // without an item schema there is no item type to project.
-        const itemSchema = rawType === "array" && schema.items && typeof schema.items === "object" && !Array.isArray(schema.items)
+        // Plain text arrays use the existing collection renderer. Structured,
+        // open, typed and enumerated items retain their prior projection until
+        // their own semantics can be projected completely.
+        const candidate = rawType === "array" && schema.items && typeof schema.items === "object" && !Array.isArray(schema.items)
           ? schema.items as typeof schema : undefined;
-        const itemType = itemSchema && (Array.isArray(itemSchema.type) ? itemSchema.type.find((value) => value !== "null") : itemSchema.type);
+        const itemSchema = candidate?.type === "string" && candidate.format === undefined && candidate.enum === undefined
+          && candidate["x-osf-type"] === undefined && candidate["x-osf-reference"] === undefined
+          && candidate["x-osf-typed-by"] === undefined && candidate["x-osf-presentation"] === undefined
+          && candidate["x-osf-exact"] === undefined ? candidate : undefined;
+        const itemType = itemSchema?.type;
         const fieldSchema = itemSchema ?? schema;
         const fieldType = itemSchema ? itemType : rawType;
         const baseType = fieldSchema.format === "date-time"

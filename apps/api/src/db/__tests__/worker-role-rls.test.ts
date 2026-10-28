@@ -47,6 +47,7 @@ import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
+import { databaseRole } from "../database-roles.js";
 import {
   DEV_WORKER_ROLE_PASSWORD_DEFAULT,
   WORKER_ROLE,
@@ -673,18 +674,34 @@ describe("worker-role RLS axis", () => {
             // The other policies are untouched. Spot-checked on the business
             // tables the old blanket bypass exposed. An INSERT-only policy
             // (the tenant registry's) has no USING, only WITH CHECK.
-            const untouched = await sql<{ qual: string; permissive: string }>`
-              select coalesce(qual, with_check, '') as qual, permissive
+            const untouched = await sql<{ qual: string; permissive: string; roles: string[]; cmd: string }>`
+              select coalesce(qual, with_check, '') as qual, permissive, roles, cmd
               from pg_policies
               where schemaname = 'erp'
             `.execute(conn);
 
             expect(untouched.rows.length).toBeGreaterThan(0);
+            const resolver = databaseRole("recordActionResolver").name;
+            expect(untouched.rows.some((row) => row.roles.length === 1 && row.roles[0] === resolver)).toBe(true);
             for (const row of untouched.rows) {
               expect(row.qual).not.toContain("current_worker_role");
-              expect(row.qual).not.toContain("CURRENT_USER");
-              // Restrictive guards narrow an existing grant; they never grant worker bypass.
-              if (row.permissive === "PERMISSIVE") expect(row.qual).toContain("bypass_rls");
+              expect(row.roles).not.toContain(WORKER_ROLE);
+              if (row.roles.length === 1 && row.roles[0] === resolver) {
+                expect(row.qual).not.toContain("bypass_rls");
+                if (row.permissive === "PERMISSIVE") {
+                  // The resolver's granting policy admits this tenant only.
+                  expect(row.qual).toMatch(/^\(tenant_id = app\.current_tenant\(\)\)$/);
+                } else {
+                  // Its restrictive fence may exempt the table owner; this is
+                  // not a worker bypass and does not broaden the resolver grant.
+                  expect(row.qual).toContain("pg_has_role(CURRENT_USER");
+                  if (row.cmd === "ALL") expect(row.qual).toContain("tenant_id = app.current_tenant()");
+                  else expect(row.cmd).toBe("DELETE");
+                }
+              } else {
+                expect(row.qual).not.toContain("CURRENT_USER");
+                if (row.permissive === "PERMISSIVE") expect(row.qual).toContain("bypass_rls");
+              }
             }
           });
         });

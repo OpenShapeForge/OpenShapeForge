@@ -48,7 +48,7 @@ import { SQL } from "bun";
 import { sql, type Transaction } from "kysely";
 import { operationErrorOf } from "@openshapeforge/operations";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
-import { API_KEY_MANAGE_ROLE } from "../../auth/api-key/ceiling.js";
+import { API_KEY_MANAGE_ROLE, assertMayManageApiKeys } from "../../auth/api-key/ceiling.js";
 import { UNDECLARED_CREDENTIAL_LIFETIME_POLICY } from "../../auth/api-key/lifetime.js";
 import {
   disableIntegration,
@@ -199,8 +199,16 @@ function management(tenantId = tenantA): ProvisioningSession {
     roles: [API_KEY_MANAGE_ROLE],
     groups: [],
     credential: "bearer",
+    principalKind: "person",
   };
 }
+
+test("management fixture is a verified person and rejects an unverified or service principal", () => {
+  const session = management();
+  expect(() => assertMayManageApiKeys(session)).not.toThrow();
+  expect(() => assertMayManageApiKeys({ ...session, principalKind: undefined })).toThrow();
+  expect(() => assertMayManageApiKeys({ ...session, principalKind: "service" })).toThrow();
+});
 
 /**
  * The session input `service.ts` opens its transaction with, so an outer
@@ -216,6 +224,7 @@ function managementSessionInput(tenantId = tenantA): DbSessionInput {
     userId: session.userId,
     roles: [...session.roles],
     groups: [],
+    principalKind: session.principalKind,
     scope: "tenant",
   };
 }

@@ -39,7 +39,30 @@ type RoleRow = {
   rolsuper: boolean;
   rolbypassrls: boolean;
   rolcreaterole: boolean;
+  rolcreatedb: boolean;
+  rolreplication: boolean;
+  rolinherit: boolean;
   member: boolean;
+};
+
+/**
+ * A role that holds a declared role's privileges by membership.
+ *
+ * The definer roles own SECURITY DEFINER functions and hold the narrow grants
+ * those functions need, and RLS matches a policy's `TO` list with
+ * `has_privs_of_role` — so every member of a definer role inherits both the
+ * grants and the policies written for it. The contract is that the only
+ * members are the MIGRATE identity, which must hand the objects over, and
+ * whatever role already holds this database's owner privileges.
+ */
+type RoleMemberRow = {
+  role: string;
+  member: string;
+  superuser: boolean;
+  /** The member is the migrate identity, or a role it is itself a member of. */
+  migrator: boolean;
+  /** The member holds the privileges of this database's owner. */
+  databaseOwner: boolean;
 };
 
 const IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/;
@@ -56,8 +79,9 @@ export function renderProvisioningSql(options: { migratorRole?: string } = {}): 
   for (const role of DATABASE_ROLES) {
     const name = identifier(role.name);
     const attributes = role.login
-      ? "login password '<set-by-operator>' nosuperuser nobypassrls"
-      : "nologin nosuperuser nocreatedb nocreaterole noinherit nobypassrls";
+      ? "login password '<set-by-operator>' nosuperuser nobypassrls nocreatedb " +
+        "nocreaterole noreplication"
+      : "nologin nosuperuser nocreatedb nocreaterole noinherit nobypassrls noreplication";
     lines.push(`-- ${role.purpose}`);
     lines.push(
       `do $$ begin if not exists (select 1 from pg_roles where rolname = '${name}') ` +
@@ -75,6 +99,7 @@ async function readRoles(db: OpenShapeForgeDatabase): Promise<Map<string, RoleRo
   if (names.length === 0) return new Map();
   const result = await sql<RoleRow>`
     select rolname, rolcanlogin, rolsuper, rolbypassrls, rolcreaterole,
+      rolcreatedb, rolreplication, rolinherit,
       (pg_has_role(current_user, rolname, 'USAGE')
         and pg_has_role(current_user, rolname, 'SET')) as member
     from pg_roles
@@ -83,16 +108,75 @@ async function readRoles(db: OpenShapeForgeDatabase): Promise<Map<string, RoleRo
   return new Map(result.rows.map((row) => [row.rolname, row]));
 }
 
+/** Every role that holds a declared role's privileges by membership. */
+async function readRoleMembers(db: OpenShapeForgeDatabase): Promise<RoleMemberRow[]> {
+  const names = DATABASE_ROLES.map((role) => sql.lit(identifier(role.name)));
+  if (names.length === 0) return [];
+  const result = await sql<RoleMemberRow>`
+    select role.rolname as role, member.rolname as member,
+      member.rolsuper as superuser,
+      pg_has_role(current_user, member.rolname, 'USAGE') as migrator,
+      pg_has_role(member.rolname,
+        (select datdba from pg_database where datname = current_database()),
+        'USAGE') as "databaseOwner"
+    from pg_auth_members am
+    join pg_roles role on role.oid = am.roleid
+    join pg_roles member on member.oid = am.member
+    where role.rolname in (${sql.join(names)})
+    order by role.rolname, member.rolname
+  `.execute(db);
+  return result.rows;
+}
+
+/** Every role a declared role is itself a member of, and therefore inherits. */
+async function readRoleMemberships(db: OpenShapeForgeDatabase): Promise<Map<string, string[]>> {
+  const names = DATABASE_ROLES.map((role) => sql.lit(identifier(role.name)));
+  if (names.length === 0) return new Map();
+  const result = await sql<{ role: string; parent: string }>`
+    select member.rolname as role, role.rolname as parent
+    from pg_auth_members am
+    join pg_roles role on role.oid = am.roleid
+    join pg_roles member on member.oid = am.member
+    where member.rolname in (${sql.join(names)})
+    order by member.rolname, role.rolname
+  `.execute(db);
+  const memberships = new Map<string, string[]>();
+  for (const row of result.rows) {
+    memberships.set(row.role, [...(memberships.get(row.role) ?? []), row.parent]);
+  }
+  return memberships;
+}
+
 /**
  * Check the contract against pg_roles as the CURRENT connection. Throws one
  * error naming every deviation and the statements that fix them, so a fresh
  * environment fails once with the complete remedy rather than one role at a
  * time.
+ *
+ * Attributes, MEMBERSHIP IN the declared roles, and the declared roles' own
+ * memberships are all part of the contract:
+ *
+ *   - no declared role may be SUPERUSER, BYPASSRLS, CREATEROLE, CREATEDB or
+ *     REPLICATION. The first two put it outside row security; the rest let it
+ *     widen its own reach without an administrator;
+ *   - a definer role must be NOINHERIT and a member of nothing. Its functions
+ *     are SECURITY DEFINER, so `grant <anything> to <definer>` would widen
+ *     every one of those bodies at once;
+ *   - the only members OF a definer role are the migrate identity, which must
+ *     hand its objects over, and roles that already hold this database's owner
+ *     privileges. Every other member inherits the definer role's narrow grants
+ *     AND is matched by the policies written `TO` it, because RLS resolves a
+ *     policy's TO list with has_privs_of_role. A second member is a second
+ *     holder of those grants; the record-action fence bounds it (its exemption
+ *     is the table owner's privileges, not a role name), but the contract is
+ *     that it does not exist. Superusers are accepted because they are outside
+ *     row security and privilege checks regardless of any membership.
  */
 export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<void> {
   const rows = await readRoles(db);
   const current = (await sql<{ user: string }>`select current_user as "user"`.execute(db)).rows[0]!.user;
   const problems: string[] = [];
+  const remedies: string[] = [];
   for (const role of DATABASE_ROLES) {
     const row = rows.get(role.name);
     if (!row) {
@@ -101,12 +185,38 @@ export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<v
     }
     if (row.rolsuper) problems.push(`role ${role.name} must not be SUPERUSER`);
     if (row.rolbypassrls) problems.push(`role ${role.name} must not have BYPASSRLS`);
+    if (row.rolcreaterole) problems.push(`role ${role.name} must not have CREATEROLE`);
+    if (row.rolcreatedb) problems.push(`role ${role.name} must not have CREATEDB`);
+    if (row.rolreplication) problems.push(`role ${role.name} must not have REPLICATION`);
     if (row.rolcanlogin !== role.login) {
       problems.push(`role ${role.name} must ${role.login ? "" : "not "}be able to log in`);
+    }
+    // A definer role owns SECURITY DEFINER functions, so what it inherits is
+    // what those bodies run with.
+    if (!role.login && row.rolinherit) {
+      problems.push(`definer role ${role.name} must be NOINHERIT`);
+      remedies.push(`alter role ${identifier(role.name)} noinherit;`);
     }
     if (role.migratorMember && !row.member) {
       problems.push(`migrate role ${current} is not a member of ${role.name}`);
     }
+  }
+  const definers = new Set(DATABASE_ROLES.filter((role) => !role.login).map((role) => role.name));
+  for (const [name, parents] of await readRoleMemberships(db)) {
+    if (!definers.has(name)) continue;
+    for (const parent of parents) {
+      problems.push(`definer role ${name} must not be a member of ${parent}`);
+      remedies.push(`revoke ${identifier(parent)} from ${identifier(name)};`);
+    }
+  }
+  for (const row of await readRoleMembers(db)) {
+    if (!definers.has(row.role)) continue;
+    if (row.superuser || row.migrator || row.databaseOwner) continue;
+    problems.push(
+      `role ${row.member} is a member of definer role ${row.role} and is neither the ` +
+        `migrate role ${current} nor a holder of this database's owner privileges`,
+    );
+    remedies.push(`revoke ${identifier(row.role)} from ${identifier(row.member)};`);
   }
   if (problems.length === 0) return;
   throw new Error(
@@ -115,7 +225,7 @@ export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<v
       "\n\nRoles are cluster-wide and are provisioned by the host, not by this migration. " +
       "Run apps/api/src/db/provision-roles.ts with OPENSHAPEFORGE_ADMIN_DATABASE_URL, " +
       "or execute as an administrator:\n\n" +
-      renderProvisioningSql({ migratorRole: current }),
+      [renderProvisioningSql({ migratorRole: current }), ...remedies].join("\n"),
   );
 }
 
@@ -151,12 +261,12 @@ export async function provisionDatabaseRoles(
         }
         await sql`
           create role ${sql.ref(name)} login password ${sql.lit(password)}
-          nosuperuser nobypassrls
+          nosuperuser nobypassrls nocreatedb nocreaterole noreplication
         `.execute(admin);
       } else {
         await sql`
           create role ${sql.ref(name)} nologin nosuperuser nocreatedb
-          nocreaterole noinherit nobypassrls
+          nocreaterole noinherit nobypassrls noreplication
         `.execute(admin);
       }
       result.created.push(role.name);

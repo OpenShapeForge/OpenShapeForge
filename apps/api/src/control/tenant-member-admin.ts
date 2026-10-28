@@ -120,6 +120,16 @@ function linkSummary(membership: MembershipRow | undefined) {
   };
 }
 
+/** Only offer confirmation for a candidate still uniquely matching this member's current verified email. */
+async function verifiedLinkSummary(trx: Transaction<DB>, tenantId: string, member: { email?: string | null; emailVerified: boolean }, membership: MembershipRow | undefined) {
+  const summary = linkSummary(membership);
+  if (summary.candidateRelationName && membership?.candidate_relation_id) {
+    const candidates = member.emailVerified && member.email ? await relationsWithEmail(trx, tenantId, member.email) : [];
+    if (candidates.length !== 1 || candidates[0]?.id !== membership.candidate_relation_id) summary.candidateRelationName = null;
+  }
+  return summary;
+}
+
 async function memberWithSummary(deps: Dependencies, trx: Transaction<DB>, tenant: TenantIdentity, memberId: string) {
   const member = await deps.members.getMember(tenant.keycloak_organization_id!, memberId);
   if (!member) throw new ControlInputError("The member does not exist in this tenant.");
@@ -127,7 +137,7 @@ async function memberWithSummary(deps: Dependencies, trx: Transaction<DB>, tenan
   const membership = await membershipOf(trx, tenant.id, memberId);
   return {
     ...member,
-    ...linkSummary(membership),
+    ...await verifiedLinkSummary(trx, tenant.id, member, membership),
     credentialCount: credentials.length,
     credentialTypes: [...new Set(credentials.map((credential) => credential.type))].sort(),
   };
@@ -162,7 +172,7 @@ export async function listTenantMembers(deps: Dependencies, slug: string) {
       members: await mapBounded(await deps.members.listMembers(tenant.keycloak_organization_id!), MEMBER_READ_CONCURRENCY,
         async (member) => {
           const credentials = await deps.members.listCredentials(member.memberId);
-          return { tenantSlug: slug, ...member, ...linkSummary(unique(memberships.get(member.memberId))),
+          return { tenantSlug: slug, ...member, ...await verifiedLinkSummary(trx, tenant.id, member, unique(memberships.get(member.memberId))),
             credentialCount: credentials.length,
             credentialTypes: [...new Set(credentials.map((credential) => credential.type))].sort() };
         }),
@@ -245,12 +255,10 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
 }
 
 function memberLinkPending(membership: MembershipRow): ControlOperationError {
-  const candidate = membership.candidate_relation_name;
   const refusal = "The member's sign-in is not linked to a Relation in this tenant yet, so no roles can be written. ";
-  return candidate
+  return membership.candidate_relation_name
     ? new ControlOperationError(409, "MEMBER_LINK_PENDING", "MEMBER_LINK_PENDING", refusal +
-        `It is pending confirmation with the candidate Relation "${candidate}": confirm that link first ` +
-        "(confirm_tenant_member_link, or 'Confirm link' on the member page), then assign the roles.")
+        "Check the member's current verified email and candidate. Confirm only a unique match; otherwise an organization administrator links the correct Relation explicitly (link_identity).")
     : new ControlOperationError(409, "MEMBER_NOT_LINKED", "MEMBER_NOT_LINKED", refusal +
         "Their sign-in matched no Relation to confirm; an organization administrator of the tenant links them to their Relation first (link_identity).");
 }

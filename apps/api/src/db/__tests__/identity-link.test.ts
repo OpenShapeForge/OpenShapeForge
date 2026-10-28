@@ -24,6 +24,7 @@ import {
   identityIdForRelation,
   linkIdentityToRelation,
   listPendingRoleAssignments,
+  listUnlinkedIdentities,
   setMembershipRoles,
   resolveIdentityLink,
   withSessionRelation,
@@ -861,6 +862,14 @@ describe("identity ↔ Relation link", () => {
         await expect(resolveIdentityLink(appDb, jackFirst.session, unverifiedClaims)).rejects.toMatchObject({ code: "NOT_INVITED" });
         expect((await sql<{ email: string | null }>`select email from platform.identities where id = ${jackFirst.state!.identityId}`.execute(adminDb)).rows[0]?.email).toBeNull();
         await resolveIdentityLink(appDb, jackFirst.session, jack.claims);
+        const duplicate = await existingRelation(adminDb, tenantA, "Jack Duplicate", "jack@example.com");
+        const ambiguous = await resolveIdentityLink(appDb, jackFirst.session, jack.claims);
+        expect(ambiguous?.candidateRelationId).toBeNull();
+        expect(ambiguous?.displayName).toBeNull();
+        await expect(confirmPendingLink(appDb, jackFirst.session)).rejects.toMatchObject({ code: "NO_CANDIDATE" });
+        expect((await listUnlinkedIdentities(appDb, adminInA.session)).map(item => item.identityId)).toContain(jackFirst.state!.identityId);
+        await sql`delete from erp.contact_details where tenant_id = ${tenantA} and relation_id = ${duplicate}`.execute(adminDb);
+        await sql`delete from erp.relations where tenant_id = ${tenantA} and id = ${duplicate}`.execute(adminDb);
         // Roles cannot be recorded on an unconfirmed link: nobody verified
         // that Relation is theirs yet.
         await expect(

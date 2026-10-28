@@ -160,9 +160,33 @@ The role contract covers attributes and membership too. No declared role may be
 `SUPERUSER`, `BYPASSRLS`, `CREATEROLE`, `CREATEDB` or `REPLICATION`; a definer
 role must be `NOINHERIT` and a member of nothing, since its functions are
 `SECURITY DEFINER` and would otherwise run with whatever it inherits; and the
-only members *of* a definer role are the migrate identity and roles that
-already hold this database's owner privileges. Anything else is reported with
-the `revoke` that fixes it. Adding a role is a host provisioning step:
+only members *of* a definer role are the migrate identity and the owner of the
+current database, both compared by role **name**.
+
+Comparing by name is the rule, not a detail. `pg_has_role(current_user, X,
+'USAGE')` answers "does the caller hold X's privileges", which is true for
+every role granted *to* the migrate role and true for every role when the
+caller is a superuser — so using it to ask "is this member the migrator?"
+admitted a helper role granted to both the migrate role and a definer role, and
+admitted every member of every definer role whenever a superuser ran the check.
+A member of the record-action resolver inherits its column grants, is matched by
+the policies written `TO` it, and *owns* its two `SECURITY DEFINER` functions,
+because object ownership is resolved with `has_privs_of_role` as well: with the
+`CREATE` on schema `app` that the same membership carries it can
+`CREATE OR REPLACE app.record_action_allows` and decide every record action
+itself. The fences bound that member's writes to entity tables; nothing bounds
+a replaced function body.
+
+For the same reason the migrate identity's own membership must be a **direct**
+grant (`grant <definer> to <migrate role>`), or the migrate role must be a
+superuser, which needs no grant: a membership held through a group means the
+group is a member of the definer role too, with everything above. Anything else
+is reported with the `grant` or `revoke` that fixes it — and only reported. The
+chain runs as the migrate role, which is deliberately not a role administrator,
+so it fails closed rather than revoking a membership an operator created. The
+record-action step repeats this check on the resolver before it grants anything,
+because a host can call that step directly. Adding a role is a host provisioning
+step:
 `db:provision-roles` before the next `db:migrate`, or step 0 refuses the chain
 and names the statements.
 

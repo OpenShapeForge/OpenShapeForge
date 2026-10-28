@@ -41,6 +41,7 @@ import {
   keysetPredicate,
   limitWithProbe,
   orderBy,
+  renderSortValue,
   takePage,
   type Page,
   type PageQuery,
@@ -108,6 +109,46 @@ export class ApiKeyValidationError extends Error {
     super(message);
     this.name = "ApiKeyValidationError";
   }
+}
+
+/**
+ * The longest display name this service will store, in Unicode code points.
+ *
+ * It is the `maxLength` every `displayName` in the catalog's Operations is
+ * authored with (`config/authoring/operations/api-key-integrations.yaml`),
+ * enforced HERE because the Operation is not the only caller: the REST and
+ * GraphQL mounts reach these same functions, and a name one surface stores and
+ * another declares invalid is not one contract. Code points, because that is
+ * what `maxLength` counts — 200 emoji are 200 characters to the schema and 400
+ * UTF-16 units to JavaScript.
+ *
+ * The cursor's own bound is derived from this one
+ * (`operations/api-key-cursor.ts`): a name the service is willing to store has
+ * to be a name its listings can page past, so the two cannot drift.
+ */
+export const MAX_DISPLAY_NAME_LENGTH = 200;
+
+/** Code points, not UTF-16 units — the count `maxLength` means. */
+export function codePointLength(value: string): number {
+  return [...value].length;
+}
+
+/**
+ * The display name as it will be stored: trimmed, present, and within the
+ * contract's length. A name that is only whitespace is absent, whichever
+ * surface sent it, and `minLength: 1` cannot see that.
+ */
+function displayNameOrThrow(value: string, subject: string): string {
+  const name = value.trim();
+  if (name === "") {
+    throw new ApiKeyNotFoundError(`${subject} needs a display name.`);
+  }
+  if (codePointLength(name) > MAX_DISPLAY_NAME_LENGTH) {
+    throw new ApiKeyValidationError(
+      `displayName must be at most ${MAX_DISPLAY_NAME_LENGTH} characters.`,
+    );
+  }
+  return name;
 }
 
 /**
@@ -207,10 +248,7 @@ export async function createIntegration(
   const roleSubset = roleSubsetOrThrow(input.roleSubset);
   assertMayGrantRoles(session, [...input.roles, ...(roleSubset ?? [])]);
 
-  const displayName = input.displayName.trim();
-  if (displayName === "") {
-    throw new ApiKeyNotFoundError("An integration needs a display name.");
-  }
+  const displayName = displayNameOrThrow(input.displayName, "An integration");
   // Resolved here rather than beside the mint below: a lifetime the
   // deployment's policy refuses must leave neither an intent row nor a realm
   // client behind, and everything from the insert onwards is external.
@@ -445,6 +483,9 @@ export async function issueKey(
 ): Promise<CreatedApiKey> {
   assertMayManageApiKeys(session);
   const roleSubset = roleSubsetOrThrow(input.roleSubset);
+  // Checked before the transaction, like every other input: a refusal must not
+  // have taken the integration's row lock on its way out.
+  const displayName = displayNameOrThrow(input.displayName, "A credential");
 
   const minted = mintApiKey();
   const keyId = randomUUID();
@@ -463,7 +504,7 @@ export async function issueKey(
       integrationId: input.integrationId,
       lookupId: minted.lookupId,
       secretHash: minted.secretHash,
-      displayName: input.displayName.trim(),
+      displayName,
       roleSubset,
       expiresAt,
       createdBy: session.userId,
@@ -640,7 +681,7 @@ export async function pageKeys(
     `.execute(trx);
 
     const result = await sql<KeyRow & { sort_value: string | null }>`
-      select ${KEY_METADATA_COLUMNS}, (${column.expr})::text as sort_value
+      select ${KEY_METADATA_COLUMNS}, ${renderSortValue(column)} as sort_value
         from platform.api_keys k
         join platform.api_key_integrations i on i.id = k.integration_id
        where ${fence}
@@ -812,7 +853,7 @@ export async function pageIntegrations(
     `.execute(trx);
 
     const result = await sql<IntegrationRow & { sort_value: string | null }>`
-      select ${integrationMetadataColumns(now)}, (${column.expr})::text as sort_value
+      select ${integrationMetadataColumns(now)}, ${renderSortValue(column)} as sort_value
         from platform.api_key_integrations i
         left join platform.api_keys k
           on k.integration_id = i.id and k.tenant_id = i.tenant_id

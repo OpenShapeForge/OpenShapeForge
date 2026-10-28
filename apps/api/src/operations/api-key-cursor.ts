@@ -22,8 +22,17 @@
  * with `invalid input syntax` or `field value out of range` — a 500 reported to
  * a caller who only supplied a bad cursor, which this contract does not declare
  * and which should never be logged as an internal failure. So both halves are
- * checked here, against what the database itself renders, before anything is
- * bound.
+ * checked here, before anything is bound.
+ *
+ * What they are checked against is the ONE spelling the listing emits, not
+ * everything the database could emit or its input parser could read. The page
+ * renders a timestamp sort's value with an explicit template against UTC
+ * (`catalog-page.ts`, `renderSortValue`), and a text sort's value is bounded by
+ * the display name the service agreed to store (`service.ts`,
+ * `MAX_DISPLAY_NAME_LENGTH`). Both checks are DERIVED from those two facts
+ * rather than guessed, which is the property that matters: every cursor a
+ * listing hands out is one it will take back, and everything else is refused
+ * before it is parsed.
  *
  * Nothing is normalized on the way back in. The resume predicate compares the
  * value for EQUALITY to find the tie-break block (`catalog-page.ts`,
@@ -33,7 +42,11 @@
 import { createHash } from "node:crypto";
 import type { KeysetCursor } from "../auth/api-key/catalog-page.js";
 import { daysInMonth } from "../db/timestamps.js";
-import { ApiKeyValidationError } from "../auth/api-key/service.js";
+import {
+  ApiKeyValidationError,
+  codePointLength,
+  MAX_DISPLAY_NAME_LENGTH,
+} from "../auth/api-key/service.js";
 
 /** What travels inside the base64url payload. */
 type CursorPayload = {
@@ -42,7 +55,7 @@ type CursorPayload = {
   d: "asc" | "desc";
   /** Fingerprint of the subject and filters. */
   q: string;
-  /** The last row's sort value as the database rendered it; null in the NULL block. */
+  /** The last row's sort value as the listing rendered it; null in the NULL block. */
   v: string | null;
   /** The last row's id — the tie-break half of the keyset. */
   i: string;
@@ -56,67 +69,97 @@ type CursorPayload = {
 const CURSOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * `timestamptz::text` under DateStyle ISO, split into its fields.
+ * The ONE spelling a timestamp sort's cursor value has, split into its fields.
  *
- * This is only the SHAPE. A shape test alone is what made
- * `2026-99-99 99:99:99+99` reach the cast — and `2026-02-29 00:00:00+00` with
- * it, which is shaped perfectly and is still PostgreSQL's
- * "date/time field value out of range". Every field is therefore range-checked
- * below as well.
+ * Not "a timestamptz PostgreSQL might render": the listing renders it with an
+ * explicit `to_char` template against UTC (`catalog-page.ts`,
+ * `renderSortValue`) precisely so that it does not depend on the session's
+ * `DateStyle` or `TimeZone`, and this is that template read back. Fixed-width
+ * fields, the fraction always present at six digits, the displacement always
+ * `+00`. Anything else is a cursor this listing did not issue — including every
+ * other form the input parser would happily accept.
  *
- * The fields are what the database renders, not everything its input parser
- * accepts: a space separator (never `T`), a fraction of at most six digits and
- * only when non-zero, and an offset that grows from `+00` to `+05:30` to
- * `+00:19:32` exactly as far as it has to. A rendered value also never carries
- * the input parser's roll-over spellings — `24:00:00` is rendered as the next
- * day's `00:00:00`, `:60` as the next minute — so those are refused: accepting
- * them would accept a cursor this listing cannot have issued.
+ * This is still only the SHAPE. A shape test alone is what let
+ * `2026-99-99 99:99:99+99` reach the cast, and `2026-02-29 00:00:00+00` with
+ * it: shaped perfectly, and still PostgreSQL's "date/time field value out of
+ * range" because 2026 is not a leap year. Every field is range-checked below.
  */
-const RENDERED_TIMESTAMPTZ =
-  /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?([+-])(\d{2})(?::(\d{2})(?::(\d{2}))?)?$/;
+const CURSOR_TIMESTAMP = /^(\d{4,6})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})\.\d{6}\+00$/;
 
 /**
- * The widest numeric time-zone displacement PostgreSQL accepts: `+16` is
- * "time zone displacement out of range", `+15:59:59` is not. A rendered value
- * is always inside this, so the bound only ever refuses a crafted one.
+ * The last year `timestamptz` holds: `294276-12-31 23:59:59.999999+00` casts,
+ * `294277-01-01 00:00:00.000000+00` is "timestamp out of range". The template
+ * above writes as many digits as the year has, so the bound is checked rather
+ * than assumed from four digits.
  */
-const MAX_OFFSET_SECONDS = 15 * 3600 + 59 * 60 + 59;
+const MAX_TIMESTAMPTZ_YEAR = 294_276;
 
 /**
- * Is this exactly a timestamptz PostgreSQL could have rendered?
+ * Is this exactly the value a timestamp sort's cursor carries?
  *
  * Shape first, then every field against the calendar — which is where the
- * month, the day (February of a leap year included) and the displacement are
- * decided, because a regular expression cannot count days in a month.
+ * month, the day (February of a leap year included) and the year's upper bound
+ * are decided, because a regular expression cannot count days in a month.
  */
-export function isRenderedTimestamptz(value: string): boolean {
-  const match = RENDERED_TIMESTAMPTZ.exec(value);
+export function isCursorTimestamp(value: string): boolean {
+  const match = CURSOR_TIMESTAMP.exec(value);
   if (!match) return false;
-  const [, year, month, day, hour, minute, second, , , offsetHour, offsetMinute, offsetSecond] =
-    match;
+  const [, year, month, day, hour, minute, second] = match;
+  if (Number(year) > MAX_TIMESTAMPTZ_YEAR) return false;
   const days = daysInMonth(Number(year), Number(month));
   if (days === undefined) return false;
   if (Number(day) < 1 || Number(day) > days) return false;
-  // The rendered forms only: a normalized time has no hour 24 and no second 60.
-  if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return false;
-  const offset = Number(offsetHour) * 3600 +
-    Number(offsetMinute ?? 0) * 60 +
-    Number(offsetSecond ?? 0);
-  if (Number(offsetMinute ?? 0) > 59 || Number(offsetSecond ?? 0) > 59) return false;
-  return offset <= MAX_OFFSET_SECONDS;
+  // The rendered form only: a normalized time has no hour 24 and no second 60.
+  return Number(hour) <= 23 && Number(minute) <= 59 && Number(second) <= 59;
 }
 
 /** The sorts whose value is a timestamp rather than text (service.ts). */
 const TIMESTAMP_SORTS = new Set(["createdAt", "updatedAt", "expiresAt", "lastUsedAt"]);
 
 /**
- * The longest text sort value a cursor may carry.
- *
- * `lower(display_name)` is the only text sort value, and the authored input
- * bounds a display name at 200 characters; `status` is one short word. Past
- * that the cursor is not one this listing produced.
+ * Full Unicode lowercase mapping can LENGTHEN a string: `İ` (U+0130)
+ * lowercases to `i` followed by U+0307, two code points for one. Two is the
+ * longest lowercase mapping Unicode defines, and an ICU collation applies it
+ * where libc does not, so `lower(display_name)` is at most twice the name.
  */
-const MAX_CURSOR_VALUE_LENGTH = 200;
+const LOWERCASE_GROWTH = 2;
+
+/**
+ * The longest text sort value a cursor may carry, in code points.
+ *
+ * `lower(display_name)` is the only text sort value — `status` is one short
+ * word — so the bound is the service's own display-name bound, grown by what
+ * lowercasing can add. Measured in code points because that is what bounds the
+ * name: 200 emoji are 200 characters to the contract and 400 UTF-16 units to
+ * `String.length`, and comparing units against a character bound is what
+ * refused this listing's own cursor for a name it had just accepted.
+ */
+const MAX_CURSOR_VALUE_LENGTH = MAX_DISPLAY_NAME_LENGTH * LOWERCASE_GROWTH;
+
+/**
+ * The JSON frame plus the longest `f`, `d`, `q` and `i` it can hold: 34
+ * characters of punctuation, an 11-character sort field, a 4-character
+ * direction, a 16-character fingerprint and a 36-character uuid.
+ */
+const CURSOR_ENVELOPE_BYTES = 128;
+
+/** `"\u0000"` — the longest escape `JSON.stringify` writes for one code point. */
+const ESCAPE_BYTES_PER_CODE_POINT = 6;
+
+/**
+ * The longest `after` string this listing can have produced, DERIVED rather
+ * than picked: the widest payload the bounds above allow, as base64.
+ *
+ * A fixed ceiling is what made a valid page unreachable. A display name of 200
+ * emoji is 800 UTF-8 bytes, so its cursor is some 1.1 kB of base64 — past any
+ * 512-character guess, and refused before it was ever parsed, for a name the
+ * contract permits and the database holds. Deriving the ceiling keeps the cheap
+ * length check a bound on MALFORMED input, which is all it was ever for, while
+ * every cursor the listing issues fits under it by construction.
+ */
+export const MAX_CURSOR_LENGTH = Math.ceil(
+  (CURSOR_ENVELOPE_BYTES + MAX_CURSOR_VALUE_LENGTH * ESCAPE_BYTES_PER_CODE_POINT) / 3,
+) * 4;
 
 export function fingerprint(parts: readonly (string | undefined)[]): string {
   return createHash("sha256").update(JSON.stringify(parts.map((part) => part ?? null)))
@@ -135,7 +178,7 @@ export function decodeCursor(
   query: string,
 ): KeysetCursor | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.length > 512) invalidCursor();
+  if (typeof value !== "string" || value.length > MAX_CURSOR_LENGTH) invalidCursor();
   let payload: CursorPayload;
   try {
     payload = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as CursorPayload;
@@ -149,12 +192,12 @@ export function decodeCursor(
   // and the set it was produced in.
   if (payload.f !== sort.f || payload.d !== sort.d || payload.q !== query) invalidCursor();
   // The sort is now known to be the one the caller asked for, so its value's
-  // type is known too. Checked against what the database renders, never left
-  // for the cast to reject — see isRenderedTimestamptz.
+  // type is known too. Checked against what the listing renders, never left
+  // for the cast to reject — see isCursorTimestamp.
   if (payload.v !== null) {
     if (TIMESTAMP_SORTS.has(payload.f)) {
-      if (!isRenderedTimestamptz(payload.v)) invalidCursor();
-    } else if (payload.v.length > MAX_CURSOR_VALUE_LENGTH) invalidCursor();
+      if (!isCursorTimestamp(payload.v)) invalidCursor();
+    } else if (codePointLength(payload.v) > MAX_CURSOR_VALUE_LENGTH) invalidCursor();
   }
   return { value: payload.v, id: payload.i };
 }

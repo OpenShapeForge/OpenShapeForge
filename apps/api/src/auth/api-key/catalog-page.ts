@@ -69,6 +69,34 @@ function bind(column: SortColumn, value: string): RawBuilder<unknown> {
 }
 
 /**
+ * The text a cursor carries for one row of this sort.
+ *
+ * `(expr)::text` would be the obvious projection and is the wrong one. A
+ * timestamptz renders under the SESSION's `DateStyle` and `TimeZone`, neither
+ * of which this code sets or owns: the same row reads
+ * `2026-10-28 07:34:35.96+00` under `ISO` at UTC, `28.10.2026 07:34:35.96 UTC`
+ * under `German`, and `2026-10-28 08:34:35.96+01` in Amsterdam. A page would
+ * then hand out a cursor whose spelling depends on a setting, and the check on
+ * the way back in — and under `German, DMY` the CAST itself, which reads
+ * `28.10.2026` as a day that is not there — would refuse the listing's own
+ * cursor and make the next page unreachable.
+ *
+ * `to_char` against an explicit template ignores `DateStyle`, and converting
+ * to UTC first takes the zone out of it, so one row is one cursor:
+ * `YYYY-MM-DD HH:MM:SS.ssssss+00`, every field fixed-width and the fraction
+ * always present. It casts back to the same instant, so the EQUALITY the
+ * resume predicate compares on still holds exactly (`keysetPredicate`).
+ *
+ * NULL stays NULL — `to_char(null, ...) || '+00'` is null — which is the
+ * absent-value block the keyset resumes on the id alone.
+ */
+export function renderSortValue(column: SortColumn): RawBuilder<unknown> {
+  return column.cast === "timestamptz"
+    ? sql`to_char((${column.expr}) at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS.US') || '+00'`
+    : sql`(${column.expr})::text`;
+}
+
+/**
  * `<expr> <direction> nulls last, <id> asc`.
  *
  * The id tie-break does NOT flip with the direction: it only has to be

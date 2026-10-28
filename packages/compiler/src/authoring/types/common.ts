@@ -203,10 +203,36 @@ export interface OwnerAxisConfig {
   command?: { setting: string; values: string[] };
 }
 
+/**
+ * What the SERVER decided a session is. Not a role, not a scope, not anything
+ * a caller states: `person` is a verified human identity, `application` a
+ * resolved API-key integration, `service` a verified client-credentials
+ * principal with no integration behind it (configured organization automation
+ * included), and `unknown` a carrier the server could not classify.
+ */
+export type EntityPrincipalClass = "person" | "application" | "service" | "unknown";
+
 export interface AuthorizationConfig {
   roles: AuthorizationRoles;
   rowAccess?: RowAccessConfig;
   ownerAxis?: OwnerAxisConfig;
+  /**
+   * Which principal classes this entity's GENERATED CRUD and the search
+   * derived from it admit. A role list says what a session may do; this says
+   * what KIND of session may use the generic routes at all — which a role
+   * list cannot express, because a service account and the person beside it
+   * can hold the very same role.
+   *
+   * Omitted admits every class, which is what every entity did before this
+   * existed. The one exception is derived rather than authored: an entity that
+   * declares a named record action for `integration` principals excludes
+   * `application` unless it says otherwise. An application reaches such an
+   * entity through the grants on individual records, so admitting it to the
+   * collection as well would hand a key with a broad role every record of the
+   * entity and make the per-record grant decorative. Writing the list out
+   * re-admits it deliberately.
+   */
+  principalClasses?: EntityPrincipalClass[];
 }
 
 export interface FieldAuthorizationConfig {

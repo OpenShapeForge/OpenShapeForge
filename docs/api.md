@@ -697,6 +697,13 @@ and nothing else, so:
   is spelled in the headers. The reader builds the session from the bundle's
   tenant, user, roles and groups and nothing else.
 
+An entity may also decide which classes reach its generated CRUD and derived
+search at all (`authorization.principalClasses`, [authoring.md](authoring.md)).
+That is the enforced answer to "do not grant a workflow role to an API key's
+service account": an entity that declares a record action for integrations
+excludes `application` from its generic routes by default, so a broad role on a
+key no longer reaches the collection behind the per-record grant.
+
 A runtime module reads the same classification through
 `platform.principals` ([plugins.md](plugins.md)): `classOf(session)` answers
 `person`, `application`, `service` or `unknown`, and `application(session)`

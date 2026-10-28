@@ -411,6 +411,38 @@ describe("resolveAuthoringLayers", () => {
     ]);
   });
 
+  test("entity patches cannot re-open a principal class an earlier layer closed", () => {
+    const closed = {
+      ...securedEntity,
+      authorization: {
+        ...securedEntity.authorization,
+        principalClasses: ["person", "service"],
+      },
+    };
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", closed);
+    writeYaml(root, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      authorization: { principalClasses: ["person", "service", "application"] },
+    });
+    configureLayers(root, ["base", "overlay"]);
+    expect(() => resolveAuthoringLayers(root))
+      .toThrow(/widens authorization\.principalClasses/);
+
+    // Closing further is allowed, and so is a first declaration in a later
+    // layer: an absent list already admitted every class.
+    const tightened = makeRepo();
+    writeYaml(tightened, "base/entities/core/widget.yaml", closed);
+    writeYaml(tightened, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      authorization: { principalClasses: ["person"] },
+    });
+    configureLayers(tightened, ["base", "overlay"]);
+    const resolved = resolveAuthoringLayers(tightened);
+    const merged = YAML.parse(readFileSync(join(resolved, "entities/core/widget.yaml"), "utf8"));
+    expect(merged.authorization.principalClasses).toEqual(["person"]);
+  });
+
   test("entity patches cannot revive interfaces or widen worker and field write controls", () => {
     for (const [patch, error] of [
       [

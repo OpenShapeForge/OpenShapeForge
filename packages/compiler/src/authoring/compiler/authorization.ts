@@ -369,6 +369,12 @@ export function buildAuthorization(
     };
   }
 
+  const principalClasses = compilePrincipalClasses(
+    coreEntity,
+    authConfig.principalClasses,
+    compiledRecordActionsFor(rowAccess),
+  );
+
   return {
     entitySlug: slug,
     roles,
@@ -377,7 +383,60 @@ export function buildAuthorization(
     profileAuthorizations,
     rowAccess,
     ...(ownerAxis ? { ownerAxis } : {}),
+    ...(principalClasses ? { principalClasses } : {}),
   };
+}
+
+const PRINCIPAL_CLASSES = ["application", "person", "service", "unknown"] as const;
+
+function compiledRecordActionsFor(
+  rowAccess: CompiledAuthorization["rowAccess"],
+): ReadonlyArray<{ principals: string[] }> {
+  return rowAccess?.recordPermissions?.actions ?? [];
+}
+
+/**
+ * Which principal classes may use this entity's generated CRUD and the search
+ * derived from it.
+ *
+ * An authored list is taken as written, after validation. What is NOT authored
+ * is the interesting part:
+ *
+ *   - an entity with no record action compiles to `undefined`: every class is
+ *     admitted, exactly as before this axis existed. 117 entities keep
+ *     byte-identical output;
+ *   - an entity that declares an action for `integration` principals compiles
+ *     to every class EXCEPT `application`. Such an entity has decided that an
+ *     application reaches it one record at a time, by grant. Leaving the
+ *     collection, the record read and the derived search open to any key whose
+ *     service account happens to hold the entity's role would hand it every
+ *     record of the entity and make the per-record grant decorative. The
+ *     default closes that without the entity having to remember to.
+ *
+ * Re-admitting `application` is a deliberate authored list, which is the
+ * point: it is a decision with a reviewer, not an omission.
+ */
+function compilePrincipalClasses(
+  coreEntity: CoreEntity,
+  authored: import("../types/common.js").EntityPrincipalClass[] | undefined,
+  actions: ReadonlyArray<{ principals: string[] }>,
+): import("../types/common.js").EntityPrincipalClass[] | undefined {
+  if (authored !== undefined) {
+    const classes = [...new Set(authored)];
+    if (classes.length === 0 ||
+      classes.some((candidate) => !PRINCIPAL_CLASSES.includes(candidate as never))) {
+      throw new AuthorizationCompileError(
+        coreEntity.entity,
+        `authorization.principalClasses must list at least one of ${PRINCIPAL_CLASSES.join(", ")}. ` +
+          `An empty list would deny every session, which is spelled by disabling the entity's ` +
+          `generated CRUD rather than by an unsatisfiable principal policy.`,
+      );
+    }
+    return classes.sort();
+  }
+  const admitsApplications = actions.some((action) => action.principals.includes("integration"));
+  if (!admitsApplications) return undefined;
+  return PRINCIPAL_CLASSES.filter((candidate) => candidate !== "application");
 }
 
 const RECORD_ACTION_NAME = /^[a-z][A-Za-z0-9]*$/;

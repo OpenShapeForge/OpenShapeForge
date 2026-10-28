@@ -970,7 +970,30 @@ function resolvedRowEmpty(rowAccess: JsonObject): "public" | "restricted" {
     : "public";
 }
 
+/**
+ * A later layer may close an entity's generic routes to a principal class and
+ * may never re-open one. Adding a class back is a widening of exactly the
+ * kind this axis exists to prevent, and the layer doing it cannot see the
+ * grants the first author relies on.
+ *
+ * An absent list means every class, so a first layer that authored none
+ * constrains nothing — a later layer is free to declare one.
+ */
+function assertPrincipalClassesOnlyNarrow(
+  base: JsonObject,
+  merged: JsonObject,
+  origin: string,
+): void {
+  assertOrListOnlyNarrows(
+    objectProperty(base, "authorization")?.principalClasses,
+    objectProperty(merged, "authorization")?.principalClasses,
+    "authorization.principalClasses",
+    origin,
+  );
+}
+
 function assertRowAccessOnlyNarrows(base: JsonObject, merged: JsonObject, origin: string): void {
+  assertPrincipalClassesOnlyNarrow(base, merged, origin);
   const before = objectProperty(objectProperty(base, "authorization"), "rowAccess");
   if (!before || before.enabled !== true) return;
   const after = objectProperty(objectProperty(merged, "authorization"), "rowAccess");

@@ -15,6 +15,13 @@ export type GeneratedCrudExposureOperation = "list" | "get" | "create" | "update
 
 export type GeneratedCrudAuthorization = {
   roles: Record<GeneratedCrudOperation, string[]>;
+  /**
+   * The principal classes this entity's generated CRUD and derived search
+   * admit (`operations/entity/principal-classes.ts`). Absent means every
+   * class, which is what an entity that declares no record action compiles
+   * to — so the axis cannot regress an existing entity.
+   */
+  principalClasses?: Array<"person" | "application" | "service" | "unknown">;
   recordPermissions?: {
     field: string;
     column: string;

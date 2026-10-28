@@ -27,6 +27,7 @@ import type {
 } from "@openshapeforge/plugin-runtime";
 import {
   executeEntityOperation,
+  entityOperationAdmitsPrincipal,
   getEntityOperationContracts,
   tableForEntityOperation,
 } from "../operations/entity/index.js";
@@ -744,7 +745,13 @@ export class ModulePlatformRuntime {
     const controlSession = isControlRealmSession(session);
     const heldRoles = new Set(session.roles);
     const entityOperations = controlSession ? [] : getEntityOperationContracts().filter((operation) =>
-      operation.authorization.roles.some((role) => heldRoles.has(role))
+      operation.authorization.roles.some((role) => heldRoles.has(role)) &&
+      // The entity's principal-class policy, so an Operation this session
+      // could not invoke is not listed as if it could. The derived
+      // application search enumerates exactly this list before it reads
+      // anything, so an entity that excludes this class is absent from the
+      // search rather than refused inside it.
+      entityOperationAdmitsPrincipal(operation, session)
     );
     const staticOperations = [...this.#staticOperations.values()]
       .filter((registration) => registration.available(session))

@@ -252,6 +252,14 @@
             }
           }
         },
+        "principalClasses": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["person", "application", "service", "unknown"] },
+          "description": "Which principal CLASSES this entity's generated CRUD and the search derived from it admit. The class is what the server decided a session is, never anything a caller states: person is a verified human identity, application a resolved API-key integration, service a verified client-credentials principal with no integration behind it (configured organization automation included), and unknown a carrier the server could not classify. A role list says what a session may do; this says what kind of session may use the generic routes at all, which a role list cannot express because a service account and the person beside it can hold the same role. Omit it to admit every class, which is what every entity does by default. The one derived exception: an entity that declares a named record action for integration principals excludes application unless this list says otherwise, because such an application is meant to reach individual records by grant and admitting it to the collection would make that grant decorative. It narrows only - roles, scopes and the record ACL still apply on top.",
+          "examples": [["person", "service", "unknown"]]
+        },
         "rowAccess": {
           "type": "object",
           "description": "Row-level access filtering. When enabled, the compiler emits a Postgres RLS policy (`FORCE ROW LEVEL SECURITY`) alongside the tenant predicate. Add an `owner` axis to make each row visible only to the user recorded in its owner column, and/or a `group` axis to make each row visible only within the org-unit hierarchy recorded in its group column; without any axis the policy is plain tenant scoping. Owner and group axes are independently combinable (both emit OR-branches). The platform-admin bypass (app.bypass_rls()) and tenant scope (app.has_scope('tenant')) always short-circuit the policy.",

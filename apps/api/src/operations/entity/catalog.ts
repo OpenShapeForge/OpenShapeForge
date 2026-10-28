@@ -4,6 +4,7 @@ import { generatedCrudTables, isGeneratedCrudTableEligible } from "./table-regis
 export { getGeneratedCrudTables, isGeneratedCrudTableEligible, recordActionTable } from "./table-registry.js";
 import { operationFailure } from "@openshapeforge/operations";
 import { notAuthorizedRefusal } from "./authorization-refusal-text.js";
+import { assertEntityAdmitsPrincipal } from "./principal-classes.js";
 import { redactElicitedValues } from "../../connectors/secrets.js";
 import type { DbSessionInput } from "../../db/session.js";
 import {
@@ -114,6 +115,13 @@ export function requireEntityOperation(
   if (!sessionRoles.some((role) => allowed.has(role))) {
     throw operationFailure(notAuthorizedRefusal(table, operation));
   }
+  // After the roles, never instead of them: the entity's principal-class
+  // policy narrows who may use the generic routes at all. This is the one
+  // gate every generated CRUD call passes — the GraphQL resolvers, the REST
+  // routes, the MCP write guard, the change stream and the Operation-backed
+  // reads the derived application search executes — so declaring the policy
+  // on the entity covers every one of them.
+  assertEntityAdmitsPrincipal(table, session);
 }
 
 /** Test-only direct handle on the guard (unit tests bypass the DB layer). */

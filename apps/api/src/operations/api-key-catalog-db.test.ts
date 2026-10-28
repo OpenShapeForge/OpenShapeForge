@@ -42,6 +42,10 @@ import {
   type ProvisioningSession,
 } from "../auth/api-key/service.js";
 import { UNDECLARED_CREDENTIAL_LIFETIME_POLICY } from "../auth/api-key/lifetime.js";
+import {
+  reconcileApiKeyIntegrations,
+  type ReconcileDeps,
+} from "../auth/api-key/reconcile.js";
 import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js";
 import { stubRealm, type StubRealm } from "../auth/api-key/__tests__/fixtures.js";
 import { createDatabaseRuntime } from "../db/connection.js";
@@ -616,22 +620,50 @@ function provisioningDeps(appDb: Kysely<DB>, realm: StubRealm): ApiKeyServiceDep
  * interleavings below need it. What a real Keycloak proves instead — that
  * those paths are the right ones — is the e2e suite's job.
  */
-function pausedRealm(): StubRealm & { entered: Promise<void>; release: () => void } {
+function pausedRealm(
+  options: { refuseDeletes?: boolean } = {},
+): StubRealm & { entered: Promise<void>; release: () => void; allowDeletes: () => void } {
   let entered!: () => void;
   let released!: () => void;
   const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
   const releasedPromise = new Promise<void>((resolve) => { released = resolve; });
   let held = false;
+  let refuseDeletes = options.refuseDeletes ?? false;
   const realm = stubRealm({
     roles: [READ_ROLE],
     onAdminRequest: async (method, path) => {
+      // A realm that answers every read and refuses every delete: the
+      // compensation's own failure mode, rather than a realm that is simply
+      // unreachable, so the probe the reconciler makes afterwards still works.
+      // `allowDeletes` stops the refusal WITHOUT restarting the server, so a
+      // later run meets the same clients it left behind.
+      if (refuseDeletes && method === "DELETE") {
+        return new Response(null, { status: 500 });
+      }
       if (held || method !== "POST" || !path.endsWith("/clients")) return;
       held = true;
       entered();
       await releasedPromise;
     },
   });
-  return { ...realm, entered: enteredPromise, release: released };
+  return {
+    ...realm,
+    entered: enteredPromise,
+    release: released,
+    allowDeletes: () => { refuseDeletes = false; },
+  };
+}
+
+/** Reconciler dependencies over the same scratch database and realm. */
+function reconcileDeps(appDb: Kysely<DB>, realm: StubRealm): ReconcileDeps {
+  const deps = provisioningDeps(appDb, realm);
+  return {
+    db: appDb as never,
+    admin: deps.admin,
+    keyring: deps.keyring,
+    entityRoleClientId: deps.entityRoleClientId,
+    actorSubject: "catalog-suite",
+  };
 }
 
 /** The one integration this tenant has, as the database holds it. */
@@ -817,6 +849,129 @@ describe("create against a concurrent disable", () => {
       }
     });
   }, TEST_TIMEOUT);
+
+  /**
+   * What happens when the compensation itself fails.
+   *
+   * The activation's `deleteClient` is best effort by design: the caller's
+   * answer is already decided, and a realm that will not cooperate must not
+   * turn it into a different, misleading failure. That only holds if the
+   * orphan stays FINDABLE, which means a row has to name it — and the
+   * reconciler finds such a row by its missing client secret. Both tests below
+   * refuse every delete at the realm, so the compensation really fails, and
+   * then run the reconciler against a realm that cooperates to show the
+   * cleanup is retried rather than forgotten.
+   */
+  for (const fence of ["disabled", "removed"] as const) {
+    test(
+      `a refused compensation leaves a cleanup record when the row was ${fence}`,
+      async () => {
+        await withScratchDb(async ({ appDb, adminDb }) => {
+          await seedTenants(adminDb);
+          const realm = pausedRealm({ refuseDeletes: true });
+          try {
+            const deps = provisioningDeps(appDb, realm);
+            const session = manager(TENANT_A);
+            const creating = createIntegration(deps, session, {
+              displayName: `compensation ${fence}`, roles: [READ_ROLE], expiresInDays: 30,
+            });
+            let settled = false;
+            void creating.then(() => { settled = true; }, () => { settled = true; });
+
+            await realm.entered;
+            expect(settled).toBe(false);
+            const pending = await soleIntegration(adminDb);
+            expect(pending.status).toBe("pending");
+
+            if (fence === "disabled") {
+              // The expected verdict: a disable landed, so the row is already
+              // the never-activated record the reconciler looks for.
+              await disableIntegration(deps, session, pending.id);
+            } else {
+              // The verdict with nothing left on record. Deleting the row is
+              // outside this contract — there is no such Operation — which is
+              // why it is done here with a raw statement, and why a failed
+              // compensation used to orphan the realm client for good: no row
+              // carried its derived clientId any more.
+              await sql`
+                delete from platform.api_key_integrations where id = ${pending.id}
+              `.execute(adminDb);
+            }
+
+            realm.release();
+            await expect(creating).rejects.toThrow(ApiKeyNotFoundError);
+
+            // The compensation was attempted and refused — the client is
+            // still there.
+            expect(realm.clients()).toEqual([`osf-int-${pending.id}`]);
+            expect(realm.requests.filter((request) => request.startsWith("DELETE ")))
+              .not.toEqual([]);
+
+            // And the record that makes it recoverable is there: disabled,
+            // never activated, with no credential under it.
+            const row = await soleIntegration(adminDb);
+            expect(row).toEqual({
+              id: pending.id, status: "disabled", client_secret_ciphertext: null,
+            });
+            const keys = await sql<{ n: string }>`
+              select count(*)::text as n from platform.api_keys
+               where integration_id = ${pending.id}
+            `.execute(adminDb);
+            expect(keys.rows[0]!.n).toBe("0");
+          } finally {
+            realm.release();
+            await realm.stop();
+          }
+        });
+      },
+      TEST_TIMEOUT,
+    );
+
+    test(`the reconciler finishes the refused cleanup when the row was ${fence}`, async () => {
+      await withScratchDb(async ({ appDb, adminDb }) => {
+        await seedTenants(adminDb);
+        const refusing = pausedRealm({ refuseDeletes: true });
+        try {
+          const deps = provisioningDeps(appDb, refusing);
+          const session = manager(TENANT_A);
+          const creating = createIntegration(deps, session, {
+            displayName: `retry ${fence}`, roles: [READ_ROLE], expiresInDays: 30,
+          });
+          void creating.catch(() => undefined);
+          await refusing.entered;
+          const pending = await soleIntegration(adminDb);
+          if (fence === "disabled") {
+            await disableIntegration(deps, session, pending.id);
+          } else {
+            await sql`delete from platform.api_key_integrations where id = ${pending.id}`
+              .execute(adminDb);
+          }
+          refusing.release();
+          await expect(creating).rejects.toThrow(ApiKeyNotFoundError);
+          expect(refusing.clients()).toEqual([`osf-int-${pending.id}`]);
+
+          // The next run, against the same realm now that it answers deletes:
+          // same server, same clients, so this really is the orphan the
+          // refused delete left behind.
+          refusing.allowDeletes();
+          const report = await reconcileApiKeyIntegrations(reconcileDeps(appDb, refusing));
+          expect(report.sweptAbandoned).toEqual([pending.id]);
+          expect(report.failed).toEqual([]);
+          // Swept, not rebuilt: a never-activated row must never be answered
+          // with a new realm client and a fresh secret.
+          expect(report.rebuilt).toEqual([]);
+          expect(refusing.clients()).toEqual([]);
+          const row = await soleIntegration(adminDb);
+          expect(row).toEqual({
+            id: pending.id, status: "disabled", client_secret_ciphertext: null,
+          });
+        } finally {
+          refusing.release();
+          await refusing.stop();
+        }
+      });
+    }, TEST_TIMEOUT);
+  }
 
   test("a second create cannot resurrect a disabled attempt", async () => {
     await withScratchDb(async ({ appDb, adminDb }) => {

@@ -7,19 +7,30 @@
  *
  * When an administrator disables an integration while provisioning is still
  * inside the realm, the activation refuses to finish (service.ts, step 3's
- * fence) and deletes the realm client it created. That delete is best effort —
- * a realm that cannot be reached must not turn the refusal into a different,
- * misleading failure — and the row it belongs to is 'disabled', which neither
- * the stalled-attempt sweep ('pending') nor the missing-client repair
- * ('active') ever visits. So a never-activated 'disabled' row whose client is
+ * fence), records the attempt, and deletes the realm client it created. That
+ * delete is best effort — a realm that cannot be reached must not turn the
+ * refusal into a different, misleading failure — and the row it belongs to is
+ * never-activated, which neither the stalled-attempt sweep ('pending') nor the
+ * missing-client repair ('active') ever visits. So such a row whose client is
  * still there is swept here, and would otherwise be an orphaned confidential
  * client with roles granted, surviving every later run.
  *
  * "Never activated" is `client_secret_ciphertext is null`, which is what the
- * activation writes and therefore exactly the rows that never reached it. A
- * disabled integration that WAS live keeps its realm client, as before: it is
- * not an abandoned attempt and deleting its client would be a second,
+ * activation writes and therefore exactly the rows that never reached it. It
+ * is deliberately NOT a list of statuses: the fence refuses on whatever status
+ * it finds, so a status a later version adds would otherwise be an orphan no
+ * run visits. And it is what keeps the repair from ever running on such a row:
+ * minting a realm client and a fresh secret for an integration nobody
+ * activated would be an enable nobody asked for.
+ *
+ * A disabled integration that WAS live keeps its realm client, as before: it
+ * is not an abandoned attempt and deleting its client would be a second,
  * unrelated decision.
+ *
+ * That a REFUSED compensation reaches this sweep at all — for a row the
+ * administrator disabled and for one removed out from under the attempt — is
+ * driven end to end in `operations/api-key-catalog-db.test.ts`, where the
+ * realm answers every read and refuses every delete.
  *
  * The realm is the stub HTTP server from `__tests__/fixtures.ts` — the admin
  * paths `keycloak-admin.ts` calls, over real HTTP, with the clients it creates
@@ -113,7 +124,8 @@ async function withScratchDb(
  */
 async function seedIntegration(adminDb: Kysely<DB>, input: {
   displayName: string;
-  status: "pending" | "active" | "disabled";
+  /** Any string: the column is `text`, which is what the widened sweep is about. */
+  status: string;
   activated: boolean;
   createdAt?: Date;
 }): Promise<string> {
@@ -200,6 +212,90 @@ describe("the abandoned-attempt backstop", () => {
           { id: alreadyGone, status: "disabled" },
           { id: wasLive, status: "disabled" },
         ]);
+      } finally {
+        await realm.stop();
+      }
+    });
+  }, TEST_TIMEOUT);
+
+  test("recognises an abandoned attempt by its missing secret, not by its status", async () => {
+    if (!reachable) return;
+    await withScratchDb(async ({ appDb, adminDb }) => {
+      const realm = stubRealm({ roles: [READ_ROLE] });
+      try {
+        // The activation's fence refuses on whatever status it finds the row
+        // in, and records the attempt as 'disabled'. A later version that adds
+        // a status — suspended, archived — would then write rows this sweep
+        // must still visit, and enumerating statuses here is what would make
+        // their realm clients invisible by default. "Never activated" is the
+        // missing client secret, so this row is swept on that alone.
+        const suspended = await seedIntegration(adminDb, {
+          displayName: "a status this version does not write",
+          status: "suspended",
+          activated: false,
+        });
+        await provisionClient(realm, suspended);
+
+        const config = readApiKeyProvisioningConfig(realmEnv(realm))!;
+        const report = await reconcileApiKeyIntegrations({
+          db: appDb as never,
+          admin: config.admin,
+          keyring: config.keyring,
+          entityRoleClientId: config.entityRoleClientId,
+          actorSubject: "reconcile-suite",
+        });
+
+        expect(report.sweptAbandoned).toEqual([suspended]);
+        expect(report.rebuilt).toEqual([]);
+        expect(report.failed).toEqual([]);
+        expect(realm.clients()).toEqual([]);
+        // The row is left exactly as it stands: this branch repairs the realm,
+        // not the database.
+        const rows = await sql<{ status: string }>`
+          select status from platform.api_key_integrations where id = ${suspended}
+        `.execute(adminDb);
+        expect(rows.rows).toEqual([{ status: "suspended" }]);
+      } finally {
+        await realm.stop();
+      }
+    });
+  }, TEST_TIMEOUT);
+
+  test("never answers a row that was never activated by provisioning one", async () => {
+    if (!reachable) return;
+    await withScratchDb(async ({ appDb, adminDb }) => {
+      const realm = stubRealm({ roles: [READ_ROLE] });
+      try {
+        // An 'active' row with no client secret is not a state anything here
+        // writes — the activation writes both together. Rebuilding it would be
+        // this reconciler creating a realm client and a fresh secret for an
+        // integration nobody ever activated, which is an enable nobody asked
+        // for. Reported for a human instead.
+        const inconsistent = await seedIntegration(adminDb, {
+          displayName: "active without a secret", status: "active", activated: false,
+        });
+        const config = readApiKeyProvisioningConfig(realmEnv(realm))!;
+        const report = await reconcileApiKeyIntegrations({
+          db: appDb as never,
+          admin: config.admin,
+          keyring: config.keyring,
+          entityRoleClientId: config.entityRoleClientId,
+          actorSubject: "reconcile-suite",
+        });
+
+        expect(report.rebuilt).toEqual([]);
+        expect(report.sweptAbandoned).toEqual([]);
+        expect(report.failed).toEqual([{
+          integrationId: inconsistent,
+          reason: "Active with no client secret: never activated, so it is not rebuilt.",
+        }]);
+        // Nothing reached the realm for it, and nothing was written.
+        expect(realm.clients()).toEqual([]);
+        const rows = await sql<{ status: string; client_secret_ciphertext: string | null }>`
+          select status, client_secret_ciphertext
+            from platform.api_key_integrations where id = ${inconsistent}
+        `.execute(adminDb);
+        expect(rows.rows).toEqual([{ status: "active", client_secret_ciphertext: null }]);
       } finally {
         await realm.stop();
       }

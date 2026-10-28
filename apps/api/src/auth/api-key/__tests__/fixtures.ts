@@ -305,8 +305,15 @@ export function stubRealm(options: {
    * the attempt INSIDE the realm — after the 'pending' row is committed and
    * before the activation — and let something else commit meanwhile. The
    * default awaits nothing, so every other suite is unaffected.
+   *
+   * Returning a `Response` answers the request instead of this server, which
+   * is how a test makes ONE admin call fail — a realm that refuses to delete a
+   * client while still answering the probe that finds it, say. Returning
+   * nothing lets the request through. It must not throw: an exception out of
+   * `fetch` is reported as a server error rather than as a refusal the
+   * provisioning client can read.
    */
-  onAdminRequest?: (method: string, path: string) => Promise<void>;
+  onAdminRequest?: (method: string, path: string) => Promise<Response | void>;
 } = {}): StubRealm {
   const realm = options.realm ?? "openshapeforge";
   const roles = options.roles ?? [];
@@ -336,7 +343,10 @@ export function stubRealm(options: {
       if (path === `/realms/${realm}/protocol/openid-connect/token`) {
         return json({ access_token: "stub-admin-token", expires_in: 300 });
       }
-      if (options.onAdminRequest) await options.onAdminRequest(request.method, path);
+      if (options.onAdminRequest) {
+        const answered = await options.onAdminRequest(request.method, path);
+        if (answered) return answered;
+      }
       const admin = `/admin/realms/${realm}`;
       if (request.method === "POST" && url.pathname === `${admin}/clients`) {
         if (options.failClientCreation) return new Response(null, { status: 500 });

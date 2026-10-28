@@ -9,12 +9,16 @@
  *     between the insert and the realm mutation, or because the realm mutation
  *     failed. The row authenticates nothing, but it holds the derived
  *     clientId, so it can leave an orphaned client behind in Keycloak.
- *   - an ABANDONED attempt: a row disabled before it was ever activated,
- *     because an administrator disabled the integration while provisioning was
- *     still inside the realm (service.ts, step 3's fence). The activation then
- *     deletes the client it created, so there is usually nothing left here —
- *     but that delete is best effort, and this status is otherwise visited by
- *     neither branch above, so the orphan would survive every later run.
+ *   - an ABANDONED attempt: a row that never reached activation, because an
+ *     administrator disabled the integration — or removed it — while
+ *     provisioning was still inside the realm (service.ts, step 3's fence).
+ *     The activation then records the attempt and deletes the client it
+ *     created, so there is usually nothing left here — but that delete is best
+ *     effort, and such a row is visited by neither branch above, so the orphan
+ *     would survive every later run. Recognised by its MISSING CLIENT SECRET
+ *     rather than by its status: that is what the activation writes, so its
+ *     absence is exactly the set of rows that never got that far, whatever
+ *     status the fence found them in.
  *   - a RESET realm: `--import-realm` is a no-op against an existing realm, so
  *     runtime-created clients survive restarts — but a deliberate realm reset
  *     erases every one of them while the database still lists the integrations
@@ -49,9 +53,9 @@ export type ReconcileReport = {
   /** 'pending' rows older than the grace window, and what happened to them. */
   sweptPending: string[];
   /**
-   * Never-activated 'disabled' rows whose realm client still existed and has
-   * now been deleted. Normally empty: the activation's own compensation does
-   * this, and this is only what that could not reach.
+   * Never-activated rows whose realm client still existed and has now been
+   * deleted. Normally empty: the activation's own compensation does this, and
+   * this is only what that could not reach.
    */
   sweptAbandoned: string[];
   /** Active integrations whose realm client was missing and has been rebuilt. */
@@ -117,12 +121,18 @@ export async function reconcileApiKeyIntegrations(
       reason: "Reconcile API key integrations against the Keycloak realm.",
     },
     async (trx) => {
+      // 'pending' and 'active' are the two branches below; everything that
+      // was NEVER ACTIVATED is the third, by its missing client secret rather
+      // than by a list of statuses. Enumerating 'disabled' was the same
+      // mistake one layer down: the activation's fence can refuse on any
+      // status the row happens to be in, and a status this version does not
+      // write would then be an orphan no run ever visits.
       const result = await sql<IntegrationRow>`
         select id, tenant_id, display_name, keycloak_client_id, status,
                granted_roles, created_at, client_secret_ciphertext
           from platform.api_key_integrations
          where status in ('pending', 'active')
-            or (status = 'disabled' and client_secret_ciphertext is null)
+            or client_secret_ciphertext is null
          order by created_at asc
       `.execute(trx);
       return result.rows;
@@ -139,12 +149,23 @@ export async function reconcileApiKeyIntegrations(
         continue;
       }
 
-      if (row.status === "disabled") {
-        // Disabled before it was ever activated: there is no credential to
-        // keep working and nothing to rebuild, only a client that may still be
-        // there. The row is already in its final state, so only the realm is
-        // touched — and `deleteClient` is a no-op when the client is gone,
-        // which is the ordinary case.
+      if (row.client_secret_ciphertext === null) {
+        // Never activated: there is no credential to keep working and nothing
+        // to rebuild, only a client that may still be there. Checked BEFORE
+        // the rebuild below, so a row that claims to be live without ever
+        // having been activated is never answered by minting it a realm
+        // client and a fresh secret — which would be this reconciler enabling
+        // an integration nobody activated. Not a state this version writes;
+        // reported for a human instead of guessed at.
+        if (row.status === "active") {
+          throw new Error(
+            "Active with no client secret: never activated, so it is not rebuilt.",
+          );
+        }
+        // The row is already in its final state, so only the realm is touched
+        // — and `deleteClient` is a no-op when the client is gone, which is
+        // the ordinary case, because the activation's own compensation got
+        // there first.
         if (!await deps.admin.clientExists(row.keycloak_client_id)) continue;
         await deps.admin.deleteClient(row.keycloak_client_id);
         report.sweptAbandoned.push(row.id);

@@ -375,10 +375,18 @@ export async function createIntegration(
 
   if ("fenced" in activated) {
     // Nothing was activated and nothing was minted, so the credential above
-    // was never handed out — but the realm client of step 2 exists and the
-    // row that names it is no longer one the reconciler visits (it sweeps
-    // 'pending' and repairs 'active'). Delete it here, and leave the sweep as
-    // the backstop for a realm that cannot be reached right now.
+    // was never handed out — but the realm client of step 2 exists. Record
+    // that it must not, THEN try to delete it: the delete is best effort, and
+    // what makes a failed one recoverable is that a row still names the
+    // client. Order matters, and so does doing this for every verdict rather
+    // than only the expected one.
+    await recordAbandonedAttempt(deps, session, {
+      integrationId,
+      keycloakClientId,
+      displayName,
+      roles: input.roles,
+      now,
+    });
     await discardRealmClient(deps, keycloakClientId);
     throw new ApiKeyNotFoundError(
       `The integration "${displayName}" was ${
@@ -403,15 +411,80 @@ export async function createIntegration(
 }
 
 /**
+ * Leave a row that NAMES the realm client step 2 created, before anything
+ * tries to delete it.
+ *
+ * This is what makes the compensation below recoverable rather than merely
+ * attempted. `reconcile.ts` finds an orphaned client through the row that
+ * carries its derived `keycloak_client_id`, so the row has to be there — and
+ * for two of the fence's three verdicts it already is:
+ *
+ *   - 'disabled' — the ordinary case. A disable committed the row into exactly
+ *     the never-activated state the sweep looks for, so this is a no-op bar
+ *     the timestamp.
+ *   - 'absent' — the row was deleted out from under the attempt. Nothing names
+ *     the client any more, so a failed delete would orphan a confidential
+ *     client with roles granted, past every later run. The row is written
+ *     again, as the record of an attempt that was made: 'disabled', with no
+ *     client secret and no key under it, so it authenticates nothing. It is a
+ *     cleanup record, not a restored integration — and leaving a swept
+ *     attempt's row behind is what `sweepStalled` does for the same reason.
+ *   - anything else — a status this version does not write. Treated as the
+ *     never-activated attempt it is, so a status added later cannot make the
+ *     orphan invisible by default.
+ *
+ * `client_secret_ciphertext is null` is the guard on the update, and it is the
+ * one that matters: it is also what "never activated" means to the reconciler,
+ * so this can only ever move a row that was never live, and can never disable
+ * or re-enable an integration that was.
+ *
+ * Its own transaction, like the intent row of step 1 — the caller's answer is
+ * already decided, and this has to outlive it.
+ */
+async function recordAbandonedAttempt(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+  attempt: {
+    integrationId: string;
+    keycloakClientId: string;
+    displayName: string;
+    roles: string[];
+    now: Date;
+  },
+): Promise<void> {
+  try {
+    await withSession(deps, session, async (trx) => {
+      await sql`
+        insert into platform.api_key_integrations
+          (id, tenant_id, display_name, keycloak_client_id, status, granted_roles,
+           created_by, created_at, updated_at)
+        values
+          (${attempt.integrationId}, ${session.tenantId}, ${attempt.displayName},
+           ${attempt.keycloakClientId}, 'disabled', ${jsonbLiteral(attempt.roles)},
+           ${session.userId}, ${attempt.now}, ${attempt.now})
+        on conflict (id) do update
+           set status = 'disabled', updated_at = ${attempt.now}
+         where platform.api_key_integrations.client_secret_ciphertext is null
+      `.execute(trx);
+    }, { independent: true });
+  } catch {
+    // Best effort, like the delete below, and for the same reason: the
+    // caller's answer is already decided and a database that cannot be
+    // reached must not turn it into a different, misleading failure. The
+    // delete is still attempted.
+  }
+}
+
+/**
  * Undo step 2 after the activation refused to finish the attempt.
  *
  * Best effort on purpose. The caller's answer is already decided — the
  * integration they asked for is not theirs to activate — and a realm that
  * cannot be reached must not turn that into a different, misleading failure.
- * What is NOT best effort is that the orphan stays findable: the row keeps the
- * derived `keycloak_client_id`, and `reconcile.ts` sweeps a never-activated
- * integration whose realm client still exists, so a delete that fails here is
- * retried there rather than forgotten.
+ * What is NOT best effort is that the orphan stays findable: the row written
+ * just above keeps the derived `keycloak_client_id`, and `reconcile.ts` sweeps
+ * a never-activated integration whose realm client still exists, so a delete
+ * that fails here is retried there rather than forgotten.
  */
 async function discardRealmClient(
   deps: ApiKeyServiceDeps,

@@ -748,6 +748,27 @@ the only one that can report `502 PROVISIONING_FAILED`; a realm that refuses
 leaves the intent row at `pending`, which authenticates nothing and is what the
 reconciler sweeps.
 
+**A fenced activation compensates recoverably.** The intent row commits before
+the realm is touched, so the integration is visible and mutable while the
+external call is in flight: an administrator can disable it, and the activation
+is fenced on still finding its own `pending` attempt. When the fence refuses,
+the realm client created in that window has to go — and that delete is best
+effort, because the caller's answer is already decided and a realm that will
+not cooperate must not become a different, misleading failure. What makes a
+failed delete recoverable is that a row still carries the derived
+`keycloak_client_id`, so the activation now WRITES that record before it tries
+the delete, in its own transaction: `disabled`, with no client secret and no
+credential under it. For the ordinary verdict the disable already wrote it; for
+a row deleted out from under the attempt nothing named the client at all, and a
+refused delete orphaned a confidential client with roles granted past every
+later run. The record is a cleanup record, not a restored integration: it
+authenticates nothing, and the update is guarded on
+`client_secret_ciphertext is null`, so it can only ever move a row that was
+never live. The reconciler picks such rows up by that same missing secret
+rather than by a list of statuses, and for the same reason never rebuilds one —
+minting a realm client and a fresh secret for an integration nobody activated
+would be an enable nobody asked for.
+
 **One transaction per request.** A writing canonical Operation is dispatched
 inside the database session core opened for the session it verified — carrying
 the identity link, the audit identity and the resolved access scope — and the
@@ -866,6 +887,12 @@ Proven:
   transaction while the `pending` intent row survives; a realm that refuses
   leaves one `pending` row, no credential, one realm client and a declared
   `502`;
+- both interleavings of create against a concurrent disable, with the realm
+  held open inside `POST /clients`; and, with the realm refusing every delete,
+  a never-activated `disabled` record left behind for a row that was disabled
+  AND for one deleted out from under the attempt, each then swept by a later
+  reconciler run against the same realm — swept and not rebuilt
+  (`apps/api/src/operations/api-key-catalog-db.test.ts`);
 - a malformed cursor anchor, and an anchor no row of the set answers to
   (forged, another tenant's, or deleted mid-walk), are the declared `400`
   before any cast; every cursor either listing issues walks to the end of every
@@ -887,7 +914,12 @@ Not proven here, and still open:
   credential management therefore needs its own end-to-end login evidence.
 - **No real Keycloak.** The realm is a stub, so realm-side behaviour under
   partial failure, concurrency or a realm reset is not covered beyond what the
-  reconciler's own tests assert.
+  reconciler's own tests assert. The stub is what the interleavings need — a
+  real server cannot be paused inside `POST /clients`, nor made to answer every
+  read and refuse every delete — so the compensation and retry evidence above
+  is stub evidence. That the admin paths it speaks are the right ones, and that
+  a second delete of an already-deleted client is the no-op the compensation
+  relies on, is the e2e suite's job and is reported separately.
 - **A crash, as opposed to an error, is not simulated.** The `pending` row is
   shown durable across a failed realm call and a rolled-back caller
   transaction; a process killed mid-provisioning is reasoned about, not tested.

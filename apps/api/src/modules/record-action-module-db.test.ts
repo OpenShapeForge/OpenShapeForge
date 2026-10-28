@@ -51,6 +51,7 @@ import { APP_ROLE } from "../db/migrations/app-role.js";
 import { ModulePlatformRuntime, withModuleOperationSession } from "./platform.js";
 import { loadRuntimeModules } from "./registry.js";
 import { bindOperationHandlers, invokeOperation } from "../operations/runtime.js";
+import { HttpError } from "../rest/http-error.js";
 import type { ModuleOperationHandler, RuntimeModule } from "./contract.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -138,8 +139,18 @@ function acl(actions: Record<string, unknown>): string {
   return JSON.stringify({ actions });
 }
 
+/**
+ * The refusal code, whichever layer refused.
+ *
+ * The record check inside the Operation raises a canonical operation failure;
+ * the dispatcher's earlier principal-class gate — an Operation whose action no
+ * session of this class could ever hold — raises an `HttpError`. Both are the
+ * same answer to a caller, so the tests read either rather than pinning which
+ * gate got there first.
+ */
 function code(error: unknown): string | undefined {
-  return operationErrorOf(error)?.code;
+  return operationErrorOf(error)?.code ??
+    (error instanceof HttpError ? error.code : undefined);
 }
 
 async function refusal(promise: Promise<unknown>): Promise<string | undefined> {
@@ -501,8 +512,10 @@ describe("the module's own rows compose with the axis", () => {
     const session = withoutApplication(application({
       credential: "bearer", roles: NOTEBOOK_ROLES,
     }));
-    // Core refuses first, before the handler is reached: the record's `deliver`
-    // action admits an integration principal and this carrier resolved to none.
+    // Core refuses first, before the handler is reached, and before a record
+    // is even consulted: `deliver` admits an integration principal, this
+    // carrier resolved to none, so no notebook could make the Operation
+    // reachable (operations/runtime.ts recordActionPrincipalReachable).
     expect(await refusal(dispatch(session, {
       notebookId: granted, reference: `ref-${randomUUID()}`,
     }))).toBe("FORBIDDEN");

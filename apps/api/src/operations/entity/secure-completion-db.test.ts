@@ -112,3 +112,19 @@ test("secure create retains server-owned Operation attribution", async () => {
     if(oldStamps) operation.stamps=oldStamps; else delete operation.stamps;
   }
 });
+
+test("secure completion attributes only verified principal kinds in tenant audit events", async () => {
+  for (const [principalKind, expected] of [["person", "person"], [undefined, "unknown"]] as const) {
+    const session = {...actor, tenantId: crypto.randomUUID(), principalKind};
+    const result = await completeEntitySecureInput(runtime.db, session,
+      {operation:{id:operation.id,intent:"create"},input:{values}}, completion);
+    if ("error" in result) throw Error(JSON.stringify(result.error));
+    if (result.intent !== "create") throw Error("Expected create result");
+    const events = await sql<{tenant_id:string; actor_kind:string}>`
+      select tenant_id::text, payload->'audit'->>'actorKind' as actor_kind
+      from platform.entity_events
+      where aggregate_id=${String(result.data?.id)} and tenant_id=${session.tenantId}::uuid
+    `.execute(privileged.db);
+    expect(events.rows).toEqual([{tenant_id:session.tenantId, actor_kind:expected}]);
+  }
+});

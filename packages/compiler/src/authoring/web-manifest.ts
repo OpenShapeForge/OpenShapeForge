@@ -17,7 +17,7 @@ export function hasWebRestCollection(contract: CompiledEntityContract): boolean 
  */
 import { missingLocalizedMetadata, missingSchemaUiTranslations, missingUiTranslations } from "@openshapeforge/interface-web";
 import type { CompiledEntityInfo, CompiledPluginOperation } from "../plugins.js";
-import { moduleOperationId } from "./operation-catalog.js";
+import { assertRelatedWebEntitiesResolve, moduleOperationId } from "./operation-catalog.js";
 import type { CoreReferentiedataSnapshot } from "../core-referentiedata-artifacts.js";
 import { assertEntityValueDefinition } from "./entity-values.js";
 import { materializeCollectionOperations } from "./collection-operations.js";
@@ -1386,6 +1386,11 @@ function projectStandalone(
   const catalogs = [...input.catalogs]
     .filter((catalog) => catalog.interfaces.web)
     .sort((left, right) => left.plugin.localeCompare(right.plugin));
+  // `entities[name]` below would let the last catalog win in silence, and a
+  // related link projected further down names a destination any catalog may
+  // own. Both resolve across all catalogs, so both are settled here, before
+  // the first one is projected.
+  assertRelatedWebEntitiesResolve(catalogs.map((document) => ({ origin: document.plugin, document })));
   for (const catalog of catalogs) {
     const web = catalog.interfaces.web!;
     const operationRef = (key: string): WebStandaloneOperationRef => {

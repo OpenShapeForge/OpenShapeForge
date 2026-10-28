@@ -512,8 +512,9 @@ export interface OperationCatalogWebOperation {
 }
 
 export interface OperationCatalogWebInterface {
-  pages: Record<string, OperationCatalogWebPage>;
-  operations: Record<string, OperationCatalogWebOperation>;
+  /** Standalone pages; absent for a catalog that only projects entities. */
+  pages?: Record<string, OperationCatalogWebPage> | undefined;
+  operations?: Record<string, OperationCatalogWebOperation> | undefined;
   /** Provider-backed resources that use normal entity collection/detail views. */
   entities?: Record<string, {
     title: LocalizedText;

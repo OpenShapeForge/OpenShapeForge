@@ -109,8 +109,8 @@ const ACTION_NAME = /^[a-z][A-Za-z0-9]*$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const DEFAULT_PAGE_SIZE = 25;
 export const MAX_PAGE_SIZE = 100;
-/** Bounds the records examined for one page, independent of how many match. */
-const MAX_RECORDS_PER_ENTITY = MAX_PAGE_SIZE + 1;
+/** One extra row detects overflow; another preserves an inclusive resume anchor. */
+const MAX_RECORDS_PER_ENTITY = MAX_PAGE_SIZE + 2;
 
 export type AssignmentRow = {
   id: string;
@@ -438,7 +438,10 @@ export async function listRecordActionAssignments(
       const entity = readable[index]!;
       const manageableEntity = holdsUpdateRoles(entity, session);
       const after = cursor && cursor.entity === entity.entity ? cursor.recordId : undefined;
-      const want = Math.min(limit + 1 - assignments.length, MAX_RECORDS_PER_ENTITY);
+      // The inclusive keyset can return the cursor record even when all of its
+      // actions have already been consumed. Reserve one extra candidate for it
+      // so the overflow row remains visible on a resumed page.
+      const want = Math.min(limit + 1 - assignments.length + (after !== undefined ? 1 : 0), MAX_RECORDS_PER_ENTITY);
       const candidates = await readCandidates(
         trx, resolvedSession, entity, query, after, direction, want,
       );

@@ -360,6 +360,41 @@ describe("the listing stays inside ordinary record authorization", () => {
     expect(down.assignments.map((row) => row.id)).toEqual([...up.assignments].reverse().map((row) => row.id));
   }, TEST_TIMEOUT);
 
+  test("single-action grants beyond a page boundary are never lost", async () => {
+    for (const count of [51, 101]) {
+      const subject = randomUUID();
+      const ids = Array.from({ length: count }, () => randomUUID()).sort();
+      await admin.db.connection().execute(async (conn) => {
+        await sql`insert into platform.api_key_integrations
+          (id, tenant_id, display_name, keycloak_client_id, status, created_by)
+          values (${subject}::uuid, ${tenantA}::uuid, 'paging boundary', ${`client-${subject}`}, 'active', ${manager}::uuid)`
+          .execute(conn);
+        for (const [index, id] of ids.entries()) {
+          await sql`insert into erp.meter_connections (id, tenant_id, name, meter_key, location, "authorization")
+            values (${id}::uuid, ${tenantA}::uuid, ${`page ${count}-${index}`}, ${`PG-${subject}-${index}`}, 'Depot',
+              ${{ actions: { submitReading: { integrations: [subject] } } }}::jsonb)`.execute(conn);
+        }
+      });
+      for (const direction of ["asc", "desc"] as const) {
+        for (const first of [1, 25, 100]) {
+          const seen: string[] = [];
+          let after: string | undefined;
+          for (let page = 0; page <= count; page += 1) {
+            const result = await listRecordActionAssignments(app.db, session(), {
+              integrationId: subject, entity: METER, first, direction, ...(after ? { after } : {}),
+            });
+            expect(result.assignments.every((row) => row.action === "submitReading")).toBe(true);
+            seen.push(...result.assignments.map((row) => row.recordId));
+            if (!result.nextCursor) break;
+            expect(result.nextCursor).not.toBe(after);
+            after = result.nextCursor;
+          }
+          expect(seen).toEqual(direction === "asc" ? ids : [...ids].reverse());
+        }
+      }
+    }
+  }, TEST_TIMEOUT);
+
   test("a cursor is refused rather than guessed at", async () => {
     for (const after of ["not-a-cursor", Buffer.from("[1,2]").toString("base64url")]) {
       expect(listRecordActionAssignments(app.db, session(), { integrationId: integration, after }))

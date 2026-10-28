@@ -376,7 +376,11 @@ operations:
             uniqueItems: true
             items: { type: string, minLength: 1 }
             description: Roles the integration's service account receives. Every one must already be held by the caller. An empty list grants no general roles; separately authorized record actions and operations open to authenticated sessions may still be available.
-            x-osf-i18n: { title: { en: Roles, nl: Rollen } }
+            x-osf-i18n:
+              title: { en: Roles, nl: Rollen }
+              description:
+                en: Leave empty for no general roles. Set specific permissions after creating the integration.
+                nl: Laat leeg voor geen algemene rollen. Stel specifieke rechten in nadat de integratie is aangemaakt.
           expiresInDays: &expiresInDays
             type: integer
             minimum: 1

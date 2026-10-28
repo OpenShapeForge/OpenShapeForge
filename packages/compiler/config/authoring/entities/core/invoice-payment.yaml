@@ -230,5 +230,5 @@ interfaces:
     fields:
       paidAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}

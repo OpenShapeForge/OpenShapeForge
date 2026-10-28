@@ -249,5 +249,5 @@ interfaces:
             clearable: false
       lastIssuedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}

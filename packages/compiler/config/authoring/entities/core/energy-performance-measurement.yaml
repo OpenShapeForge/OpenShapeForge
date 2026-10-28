@@ -248,7 +248,7 @@ interfaces:
     fields:
       measuredAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       notes:
         render:

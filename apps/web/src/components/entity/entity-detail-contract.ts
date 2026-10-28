@@ -146,7 +146,7 @@ function inferRendererFieldValueType(field: DetailFieldConfig | undefined): NonN
   switch (field?.render?.component) {
     case "DatePicker":
       return "date";
-    case "DateTimePicker":
+    case "FieldDateAndTime":
       return "datetime";
     case "NumberInput":
       return "number";

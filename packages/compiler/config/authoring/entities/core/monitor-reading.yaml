@@ -224,5 +224,5 @@ interfaces:
     fields:
       readAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}

@@ -308,11 +308,11 @@ interfaces:
             maxLength: 5000
       startDateTime:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       endDateTime:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       status:
         render:

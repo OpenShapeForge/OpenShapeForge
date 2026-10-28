@@ -228,5 +228,5 @@ interfaces:
     fields:
       matchedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}

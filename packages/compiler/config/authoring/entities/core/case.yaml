@@ -645,43 +645,43 @@ interfaces:
             clearable: true
       registeredAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       startedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       routedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       lastCustomerContactAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       nextActionAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       plannedEndAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       dueAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       firstResponseDueAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       resolutionDueAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       closedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       resultDetails:
         render:

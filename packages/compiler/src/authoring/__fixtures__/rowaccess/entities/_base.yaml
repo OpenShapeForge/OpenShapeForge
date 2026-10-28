@@ -46,7 +46,7 @@ fields:
       column: created_at
       storageClass: core
     render:
-      component: DateTimePicker
+      component: FieldDateAndTime
   - key: updatedAt
     osfType: datetime
     required: true
@@ -61,7 +61,7 @@ fields:
       column: updated_at
       storageClass: core
     render:
-      component: DateTimePicker
+      component: FieldDateAndTime
   - key: externalId
     osfType: string
     required: false

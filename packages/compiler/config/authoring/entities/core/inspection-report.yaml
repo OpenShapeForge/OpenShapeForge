@@ -275,7 +275,7 @@ interfaces:
     fields:
       inspectedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       summary:
         render:

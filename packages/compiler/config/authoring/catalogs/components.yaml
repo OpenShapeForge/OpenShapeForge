@@ -50,7 +50,7 @@ defaults:
     label:
       nl: Datum en tijd
       en: Date and time
-    component: DateTimePicker
+    component: FieldDateAndTime
     props: { layout: above, showTimezoneSelector: false }
 # ── Default component per view element ──
 # Used when a view does not specify a `render.component` for that element.
@@ -229,13 +229,6 @@ components:
   DatePicker:
     kind: field
     description: Date picker.
-    props:
-      - minDate
-      - maxDate
-
-  DateTimePicker:
-    kind: field
-    description: Date and time picker.
     props:
       - minDate
       - maxDate

@@ -436,11 +436,11 @@ interfaces:
             clearable: false
       raisedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       resolvedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       dueDate:
         render:

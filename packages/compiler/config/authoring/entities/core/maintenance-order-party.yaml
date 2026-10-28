@@ -420,5 +420,5 @@ interfaces:
           props: {}
       workCompletedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}

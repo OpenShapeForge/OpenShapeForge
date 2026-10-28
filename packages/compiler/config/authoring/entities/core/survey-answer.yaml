@@ -235,5 +235,5 @@ interfaces:
             maxLength: 4000
       answeredAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}

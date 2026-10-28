@@ -291,7 +291,7 @@ interfaces:
     fields:
       assessedAt:
         render:
-          component: DateTimePicker
+          component: FieldDateAndTime
           props: {}
       scoreScale:
         render:

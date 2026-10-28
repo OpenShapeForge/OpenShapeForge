@@ -312,18 +312,23 @@ describe("database role contract", () => {
   test("an unsafe attribute or an inherited role fails the contract", async () => {
     const definer = databaseRole("recordActionResolver").name;
     const parent = `osf_contract_parent_${suffix}`;
-    const cases: Array<{ apply: string; undo: string; expected: string }> = [
+    const cases: Array<{ apply: string; undo: string; expected: string; remedy?: string }> = [
       { apply: `alter role ${definer} createrole`, undo: `alter role ${definer} nocreaterole`,
-        expected: `role ${definer} must not have CREATEROLE` },
+        expected: `role ${definer} must not have CREATEROLE`,
+        remedy: `alter role ${definer} nocreaterole;` },
       { apply: `alter role ${definer} createdb`, undo: `alter role ${definer} nocreatedb`,
-        expected: `role ${definer} must not have CREATEDB` },
+        expected: `role ${definer} must not have CREATEDB`,
+        remedy: `alter role ${definer} nocreatedb;` },
       { apply: `alter role ${definer} replication`, undo: `alter role ${definer} noreplication`,
-        expected: `role ${definer} must not have REPLICATION` },
+        expected: `role ${definer} must not have REPLICATION`,
+        remedy: `alter role ${definer} noreplication;` },
       { apply: `alter role ${definer} inherit`, undo: `alter role ${definer} noinherit`,
-        expected: `definer role ${definer} must be NOINHERIT` },
+        expected: `definer role ${definer} must be NOINHERIT`,
+        remedy: `alter role ${definer} noinherit;` },
       { apply: `create role ${parent} nologin; grant ${parent} to ${definer}`,
         undo: `revoke ${parent} from ${definer}; drop role ${parent}`,
-        expected: `definer role ${definer} must not be a member of ${parent}` },
+        expected: `definer role ${definer} must not be a member of ${parent}`,
+        remedy: `revoke ${parent} from ${definer};` },
     ];
     for (const scenario of cases) {
       await admin.unsafe(scenario.apply);
@@ -333,9 +338,136 @@ describe("database role contract", () => {
           (caught: unknown) => caught as Error,
         );
         expect(error?.message).toContain(scenario.expected);
+        if (scenario.remedy) expect(error?.message).toContain(scenario.remedy);
       } finally {
         await admin.unsafe(scenario.undo);
       }
+    }
+    await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
+  }, TEST_TIMEOUT);
+
+  /**
+   * THE ATTRIBUTE REMEDY, APPLIED.
+   *
+   * `renderProvisioningSql` only creates roles that do not exist, so a role an
+   * operator already created with an unsafe attribute keeps it: the refusal
+   * named the problem and the provisioning script was not the fix for it. The
+   * refusal now carries one `alter role` per deviating role, listing only the
+   * attributes that role must not keep — and this test runs exactly the
+   * printed statement and shows the contract then holds.
+   *
+   * It runs against a SCRATCH role of its own rather than a declared one, by
+   * substituting the contract list the way the self-grant test below does.
+   * Making `openshapeforge_record_action_resolver` a cluster superuser to
+   * assert a sentence about it is not worth the window in which it is one,
+   * however short; a `nologin` role with no password and no membership that
+   * this test creates and drops is.
+   */
+  test("the printed alter role repairs exactly the deviating role and nothing else", async () => {
+    const unsafeRole = `osf_contract_unsafe_${suffix}`;
+    const loginRole = `osf_contract_login_${suffix}`;
+    const loginPassword = `login-${suffix}`;
+    const contracts = DATABASE_ROLES as DatabaseRoleContract[];
+    const originalContracts = [...contracts];
+    const declared = originalContracts.map((role) => role.name);
+    /** Every attribute the contract reads, for the roles this test must not change. */
+    const attributesOf = async (names: readonly string[]) =>
+      (await admin.unsafe(
+        `select rolname, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolreplication,
+                rolcanlogin, rolinherit
+           from pg_roles where rolname = any(string_to_array($1, ',')) order by rolname`,
+        [names.join(",")],
+      )) as Array<Record<string, unknown>>;
+    try {
+      // Every unsafe attribute at once on a role that cannot log in, so the one
+      // statement has to carry all of them.
+      await admin.unsafe(`
+        create role ${unsafeRole} nologin superuser bypassrls createrole createdb
+          replication inherit;
+      `);
+      contracts.splice(0, contracts.length, {
+        key: "recordActionResolver",
+        name: unsafeRole,
+        login: false,
+        migratorMember: false,
+        purpose: "exercise the printed attribute remedy",
+      });
+      const before = await attributesOf(declared);
+
+      const expectedAlter =
+        `alter role ${unsafeRole} nosuperuser nobypassrls nocreaterole nocreatedb ` +
+        "noreplication noinherit;";
+      const error = await migrator.db.connection().execute((db) => verifyDatabaseRoles(db)).then(
+        () => undefined,
+        (caught: unknown) => caught as Error,
+      );
+      expect(error?.message).toContain(`role ${unsafeRole} must not be SUPERUSER`);
+      expect(error?.message).toContain(expectedAlter);
+      // One statement, not one per attribute, and no other role is altered.
+      expect((error?.message ?? "").split(`alter role ${unsafeRole}`).length - 1).toBe(1);
+      expect((error?.message ?? "").match(/^alter role /gm)).toHaveLength(1);
+      // And the refusal says which connection that statement needs.
+      expect(error?.message).toContain(
+        "changing SUPERUSER, REPLICATION or BYPASSRLS needs a SUPERUSER connection",
+      );
+
+      // The provisioning script is NOT the remedy: the role exists, so it is
+      // left alone and the contract fails on the same attributes again.
+      const provisioned = await adminRuntime.db.connection().execute((db) =>
+        provisionDatabaseRoles(db, { passwords: {} }),
+      );
+      expect(provisioned).toMatchObject({ created: [], granted: [], unchanged: [unsafeRole] });
+      expect(renderProvisioningSql()).not.toContain("alter role");
+      await expect(
+        migrator.db.connection().execute((db) => verifyDatabaseRoles(db)),
+      ).rejects.toThrow(`role ${unsafeRole} must not be SUPERUSER`);
+
+      // Run the printed statement verbatim, as the administrator it names.
+      await admin.unsafe(expectedAlter);
+      await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
+      // A compliant role is not told to alter anything.
+      await admin.unsafe(`alter role ${unsafeRole} createdb`);
+      const again = await migrator.db.connection().execute((db) => verifyDatabaseRoles(db)).then(
+        () => undefined,
+        (caught: unknown) => caught as Error,
+      );
+      // Only the attribute that is actually wrong, and no superuser caveat for it.
+      expect(again?.message).toContain(`alter role ${unsafeRole} nocreatedb;`);
+      expect(again?.message).not.toContain("needs a SUPERUSER connection");
+      await admin.unsafe(`alter role ${unsafeRole} nocreatedb`);
+      await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
+      // The declared roles this test replaced are untouched by all of it.
+      expect(await attributesOf(declared)).toEqual(before);
+
+      // The login flag is part of the same statement, and carries no password:
+      // a role that must stop logging in keeps the secret the host gave it.
+      await admin.unsafe(
+        `create role ${loginRole} login password '${loginPassword}' nosuperuser nobypassrls
+           nocreaterole nocreatedb noreplication noinherit`,
+      );
+      contracts.splice(0, contracts.length, {
+        key: "recordActionResolver",
+        name: loginRole,
+        login: false,
+        migratorMember: false,
+        purpose: "exercise the printed login remedy",
+      });
+      const loginError = await migrator.db.connection().execute((db) => verifyDatabaseRoles(db))
+        .then(() => undefined, (caught: unknown) => caught as Error);
+      expect(loginError?.message).toContain(`role ${loginRole} must not be able to log in`);
+      expect(loginError?.message).toContain(`alter role ${loginRole} nologin;`);
+      expect(loginError?.message).not.toContain("password");
+      await admin.unsafe(`alter role ${loginRole} nologin;`);
+      await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
+      const secret = (await admin.unsafe(
+        `select rolpassword is not null as kept from pg_authid where rolname = $1`,
+        [loginRole],
+      )) as Array<{ kept: boolean }>;
+      expect(secret[0]?.kept).toBe(true);
+    } finally {
+      contracts.splice(0, contracts.length, ...originalContracts);
+      await admin.unsafe(`drop role if exists ${unsafeRole}`);
+      await admin.unsafe(`drop role if exists ${loginRole}`);
     }
     await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
   }, TEST_TIMEOUT);

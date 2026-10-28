@@ -234,11 +234,29 @@ leave the other route live. So the refusal names one route per distinct first
 hop out of the reported role, each with its own `revoke`, and says that every
 statement has to be run. Running all of them removes every edge by which a
 reported role reaches a definer role; it is not an iterative hunt. The walk
-stops at 16 hops, which bounds its work on a grant lattice an administrator
-built and is not a way past the check: the nearest reported role on a longer
-chain fails it and carries the `revoke` that cuts the chain, so hiding behind
-the bound means 16 *admitted* hops — 16 superusers, since the migrate identity
-and the database owner are one role each.
+stops at 16 hops, and that is not a way past the check: the nearest reported
+role on a longer chain fails it and carries the `revoke` that cuts the chain,
+so hiding behind the bound means 16 *admitted* hops — 16 superusers, since the
+migrate identity and the database owner are one role each.
+
+What the 16 hops do **not** do is bound the walk's cost. Reading one row per
+route off an enumeration of paths costs the number of paths, and on a dense
+acyclic lattice that is exponential in its depth: eight layers of six roles,
+every role granted to every role in the next, is 258 edges and 2,015,538
+paths, and the enumeration spent 20s producing the 258 rows. Each further layer
+multiplies the path count by six and leaves the row count linear — a grant
+graph large enough would refuse a deployment its migration rather than report a
+verdict on it. So the walk is over **roles**:
+`UNION` rather than `UNION ALL`, keyed on `(definer role, role, depth)`, so a
+role that several grants lead to is visited once per level instead of once per
+path. Its shortest-distance tree is reconstructed after it and the routes are
+read off each reached role's outgoing edges, which is where the one row per
+first hop comes from. The rows are the ones the enumeration produced — same
+triples, same shortest chain length each — and nothing is capped: a role
+reachable by ten routes still gets ten rows and ten `revoke`s. The cost is now
+bounded by the size of the grant graph, as
+`apps/api/src/db/__tests__/definer-role-reachability.test.ts` measures on that
+same lattice.
 
 No membership option makes an edge safe, so the walk does not look at them.
 `INHERIT` hands over the definer role's privileges and the ownership of its
@@ -263,11 +281,25 @@ suite runs on in CI, and therefore the oldest server this contract supports.
 On an older server the check errors on the missing columns rather than passing;
 upgrade the cluster to 16 or later before `db:migrate`.
 
-Anything else is reported with the `grant` or `revoke` that fixes it — and only
-reported. The chain runs as the migrate role, which is deliberately not a role
-administrator, so it fails closed rather than revoking a membership an operator
-created. The record-action step repeats this check on the resolver before it
-grants anything, because a host can call that step directly.
+Anything else is reported with the `alter role`, `grant` or `revoke` that fixes
+it — and only reported. The chain runs as the migrate role, which is
+deliberately not a role administrator, so it fails closed rather than changing
+an attribute or revoking a membership an operator set. The record-action step
+repeats this check on the resolver before it grants anything, because a host
+can call that step directly.
+
+An attribute deviation is reported as **one `alter role` per role**, naming
+that role and only the attributes it must not keep —
+`alter role openshapeforge_record_action_resolver nosuperuser nocreatedb;` for
+a role that is a superuser and may create databases, and nothing for the
+attributes that are already right. No other role is named, and the statement is
+never run for you. `db:provision-roles` does not stand in for it: the script
+creates the roles that do not exist and grants the migrate identity its
+membership, and a role that already exists keeps the attribute that failed, so
+the next `db:migrate` refuses on it again until the printed `alter role` is run.
+Postgres reserves `SUPERUSER`, `REPLICATION` and `BYPASSRLS` to superusers, so
+the refusal says when a `CREATEROLE` administrator connection is not enough for
+the statement it just printed.
 
 Adding a role is a host provisioning step:
 `db:provision-roles` before the next `db:migrate`, or step 0 refuses the chain
@@ -373,11 +405,16 @@ current database" is not. A role that is a member of the definer roles and owns
 here, and that is the supported policy rather than an oversight: admitting any
 database owner would admit whoever a `CREATEDB` role made one. The refusal says
 so when the reported role owns another database, so it is not mistaken for a
-broken grant, and the sentence it adds names the arrangement that always
-satisfies the contract: one owner and one migrate identity per cluster, or a
-cluster each. That advice is deliberately stricter than the predicate the check
-applies — see the section above for the rule itself, under which a cluster
-whose databases differ in owner passes under one migrate identity.
+broken grant, and the sentence it adds states the predicate the check applies:
+a member is admitted in a database only when it **is** that database's migrate
+identity or owner, so owning another one admits it there and not here. The
+remedy is the `revoke` the refusal already carries, or separate clusters.
+
+That sentence does not ask for one owner and one migrate identity across the
+cluster. Such a cluster satisfies the contract, but it is not what the check
+requires — a cluster whose databases differ in owner passes under one migrate
+identity, as does one whose two migrate identities each own the other's
+database. See the section above for the rule itself.
 
 Differing owners alone do not cause a refusal: an owner is only measured
 against the predicate if it is a member of the definer roles, or reaches one
@@ -392,9 +429,12 @@ is neither the migrate identity nor this database's owner can reach a definer
 role — including through either of those two — and when the migrate identity's
 own grant is indirect or carries neither option. On a shared cluster that
 includes a sibling database's owner or migrate identity, when it is a definer
-member and is neither this database's `current_user` nor its owner. Each
-refusal names the exact `grant` or `revoke` — one per route, so run all of
-them; none of them is applied for you. Run
+member and is neither this database's `current_user` nor its owner. It also
+refuses when a declared role that already exists carries `SUPERUSER`,
+`BYPASSRLS`, `CREATEROLE`, `CREATEDB` or `REPLICATION`, or the wrong login
+flag, which `db:provision-roles` does not repair. Each refusal names the exact
+`alter role`, `grant` or `revoke` — one per deviating role and one per route,
+so run all of them; none of them is applied for you. Run
 `db:provision-roles -- --print` and the reported statements against the cluster
 before the upgrade window if any of those shapes may be present.
 

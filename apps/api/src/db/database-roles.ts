@@ -9,8 +9,11 @@
  * every role the generated schema depends on exists with the load-bearing
  * attributes, and that the migrate role is a member of the definer roles
  * whose objects it must hand over. Anything missing is reported with the
- * exact statements an administrator runs — the same statements
- * {@link provisionDatabaseRoles} executes when given the admin connection.
+ * exact statements an administrator runs. {@link provisionDatabaseRoles}
+ * executes the create-and-grant half of them when given the admin connection;
+ * the `alter role` that drops an unsafe attribute from a role that already
+ * exists, and the `revoke` that cuts an unintended membership, are printed for
+ * an operator and never run here — see {@link verifyDatabaseRoles}.
  *
  * TWO OPENSHAPEFORGE DATABASES IN ONE CLUSTER
  * -------------------------------------------
@@ -175,8 +178,23 @@ function identifier(name: string): string {
   return name;
 }
 
+/**
+ * The attributes whose removal needs a SUPERUSER connection. `ALTER ROLE` can
+ * drop CREATEROLE, CREATEDB, LOGIN and INHERIT with CREATEROLE alone; Postgres
+ * reserves SUPERUSER, REPLICATION and BYPASSRLS to superusers, so the refusal
+ * says which connection the printed statement needs rather than letting an
+ * administrator discover it from a permission error.
+ */
+const SUPERUSER_ONLY_ATTRIBUTES = new Set(["nosuperuser", "noreplication", "nobypassrls"]);
+
 /** The statements an administrator runs to satisfy the contract. Passwords are
- * never rendered; login roles get a placeholder the operator replaces. */
+ * never rendered; login roles get a placeholder the operator replaces.
+ *
+ * Only roles that do not exist yet are created: the `do $$ ... $$` guard is
+ * what makes the script safe to re-run, and it is also why the script does not
+ * repair an EXISTING role. An attribute a role already carries is reported by
+ * {@link verifyDatabaseRoles} as its own `alter role`, naming that one role and
+ * only the attributes it must not keep. */
 export function renderProvisioningSql(options: { migratorRole?: string } = {}): string {
   const lines: string[] = [];
   for (const role of DATABASE_ROLES) {
@@ -211,8 +229,11 @@ export async function readMigrateIdentity(db: OpenShapeForgeDatabase): Promise<M
 
 /**
  * How deep the membership graph is walked. Postgres forbids cycles, so the walk
- * terminates on its own; this bounds the work it may do on a dense grant
- * lattice an administrator built.
+ * terminates on its own; this bounds how far from a definer role it looks.
+ *
+ * It is not what keeps the walk cheap on a dense grant lattice — the node-wise
+ * traversal in {@link readUnintendedDefinerMembers} is, and that one is bounded
+ * by the SIZE of the graph rather than by the number of paths through it.
  *
  * A chain longer than this is not a way past the contract. Every role on it at
  * depth 1..16 is reported unless it is admitted, and the nearest reported role
@@ -283,6 +304,40 @@ const MEMBERSHIP_DEPTH = 16;
  * That also bounds the result: at most one row per definer role per
  * `pg_auth_members` edge, however many distinct paths run through it.
  *
+ * AND BOUNDS THE WORK, NOT JUST THE RESULT
+ * ----------------------------------------
+ * Enumerating those paths to report one row per edge is what a `union all`
+ * walk does, and the cost is the number of PATHS — which on a dense lattice an
+ * administrator built is exponential in its depth. Eight layers of six roles,
+ * every role granted to every role in the next, is 258 edges and 2,015,538
+ * paths: the walk took 20s to return 258 rows (measured on PostgreSQL 17.11).
+ * Each further layer multiplies the paths by six and leaves the rows linear, so
+ * a deployment could be refused a migration by the SIZE of its grant graph
+ * rather than by a verdict on it.
+ *
+ * So the walk is over NODES and the paths are reconstructed afterwards:
+ *
+ *   - `reach` is a `union` — not `union all` — over `(definer, role, depth)`,
+ *     so a role several grants lead to is visited once per level instead of
+ *     once per path. Its rows are bounded by definer roles × roles × depth and
+ *     its edge scans by definer roles × `pg_auth_members` × depth, whatever
+ *     the path count;
+ *   - `hop` keeps each role's SHORTEST distance from each definer role, and
+ *     `nearest` picks one predecessor at that distance — so the shortest-path
+ *     tree has exactly one parent per node;
+ *   - `chain` walks that tree to build one chain string per reached role;
+ *   - the final select joins each reached role's outgoing edges, which is
+ *     where the one row per `(definer, member, first hop)` comes from: `via`
+ *     is the reached role, `member` the role granted it, and the chain shown
+ *     is the shortest one to `via` plus `member`.
+ *
+ * The rows and the chains are the same the path enumeration produced — same
+ * `(role, member, via)` triples, same chain length per row (verified against
+ * the `union all` walk on the lattice above, on PostgreSQL 17.11 and 16.15).
+ * Nothing is capped and no route is dropped: a member reachable by ten routes
+ * still gets ten rows and ten revokes. {@link MEMBERSHIP_DEPTH} is the only
+ * limit, unchanged in meaning.
+ *
  * Admitted roles are not reported; everything else on a path is, with a chain
  * it travels and the `revoke` that cuts that route.
  *
@@ -296,32 +351,55 @@ export async function readUnintendedDefinerMembers(
   const names = roles.map((role) => sql.lit(identifier(role)));
   if (names.length === 0) return [];
   const result = await sql<UnintendedDefinerMember>`
-    with recursive reachable as (
-      select definer.rolname as role, am.member as member_oid,
-        definer.rolname as via, definer.rolname || ' <- ' || member.rolname as path, 1 as depth
-      from pg_auth_members am
-      join pg_roles definer on definer.oid = am.roleid
-      join pg_roles member on member.oid = am.member
+    with recursive reach as (
+      select definer.rolname as role, definer.oid as node, 0 as depth
+      from pg_roles definer
       where definer.rolname in (${sql.join(names)})
-      union all
-      select r.role, am.member, holder.rolname, r.path || ' <- ' || member.rolname, r.depth + 1
-      from reachable r
-      join pg_roles holder on holder.oid = r.member_oid
-      join pg_auth_members am on am.roleid = r.member_oid
-      join pg_roles member on member.oid = am.member
+      union
+      select r.role, am.member, r.depth + 1
+      from reach r
+      join pg_auth_members am on am.roleid = r.node
       where r.depth < ${MEMBERSHIP_DEPTH}
+    ),
+    hop as (
+      select role, node, min(depth) as depth from reach group by role, node
+    ),
+    nearest as (
+      select distinct on (child.role, child.node)
+        child.role, child.node, child.depth, up.node as parent
+      from hop child
+      join pg_auth_members am on am.member = child.node
+      join hop up on up.role = child.role and up.node = am.roleid
+        and up.depth = child.depth - 1
+      where child.depth > 0
+      order by child.role, child.node, child.depth, up.node
+    ),
+    chain as (
+      select h.role, h.node, h.depth, root.rolname::text as path
+      from hop h
+      join pg_roles root on root.oid = h.node
+      where h.depth = 0
+      union all
+      select n.role, n.node, n.depth, c.path || ' <- ' || reached.rolname
+      from chain c
+      join nearest n on n.role = c.role and n.parent = c.node and n.depth = c.depth + 1
+      join pg_roles reached on reached.oid = n.node
     )
-    select distinct on (r.role, member.rolname, r.via)
-      r.role, member.rolname as member, r.via, r.path,
+    select distinct on (c.role, member.rolname, via.rolname)
+      c.role as role, member.rolname as member, via.rolname as via,
+      c.path || ' <- ' || member.rolname as path,
       exists (select 1 from pg_database d
         where d.datdba = member.oid and d.datname <> current_database()) as "ownsOtherDatabase"
-    from reachable r
-    join pg_roles member on member.oid = r.member_oid
-    where not member.rolsuper
+    from chain c
+    join pg_roles via on via.oid = c.node
+    join pg_auth_members am on am.roleid = c.node
+    join pg_roles member on member.oid = am.member
+    where c.depth < ${MEMBERSHIP_DEPTH}
+      and not member.rolsuper
       and member.rolname <> current_user
       and member.oid <> coalesce(
         (select datdba from pg_database where datname = current_database()), 0)
-    order by r.role, member.rolname, r.via, r.depth
+    order by c.role, member.rolname, via.rolname
   `.execute(db);
   return result.rows;
 }
@@ -337,13 +415,18 @@ export async function readUnintendedDefinerMembers(
  * would admit whoever a `CREATEDB` role made one.
  *
  * The extra sentence is emitted for exactly that member, so the refusal is not
- * mistaken for a broken grant. It names the arrangement that always satisfies
- * the contract — one owner and one migrate identity per cluster, or a cluster
- * each — as operator advice; it is deliberately stricter than the predicate
- * this check applies, which admits each database's own `current_user` and
- * `datdba` and so also passes a shared cluster whose databases differ in owner
- * under one migrate identity. The precise rule is in the file header and in
- * docs/migrations.md.
+ * mistaken for a broken grant. It states the predicate this check applies — a
+ * member is admitted in a database when it IS that database's `current_user`
+ * or its `datdba`, or is a superuser — and so says why owning some OTHER
+ * database is not a ground for admission here.
+ *
+ * It does not ask for one owner and one migrate identity across the cluster.
+ * That arrangement satisfies the contract, but so does a cluster whose
+ * databases differ in owner under one migrate identity, and so does one whose
+ * two migrate identities each own the other's database; demanding the first
+ * states a limit this check does not apply. The remedy is the `revoke` the
+ * refusal already carries, or a cluster per database. The precise rule is in
+ * the file header and in docs/migrations.md.
  */
 export function explainDefinerMember(
   row: UnintendedDefinerMember,
@@ -355,9 +438,10 @@ export function explainDefinerMember(
       ? `role ${row.member} is a member of definer role ${row.role}`
       : `role ${row.member} can act as definer role ${row.role} through ${row.path}`;
   const cluster = row.ownsOtherDatabase
-    ? `. ${row.member} owns another database on this cluster: definer roles are cluster-wide, ` +
-      "so every OpenShapeForge database sharing a cluster must share one owner and one migrate " +
-      "identity, or be given its own cluster"
+    ? `. ${row.member} owns another database on this cluster and is admitted there for that ` +
+      "reason: definer roles are cluster-wide, but a member is admitted in a database only " +
+      "when it IS that database's migrate identity or owner, so owning another one admits it " +
+      "there and not here. Revoke the grant, or give the two databases separate clusters"
     : "";
   return (
     `${reach}, and is neither the migrate role ${identity.user} nor this database's owner ` +
@@ -450,9 +534,13 @@ async function readRoleMemberships(db: OpenShapeForgeDatabase): Promise<Map<stri
  *     are outside row security and privilege checks regardless of any
  *     membership.
  *
- * Deviations are reported with the `revoke` that fixes them and never revoked
- * here: this runs as the migrate role, which is deliberately not a role
- * administrator, and a membership an operator created is theirs to remove.
+ * Deviations are reported with the `alter role` or `revoke` that fixes them and
+ * never applied here: this runs as the migrate role, which is deliberately not
+ * a role administrator, and an attribute or membership an operator set is
+ * theirs to change. The provisioning script does not stand in for those two
+ * either — it creates roles that are absent and grants the migrate identity's
+ * membership, so a role that already exists keeps the attribute that failed,
+ * and the next verify fails on it again until the printed `alter role` is run.
  */
 export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<void> {
   const rows = await readRoles(db);
@@ -460,25 +548,60 @@ export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<v
   const current = identity.user;
   const problems: string[] = [];
   const remedies: string[] = [];
+  let superuserRemedy = false;
   for (const role of DATABASE_ROLES) {
     const row = rows.get(role.name);
     if (!row) {
       problems.push(`role ${role.name} (${role.key}) does not exist`);
       continue;
     }
-    if (row.rolsuper) problems.push(`role ${role.name} must not be SUPERUSER`);
-    if (row.rolbypassrls) problems.push(`role ${role.name} must not have BYPASSRLS`);
-    if (row.rolcreaterole) problems.push(`role ${role.name} must not have CREATEROLE`);
-    if (row.rolcreatedb) problems.push(`role ${role.name} must not have CREATEDB`);
-    if (row.rolreplication) problems.push(`role ${role.name} must not have REPLICATION`);
+    // Every attribute deviation this role has, collected into the ONE `alter
+    // role` that fixes it. The statement names this role and nothing else, and
+    // lists only the attributes it must not keep — an administrator reading it
+    // can see it touches no other role and changes no attribute that is
+    // already right. A blanket `alter role <name> nosuperuser nobypassrls
+    // nocreaterole nocreatedb noreplication` would read the same way and be
+    // wrong: on a compliant role it is a no-op nobody needs to run, and it
+    // hides which attribute actually failed.
+    const attributes: string[] = [];
+    if (row.rolsuper) {
+      problems.push(`role ${role.name} must not be SUPERUSER`);
+      attributes.push("nosuperuser");
+    }
+    if (row.rolbypassrls) {
+      problems.push(`role ${role.name} must not have BYPASSRLS`);
+      attributes.push("nobypassrls");
+    }
+    if (row.rolcreaterole) {
+      problems.push(`role ${role.name} must not have CREATEROLE`);
+      attributes.push("nocreaterole");
+    }
+    if (row.rolcreatedb) {
+      problems.push(`role ${role.name} must not have CREATEDB`);
+      attributes.push("nocreatedb");
+    }
+    if (row.rolreplication) {
+      problems.push(`role ${role.name} must not have REPLICATION`);
+      attributes.push("noreplication");
+    }
     if (row.rolcanlogin !== role.login) {
       problems.push(`role ${role.name} must ${role.login ? "" : "not "}be able to log in`);
+      // `login` alone, never a password: a role that must be able to log in
+      // already has whatever secret the host gave it, and the remedy must not
+      // reset it or print one.
+      attributes.push(role.login ? "login" : "nologin");
     }
     // A definer role owns SECURITY DEFINER functions, so what it inherits is
     // what those bodies run with.
     if (!role.login && row.rolinherit) {
       problems.push(`definer role ${role.name} must be NOINHERIT`);
-      remedies.push(`alter role ${identifier(role.name)} noinherit;`);
+      attributes.push("noinherit");
+    }
+    if (attributes.length > 0) {
+      remedies.push(`alter role ${identifier(role.name)} ${attributes.join(" ")};`);
+      if (attributes.some((attribute) => SUPERUSER_ONLY_ATTRIBUTES.has(attribute))) {
+        superuserRemedy = true;
+      }
     }
     // A superuser hands the objects over without a grant. Otherwise the grant
     // must name the migrate identity itself AND carry INHERIT and SET on that
@@ -522,9 +645,16 @@ export async function verifyDatabaseRoles(db: OpenShapeForgeDatabase): Promise<v
     "Database role contract is not satisfied:\n" +
       problems.map((problem) => `  - ${problem}`).join("\n") +
       "\n\nRoles are cluster-wide and are provisioned by the host, not by this migration. " +
-      "Run apps/api/src/db/provision-roles.ts with OPENSHAPEFORGE_ADMIN_DATABASE_URL, " +
-      "or execute ALL of the following as an administrator — each revoke cuts one route " +
-      "into one definer role, and a role listed more than once reaches it more than once:" +
+      "apps/api/src/db/provision-roles.ts with OPENSHAPEFORGE_ADMIN_DATABASE_URL creates the " +
+      "roles that do not exist and grants the migrate identity its membership; it never " +
+      "alters an existing role and never revokes anything, so execute ALL of the following " +
+      "as an administrator — each alter role names one role and only the attributes it must " +
+      "not keep, each revoke cuts one route into one definer role, and a role listed more " +
+      "than once reaches it more than once:" +
+      (superuserRemedy
+        ? " changing SUPERUSER, REPLICATION or BYPASSRLS needs a SUPERUSER connection, which " +
+          "CREATEROLE alone is not."
+        : "") +
       "\n\n" +
       [provisioning, ...extra].join("\n"),
   );
@@ -545,6 +675,13 @@ export type ProvisionResult = { created: string[]; rotated: string[]; granted: s
  * Satisfy the contract as an ADMINISTRATOR connection (CREATEROLE). Idempotent:
  * existing roles are left untouched unless their password is explicitly
  * selected for rotation, and memberships are granted only when missing.
+ *
+ * "Left untouched" includes ATTRIBUTES. A role an operator created with an
+ * attribute the contract refuses is not repaired here, deliberately: the
+ * attributes a deployment's own role carries are not this script's to rewrite,
+ * and `nosuperuser`, `noreplication` and `nobypassrls` need a superuser this
+ * connection need not be. {@link verifyDatabaseRoles} prints the `alter role`
+ * for exactly the deviating attributes of exactly that role instead.
  */
 export async function provisionDatabaseRoles(
   admin: OpenShapeForgeDatabase,

@@ -78,7 +78,10 @@ two for any one tenant. A request beyond either limit receives HTTP 429 with
 both the provider read has settled and the response has finished or closed,
 so a disconnected client cannot make still-running reads unbounded. These
 limits are process-local, not a cluster-wide quota. A provider that never
-returns can retain a slot indefinitely; the current provider contract has no
-cancellation guarantee. Isolation across tenants limits one tenant's impact,
+returns can retain a slot indefinitely; provider cancellation is cooperative. Isolation across tenants limits one tenant's impact,
 but simultaneous stalled providers in multiple tenants can still exhaust the
-process-wide budget.
+process-wide budget. HTTP requests signal cancellation on disconnect or after
+30 seconds; a cooperative provider must stop and complete transaction cleanup
+before its slot is released. Providers and filesystem/kernel operations that
+ignore cancellation can still retain capacity indefinitely; the signal is not a
+hard process-level termination guarantee.

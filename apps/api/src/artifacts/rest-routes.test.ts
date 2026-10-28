@@ -5,6 +5,7 @@ import Fastify from "fastify";
 import { __resetSessionResolverForTests } from "../auth/identity.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { registerArtifactRestRoutes } from "./rest-routes.js";
+import { ArtifactStorageRuntime } from "../modules/artifact-storage.js";
 import { ARTIFACT_UPLOAD_LIMIT_BYTES, assertUploadFileName, limitUploadBody } from "./upload-input.js";
 
 const SECRET = "artifact-route-test-secret";
@@ -162,6 +163,55 @@ test("a stalled tenant cannot occupy every download slot", async () => {
     expect((await request("tenant-a")).statusCode).toBe(429);
     expect((await request("tenant-b")).statusCode).toBe(200);
   } finally { finish(); await Promise.all(pending); await app.close(); }
+});
+
+test("a cooperative provider stops on deadline before its slot is released", async () => {
+  const app = Fastify(); let started = 0, cleaned = 0;
+  registerArtifactRestRoutes(app, { downloadTimeoutMs: 20, artifacts: {
+    stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
+    read: async (_session, _input, options) => {
+      started++;
+      try { await new Promise<void>((_resolve, reject) => options!.signal!.addEventListener("abort", () => reject(new Error("cancelled")), { once: true })); }
+      finally { cleaned++; }
+      throw Error("unreachable");
+    },
+  } });
+  const path = `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`;
+  try {
+    const response = await app.inject({ method: "GET", url: path, headers: authorizationHeaders() });
+    expect(response.statusCode).toBe(504);
+    expect(response.json().error.code).toBe("ARTIFACT_DOWNLOAD_TIMEOUT");
+    expect(started).toBe(1);
+    expect(cleaned).toBe(1);
+  } finally { await app.close(); }
+});
+
+test("deadline abort flows through storage runtime and finishes transaction cleanup", async () => {
+  const app = Fastify();
+  let transactionOpen = false, providerStopped = false;
+  const runtime = new ArtifactStorageRuntime<TrustedSessionContext, object>({
+    acceptsSession: () => true, currentTransaction: () => undefined,
+    withTransaction: async (_session, work) => {
+      transactionOpen = true;
+      try { return await work({}); } finally { transactionOpen = false; }
+    },
+    records: { assertAccess: async () => {} } as never,
+  });
+  runtime.configure([{ name: "test-storage", artifactStorage: {
+    providerId: "test", stage: async () => { throw Error("unused"); }, bind: async () => { throw Error("unused"); },
+    read: async (_context, _input, options) => {
+      try { await new Promise<void>((_resolve, reject) => options!.signal!.addEventListener("abort", () => reject(new Error("cancelled")), { once: true })); }
+      finally { providerStopped = true; }
+      throw Error("unreachable");
+    },
+  } }], ["test"]);
+  registerArtifactRestRoutes(app, { artifacts: runtime.services, downloadTimeoutMs: 20 });
+  try {
+    const response = await app.inject({ method: "GET", url: `/api/artifacts/${ARTIFACT_ID}/contents?ownerEntity=Document&ownerId=${DOCUMENT_ID}`, headers: authorizationHeaders() });
+    expect(response.statusCode).toBe(504);
+    expect(providerStopped).toBe(true);
+    expect(transactionOpen).toBe(false);
+  } finally { await app.close(); }
 });
 
 test("download capacity includes in-flight reads and recovers after they finish",async()=>{

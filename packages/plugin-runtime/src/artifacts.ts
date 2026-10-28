@@ -43,7 +43,7 @@ export type RuntimeArtifactStorageContribution<Session, Transaction> = {
   readonly providerId: string;
   stage(context: RuntimeArtifactSessionContext<Session, Transaction>, input: RuntimeArtifactStageInput): Promise<RuntimeArtifactDescriptor>;
   bind(context: { session: Session; transaction: Transaction }, input: RuntimeArtifactBindInput): Promise<RuntimeArtifactDescriptor>;
-  read(context: RuntimeArtifactSessionContext<Session, Transaction>, input: RuntimeArtifactOwnerInput): Promise<RuntimeArtifactContents>;
+  read(context: RuntimeArtifactSessionContext<Session, Transaction>, input: RuntimeArtifactOwnerInput, options?: { signal?: AbortSignal }): Promise<RuntimeArtifactContents>;
 };
 
 /** No physical-delete API: destructive work requires a durable OSF policy decision. */
@@ -56,5 +56,5 @@ export type RuntimeArtifactServices<Session> = Readonly<{
    * refuses the result unless the provider confirms that owner as the record
    * the artifact is bound to.
    */
-  read(session: Session, input: RuntimeArtifactOwnerInput): Promise<RuntimeArtifactContents>;
+  read(session: Session, input: RuntimeArtifactOwnerInput, options?: { signal?: AbortSignal }): Promise<RuntimeArtifactContents>;
 }>;

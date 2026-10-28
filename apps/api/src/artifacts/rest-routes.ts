@@ -65,6 +65,8 @@ export function registerArtifactRestRoutes(
   options: {
     artifacts: RuntimeArtifactServices<TrustedSessionContext>;
     db?: OpenShapeForgeDatabase | undefined;
+    /** Server-owned bound for cooperative provider cancellation. */
+    downloadTimeoutMs?: number;
   },
 ): void {
   void app.register(async (instance) => {
@@ -105,6 +107,12 @@ export function registerArtifactRestRoutes(
       activeDownloads++;
       activeDownloadsByTenant.set(tenantId, tenantDownloads + 1);
       let released = false, readSettled = false, responseSettled = false;
+      const abort = new AbortController();
+      const deadline = setTimeout(() => {
+        if (readSettled) reply.raw.destroy();
+        else abort.abort();
+      }, options.downloadTimeoutMs ?? 30_000);
+      deadline.unref();
       const release = () => {
         if (!released && readSettled && responseSettled) {
           released = true;
@@ -114,14 +122,15 @@ export function registerArtifactRestRoutes(
           else activeDownloadsByTenant.delete(tenantId);
         }
       };
-      const responseDone = () => { responseSettled = true; release(); };
+      const responseDone = () => { clearTimeout(deadline); if (!readSettled) abort.abort(); responseSettled = true; release(); };
       reply.raw.once("finish", responseDone);
       reply.raw.once("close", responseDone);
       try {
       const result = await options.artifacts.read(verified, {
         artifactId,
         owner: { entity: queryString(request, "ownerEntity"), id: queryString(request, "ownerId") },
-      });
+      }, { signal: abort.signal });
+      if (abort.signal.aborted) throw new HttpError(504, "ARTIFACT_DOWNLOAD_TIMEOUT", "File download timed out.");
       readSettled = true;
       release();
       return reply
@@ -133,7 +142,13 @@ export function registerArtifactRestRoutes(
         .header("x-content-type-options", "nosniff")
         .header("cache-control", "private, no-store")
         .send(Buffer.from(result.bytes.buffer, result.bytes.byteOffset, result.bytes.byteLength));
-      } catch (error) { readSettled = true; responseDone(); throw error; }
+      } catch (error) {
+        readSettled = true;
+        const timedOut = abort.signal.aborted && !responseSettled;
+        responseDone();
+        if (timedOut) throw new HttpError(504, "ARTIFACT_DOWNLOAD_TIMEOUT", "File download timed out.");
+        throw error;
+      }
     });
   });
 }

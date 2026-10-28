@@ -91,14 +91,16 @@ export class ArtifactStorageRuntime<Session, Transaction> {
         if (result.artifactId !== input.artifactId) throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The linked file identity does not match." });
         return result;
       },
-      read: async (session, input) => {
+      read: async (session, input, readOptions) => {
         const active = provider(session);
         const record = owner(input);
         // One transaction for the oracle and the provider: the record the
         // session was found to reach is the record the bytes are read against.
         return options.withTransaction(session, async () => {
           await options.records.assertAccess(session, { entityName: record.entity, id: record.id, intent: "get" });
-          const result = await active.read(context(session), input);
+          readOptions?.signal?.throwIfAborted();
+          const result = await active.read(context(session), input, readOptions);
+          readOptions?.signal?.throwIfAborted();
           const safe = descriptor(result.descriptor);
           if (safe.artifactId !== input.artifactId || !(result.bytes instanceof Uint8Array) || result.bytes.byteLength !== safe.byteSize) {
             throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The returned file does not match its stored descriptor." });

@@ -7,6 +7,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { collectAllArtifacts } from "../packages/compiler/src/index.ts";
+import { loadAuthoringConfig } from "../packages/compiler/src/authoring/layers.ts";
 import {
   compilerOwnedGeneratedFiles,
   compilerOwnedGeneratedRoots,
@@ -27,7 +28,7 @@ const webPresent = existsSync(join(repoRoot, "apps/web"));
 // ExternalProcessRun and MeterConnection come from this repository's own
 // record-action layer (test/fixtures/authoring/record-actions) and carry a Web
 // contract because the first-grant form resolves their collections.
-const expectedGeneratedCrudEntityCount = 119;
+const expectedGeneratedCrudEntityCount = loadAuthoringConfig(repoRoot).layers.includes("test/fixtures/authoring/record-actions") ? 119 : 117;
 
 /**
  * The realms this repository authors, by name.

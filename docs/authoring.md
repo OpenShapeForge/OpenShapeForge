@@ -1209,3 +1209,17 @@ projected fields. Fields needed for identity and bindings can remain in `fields`
 without being placed in the visible groups. Other layout properties and multiple
 content tabs are rejected explicitly; related route tabs remain unchanged.
 Omitting `recordLayout` preserves the existing default.
+
+## Record-action test composition
+
+The default `authoring.config.yaml` is the production composition. The
+repository's two `ExternalProcessRun` and `MeterConnection` sample entities
+are test fixtures and are not compiled into the API image. To run this
+repository's record-action DB and end-to-end tests locally, copy
+`test/fixtures/authoring/test-composition.yaml` to the ignored
+`authoring.config.local.yaml`, then run `bun run generate`. Remove the local
+file and regenerate to return to the default composition. Do not replace an
+existing local overlay without preserving its contents. CI opts into the test
+layer explicitly; `.dockerignore` keeps local overlays out of production
+images. `bun scripts/check-test-fixture-composition.ts production` (or `test`)
+checks the currently generated database, REST, GraphQL, MCP and web artifacts.

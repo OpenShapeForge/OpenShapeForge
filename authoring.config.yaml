@@ -8,11 +8,6 @@ layers:
   # Neutral identities used only by this repository's local/e2e stack. The
   # published compiler base contains no product personas or seeded users.
   - test/fixtures/authoring/development-identities
-  # Two entities that opt into the named record-action axis, so the local and
-  # end-to-end stacks have one to manage assignments on. The reusable base
-  # ships none: the axis is opt-in and which records carry an action is a
-  # product decision, not a platform default.
-  - test/fixtures/authoring/record-actions
   # One layer per connector, so a connector directory is self-contained: its
   # contract sits beside the package that implements it, and adding or dropping
   # an integration is one directory and one line here rather than an edit in

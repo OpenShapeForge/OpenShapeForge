@@ -22,3 +22,6 @@ keycloak/*-realm.json
 docs/entities.generated.md
 *.log
 .DS_Store
+
+# Local test overlays must never change the published image composition.
+authoring.config.local.yaml

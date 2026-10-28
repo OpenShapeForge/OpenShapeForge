@@ -64,8 +64,13 @@ jobs:
 
       # generate is REQUIRED before the api typecheck/tests (produces
       # apps/api/src/generated/**).
-      - name: Generate artifacts
-        run: bun run generate
+      - name: Verify production and test compositions
+        run: |
+          bun run generate
+          bun scripts/check-test-fixture-composition.ts production
+          cp test/fixtures/authoring/test-composition.yaml authoring.config.local.yaml
+          bun run generate
+          bun scripts/check-test-fixture-composition.ts test
 
       # typecheck:admin is the control-plane app (apps/admin). It is NOT covered
       # by typecheck:web — separate Next project, separate tsconfig, separate
@@ -439,7 +444,9 @@ jobs:
 
       # apps/api types consume generated artifacts; generate before running.
       - name: Generate artifacts
-        run: bun run generate
+        run: |
+          cp test/fixtures/authoring/test-composition.yaml authoring.config.local.yaml
+          bun run generate
 
       # The db tests default to localhost:5434 with the openshapeforge role and
       # a /postgres admin URL — the exact service configured above — so no extra

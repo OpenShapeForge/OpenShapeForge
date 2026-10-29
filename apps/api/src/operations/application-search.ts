@@ -33,8 +33,8 @@ export function nativeApplicationSearchHandler(operation:OperationContract):Modu
     const available=new Map(definitions.map(d=>[d.id,d]));
     const visible=sources.filter(s=>available.has(s.list));
     const entities=visible.filter(s=>matchesSearch(s,query)).map(s=>({entity:s.entity,label:s.labels[locale]??s.entity}));
-    if(!query)return {value:{entities,groups:[],incomplete:false}};
-    if(input.entity&&!visible.some(s=>s.entity===input.entity))return {value:{entities:[],groups:[],incomplete:false}};
+    if(!query){measure('complete',{durationMs:performance.now()-start,selectedSources:0,incomplete:false});return {value:{entities,groups:[],incomplete:false}};}
+    if(input.entity&&!visible.some(s=>s.entity===input.entity)){measure('complete',{durationMs:performance.now()-start,selectedSources:0,incomplete:false});return {value:{entities:[],groups:[],incomplete:false}};}
     const selected=visible.filter(s=>!input.entity||s.entity===input.entity);
     const groups: Array<{entity:string;items:Array<{id:string;label:string}>;nextCursor:string|null}>=[];
     let incomplete=false,index=0;
@@ -43,18 +43,18 @@ export function nativeApplicationSearchHandler(operation:OperationContract):Modu
     await Promise.all(Array.from({length:Math.min(4,selected.length)},async()=>{
       while(index<selected.length){
         const source=selected[index++]!;
-        if(!source.field||!source.get||!available.has(source.get))continue;
+        if(!source.field||!source.get||!available.has(source.get)){measure('source',{entity:source.entity,outcome:'skipped',reason:'not-record-searchable'});continue;}
         const table=getGeneratedCrudTables().find(t=>t.source?.authoringEntityName===source.entity);
         const readable=(field:string)=>{
           if(!table)return true;
           try{const probe={filter:{[field]:query}};assertClassifiedQueryAllowed(table,session,probe);assertElicitedQueryAllowed(table,probe);assertBoundFieldQueryAllowed(table,probe);return true;}catch{return false;}
         };
-        if(!readable(source.field))continue;
+        if(!readable(source.field)){measure('source',{entity:source.entity,outcome:'skipped',reason:'field-unreadable'});continue;}
         const columns=table?fieldColumnMap(table):undefined;
         const exactId=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(query);
         const fields=[source.field,...(source.descriptionField?[source.descriptionField]:[])].filter(field=>
           readable(field)&&(!columns||columns.get(field)?.type==='text'||(exactId&&columns.get(field)?.type==='uuid')));
-        if(!fields.length)continue;
+        if(!fields.length){measure('source',{entity:source.entity,outcome:'skipped',reason:'no-searchable-fields'});continue;}
         const definition=available.get(source.list)!;
         const schema=(definition.input.kind==='json-schema'?definition.input.schema:definition.input) as Record<string,any>;
         const properties=schema?.properties??{};

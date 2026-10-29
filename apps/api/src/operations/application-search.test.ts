@@ -84,3 +84,32 @@ test('opt-in timing reports source durations without inputs, identity or results
   expect(lines.join(' ')).not.toMatch(/private-query|private-tenant|private-id|private-label/);
  }finally{console.info=info; if(previous===undefined)delete process.env.OSF_SEARCH_TIMING;else process.env.OSF_SEARCH_TIMING=previous;}
 });
+
+test('timing is disabled unless explicitly enabled',async()=>{
+ const previous=process.env.OSF_SEARCH_TIMING; const info=console.info; const lines:string[]=[];
+ console.info=(line:unknown)=>lines.push(String(line));
+ try{
+  for(const flag of [undefined,'0']){
+   if(flag===undefined)delete process.env.OSF_SEARCH_TIMING;else process.env.OSF_SEARCH_TIMING=flag;
+   await nativeApplicationSearchHandler(operation as any)({query:'needle'}, {session:{tenantId:'t'},platform:{operations:{
+    list:async()=>listed('Example.list','Example.get'),execute:async()=>({data:{items:[]}})
+   }}} as any);
+  }
+  expect(lines).toEqual([]);
+ }finally{console.info=info;if(previous===undefined)delete process.env.OSF_SEARCH_TIMING;else process.env.OSF_SEARCH_TIMING=previous;}
+});
+
+test('timing reports skipped catalogue sources and completes empty searches',async()=>{
+ const previous=process.env.OSF_SEARCH_TIMING;const info=console.info;const lines:string[]=[];
+ process.env.OSF_SEARCH_TIMING='1';console.info=(line:unknown)=>lines.push(String(line));
+ try{
+  const context={session:{tenantId:'t'},platform:{operations:{list:async()=>listed('accounts.list-roles'),execute:()=>{throw Error('Must not read')}}}} as any;
+  await nativeApplicationSearchHandler(withPage as any)({query:'roles'},context);
+  const entries=lines.map(line=>JSON.parse(line));
+  expect(entries.find(e=>e.event==='application-search.source')).toMatchObject({entity:'AccessRole',outcome:'skipped',reason:'not-record-searchable'});
+  expect(entries.at(-1)).toMatchObject({event:'application-search.complete',selectedSources:1});
+  lines.length=0;
+  await nativeApplicationSearchHandler(withPage as any)({query:''},context);
+  expect(JSON.parse(lines.at(-1)!)).toMatchObject({event:'application-search.complete',selectedSources:0});
+ }finally{console.info=info;if(previous===undefined)delete process.env.OSF_SEARCH_TIMING;else process.env.OSF_SEARCH_TIMING=previous;}
+});

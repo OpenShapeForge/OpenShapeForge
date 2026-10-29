@@ -68,3 +68,19 @@ test('the pages on offer come from the verified session, not from the input',asy
  expect(seen[0]).toBe(session);
  expect(('value' in result)?result.value:null).toEqual({entities:[],groups:[],incomplete:false});
 });
+
+test('opt-in timing reports source durations without inputs, identity or results',async()=>{
+ const previous=process.env.OSF_SEARCH_TIMING; const info=console.info; const lines:string[]=[];
+ process.env.OSF_SEARCH_TIMING='1'; console.info=(line:unknown)=>lines.push(String(line));
+ try{
+  await nativeApplicationSearchHandler(operation as any)({query:'private-query',locale:'nl'}, {session:{tenantId:'private-tenant'},platform:{operations:{
+   list:async()=>listed('Example.list','Example.get'),execute:async()=>({data:{items:[{id:'private-id',name:'private-label'}]}})
+  }}} as any);
+  const entries=lines.map(line=>JSON.parse(line));
+  expect(entries.map(entry=>entry.event)).toEqual(['application-search.catalog','application-search.source','application-search.complete']);
+  expect(entries[1]).toMatchObject({entity:'Example',outcome:'success'});
+  expect(entries[1].durationMs).toBeGreaterThanOrEqual(0);
+  expect(new Set(entries.map(entry=>entry.measurementId)).size).toBe(1);
+  expect(lines.join(' ')).not.toMatch(/private-query|private-tenant|private-id|private-label/);
+ }finally{console.info=info; if(previous===undefined)delete process.env.OSF_SEARCH_TIMING;else process.env.OSF_SEARCH_TIMING=previous;}
+});

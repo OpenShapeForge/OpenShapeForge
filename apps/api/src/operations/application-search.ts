@@ -18,11 +18,18 @@ export function nativeApplicationSearchHandler(operation:OperationContract):Modu
     ||operation.auth.mode!=='session'||operation.tenancy.mode!=='required'||operation.effects?.data!=='read')throw Error('Invalid application search binding.');
   const sources=operation.implementation.sources;
   return async(input,{session,platform})=>{
+    const timingEnabled=process.env.OSF_SEARCH_TIMING === '1';
+    const start=performance.now();
+    const measurementId=timingEnabled ? crypto.randomUUID() : '';
+    const measure=(event:string,details:Record<string,unknown>={})=>{
+      if(timingEnabled)console.info(JSON.stringify({event:`application-search.${event}`,measurementId,...details}));
+    };
     if(!session?.tenantId||!platform)throw operationFailure({code:'UNAUTHENTICATED',message:'Select an organization.'});
     const query=typeof input.query==='string'?input.query.trim():'';
     const locale=input.locale==='nl'?'nl':'en';
     const first=typeof input.first==='number'?input.first:5;
     const definitions=await platform.operations.list(session);
+    measure('catalog',{durationMs:performance.now()-start});
     const available=new Map(definitions.map(d=>[d.id,d]));
     const visible=sources.filter(s=>available.has(s.list));
     const entities=visible.filter(s=>matchesSearch(s,query)).map(s=>({entity:s.entity,label:s.labels[locale]??s.entity}));
@@ -31,6 +38,7 @@ export function nativeApplicationSearchHandler(operation:OperationContract):Modu
     const selected=visible.filter(s=>!input.entity||s.entity===input.entity);
     const groups: Array<{entity:string;items:Array<{id:string;label:string}>;nextCursor:string|null}>=[];
     let incomplete=false,index=0;
+    const queuedAt=performance.now();
     // Bounded concurrency; every read is still the canonical Operation, with the live session.
     await Promise.all(Array.from({length:Math.min(4,selected.length)},async()=>{
       while(index<selected.length){
@@ -55,6 +63,8 @@ export function nativeApplicationSearchHandler(operation:OperationContract):Modu
         const predicates=fields.map(field=>({[field]:columns?.get(field)?.type==='uuid'?{eq:query}:{contains:query}}));
         const request=structured?{filter:{or:predicates},...(table||'limit'in properties?{limit:first,cursor:input.after}:{first,after:input.after})}
           :{first,after:input.after,[source.field]:query};
+        const operationStart=performance.now();
+        let outcome='success';
         try{
           const result=await platform.operations.execute(session,{operation:{id:source.list,intent:definition.intent??'list'},input:Object.fromEntries(Object.entries(request).filter(([,v])=>v!==undefined))});
           if('error' in result)throw {operationError:result.error};
@@ -65,10 +75,14 @@ export function nativeApplicationSearchHandler(operation:OperationContract):Modu
           if(!structured&&source.descriptionField)incomplete=true;
         }catch(error){
           const code=(error as any)?.operationError?.code;
+          outcome=['FORBIDDEN','ACCESS_DENIED','OPERATION_FORBIDDEN'].includes(code)?'denied':'error';
           if(!['FORBIDDEN','ACCESS_DENIED','OPERATION_FORBIDDEN'].includes(code)){incomplete=true;console.warn('[application-search] source failed',source.entity,code??'UNEXPECTED');}
+        }finally{
+          measure('source',{entity:source.entity,elapsedBeforeStartMs:operationStart-queuedAt,durationMs:performance.now()-operationStart,outcome});
         }
       }
     }));
+    measure('complete',{durationMs:performance.now()-start,selectedSources:selected.length,incomplete});
     return {value:{entities,groups:groups.sort((a,b)=>a.entity.localeCompare(b.entity)),incomplete}};
   };
 }

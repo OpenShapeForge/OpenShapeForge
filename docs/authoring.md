@@ -1223,3 +1223,41 @@ existing local overlay without preserving its contents. CI opts into the test
 layer explicitly; `.dockerignore` keeps local overlays out of production
 images. `bun scripts/check-test-fixture-composition.ts production` (or `test`)
 checks the currently generated database, REST, GraphQL, MCP and web artifacts.
+
+### Collection boards
+
+A web collection can declare a board over an existing single-valued choice or
+entity reference. The grouping reference's collection supplies the columns,
+including columns with no records. Cards project existing typed fields and
+relationship paths; a path ending in an entity returns entity instances and a
+path traversing a collection returns multiple values.
+
+```yaml
+interfaces:
+  web:
+    views:
+      collection:
+        route: /deals
+        columns: [{ key: name }]
+        board:
+          groupBy: salesStageId
+          scopeBy: salesProcessId
+          card:
+            title: name
+            body: [relationId, dealProducts.productId]
+```
+
+`scopeBy` is optional and names a persisted, filterable single string or
+reference field on the grouping entity. The board permits a move only when the
+source and destination columns have the same nonempty scope. If either scope
+is unavailable or the current group is unset, it refuses the move. This is a
+board interaction rule; it does not add a domain invariant to the generic
+entity update Operation. Domain-wide restrictions need their own server-side
+contract. Drag starts acquisition of the normal edit lease in parallel; drop is
+optimistic, and a failed lease or update restores the card.
+
+The runtime resolves relationship steps through authorized canonical list
+Operations in bounded batches. Paths needing provider or association-backed
+reads are reported unavailable by this initial implementation. If a field or
+related instance is not readable, the board does not substitute an identifier
+for its display value. The card title must be single-valued.

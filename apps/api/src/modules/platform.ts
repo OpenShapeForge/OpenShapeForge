@@ -62,6 +62,8 @@ import { runtimeSettings } from "./settings.js";
 import { RecordAccessRuntime } from "./record-access.js";
 import { PrincipalRuntime } from "./principals.js";
 import { createWebhookSecretServices } from "./webhook-secrets.js";
+import { createInboundEndpointServices } from "./inbound-endpoints.js";
+import { inboundEndpointWriter } from "./inbound-store.js";
 import { ReadProgressRuntime, type ReadProgressDefinition } from "./read-progress.js";
 import type { RuntimeReadProgress } from "@openshapeforge/plugin-runtime";
 import {
@@ -474,6 +476,18 @@ export class ModulePlatformRuntime {
           if (activeOperationSessionStorage.getStore()) throw new Error("Signed webhook admission requires its own verified invocation.");
           return this.withActiveOperationSession(session, work);
         },
+      }),
+      // Authenticated inbound provider deliveries. Registration only: the
+      // admission path is the host's own route, so nothing here can be handed
+      // bytes and asked whether they are genuine.
+      inboundEndpoints: createInboundEndpointServices({
+        acceptsSession: (session) => this.#acceptsScopedSession(session),
+        serviceIdentity: (tenantId) => organizationServiceIdentities().find((entry) => entry.tenantId === tenantId)?.clientId,
+        // The dispatch target is resolved through the caller's OWN catalog
+        // authorization, so nobody can bind a webhook to an Operation they
+        // could not invoke themselves and have the service identity run it.
+        resolveOperation: (session, operationId) => this.#getOperation(session, operationId),
+        store: inboundEndpointWriter(db),
       }),
       records: records.services,
       principals: principals.services,

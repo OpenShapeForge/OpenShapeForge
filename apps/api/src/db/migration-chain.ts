@@ -102,6 +102,7 @@ import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/bl
 import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
 import { applyAuditHistory } from "./migrations/audit-history.js";
 import { applyJobsMigration } from "./migrations/jobs.js";
+import { applyInboundMigration, applyInboundGrants } from "./migrations/inbound.js";
 import { applyRecordActionsMigration } from "./migrations/record-actions.js";
 import {
   applyGeneratedSchemaMigration,
@@ -196,6 +197,8 @@ export async function runMigrationChain(
   await applyUpdateNoticesMigration(db);
   await applyOperationExecutionReceiptsMigration(db);
   await applyJobsMigration(db);
+  // After the queue, because an inbound receipt's dispatch rides on it.
+  await applyInboundMigration(db);
   await applyBlueprintsMigration(db);
   await applyAuditHistory(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
@@ -206,6 +209,10 @@ export async function runMigrationChain(
   // declares (or stops declaring) workerDml is picked up without a bespoke
   // migration.
   await applyWorkerRoleGrants(db);
+  // After that sweep, for the same reason the record-action step is: it grants
+  // EXECUTE on every function in `app` to the worker, and the worker may hold
+  // only the inbound liveness lookup — not the tenant resolution beside it.
+  await applyInboundGrants(db);
   // LAST of the privilege steps, and deliberately so. The two sweeps above
   // grant EXECUTE on every function in `app` to the app and worker roles and
   // set a default privilege that would catch a later one too; the

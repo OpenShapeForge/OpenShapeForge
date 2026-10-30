@@ -640,8 +640,17 @@ describe("worker-role RLS axis", () => {
               order by 1
             `.execute(conn);
 
-            // The whole list, enumerated: core's job queue (docs/jobs.md).
-            expect(policies.rows.map((row) => row.qualified)).toEqual(["platform.jobs"]);
+            // The whole list, enumerated: core's job queue (docs/jobs.md) and
+            // the inbound delivery receipts the same `job-worker` resolves
+            // durable dispatch work from (docs/inbound-deliveries.md). Both are
+            // queue bookkeeping the worker claims across tenants. The one
+            // piece of third-party content a receipt carries is encrypted with
+            // AAD bound to its own tenant, endpoint and receipt, so the role's
+            // cross-tenant read still opens nothing but the row it claimed —
+            // and `platform.inbound_endpoints`, which holds the provider
+            // secret, is deliberately NOT on this axis.
+            expect(policies.rows.map((row) => row.qualified))
+              .toEqual(["platform.inbound_deliveries", "platform.jobs"]);
             // USING and WITH CHECK move together, so a claim can also write back
             // — and neither may name the GUC without the connected role beside
             // it, which is the property #223 added.

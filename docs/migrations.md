@@ -105,9 +105,23 @@ migrate role, which on a managed instance has neither `SUPERUSER` nor
 roles the generated schema depends on in `apps/api/src/generated/db/manifest.json`
 under `databaseRoles` — the runtime login role, the worker login role and the
 `nologin` definer roles that own the cross-tenant blueprint read function, the
-identity-registry point lookups and the record-action lookup — and step 0
+pre-session registry point lookups and the record-action lookup — and step 0
 verifies them, failing *before any schema exists* with the exact administrator
 statements that satisfy the contract.
+
+`openshapeforge_identity_resolver` owns the point lookups that have to answer
+*before* a tenant session exists. Its generated `purpose` names the identity
+registry, which is where it began; the current inventory is
+`app.tenant_for_keycloak_organization`, `app.tenant_for_scoped_service`,
+`app.identity_subject` and — added with the authenticated inbound path
+([inbound-deliveries.md](inbound-deliveries.md)) —
+`app.inbound_endpoint_tenant` and `app.inbound_endpoint_active`. Each is a
+point lookup bounded by column-level `SELECT` and a read policy written to this
+role: for inbound that is `(id, tenant_id, status)` of
+`platform.inbound_endpoints`, so the sealed provider secret on that row is
+outside the definer's reach rather than merely unselected by its body. The
+worker connection holds `EXECUTE` on the liveness lookup only, applied after
+the role sweeps that grant `EXECUTE` on every function in `app`.
 
 A definer role exists so one function can read what its caller may not, and
 owns nothing else. `openshapeforge_record_action_resolver` is the narrowest of

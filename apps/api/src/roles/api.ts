@@ -43,6 +43,11 @@ import {
   type PersistedOperationManifest,
 } from "../graphql/yoga.js";
 import { headersFromFastify } from "../http/headers.js";
+import { registerInboundRoutes } from "../http/inbound-routes.js";
+import { useRawJsonBody } from "../http/raw-json-body.js";
+import { createInboundAdmission } from "../modules/inbound-admission.js";
+import { createInboundAdmissionStore } from "../modules/inbound-store.js";
+import { keyringFromEnv } from "../platform/secrets.js";
 import { registerGeneratedRestRoutes } from "../rest/generated-rest-routes.js";
 import { registerEntityChangeStream } from "../rest/entity-change-stream.js";
 import { registerEditLeaseRestRoutes } from "../rest/edit-lease-routes.js";
@@ -331,12 +336,9 @@ export function createApiApp(options: {
 
   app.decorate("rateLimitMetrics", rateLimitMetrics);
 
-  app.removeContentTypeParser("application/json");
-  app.addContentTypeParser(
-    "application/json",
-    { parseAs: "buffer" },
-    (_request, body, done) => done(null, body),
-  );
+  // Exact request bytes for every route: GraphQL forwards them to Yoga, and an
+  // inbound provider delivery's HMAC covers them (http/raw-json-body.ts).
+  useRawJsonBody(app);
   let databaseRuntime: DatabaseRuntime | undefined;
 
   if (options.databaseUrl) {
@@ -643,6 +645,23 @@ export function createApiApp(options: {
       ...dbOptions,
       config: readConnectorRuntimeConfig(),
       egressOwner,
+    });
+    // The provider delivery route. Unauthenticated by necessity, like the
+    // OAuth callback below, and registered here for the same reason: a route
+    // a stranger can reach belongs behind the rate limiter. Without a database
+    // the admission is absent and the route answers 503 rather than 404, so a
+    // misconfigured host never looks to a provider like a withdrawn endpoint.
+    registerInboundRoutes(routes, {
+      ...(databaseRuntime
+        ? {
+            admit: createInboundAdmission({
+              store: createInboundAdmissionStore(databaseRuntime.db),
+              keyring: () => keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS),
+              // Ids and codes only: never a header value, a digest or a payload.
+              log: (event) => routes.log.warn(event, "An inbound delivery was not accepted."),
+            }),
+          }
+        : {}),
     });
     // Inside the same child plugin, so the callback an unauthenticated stranger
     // can reach sits behind the rate limiter like everything else.

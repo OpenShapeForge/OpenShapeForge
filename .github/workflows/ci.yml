@@ -474,6 +474,11 @@ jobs:
           bun test src/documents/__tests__
           find src/modules -name '*.test.ts' ! -name 'platform-artifact-transaction.test.ts' -print0 | xargs -0 bun test
           bun test src/modules/platform-artifact-transaction.test.ts
+          # The inbound delivery path: the bounded HMAC verifier, the public
+          # route's exact-bytes handling and the dispatch handler's outcome
+          # translation. Database-free, but they run here because this is the
+          # job that already has apps/api generated and installed.
+          bun test src/platform/inbound-signature.test.ts src/http src/jobs
 
       # The three connector suites below exercise real RLS sessions and the
       # booted HTTP surfaces. Each creates, migrates, and drops its own scratch

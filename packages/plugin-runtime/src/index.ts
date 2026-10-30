@@ -9,9 +9,20 @@ import type { Kysely, Transaction } from "kysely";
 import type { RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type { RuntimeSettingsService } from "./settings.js";
 import type { RuntimeWebhookSecretServices } from "./webhook-secrets.js";
+import type { RuntimeInboundEndpointServices } from "./inbound.js";
 import type { RuntimeReadProgressServices } from "./read-progress.js";
 export type { RuntimeReadProgress, RuntimeReadProgressSnapshot, RuntimeReadProgressServices } from "./read-progress.js";
 export type { RuntimeWebhookSecretServices, RuntimeWebhookSignatureInput } from "./webhook-secrets.js";
+export {
+  RUNTIME_INBOUND_HASH_ALGORITHMS, RUNTIME_INBOUND_IDENTITY_SOURCES,
+  RUNTIME_INBOUND_SIGNATURE_ENCODINGS,
+} from "./inbound.js";
+export type {
+  RuntimeInboundAdmission, RuntimeInboundDeliveryEnvelope, RuntimeInboundDeliveryIdentity,
+  RuntimeInboundEndpoint, RuntimeInboundEndpointRegistration, RuntimeInboundEndpointServices,
+  RuntimeInboundEndpointStatus, RuntimeInboundHashAlgorithm, RuntimeInboundIdentitySource,
+  RuntimeInboundSignatureEncoding, RuntimeInboundSignatureScheme,
+} from "./inbound.js";
 import type { RuntimeRecordAccessServices } from "./record-access.js";
 export type { RuntimeRecordAccessServices, RuntimeRecordAccessRequest, RuntimeRecordAccessBatchRequest, RuntimeRecordAccessIntent, RuntimeStoredFieldProjectionRequest,
   RuntimeRecordActionRequest } from "./record-access.js";
@@ -461,6 +472,13 @@ export type PluginPlatformServices = {
   };
   /** Host-owned signing secret sealing and raw-body verification; no plaintext read API. */
   readonly webhookSecrets?: RuntimeWebhookSecretServices<PluginSessionContext>;
+  /**
+   * Authenticated inbound provider deliveries (`./inbound.js`): the plugin
+   * registers an endpoint for its own tenant, the host owns the secret, the
+   * verification, the durable receipt and the dispatch identity. Absent on
+   * runtimes without this capability; consumers must fail closed.
+   */
+  readonly inboundEndpoints?: RuntimeInboundEndpointServices<PluginSessionContext>;
   readonly records: RuntimeRecordAccessServices<PluginSessionContext>;
   /**
    * Who the host verified this session to be. A module acting for an

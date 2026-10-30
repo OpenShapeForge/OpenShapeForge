@@ -81,4 +81,7 @@ test("sum preserves decimals, scope, filters and separate currencies", async () 
   await expect(aggregateBoardGroupsForTable(restricted!.db, restrictedSession, root, [root, target], {})).rejects.toThrow("outside the list projection");
   const constrainedRoot = { ...root, source: { ...root.source!, graphql: { ...root.source!.graphql!, relationships: [{ ...root.source!.graphql!.relationships![0]!, constraints: { currency: { eq: "EUR" } } }] } } };
   await expect(aggregateBoardGroupsForTable(restricted!.db, session, constrainedRoot, [constrainedRoot, target], {})).rejects.toThrow("Invalid board aggregate relationship");
+  const scopedTarget: GeneratedCrudTable = { ...target, subtype: { base: { entityName: "ContactDetail", entityId: "core.ContactDetail", slug: "contact-detail", table: target.name }, scope: [{ field: "currency", column: "currency", value: "EUR" }], hiddenColumns: [] } };
+  const scoped = await aggregateBoardGroupsForTable(restricted!.db, session, root, [root, scopedTarget], { filter: { stage: { eq: "open" } } });
+  expect(scoped).toEqual([{ group: "open", available: false, totals: [] }]);
 });

@@ -6,6 +6,7 @@ import { inheritAuthorizationProfileAccess } from "../auth/authorization-profile
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { readStatementTimeoutMs } from "../config/limits.js";
+import { databaseRole } from "./database-roles.js";
 import { actingRelationId, type ActingRelationSource } from "./acting-relation.js";
 import { withReadBarrierDatabase } from "./read-barrier.js";
 import { boundedReadTransaction } from "./bounded-read-transaction.js";
@@ -149,6 +150,18 @@ async function applyAuthorizationSession<T>(trx: Transaction<T>): Promise<void> 
     if to_regprocedure('app.authorization_rules_for_actor()') is not null then
       if app.bypass_rls() or app.current_tenant() is null then
         perform set_config('app.authorization_rules','',true);
+        return;
+      end if;
+      -- Workers may touch only worker-granted tables. They receive a
+      -- tenant-fenced list of managed entities and no grant rules: any access
+      -- to a managed entity is denied, while canonical Operations execute
+      -- separately under the API's verified service identity.
+      if current_user = ${sql.lit(databaseRole("worker").name)} then
+        if to_regprocedure('app.authorization_worker_rules()') is null then
+          raise exception 'Worker authorization projection is not installed';
+        end if;
+        perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
+        perform set_config('app.authorization_rules',app.authorization_worker_rules()::text,true);
         return;
       end if;
       dependencies:=coalesce(nullif(current_setting('app.audit_read_operations',true),''),'[]')::jsonb;
@@ -789,6 +802,7 @@ export async function withCredentialResolutionSession<TDatabase, TResult>(
       );
     }
     await sql`select set_config('app.tenant_id', ${tenantId}, true)`.execute(trx);
+    await sql`select set_config('app.bypass_rls', 'false', true)`.execute(trx);
     // Deliberately no app.user_id, no app.roles, no app.scope, no
     // app.principal_class and no
     // app.app_principal_id: nothing this callback reads is user-, role- or

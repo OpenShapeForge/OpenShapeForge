@@ -187,6 +187,10 @@ describe("worker-role RLS axis", () => {
           await sql`update platform.tenants set keycloak_realm = 'host', keycloak_organization_id = ${organization}
             where id = ${tenant}::uuid`.execute(db);
         }
+        // Manage Notebook in only tenant A. A worker must learn only that
+        // managed name, never the policy rows or the other tenant's state.
+        await sql`insert into erp.authorization_operation_policies (tenant_id, operation_id, entity_type, managed)
+          values (${fixture.tenantA}::uuid, 'Notebook.deliver', 'Notebook', true)`.execute(db);
         return fixture;
       });
       const issuer = "https://identity.example.test/realms/host";
@@ -237,6 +241,17 @@ describe("worker-role RLS axis", () => {
             .rejects.toThrow(/permission denied for (table|schema)/);
           await expect(sql`select 1 from erp.relations limit 1`.execute(db))
             .rejects.toThrow(/permission denied for (table|schema)/);
+          await expect(sql`select 1 from erp.authorization_operation_policies limit 1`.execute(db))
+            .rejects.toThrow(/permission denied for (table|schema)/);
+          for (const [tenantId, managed] of [[fixture.tenantA, true], [fixture.tenantB, false]] as const) {
+            await withDbSession(db, { tenantId, userId: subject, roles: [], scope: "self" }, async trx => {
+              const result = await sql<{managed: boolean; allowed: boolean; exposed: boolean}>`
+                select app.authorization_entity_managed('Notebook') as managed,
+                  app.authorization_allows('Notebook', '{}'::jsonb) as allowed,
+                  (current_setting('app.authorization_rules')::jsonb->'states' <> '{}'::jsonb) as exposed`.execute(trx);
+              expect(result.rows[0]).toEqual({ managed, allowed: !managed, exposed: false });
+            });
+          }
 
           await withDbSession(db, { tenantId: fixture.tenantA, userId: subject, roles: [], scope: "self" }, async (trx) => {
             for (const [tenant, realm, expected] of [

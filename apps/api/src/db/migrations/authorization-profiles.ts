@@ -13,6 +13,7 @@ import compiledInventory from '../../generated/compiler/authorization-operations
 import accessPolicy from '../../generated/compiler/access-policy.json' with {type:'json'};
 import { databaseRole } from '../database-roles.js';
 import { APP_ROLE } from './app-role.js';
+import { WORKER_ROLE } from './worker-role.js';
 
 type InventorySeed = { checksum: string; rows: Array<{ id:string; entity:string; roles:string[]; grantable:boolean; fields:Record<string,{column:string;type:string}> }> };
 export async function applyAuthorizationProfilesMigration(db: OpenShapeForgeDatabase) {
@@ -167,6 +168,26 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
     alter function app.authorization_group_exists(text) owner to ${sql.id(resolver)};
   `.execute(db);
   const policies=table('AuthorizationOperationPolicy'),assignments=table('AuthorizationProfileAssignment'),profiles=table('AuthorizationProfile'),versions=table('AuthorizationProfileVersion');
+  // A worker needs to fail closed for managed entities while handling a
+  // tenant's queued work, but must not gain the API role's access to the
+  // authorization catalog. The existing non-login resolver may read only
+  // these three columns and returns only the tenant's managed entity names.
+  await sql`grant select (tenant_id, ${sql.id(entityColumnName('AuthorizationOperationPolicy','entityType'))}, ${sql.id(entityColumnName('AuthorizationOperationPolicy','managed'))}) on ${policies} to ${sql.id(resolver)}`.execute(db);
+  await sql`drop policy if exists authorization_worker_managed_lookup on ${policies}`.execute(db);
+  await sql`create policy authorization_worker_managed_lookup on ${policies} for select to ${sql.id(resolver)} using (tenant_id=app.current_tenant())`.execute(db);
+  await sql`grant create on schema app to ${sql.id(resolver)}`.execute(db);
+  await sql`
+    create or replace function app.authorization_worker_rules() returns jsonb
+    language sql stable security definer set search_path=pg_catalog,pg_temp as $function$
+      select jsonb_build_object('actor','{}'::jsonb,'states','{}'::jsonb,
+        'managedEntities',coalesce((select jsonb_agg(distinct ${col('s','AuthorizationOperationPolicy','entityType')})
+          from ${policies} s where s.tenant_id=app.current_tenant() and ${col('s','AuthorizationOperationPolicy','managed')}),'[]'::jsonb));
+    $function$;
+    revoke all on function app.authorization_worker_rules() from public;
+    grant execute on function app.authorization_worker_rules() to ${sql.id(WORKER_ROLE)};
+    alter function app.authorization_worker_rules() owner to ${sql.id(resolver)};
+  `.execute(db);
+  await sql`revoke create on schema app from ${sql.id(resolver)}`.execute(db);
   await sql`
     create or replace function app.authorization_rules_for_actor() returns jsonb
     language sql stable as $function$

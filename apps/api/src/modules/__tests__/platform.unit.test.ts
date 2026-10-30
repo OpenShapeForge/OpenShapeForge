@@ -83,7 +83,7 @@ describe("runtime module platform session authority", () => {
   });
 
   it("exposes only canonical, safely classified database refusals", () => {
-    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const runtime = new ModulePlatformRuntime(testDatabase());
     const authored = Object.assign(
       new Error("STATE_TRANSITION_REFUSED: This transition is not available."),
       {
@@ -109,7 +109,7 @@ describe("runtime module platform session authority", () => {
   });
 
   it("includes static plugin Operations in the canonical registry and executor", async () => {
-    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const runtime = new ModulePlatformRuntime(testDatabase());
     const definition = {
       id: "example.static.run",
       key: "example.static.run",
@@ -152,7 +152,7 @@ describe("runtime module platform session authority", () => {
   });
 
   it("answers a generated entity tool name with its canonical contract under the same checks", async () => {
-    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const runtime = new ModulePlatformRuntime(testDatabase());
     const contracts = getEntityOperationContracts();
     // Real generated aliases: a dedicated tool name only one entity carries.
     const dedicated = (operation: string) => {
@@ -303,7 +303,7 @@ describe("runtime module platform session authority", () => {
   });
 
   it("refuses duplicate runtime Operation provider ids", async () => {
-    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const runtime = new ModulePlatformRuntime(testDatabase());
     const provider = {
       id: "duplicate",
       list: async () => [],
@@ -319,7 +319,7 @@ describe("runtime module platform session authority", () => {
   });
 
   it("authorizes a module-owned resource handle only for its exact live session", async () => {
-    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const runtime = new ModulePlatformRuntime(testDatabase());
     const active = createModuleSessionCapability(claims());
     let hookCalls = 0;
     const owner: RuntimeModule = {
@@ -609,7 +609,7 @@ describe("runtime module platform session authority", () => {
   });
 
   it("accepts only the exact active deeply-frozen session capability", async () => {
-    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const runtime = new ModulePlatformRuntime(testDatabase());
     const active = createModuleSessionCapability(claims());
     const registered = binding(active);
     runtime.registerServer(registered);
@@ -909,7 +909,7 @@ describe("runtime module platform session authority", () => {
   });
 
   it("invalidates a stale capability across unregister and reconnect", async () => {
-    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const runtime = new ModulePlatformRuntime(testDatabase());
     const oldSession = createModuleSessionCapability(claims());
     const oldBinding = binding(oldSession);
     runtime.registerServer(oldBinding);
@@ -928,7 +928,7 @@ describe("runtime module platform session authority", () => {
 
 describe("runtime module list-change notifications", () => {
   it("fans out by tenant or globally and excludes closed/non-live sessions", async () => {
-    const runtime = new ModulePlatformRuntime({} as OpenShapeForgeDatabase);
+    const runtime = new ModulePlatformRuntime(testDatabase());
     const calls: string[] = [];
     const add = (name: string, tenant: string, liveNotifications = true) => {
       const value = binding(createModuleSessionCapability(claims(tenant)), {

@@ -23,8 +23,11 @@ export function nativeCollectionOptionsHandler(operation:OperationContract,modul
  return async(input,context)=>{
   const {session,platform}=context;
   if(!session?.tenantId||!platform)throw operationFailure({code:'UNAUTHENTICATED',message:'Select an organization.'});
-  const definitions=await platform.operations.list(session), available=new Map(definitions.map(d=>[d.id,d]));
-  const source=sources.find(s=>s.entity===input.entity&&available.has(s.list));
+  const candidate=sources.find(s=>s.entity===input.entity);
+  const wanted=[candidate?.list,sources.find(s=>s.entity===input.referenceEntity)?.list,sources.find(s=>s.entity===input.referenceEntity)?.get,typeof input.referenceEntity==='string'?resources.get(input.referenceEntity)?.readOperationId:undefined,'application.search'].filter((id):id is string=>typeof id==='string');
+  const definitions=(await Promise.all([...new Set(wanted)].map(id=>platform.operations.get(session,id)))).filter((definition):definition is NonNullable<typeof definition>=>!!definition);
+  const available=new Map(definitions.map(d=>[d.id,d]));
+  const source=candidate&&available.has(candidate.list)?candidate:undefined;
   const field=typeof input.field==='string'?input.field:'';
   if(!source||!Object.hasOwn(source.fields,field))throw operationFailure({code:'FORBIDDEN',message:'This filter source is unavailable.'});
   const table=getGeneratedCrudTables().find(t=>t.source?.authoringEntityName===source.entity);

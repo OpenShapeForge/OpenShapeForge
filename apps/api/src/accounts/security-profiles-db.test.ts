@@ -95,9 +95,9 @@ test('a tenant assignment stays inside the ceiling and a withdrawn profile stops
   return createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfileAssignment'),values:{name:operationId,profileVersion:version.id,subjectKind,subjectKey,active:true}});
  };
  const {securitySubjectChoices}=await import('./security-profiles.js');
- const people=await securitySubjectChoices({...platformFor(manager).context,db:restricted()},{kind:'user',search:'Reader',first:25,locale:'en'});
+ const people=await securitySubjectChoices({session:manager,db:restricted()},{kind:'user',search:'Reader',first:25,locale:'en'});
  expect(people.items.some(item=>item.value===identity)).toBe(true);
- const directoryGroups=await securitySubjectChoices({...platformFor(manager).context,db:restricted()},{kind:'group',search:'Readers',first:25,locale:'en'});
+ const directoryGroups=await securitySubjectChoices({session:manager,db:restricted()},{kind:'group',search:'Readers',first:25,locale:'en'});
  expect(directoryGroups.items.some(item=>item.value===group&&item.label==='Readers')).toBe(true);
  await addProfile('Relation.get',rule('equals',literal('supplier')),'group',group);
  const grouped={...audience,relationGroupIds:[group]};

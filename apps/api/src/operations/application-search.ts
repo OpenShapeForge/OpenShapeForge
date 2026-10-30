@@ -22,7 +22,7 @@ export function nativeApplicationSearchHandler(operation:OperationContract):Modu
     const query=typeof input.query==='string'?input.query.trim():'';
     const locale=input.locale==='nl'?'nl':'en';
     const first=typeof input.first==='number'?input.first:5;
-    const definitions=await platform.operations.list(session);
+    const definitions=(await Promise.all([...new Set(sources.map(source=>source.list))].map(id=>platform.operations.get(session,id)))).filter((definition):definition is NonNullable<typeof definition>=>!!definition);
     const available=new Map(definitions.map(d=>[d.id,d]));
     const visible=sources.filter(s=>available.has(s.list));
     const entities=visible.filter(s=>matchesSearch(s,query)).map(s=>({entity:s.entity,label:s.labels[locale]??s.entity}));

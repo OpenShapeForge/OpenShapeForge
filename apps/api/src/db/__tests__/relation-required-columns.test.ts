@@ -37,3 +37,16 @@ test('a null in either table aborts both changes without altering user rows',asy
  expect((await flags(db)).every(c=>!c.required)).toBe(true);
  expect((await sql<{id:string}>`select id::text from erp.relation_group_memberships`.execute(db)).rows[0]?.id).toBe(id);
 }),30000);
+
+test('membership nullability follows the composed manifest without changing existing data',async()=>scratch(async db=>{
+ const { reconcileMembershipRelationNullability }=await import('../migrations/versioned/0022_membership-relation-nullability.js');
+ const id=randomUUID(),relation=randomUUID();
+ await sql`alter table erp.relation_group_memberships alter column relation_id set not null`.execute(db);
+ await sql`insert into erp.relation_group_memberships values(${id}::uuid,${relation}::uuid)`.execute(db);
+ await db.transaction().execute(tx=>reconcileMembershipRelationNullability(tx,tables(true)));
+ expect((await flags(db)).find(c=>c.table==='relation_group_memberships')?.required).toBe(true);
+ await db.transaction().execute(tx=>reconcileMembershipRelationNullability(tx,tables(false)));
+ expect((await flags(db)).find(c=>c.table==='relation_group_memberships')?.required).toBe(false);
+ expect((await sql<{relation_id:string}>`select relation_id::text from erp.relation_group_memberships where id=${id}::uuid`.execute(db)).rows[0]?.relation_id).toBe(relation);
+ await db.transaction().execute(tx=>reconcileMembershipRelationNullability(tx,tables(false)));
+}),30000);

@@ -483,15 +483,16 @@ function compileRelationshipPath(
   source: ProjectableEntity,
   all: ReadonlyMap<string, ProjectableEntity>,
   keys: readonly string[],
+  kind = "context record",
 ): { path: Array<{ entityId: string; relationshipId: string }>; target: ProjectableEntity; many: boolean } {
-  if (!keys.length || keys.length > 4) throw new Error(`${entityName}: context record path requires one to four relationships.`);
+  if (!keys.length || keys.length > 4) throw new Error(`${entityName}: ${kind} path requires one to four relationships.`);
   let owner = source;
   let many = false;
   const path = keys.map(key => {
     const relation = owner.contract.model.relationships.find(item => item.key === key);
     const target = relation && all.get(relation.target);
     if (!relation || !target || !target.operations[relation.kind === "hasMany" ? "list" : "get"]) {
-      throw new Error(`${entityName}: context record path ${key} requires a canonical readable relationship.`);
+      throw new Error(`${entityName}: ${kind} path ${key} requires a canonical readable relationship.`);
     }
     const step = { entityId: owner.contract.entity.name, relationshipId: `${owner.contract.entity.name}.${key}` };
     many ||= relation.kind === "hasMany";
@@ -921,7 +922,8 @@ function projectEntity(
         const key = parts[i]!;
         const relation = owner.contract.model.relationships.find(item => item.key === key);
         if (relation) {
-          const resolved = compileRelationshipPath(entityName, owner, all, [key]);
+          if (path.length >= 4) throw new Error(`${entityName}: board path requires at most four relationships.`);
+          const resolved = compileRelationshipPath(entityName, owner, all, [key], "board");
           if (!resolved.target.operations.list) throw new Error(`${entityName}: board path ${expression} requires a readable collection.`);
           path.push(...resolved.path);
           many ||= resolved.many;

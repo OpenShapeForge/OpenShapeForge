@@ -1256,6 +1256,10 @@ entity update Operation. Domain-wide restrictions need their own server-side
 contract. Drag starts acquisition of the normal edit lease in parallel; drop is
 optimistic, and a failed lease or update restores the card.
 
+The `groupTargetField` choice marker identifies fields on the selected grouping
+entity. Schema-driven editors that do not yet follow the selected `groupBy`
+show this setting as text; compiler validation remains authoritative.
+
 The runtime resolves relationship steps through authorized canonical list
 Operations in bounded batches. Paths needing provider or association-backed
 reads are reported unavailable by this initial implementation. If a field or

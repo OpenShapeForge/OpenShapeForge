@@ -522,7 +522,7 @@ describe("coreEntity properties the compiler implements", () => {
     // operation, renderer or component key must carry one; a key that is an
     // identifier of something else (a variable source) must not.
     const defs = coreEntitySchema.$defs as Record<string, unknown>;
-    const kinds = new Set(["field", "sortableField", "relationship", "operation", "renderer", "component"]);
+    const kinds = new Set(["field", "sortableField", "relationship", "groupTargetField", "operation", "renderer", "component"]);
     const unmarked: string[] = [];
     const seen: string[] = [];
     const visited = new Set<unknown>();

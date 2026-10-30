@@ -589,6 +589,7 @@ function projectField(
     id: `${parent}.${field.key}`, key: field.key,
     label: localized(field.label, field.key), description: localized(field.description, ""),
     osfType: field.osfType,
+    ...(field.unit ? { unit: field.unit } : {}),
     ...(field.document ? { document: structuredClone(field.document) } : {}),
     baseType: field.baseType,
     cardinality: field.cardinality === "collection" ? "many" : "one",
@@ -912,6 +913,14 @@ function projectEntity(
         throw new Error(`${entityName}: board scope must name a persisted filterable single scalar field on the grouping entity.`);
       }
     }
+    if (authoredBoard.groupSummary) {
+      const target = group.relationship && all.get(group.relationship.targetEntityId);
+      const summary = target?.contract.model.fields.find(field => field.key === authoredBoard.groupSummary);
+      const provider = target?.contract.model.relationships.some(item => item.fieldKey === authoredBoard.groupSummary);
+      if (!summary || summary.cardinality === "collection" || summary.baseType === "object" || summary.relationship?.target || provider) {
+        throw new Error(`${entityName}: board group summary must name a scalar field on the grouping entity.`);
+      }
+    }
     const valuePath = (expression: string): WebValuePath => {
       const parts = expression.split(".");
       if (parts.length > 5 || parts.some(part => !part)) throw new Error(`${entityName}: invalid board path ${expression}.`);
@@ -940,7 +949,7 @@ function projectEntity(
     };
     const title = valuePath(authoredBoard.card.title);
     if (title.cardinality !== "one") throw new Error(`${entityName}: board card title must be single-valued.`);
-    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), card: { title, body: (authoredBoard.card.body ?? []).map(valuePath) } };
+    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), ...(authoredBoard.groupSummary ? { groupSummary: authoredBoard.groupSummary } : {}), card: { title, ...(authoredBoard.card.subtitle ? { subtitle: authoredBoard.card.subtitle.map(valuePath) } : {}), body: (authoredBoard.card.body ?? []).map(valuePath) } };
   }
   for (const groups of [authoredCreateGroups, updateGroups]) assertVisibilityFields(entityName, "form group", groups, fields);
 

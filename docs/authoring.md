@@ -1243,9 +1243,10 @@ interfaces:
         board:
           groupBy: salesStageId
           scopeBy: salesProcessId
+          groupSummary: defaultProbabilityPercent
           card:
             title: name
-            body: [relationId, dealProducts.productId]
+            subtitle: [relationId, dealProducts.productId]
 ```
 
 `scopeBy` is optional and names a persisted, filterable single string or
@@ -1256,6 +1257,11 @@ board interaction rule; it does not add a domain invariant to the generic
 entity update Operation. Domain-wide restrictions need their own server-side
 contract. Drag starts acquisition of the normal edit lease in parallel; drop is
 optimistic, and a failed lease or update restores the card.
+
+`groupSummary` optionally names a readable scalar field on the grouping entity.
+Its value uses the normal typed field renderer, including an authored unit.
+`subtitle` is an optional list of typed paths displayed directly beneath the
+card title; `body` remains available for other card fields.
 
 The `groupTargetField` choice marker identifies fields on the selected grouping
 entity. Schema-driven editors that do not yet follow the selected `groupBy`

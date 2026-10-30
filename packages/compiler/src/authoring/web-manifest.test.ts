@@ -2136,8 +2136,9 @@ test("board card paths preserve related entity type and collection cardinality",
   const owner = entity("Deal", "deal", [field("displayName"), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } })], coreView(), [{ key: "lines", kind: "hasMany", target: "Line", foreignKey: "deal_id" }]);
   const line = entity("Line", "line", [field("productId", { osfType: "Product" })], coreView(), [{ key: "productId", fieldKey: "productId", kind: "belongsTo", target: "Product", foreignKey: "product_id" }]);
   const product = entity("Product", "product", [field("displayName")], coreView());
-  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", body: ["lines.productId", "lines.productId.displayName"] } };
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", subtitle: ["lines.productId"], body: ["lines.productId", "lines.productId.displayName"] } };
   const build = () => buildWebManifest([owner, line, product]);
+  expect(build().entities.Deal!.views.collection.board!.card.subtitle![0]).toMatchObject({ targetEntityId: "Product", cardinality: "many" });
   expect(build().entities.Deal!.views.collection.board!.card.body[0]).toMatchObject({
     targetEntityId: "Product", osfType: "Product", cardinality: "many",
     path: [{ entityId: "Deal", relationshipId: "Deal.lines" }, { entityId: "Line", relationshipId: "Line.productId" }],
@@ -2167,10 +2168,15 @@ test("board card relationship paths allow four hops and reject five", () => {
 
 test("board scope names a single field on the grouping entity", () => {
   const owner = entity("Task", "task", [field("displayName"), field("stage", { osfType: "Stage", relationship: { target: "Stage" } })], coreView(), [{ key: "stage", fieldKey: "stage", kind: "belongsTo", target: "Stage", foreignKey: "stage_id" }]);
-  const stage = entity("Stage", "stage", [field("displayName"), field("processId")], coreView());
-  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", scopeBy: "processId", card: { title: "displayName" } };
+  const stage = entity("Stage", "stage", [field("displayName"), field("processId"), field("probability", { osfType: "integer", baseType: "integer", unit: "%" })], coreView());
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", scopeBy: "processId", groupSummary: "probability", card: { title: "displayName" } };
   const build = () => buildWebManifest([owner, stage]);
   expect(build().entities.Task!.views.collection.board?.scopeBy).toBe("processId");
+  expect(build().entities.Task!.views.collection.board?.groupSummary).toBe("probability");
+  expect(build().entities.Stage!.fields.probability?.unit).toBe("%");
+  owner.contract.interfaces!.web!.collectionBoard!.groupSummary = "missing";
+  expect(build).toThrow("board group summary must name a scalar field");
+  owner.contract.interfaces!.web!.collectionBoard!.groupSummary = "probability";
   owner.contract.interfaces!.web!.collectionBoard!.scopeBy = "missing";
   expect(build).toThrow("board scope must name a persisted filterable single scalar field");
 });

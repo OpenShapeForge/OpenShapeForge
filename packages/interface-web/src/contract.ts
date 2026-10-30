@@ -178,6 +178,7 @@ export type WebFieldProjection = {
    * The renderer registry keys on it; `baseType` is its structural base.
    */
   osfType: string;
+  unit?: string;
   baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
@@ -235,7 +236,7 @@ export type WebTimelinePresentation = {
 };
 
 export type WebCollectionView = {
-  board?: { groupBy: string; scopeBy?: string; card: { title: WebValuePath; body: WebValuePath[] } };
+  board?: { groupBy: string; scopeBy?: string; groupSummary?: string; card: { title: WebValuePath; subtitle?: WebValuePath[]; body: WebValuePath[] } };
   presentation?: WebTimelinePresentation;
   id: string;
   kind: "collection";

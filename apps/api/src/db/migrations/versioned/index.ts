@@ -2,7 +2,7 @@
 /**
  * Explicit, ordered registry of versioned migrations.
  *
- * Each entry is the default export of a sibling file in this directory,
+ * Each entry normally is the default export of a sibling file in this directory,
  * scaffolded with `bun run db:migration:new <kebab-name>`. The runner
  * (../versioned-runner.ts) enforces the "NNNN_kebab-name" version format and
  * strictly ascending numbers, starting at 0016 — 0001 is the generated-schema
@@ -11,6 +11,9 @@
  * Applied migrations are immutable: platform.schema_migrations records the
  * sha256 of each migration file and db:migrate fails loudly if an applied
  * file is edited afterwards. Transform forward with a new migration instead.
+ * The one exception is pending 0018: the wrapper below runs separately
+ * checksummed 0020 compatibility in the same transaction and records both
+ * hashes atomically. Previously applied 0018 continues to be skipped.
  */
 import { migrationFileChecksum, type VersionedMigration } from "../versioned-runner.js";
 import { sql } from "kysely";
@@ -25,7 +28,8 @@ export const versionedMigrations: VersionedMigration[] = [
   m0016ChipDefinitionDefault,
   m0017TenantIdentityDefault,
   { ...m0018TypedTenantSettings, up: async db => {
-    // Compatibility is performed atomically with pending 0018 and ledgered
+    // 0018 remains byte-identical for existing ledgers. Compatibility is
+    // performed atomically with pending 0018 and ledgered
     // under its own immutable checksum. Previously applied 0018 is skipped.
     const checksum = await migrationFileChecksum(m0020LegacySealedTenantSettings);
     const recorded = (await sql<{checksum:string}>`select checksum from platform.schema_migrations where version=${m0020LegacySealedTenantSettings.version}`.execute(db)).rows[0]?.checksum;

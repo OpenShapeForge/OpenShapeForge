@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql, type Kysely } from "kysely";
-import { decryptSecret, encryptSecret, keyringFromEnv, type StoredSecret } from "@openshapeforge/plugin-runtime/secrets";
+import { decryptSecret, encryptSecret, keyringFromEnv, type StoredSecret, SECRET_ALGORITHM } from "@openshapeforge/plugin-runtime/secrets";
 import type { VersionedMigration } from "../versioned-runner.js";
 
-/** Carry the released scalar/plain JSON contract forward without guessing at
+/** Compatibility implementation for pending 0018: its original source remains
+ * immutable, while this separately checksummed file extends it to the legacy
+ * browser-client {sealed} contract. Its registry up is intentionally a no-op:
+ * the wrapper runs and ledgers this file atomically with 0018.
+ *
+ * Carry the released scalar/plain JSON contract forward without guessing at
  * inactive values or an untyped array's element contract. Unsupported legacy
  * rows stop the transaction before any data is removed. A fresh build already
  * has the target shape and records this migration as its baseline.
@@ -14,10 +19,12 @@ import type { VersionedMigration } from "../versioned-runner.js";
  * authority; a restricted runtime connection cannot run this transformation.
  */
 export async function upgradeLegacySealedTenantSettings(db: Kysely<any>): Promise<void> {
+  const table=await sql<{present:boolean}>`select to_regclass('erp.tenant_settings') is not null as present`.execute(db);
+  if (!table.rows[0]?.present) return;
+  await sql`lock table erp.tenant_settings in access exclusive mode`.execute(db);
   const columns=await sql<{name:string}>`select attname as name from pg_attribute where attrelid=to_regclass('erp.tenant_settings') and attnum>0 and not attisdropped`.execute(db);
   if(!columns.rows.some(c=>c.name==='value_type'))return;
   if(columns.rows.some(c=>['definition','value'].includes(c.name)))throw Error('Tenant settings have an ambiguous partial upgrade; no values were changed.');
-  await sql`lock table erp.tenant_settings in access exclusive mode`.execute(db);
   const flags=await sql<{enabled:boolean;forced:boolean}>`select relrowsecurity as enabled,relforcerowsecurity as forced from pg_class where oid='erp.tenant_settings'::regclass`.execute(db);
   await sql`alter table erp.tenant_settings disable row level security`.execute(db);
   const rows=await sql<{id:string;tenant_id:string;namespace:string;key:string;value_type:string;value_text:string|null;value_json:unknown;is_secret:boolean}>`select id::text,tenant_id::text,namespace,key,value_type,value_text,value_json,is_secret from erp.tenant_settings`.execute(db);
@@ -30,6 +37,8 @@ export async function upgradeLegacySealedTenantSettings(db: Kysely<any>): Promis
       if (!sealed || typeof sealed!=='object' || Array.isArray(sealed) || !('ciphertext' in sealed) || !('keyId' in sealed) || !('algorithm' in sealed) || typeof sealed.ciphertext!=='string' || typeof sealed.keyId!=='string' || typeof sealed.algorithm!=='string') throw Error('Invalid legacy sealed tenant setting.');
       const keys=keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
       if (!keys) throw Error('Configure secure value storage before migrating confidential tenant settings.');
+      if (sealed.algorithm !== SECRET_ALGORITHM) throw Error('Unsupported legacy tenant secret encryption algorithm.');
+      if (!keys.keys.has(sealed.keyId)) throw Error('A legacy tenant secret encryption key is unavailable.');
       try { value=decryptSecret(keys,JSON.stringify(['tenant-setting',row.tenant_id,row.namespace,row.key]),'value',sealed as StoredSecret); }
       catch { throw Error('Could not authenticate legacy sealed tenant setting.'); }
     } else if(!['string','json'].includes(row.value_type)||(row.value_type==='string'?row.value_json!==null:row.value_text!==null))throw Error('Tenant settings contain unsupported or inactive legacy values; classify these before migrating.');

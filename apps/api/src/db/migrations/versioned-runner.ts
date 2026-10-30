@@ -167,8 +167,11 @@ export async function applyVersionedMigrations(
   `.execute(db);
   if (!built.rows[0]?.present) return result;
 
+  const initiallyRecorded = new Set((await sql<{version:string}>`select version from platform.schema_migrations`.execute(db)).rows.map(row => row.version));
 
-
+  // The 0018 compatibility wrapper atomically records the checksum of its
+  // 0020 implementation in the same transaction. Re-read each ledger entry
+  // so later registry entries see records created by earlier migrations.
   for (const migration of migrations) {
     const fileChecksum = await migrationFileChecksum(migration);
     const recorded = (await sql<{checksum:string}>`select checksum from platform.schema_migrations where version = ${migration.version}`.execute(db)).rows[0]?.checksum;
@@ -190,7 +193,9 @@ export async function applyVersionedMigrations(
         result.reconciled.push(migration.version);
         continue;
       }
-      result.skipped.push(migration.version);
+      // A prior migration may have recorded this entry in its transaction.
+      // Report that as applied on this run, not as a pre-existing skip.
+      (initiallyRecorded.has(migration.version) ? result.skipped : result.applied).push(migration.version);
       continue;
     }
 

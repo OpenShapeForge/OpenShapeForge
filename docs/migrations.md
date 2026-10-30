@@ -603,6 +603,11 @@ file under `apps/api/src/db/migrations/versioned/` and registers it in
   file; editing an applied file fails every later run. List a previous hash in
   `supersededChecksums` only for an edit that cannot have changed what the
   migration did (a licence header, a comment), and say which commit caused it.
+  The pending `0018_typed-tenant-settings` exception runs the `0020` legacy
+  sealed-value compatibility implementation and records both file checksums
+  atomically. Existing databases that already recorded 0018 skip the wrapper;
+  0020 is then a no-op ledger entry. This preserves the historical 0018 hash
+  while making the additional transformation independently identifiable.
 - **Atomic** — each `up()` runs in its own `BEGIN`/`COMMIT` with its ledger
   row and is rolled back as a unit on failure.
 - **Tested** — a migration ships with a test that builds a database, puts it

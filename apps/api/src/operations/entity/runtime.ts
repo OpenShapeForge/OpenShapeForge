@@ -44,6 +44,7 @@ import {
   updateGeneratedEntity,
 } from "./mutations.js";
 import { fetchGeneratedEntityRow, getGeneratedEntity, listGeneratedEntities } from "./queries.js";
+import { aggregateBoardGroups } from "./board-aggregate.js";
 import type {
   EntityOperationInput,
   EntityOperationContract,
@@ -1059,10 +1060,14 @@ async function executeEntityOperationWithContext(
     if (collectionError) throw operationFailure(collectionError);
     switch (request.operation.intent) {
       case "list": {
+        if (request.input?.includeBoardTotals !== undefined && typeof request.input.includeBoardTotals !== "boolean") {
+          throw generatedCrudError("includeBoardTotals must be a boolean.", "BAD_USER_INPUT");
+        }
         const connection = await listGeneratedEntities(db, session, {
           ...listPageInput(request.input),
           table: table.name,
         });
+        const boardTotals = request.input?.includeBoardTotals ? await aggregateBoardGroups(db, session, { table: table.name, ...(request.input.filter !== undefined ? { filter: request.input.filter } : {}) }) : undefined;
         const targets = connection.rows.map((row) => offerTarget(row, table));
         const unavailableByTarget = await businessAndLeaseUnavailability(
           db,
@@ -1087,6 +1092,7 @@ async function executeEntityOperationWithContext(
             })),
             totalCount: connection.totalCount,
             nextCursor: connection.nextCursor,
+            ...(boardTotals ? { boardTotals } : {}),
           },
           operations: getEntityOperationOffers(
             entityName,

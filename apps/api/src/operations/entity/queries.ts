@@ -125,7 +125,7 @@ function membershipCondition(columnName: string, values: unknown[], columnType: 
   return sql`${sql.id("row_source", columnName)} = ANY(${postgresArrayLiteral(values)}::${sql.raw(pgType)}[])`;
 }
 
-function buildFilterConditions(
+export function buildFilterConditions(
   table: GeneratedCrudTable,
   session: DbSessionInput,
   filter?: Record<string, unknown> | null,
@@ -254,7 +254,7 @@ function buildFilterConditions(
     : sql.join(conditions, sql` and `);
 }
 
-function tenantFixedWhere(table: GeneratedCrudTable, session: DbSessionInput) {
+export function tenantFixedWhere(table: GeneratedCrudTable, session: DbSessionInput) {
   if (!table.tenantScoped) {
     return [];
   }

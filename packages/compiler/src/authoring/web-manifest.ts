@@ -984,7 +984,7 @@ function projectEntity(
         for (const step of amount.path) {
           const relationship = owner.contract.model.relationships.find(item => `${owner.contract.entity.name}.${item.key}` === step.relationshipId);
           const next = relationship && all.get(relationship.target);
-          if (!relationship || relationship.kind !== "belongsTo" || !relationship.foreignKey || relationship.provider || !next || next.contract.source) {
+          if (!relationship || relationship.kind !== "belongsTo" || !relationship.foreignKey || relationship.provider || (relationship.constraints && Object.keys(relationship.constraints).length > 0) || !next || next.contract.source) {
             throw new Error(`${entityName}: board aggregate requires persisted belongs-to relationships.`);
           }
           owner = next;

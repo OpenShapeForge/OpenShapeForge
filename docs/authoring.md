@@ -1244,9 +1244,12 @@ interfaces:
           groupBy: salesStageId
           scopeBy: salesProcessId
           groupSummary: defaultProbabilityPercent
+          aggregate: { sum: quoteId.amountBase, currency: quoteId.currencyCode }
           card:
             title: name
             subtitle: [relationId, dealProducts.productId]
+            amount: { value: quoteId.amountBase, currency: quoteId.currencyCode }
+            timestamp: updatedAt
 ```
 
 `scopeBy` is optional and names a persisted, filterable single string or
@@ -1265,6 +1268,16 @@ presentation props overrides a field-authored unit; the web projection exposes
 the effective unit to compact renderers as well.
 `subtitle` is an optional list of typed paths displayed directly beneath the
 card title; `body` remains available for other card fields.
+
+`amount` pairs a single numeric field with a currency string from the same
+record and relationship path. `timestamp` is a single datetime path. The
+optional `aggregate` uses an exact stored numeric field and currency from that
+same record, reached only via stored, unconstrained belongs-to relationships.
+The list Operation accepts `includeBoardTotals` when configured and returns
+per-group totals as decimal strings, separated by currency. A group whose
+amount, currency or relationship is unavailable is marked unavailable rather
+than returning a partial total. The aggregate uses the list's filter and its
+authorized rows, and is independent of the page size.
 
 The `groupTargetField` choice marker identifies fields on the selected grouping
 entity. Schema-driven editors that do not yet follow the selected `groupBy`

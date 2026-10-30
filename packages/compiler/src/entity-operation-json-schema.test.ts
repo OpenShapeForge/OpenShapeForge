@@ -147,6 +147,19 @@ const adapterContract = {
 } as unknown as CompiledEntityContract;
 
 describe("canonical entity Operation JSON Schemas", () => {
+  test("exposes board totals only for an authored board aggregate", () => {
+    const ordinary = entityOperationJsonSchemas(contract, entityOperations.list!, contracts, {});
+    expect(ordinary.inputSchema.properties).not.toHaveProperty("includeBoardTotals");
+    expect(ordinary.outputSchema.properties).not.toHaveProperty("boardTotals");
+    const configured = { ...contract, interfaces: { web: { operations: { list: true }, collectionBoard: { groupBy: "stage", aggregate: { sum: "price", currency: "currency" }, card: { title: "title" } } } } } as CompiledEntityContract;
+    const list = entityOperationJsonSchemas(configured, entityOperations.list!, contracts, {});
+    expect(list.inputSchema.properties).toHaveProperty("includeBoardTotals");
+    expect(list.outputSchema.properties).toHaveProperty("boardTotals");
+    const properties = list.outputSchema.properties as Record<string, any>;
+    const validate = new Ajv2020().compile(properties.boardTotals);
+    expect(validate([{ group: "open", available: true, totals: [{ currency: "EUR", amount: "999999999999999.03" }] }])).toBe(true);
+    expect(validate([{ group: "open", available: true, totals: [{ currency: "EUR", amount: 1 }] }])).toBe(false);
+  });
   test("uses the executor values envelope and preserves authored field eligibility", () => {
     const create = entityOperationJsonSchemas(
       contract,

@@ -100,6 +100,21 @@ function mayCarryKeyManagement(session: CeilingSession): boolean {
 }
 
 /**
+ * The carrier rule above, for another surface that delegates authority to a
+ * machine identity and therefore has the same ladder: registering an inbound
+ * provider endpoint (`modules/inbound-endpoints.ts`) says "these bytes make the
+ * organization's service identity run that Operation". Exported rather than
+ * re-derived, so the next surface with this hazard inherits the decision
+ * instead of writing a third version of it that drifts.
+ *
+ * Returns a boolean because the caller composes it with its own capability
+ * check and owns the message; it is never the whole gate on its own.
+ */
+export function isVerifiedPersonSession(session: CeilingSession): boolean {
+  return mayCarryKeyManagement(session);
+}
+
+/**
  * Gate every API key mutation. Throws `ApiKeyAuthorizationError` — never
  * returns a boolean, so a caller cannot forget to branch on it.
  *

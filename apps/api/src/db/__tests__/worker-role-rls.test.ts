@@ -187,6 +187,10 @@ describe("worker-role RLS axis", () => {
           await sql`update platform.tenants set keycloak_realm = 'host', keycloak_organization_id = ${organization}
             where id = ${tenant}::uuid`.execute(db);
         }
+        // Manage Notebook in only tenant A. A worker must learn only that
+        // managed name, never the policy rows or the other tenant's state.
+        await sql`insert into erp.authorization_operation_policies (tenant_id, operation_id, entity_type, managed)
+          values (${fixture.tenantA}::uuid, 'Notebook.deliver', 'Notebook', true)`.execute(db);
         return fixture;
       });
       const issuer = "https://identity.example.test/realms/host";
@@ -237,6 +241,23 @@ describe("worker-role RLS axis", () => {
             .rejects.toThrow(/permission denied for (table|schema)/);
           await expect(sql`select 1 from erp.relations limit 1`.execute(db))
             .rejects.toThrow(/permission denied for (table|schema)/);
+          await expect(sql`select 1 from erp.authorization_operation_policies limit 1`.execute(db))
+            .rejects.toThrow(/permission denied for (table|schema)/);
+          // The current worker-granted tables are platform-owned and have no
+          // authored-entity guard. If an authored table gains worker access,
+          // add a direct managed-row denial test in addition to this projection.
+          for (const [tenantId, managed] of [[fixture.tenantA, true], [fixture.tenantB, false]] as const) {
+            await withDbSession(db, { tenantId, userId: subject, roles: [], scope: "self" }, async trx => {
+              const result = await sql<{managed: boolean; allowed: boolean; exposed: boolean}>`
+                select app.authorization_entity_managed('Notebook') as managed,
+                  app.authorization_allows('Notebook', '{}'::jsonb) as allowed,
+                  (current_setting('app.authorization_rules')::jsonb->'states' <> '{}'::jsonb) as exposed`.execute(trx);
+              expect(result.rows[0]).toEqual({ managed, allowed: !managed, exposed: false });
+              const locks = await sql<{ held: boolean }>`select exists(select 1 from pg_locks
+                where pid=pg_backend_pid() and locktype='advisory' and mode='ShareLock') as held`.execute(trx);
+              expect(locks.rows[0]?.held).toBe(managed);
+            });
+          }
 
           await withDbSession(db, { tenantId: fixture.tenantA, userId: subject, roles: [], scope: "self" }, async (trx) => {
             for (const [tenant, realm, expected] of [
@@ -640,8 +661,17 @@ describe("worker-role RLS axis", () => {
               order by 1
             `.execute(conn);
 
-            // The whole list, enumerated: core's job queue (docs/jobs.md).
-            expect(policies.rows.map((row) => row.qualified)).toEqual(["platform.jobs"]);
+            // The whole list, enumerated: core's job queue (docs/jobs.md) and
+            // the inbound delivery receipts the same `job-worker` resolves
+            // durable dispatch work from (docs/inbound-deliveries.md). Both are
+            // queue bookkeeping the worker claims across tenants. The one
+            // piece of third-party content a receipt carries is encrypted with
+            // AAD bound to its own tenant, endpoint and receipt, so the role's
+            // cross-tenant read still opens nothing but the row it claimed —
+            // and `platform.inbound_endpoints`, which holds the provider
+            // secret, is deliberately NOT on this axis.
+            expect(policies.rows.map((row) => row.qualified))
+              .toEqual(["platform.inbound_deliveries", "platform.jobs"]);
             // USING and WITH CHECK move together, so a claim can also write back
             // — and neither may name the GUC without the connected role beside
             // it, which is the property #223 added.

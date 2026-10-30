@@ -12,7 +12,7 @@ import {
 } from "@openshapeforge/auth";
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
-import { withDbSession } from "../db/session.js";
+import { withCredentialResolutionSession } from "../db/session.js";
 import {
   bindOrganizationResource,
   OrganizationBindingError,
@@ -194,9 +194,11 @@ export async function resolveScopedServiceTenant(
       !sameTenantId(identity.tenantId, credential.tenantId) ||
       claims.azp !== credential.clientId ||
       claims.preferred_username !== `service-account-${credential.clientId}`) return null;
-  const tenantId = await withDbSession(db, {
-    tenantId: credential.tenantId, userId: identity.userId, roles: [], scope: "self",
-  }, async (trx) => {
+  // Credential resolution needs only the verified tenant and the narrow
+  // security-definer registry lookup. A full actor session would evaluate
+  // application authorization before the caller has established identity,
+  // and would require the restricted worker to read unrelated ERP tables.
+  const tenantId = await withCredentialResolutionSession(db, credential.tenantId, async (trx) => {
     const result = await sql<{ tenant_id: string | null }>`
       select app.tenant_for_scoped_service(${credential.tenantId}::uuid, ${realm}) as tenant_id
     `.execute(trx);

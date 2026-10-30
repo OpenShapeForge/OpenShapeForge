@@ -49,17 +49,47 @@ rule) when a declared retention policy cannot resolve a usable clock:
 This prevents an entity from advertising a statutory retention window that
 compiles to nothing.
 
-## What is swept today: finished jobs
+## What is swept today: finished jobs and inbound payloads
 
-One runtime sweep exists, and it is deliberately narrow. The `job-worker`
+Two runtime sweeps exist, both deliberately narrow, both on the `job-worker`'s
+hourly tick, and neither one the executor described below.
+
+### Finished jobs
+
+The `job-worker`
 role ([jobs.md](jobs.md#retention)) deletes rows of `platform.jobs` in status
 `done` whose `completed_at` is older than
 `OPENSHAPEFORGE_JOBS_DONE_RETENTION_DAYS` (default 30; `0` disables it), once
 an hour, under the worker session. It touches no other status: a `failed`,
 `dead` or `outcome_unknown` job is an operator decision still to be taken, and
 a queue that forgot those would forget the very rows retention exists to
-account for. It reads no entity retention metadata and is not the executor
-described below — the queue is platform bookkeeping, not a business record.
+account for. It reads no entity retention metadata — the queue is platform
+bookkeeping, not a business record.
+
+### Retained inbound delivery payloads
+
+The same role removes the encrypted provider payload held on **settled**
+deliveries in `platform.inbound_deliveries`
+([inbound-deliveries.md](inbound-deliveries.md#bounded-removal)): the row stays
+as the receipt, and `body_ciphertext` is nulled with `body_purged_at` recorded.
+Two bounds apply — `OPENSHAPEFORGE_INBOUND_BODY_RETENTION_DAYS` (default 7)
+after a delivery settles, and `OPENSHAPEFORGE_INBOUND_BODY_MAX_AGE_DAYS`
+(default 30, maximum 365) after it arrived, as the outer bound on that same
+removal. Unlike the job sweep, the second bound cannot be disabled: this is
+third-party content, often personal, and a settled receipt must not keep it
+indefinitely. Each sweep is row-bounded.
+
+A delivery that has **not** settled keeps its payload however old it is. The
+2xx the provider received was a durable acceptance and the sealed payload is
+the only remaining copy of the work; discarding it on a timer would make
+accepted work unrecoverable without saying so. Such a delivery is instead
+counted as *overdue* past the same age and reported for operator action —
+today only as a worker log line. An alert on that count and admission
+backpressure are **not implemented** and are needed before this is
+operationally complete.
+
+This too reads no entity retention metadata; the payload is a transport
+artefact, not an authored business record.
 
 ## Runtime enforcement
 

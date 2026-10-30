@@ -17,7 +17,7 @@ const registration: RuntimeInboundConnectionRegistration = {
   signature: { header: "x-hub-signature", algorithm: "sha256", encoding: "hex", prefix: "sha256=" },
   identity: { source: "body-digest", eventTypePath: "webhookEvent" },
   dispatch: { operationId: "integration.receive", inputField: "delivery" },
-  idempotencyKey: "reconcile.test", expect: { endpointStatus: "inactive", endpointId: null },
+  idempotencyKey: "reconcile.test",
 };
 function fixture(overrides: { active?: boolean; connection?: RuntimeConnectionResolution; authorized?: boolean } = {}) {
   let row: EndpointRow | undefined;
@@ -52,7 +52,7 @@ function fixture(overrides: { active?: boolean; connection?: RuntimeConnectionRe
       revoke: async (_session, input) => row && row.id === input.id && row.connection_id === input.connectionId ? { ...endpointSummaryOf(row), status: "revoked", revokedAt: new Date().toISOString() } : undefined,
     },
   });
-  return { api, inserts };
+  return { api, inserts, corruptIdentity: () => { if (row) row.identity_source = "invalid"; } };
 }
 
 test("managed registration resolves a confidential Connection field and never exposes it", async () => {
@@ -65,9 +65,9 @@ test("managed registration resolves a confidential Connection field and never ex
   expect(await api.connectionIsCurrent(session, { connectionId: USER, endpointId: first.id })).toBe(false);
   expect(JSON.stringify(first)).not.toContain(SECRET);
   expect(JSON.stringify(inserts)).not.toContain(SECRET);
-  await expect(api.registerForConnection(session, { ...registration, maxBodyBytes: 32 })).rejects.toThrow(/different Connection/);
-  await expect(api.revokeForConnection(session, { connectionId: USER, endpointId: first.id, idempotencyKey: "pause", expect: { endpointId: first.id, endpointStatus: "active" } })).rejects.toThrow();
-  const revoked = await api.revokeForConnection(session, { connectionId: CONNECTION, endpointId: first.id, idempotencyKey: "pause", expect: { endpointId: first.id, endpointStatus: "active" } });
+  await expect(api.registerForConnection(session, { ...registration, maxBodyBytes: 32 })).rejects.toThrow(/different or invalid Connection/);
+  await expect(api.revokeForConnection(session, { connectionId: USER, endpointId: first.id })).rejects.toThrow();
+  const revoked = await api.revokeForConnection(session, { connectionId: CONNECTION, endpointId: first.id });
   expect(revoked.status).toBe("revoked");
 });
 
@@ -102,4 +102,23 @@ test("secret rotation or Connection removal refuses later delivery without expos
   expect(await api.connectionIsCurrent(session, { connectionId: CONNECTION, endpointId: endpoint.id })).toBe(false);
   (connection as { ok: boolean }).ok = false;
   expect(await api.connectionIsCurrent(session, { connectionId: CONNECTION, endpointId: endpoint.id })).toBe(false);
+});
+
+
+test("an invalid stored identity is reported as unavailable, never as a usable default", () => {
+  const corrupt = { id: USER, tenant_id: TENANT, endpoint_key: "jira-cloud", signature_header: "x-hub-signature",
+    signature_algorithm: "sha256", signature_encoding: "hex", signature_prefix: "sha256=", identity_source: "invalid",
+    identity_fields: null, identity_event_type_path: null, unsigned_delivery_id_header: null, unsigned_event_type_header: null,
+    max_body_bytes: 1024, secret_ciphertext: "x", secret_key_id: "x", secret_algorithm: "x", service_identity_id: "service",
+    operation_id: "integration.receive", operation_input_field: "delivery", status: "active", created_by: USER,
+    created_at: new Date(), revoked_at: null, revoked_reason: null } as EndpointRow;
+  expect(endpointSummaryOf(corrupt).identity).toBeNull();
+});
+
+
+test("a repeated registration cannot confirm a corrupt identity profile", async () => {
+  const { api, corruptIdentity } = fixture();
+  await api.registerForConnection(session, registration);
+  corruptIdentity();
+  await expect(api.registerForConnection(session, registration)).rejects.toThrow(/invalid Connection endpoint/);
 });

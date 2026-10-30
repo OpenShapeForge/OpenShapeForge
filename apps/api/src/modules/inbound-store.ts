@@ -36,10 +36,10 @@ import type {
   RecordInboundDeliveryInput,
 } from "./inbound-admission.js";
 import {
-  DEFAULT_INBOUND_IDENTITY, serializeInboundIdentityFields, storedInboundIdentity,
+  serializeInboundIdentityFields, storedInboundIdentity,
   type InboundIdentityProfile,
 } from "./inbound-identity.js";
-import { boundInboundEndpointGateWait, inboundEndpointGateKey } from "./inbound-endpoint-gate.js";
+import { boundInboundEndpointGateWait, restoreInboundEndpointGateWait, inboundEndpointGateKey } from "./inbound-endpoint-gate.js";
 
 /** The registration row, as every read in this file projects it. */
 export type EndpointRow = {
@@ -133,7 +133,7 @@ export function endpointOf(row: EndpointRow): InboundAdmissionEndpoint | undefin
 export type EndpointSummary = {
   id: string; tenantId: string; endpointKey: string;
   signature: InboundAdmissionEndpoint["signature"];
-  identity: InboundIdentityProfile;
+  identity: InboundIdentityProfile | null;
   unsignedHeaders: { deliveryId: string | null; eventType: string | null };
   dispatch: { operationId: string; inputField: string };
   maxBodyBytes: number; status: "active" | "revoked";
@@ -145,10 +145,8 @@ export function endpointSummaryOf(row: EndpointRow): EndpointSummary {
   return {
     id: row.id, tenantId: row.tenant_id, endpointKey: row.endpoint_key,
     signature: signatureOf(row),
-    // A summary is a report, so a row whose profile no longer normalises is
-    // shown as the default rather than hidden; admission is where an
-    // unusable profile has to be a refusal.
-    identity: storedInboundIdentity(row) ?? DEFAULT_INBOUND_IDENTITY,
+    // A corrupt or unsupported identity cannot be reported as a working default.
+    identity: storedInboundIdentity(row) ?? null,
     unsignedHeaders: unsignedHeadersOf(row),
     dispatch: { operationId: row.operation_id, inputField: row.operation_input_field },
     maxBodyBytes: row.max_body_bytes,
@@ -182,9 +180,9 @@ export type InsertEndpointInput = {
   dispatch: { operationId: string; inputField: string };
 };
 
-export async function insertInboundEndpoint(
-  trx: Transaction<DB>, input: InsertEndpointInput,
-): Promise<EndpointSummary> {
+async function insertInboundEndpointRow(
+  trx: Transaction<DB>, input: InsertEndpointInput, ignoreExistingKey: boolean,
+): Promise<EndpointRow | undefined> {
   const row = await sql<EndpointRow>`
     insert into platform.inbound_endpoints (
       id, tenant_id, endpoint_key, connection_id, connection_secret_field, registration_key, signature_header, signature_algorithm, signature_encoding,
@@ -203,11 +201,22 @@ export async function insertInboundEndpoint(
       ${input.serviceIdentityId}, ${input.dispatch.operationId}, ${input.dispatch.inputField},
       ${input.createdBy}::uuid
     )
+    ${ignoreExistingKey ? sql`on conflict (tenant_id, registration_key) where registration_key is not null do nothing` : sql``}
     returning ${sql.join(ENDPOINT_COLUMNS.map((column) => sql.ref(column)))}
   `.execute(trx);
-  const inserted = row.rows[0];
+  return row.rows[0];
+}
+
+export async function insertInboundEndpoint(trx: Transaction<DB>, input: InsertEndpointInput): Promise<EndpointSummary> {
+  const inserted = await insertInboundEndpointRow(trx, input, false);
   if (!inserted) throw new Error("The inbound endpoint registration was not stored.");
   return endpointSummaryOf(inserted);
+}
+
+/** A concurrent winner owns the idempotency key; caller must read and compare it. */
+export async function insertInboundEndpointIfAbsent(trx: Transaction<DB>, input: InsertEndpointInput): Promise<EndpointSummary | undefined> {
+  const inserted = await insertInboundEndpointRow(trx, input, true);
+  return inserted ? endpointSummaryOf(inserted) : undefined;
 }
 
 /**
@@ -228,12 +237,13 @@ export async function revokeInboundEndpoint(
   // for it. The pair comes off the registration row read THROUGH the tenant
   // policy, so another tenant's id takes no lock at all — and then matches no
   // row below either, which is the same refusal this surface already gave.
-  await boundInboundEndpointGateWait(trx);
+  const previousLockTimeout = await boundInboundEndpointGateWait(trx);
   await sql`
     select pg_advisory_xact_lock(${inboundEndpointGateKey(sql`e.tenant_id`, sql`e.id`)})
       from platform.inbound_endpoints e
      where e.id = ${input.id}::uuid and e.tenant_id = app.current_tenant()
   `.execute(trx);
+  await restoreInboundEndpointGateWait(trx, previousLockTimeout);
   // `tenant_id = app.current_tenant()` beside the policy, not instead of it.
   // The policy is what enforces the fence; spelling it here as well means a
   // statement that somehow ran without the policy still cannot reach another

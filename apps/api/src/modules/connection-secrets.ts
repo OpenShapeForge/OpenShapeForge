@@ -246,6 +246,9 @@ export async function resolveConnectionValues(
   };
 
   const selector = input.selector;
+  if (input.transaction && !("connectionId" in selector)) {
+    throw new Error("Transaction-scoped Connection resolution requires an exact Connection id.");
+  }
   const readRow = async (trx: Transaction<DB>) => {
     // Read under the caller's own session: row-level security decides which
     // rows exist before any of this code sees one.

@@ -61,7 +61,7 @@ import {
 import { createInboundAdmission } from "../../modules/inbound-admission.js";
 import {
   createInboundAdmissionStore, inboundEndpointWriter, revokeInboundEndpoint,
-  findInboundConnectionEndpoint, findInboundRegistration, insertInboundEndpoint, revokeInboundConnectionEndpoint,
+  findInboundConnectionEndpoint, findInboundRegistration, insertInboundEndpointIfAbsent, revokeInboundConnectionEndpoint,
 } from "../../modules/inbound-store.js";
 import { createInboundEndpointServices } from "../../modules/inbound-endpoints.js";
 import {
@@ -999,8 +999,11 @@ test("managed Connection registration commits with its caller or rolls back toge
       organizationServiceIdentityId: SERVICE_IDENTITY, roles: ["Platform.InboundEndpointManage"] } as TrustedSessionContext;
     const request = { connectionId, secretField: "webhookSigningSecret", endpointKey: KEY, signature: jira,
       identity: { source: "body-digest" as const }, dispatch: { operationId: OPERATION, inputField: "delivery" },
-      idempotencyKey: "reconcile-one", expect: { endpointStatus: "inactive", endpointId: null } };
-    const run = async (fail: boolean) => withDbSession(app, service, async trx => {
+      idempotencyKey: "reconcile-one" };
+    let waiting = 0;
+    let release: () => void = () => {};
+    const bothRead = new Promise<void>((resolve) => { release = resolve; });
+    const run = async (fail: boolean, race = false) => withDbSession(app, service, async trx => {
       const api = createInboundEndpointServices({ acceptsSession: candidate => candidate === service,
         serviceIdentity: () => SERVICE_IDENTITY, resolveOperation: async () => ({ id: OPERATION,
           reliability: { idempotency: { mode: "keyed", inputField: "key" } } } as unknown as RuntimeOperationDefinition),
@@ -1009,9 +1012,13 @@ test("managed Connection registration commits with its caller or rolls back toge
           connection: async () => ({ ok: true, connection: { connectionId, connectionKey: "fixture", adapterKey: KEY,
             transport: "rest", connectionScope: "tenant", ownerUserId: null,
             values: { webhookSigningSecret: SECRET }, secretKeys: ["webhookSigningSecret"], egressGrant: {} as never } }),
-          find: async (_session, key) => findInboundRegistration(trx, key),
+          find: async (_session, key) => {
+            const row = await findInboundRegistration(trx, key);
+            if (race && !row && waiting < 2) { if (++waiting === 2) release(); await bothRead; }
+            return row;
+          },
           findConnection: async (_session, input) => findInboundConnectionEndpoint(trx, input),
-          insert: async (_session, input) => insertInboundEndpoint(trx, input),
+          insert: async (_session, input) => insertInboundEndpointIfAbsent(trx, input),
           revoke: async (_session, input) => revokeInboundConnectionEndpoint(trx, input),
         } });
       const endpoint = await api.registerForConnection(service, request);
@@ -1021,9 +1028,22 @@ test("managed Connection registration commits with its caller or rolls back toge
     await expect(run(true)).rejects.toThrow("subscription update failed");
     const count = async () => (await sql<{ count: string }>`select count(*)::text as count from platform.inbound_endpoints where tenant_id = ${tenantA}::uuid`.execute(admin)).rows[0]!.count;
     expect(await count()).toBe("0");
-    const first = await run(false);
-    const second = await run(false);
+    const [first, second] = await Promise.all([run(false, true), run(false, true)]);
     expect(first.id).toBe(second.id);
     expect(await count()).toBe("1");
+  });
+}, TEST_TIMEOUT);
+
+
+test("endpoint revocation restores the caller's lock timeout", async () => {
+  await withScratch(async ({ app, tenantA, userA }) => {
+    const session = tenantSession(tenantA, userA);
+    const endpoint = await register(app, tenantA, userA);
+    await withDbSession(app, session, async trx => {
+      await sql`select set_config('lock_timeout', '13s', true)`.execute(trx);
+      await revokeInboundEndpoint(trx, { id: endpoint.id, reason: null });
+      const result = await sql<{ timeout: string }>`select current_setting('lock_timeout') as timeout`.execute(trx);
+      expect(result.rows[0]?.timeout).toBe('13s');
+    });
   });
 }, TEST_TIMEOUT);

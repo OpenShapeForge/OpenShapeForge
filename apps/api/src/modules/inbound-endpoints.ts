@@ -68,6 +68,11 @@ import { endpointSummaryOf, type EndpointRow, type EndpointSummary, type Inbound
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPERATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,200}$/;
 const INPUT_FIELD = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+function equalSecret(left: string, right: string): boolean {
+  const a = Buffer.from(left, "utf8"), b = Buffer.from(right, "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 const MIN_SECRET_BYTES = 32;
 const MAX_SECRET_BYTES = 4096;
 const MAX_REASON_LENGTH = 500;
@@ -94,7 +99,7 @@ export type InboundEndpointServiceOptions = {
     connection(session: TrustedSessionContext, id: string): Promise<RuntimeConnectionResolution>;
     find(session: TrustedSessionContext, registrationKey: string): Promise<EndpointRow | undefined>;
     findConnection(session: TrustedSessionContext, input: { id: string; connectionId: string }): Promise<EndpointRow | undefined>;
-    insert(session: TrustedSessionContext, input: InsertEndpointInput): Promise<EndpointSummary>;
+    insert(session: TrustedSessionContext, input: InsertEndpointInput): Promise<EndpointSummary | undefined>;
     revoke(session: TrustedSessionContext, input: { id: string; connectionId: string }): Promise<EndpointSummary | undefined>;
   };
   keyring?: SecretKeyring;
@@ -107,11 +112,11 @@ function view(summary: EndpointSummary): RuntimeInboundEndpoint {
     endpointKey: summary.endpointKey,
     path: inboundEndpointPath(summary.endpointKey, summary.id),
     signature: summary.signature,
-    identity: {
+    identity: summary.identity ? {
       source: summary.identity.source,
       ...(summary.identity.fields.length > 0 ? { fields: summary.identity.fields } : {}),
       ...(summary.identity.eventTypePath ? { eventTypePath: summary.identity.eventTypePath } : {}),
-    },
+    } : null,
     unsignedHeaders: summary.unsignedHeaders,
     dispatch: summary.dispatch,
     maxBodyBytes: summary.maxBodyBytes,
@@ -297,9 +302,7 @@ export function createInboundEndpointServices(
       try {
         const original = decryptSecret(keys, `${actor.tenantId}:${endpoint.id}`, INBOUND_SECRET_FIELD,
           { ciphertext: endpoint.secret_ciphertext, keyId: endpoint.secret_key_id, algorithm: endpoint.secret_algorithm });
-        const currentBytes = Buffer.from(currentSecret, "utf8");
-        const originalBytes = Buffer.from(original, "utf8");
-        return currentBytes.length === originalBytes.length && timingSafeEqual(currentBytes, originalBytes);
+        return equalSecret(currentSecret, original);
       } catch { return false; }
     },
     registerForConnection: async (session, input) => {
@@ -320,29 +323,40 @@ export function createInboundEndpointServices(
       const keys = keyring();
       if (!keys) throw new Error("Inbound endpoint secret encryption is not configured.");
       const registrationKey = createHash("sha256").update(input.idempotencyKey, "utf8").digest("hex");
-      const existing = await options.managed!.find(session, registrationKey);
-      if (existing) {
+      const sameRegistration = (existing: EndpointRow): RuntimeInboundEndpoint => {
         const current = endpointSummaryOf(existing);
         let oldSecret: string;
         try {
           oldSecret = decryptSecret(keys, `${actor.tenantId}:${existing.id}`, INBOUND_SECRET_FIELD,
             { ciphertext: existing.secret_ciphertext, keyId: existing.secret_key_id, algorithm: existing.secret_algorithm });
         } catch { throw new Error("The existing Connection endpoint cannot be opened."); }
-        if (existing.connection_id !== input.connectionId || existing.connection_secret_field !== input.secretField || oldSecret !== secret || current.status !== "active" ||
+        if (existing.connection_id === input.connectionId && existing.connection_secret_field === input.secretField &&
+            !equalSecret(oldSecret, secret)) {
+          throw new Error("The Connection signing secret has changed since this endpoint was registered.");
+        }
+        if (existing.connection_id !== input.connectionId || existing.connection_secret_field !== input.secretField ||
+            !current.identity || current.status !== "active" ||
             JSON.stringify({ endpointKey: current.endpointKey, signature: current.signature, identity: current.identity,
               unsignedHeaders: current.unsignedHeaders, maxBodyBytes: current.maxBodyBytes, dispatch: current.dispatch }) !==
             JSON.stringify(normalized)) {
-          throw new Error("The registration key is already bound to a different Connection endpoint.");
+          throw new Error("The registration key is already bound to a different or invalid Connection endpoint.");
         }
         return view(current);
-      }
+      };
+      const existing = await options.managed!.find(session, registrationKey);
+      if (existing) return sameRegistration(existing);
       const id = randomUUID();
       const stored = await options.managed!.insert(session, {
         id, tenantId: actor.tenantId, createdBy: actor.userId, connectionId: input.connectionId, connectionSecretField: input.secretField, registrationKey,
         ...normalized, serviceIdentityId: actor.serviceIdentityId,
         storedSecret: encryptSecret(keys, `${actor.tenantId}:${id}`, INBOUND_SECRET_FIELD, secret),
       });
-      return view(stored);
+      if (stored) return view(stored);
+      // A concurrent transaction won the partial unique key. Its insert has
+      // committed before ON CONFLICT returns; compare the winner exactly.
+      const winner = await options.managed!.find(session, registrationKey);
+      if (!winner) throw new Error("The concurrent Connection endpoint could not be read.");
+      return sameRegistration(winner);
     },
     revokeForConnection: async (session, input) => {
       managedActor(session);

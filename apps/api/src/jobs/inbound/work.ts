@@ -122,7 +122,7 @@ import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { DurableAuthorityError } from "../../operations/durable-worker.js";
 import { INBOUND_BODY_FIELD, inboundBodyScope } from "../../modules/inbound-admission.js";
 import {
-  boundInboundEndpointGateWait, inboundEndpointGateKey,
+  boundInboundEndpointGateWait, restoreInboundEndpointGateWait, inboundEndpointGateKey,
 } from "../../modules/inbound-endpoint-gate.js";
 import { decryptSecret, keyringFromEnv, type SecretKeyring } from "../../platform/secrets.js";
 import { withJobWorkerSession } from "../worker.js";
@@ -350,12 +350,13 @@ export async function markInboundDispatchInTransaction(
   // both columns are immutable for the life of the row — so the worker scopes
   // the lock without reading, or being granted, the registration it names. An
   // absent delivery takes no lock and matches no row below: the same refusal.
-  await boundInboundEndpointGateWait(trx);
+  const previousLockTimeout = await boundInboundEndpointGateWait(trx);
   await sql`
     select pg_advisory_xact_lock(${inboundEndpointGateKey(sql`d.tenant_id`, sql`d.endpoint_id`)})
       from platform.inbound_deliveries d
      where d.id = ${reference.workId}::uuid
   `.execute(trx);
+  await restoreInboundEndpointGateWait(trx, previousLockTimeout);
   // Committed before the request leaves, so a crash between here and the
   // Operation leaves this attempt on record as having started one. Holding the
   // gate is what makes the predicate's own statement snapshot decisive: a

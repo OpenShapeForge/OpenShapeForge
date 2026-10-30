@@ -112,7 +112,13 @@ export function inboundEndpointGateKey(
     ${GATE_NAME}::text || ':' || ${tenant}::text || ':' || ${endpoint}::text, 0)`;
 }
 
-/** Bound this transaction's wait for the gate. Transaction-local, so it ends with it. */
-export async function boundInboundEndpointGateWait(trx: Transaction<DB>): Promise<void> {
+/** Temporarily bound gate acquisition; return the original caller setting for restoration. */
+export async function boundInboundEndpointGateWait(trx: Transaction<DB>): Promise<string> {
+  const current = await sql<{ value: string }>`select current_setting('lock_timeout') as value`.execute(trx);
   await sql`select set_config('lock_timeout', ${GATE_WAIT}, true)`.execute(trx);
+  return current.rows[0]!.value;
+}
+
+export async function restoreInboundEndpointGateWait(trx: Transaction<DB>, previous: string): Promise<void> {
+  await sql`select set_config('lock_timeout', ${previous}, true)`.execute(trx);
 }

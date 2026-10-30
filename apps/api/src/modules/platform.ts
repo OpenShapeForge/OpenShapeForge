@@ -63,7 +63,7 @@ import { RecordAccessRuntime } from "./record-access.js";
 import { PrincipalRuntime } from "./principals.js";
 import { createWebhookSecretServices } from "./webhook-secrets.js";
 import { createInboundEndpointServices } from "./inbound-endpoints.js";
-import { inboundEndpointWriter, findInboundConnectionEndpoint, findInboundRegistration, insertInboundEndpoint, revokeInboundConnectionEndpoint } from "./inbound-store.js";
+import { inboundEndpointWriter, findInboundConnectionEndpoint, findInboundRegistration, insertInboundEndpointIfAbsent, revokeInboundConnectionEndpoint } from "./inbound-store.js";
 import { ReadProgressRuntime, type ReadProgressDefinition } from "./read-progress.js";
 import type { RuntimeReadProgress } from "@openshapeforge/plugin-runtime";
 import {
@@ -509,7 +509,7 @@ export class ModulePlatformRuntime {
           insert: (session, input) => {
             const active = this.#operationTransactionStorage.getStore();
             if (!active || active.session !== session) throw new Error("An active Operation transaction is required.");
-            return insertInboundEndpoint(active.trx, input);
+            return insertInboundEndpointIfAbsent(active.trx, input);
           },
           revoke: (session, input) => {
             const active = this.#operationTransactionStorage.getStore();

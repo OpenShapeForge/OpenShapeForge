@@ -176,7 +176,8 @@ export type RuntimeInboundEndpoint = {
    */
   path: string;
   signature: RuntimeInboundSignatureScheme;
-  identity: RuntimeInboundDeliveryIdentity;
+  /** Null means the stored identity profile is unusable and admission is refused. */
+  identity: RuntimeInboundDeliveryIdentity | null;
   unsignedHeaders: { deliveryId: string | null; eventType: string | null };
   dispatch: { operationId: string; inputField: string };
   maxBodyBytes: number;
@@ -225,14 +226,10 @@ export type RuntimeInboundConnectionRegistration = Omit<RuntimeInboundEndpointRe
   secretField: string;
   /** Stable per lifecycle intent; a repeated key must name the same endpoint and configuration. */
   idempotencyKey: string;
-  /** Caller-owned subscription state. The caller must lock and compare it within this Operation transaction. */
-  expect: { endpointStatus: string; endpointId: string | null };
 };
 export type RuntimeInboundConnectionRevocation = {
   connectionId: string;
   endpointId: string;
-  idempotencyKey: string;
-  expect: { endpointStatus: string; endpointId: string | null };
 };
 
 export type RuntimeInboundEndpointServices<Session> = {

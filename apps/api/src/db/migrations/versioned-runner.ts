@@ -108,7 +108,7 @@ export function validateVersionedRegistry(
   }
 }
 
-async function migrationFileChecksum(
+export async function migrationFileChecksum(
   migration: VersionedMigration,
 ): Promise<string> {
   let contents: Buffer;
@@ -167,19 +167,11 @@ export async function applyVersionedMigrations(
   `.execute(db);
   if (!built.rows[0]?.present) return result;
 
-  const versions = migrations.map((migration) => migration.version);
-  const ledger = await sql<{ version: string; checksum: string }>`
-    select version, checksum
-    from platform.schema_migrations
-    where version in (${sql.join(versions)})
-  `.execute(db);
-  const recordedChecksums = new Map(
-    ledger.rows.map((row) => [row.version, row.checksum]),
-  );
+
 
   for (const migration of migrations) {
     const fileChecksum = await migrationFileChecksum(migration);
-    const recorded = recordedChecksums.get(migration.version);
+    const recorded = (await sql<{checksum:string}>`select checksum from platform.schema_migrations where version = ${migration.version}`.execute(db)).rows[0]?.checksum;
 
     if (recorded !== undefined) {
       if (recorded !== fileChecksum) {

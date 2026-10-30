@@ -8,7 +8,7 @@ import { operationFailure } from "@openshapeforge/operations";
 import { actingRelationId } from "../db/acting-relation.js";
 import { configurationOwnerPatch } from "./configuration-ownership.js";
 import { getEntityOperationContracts, getGeneratedEntity } from "../operations/entity/index.js";
-import { assertEntityValuesValid } from "../operations/entity/input-validation.js";
+import { assertEntityValuesValid, valuesSchemaOf } from "../operations/entity/input-validation.js";
 import { collectElicitedValues } from "./elicitation.js";
 import { mintConfiguration } from "./configuration-handoff.js";
 import { handoffModelValues } from "./configuration-submission.js";
@@ -218,6 +218,7 @@ export async function crudToolCall(
           elicit,
           modelValues: handoffModelValues({
             required,
+            accepted: Object.keys(valuesSchemaOf(secureContract)?.properties ?? {}),
             elicit,
             modelValues: modelArguments,
             sourceRow,

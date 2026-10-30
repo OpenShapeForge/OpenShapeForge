@@ -113,21 +113,22 @@ export function handoffFailureCode(error: unknown): string {
  * The identity a browser handoff will write the row with. The form asks the
  * person only for the elicited values, so every other required create
  * argument has to be known when the form is minted. A model routinely omits
- * a connection's key and name; the source (provider) row supplies both, the
- * way the connection-problem path already does. Anything still missing
+ * an accepted key or name; the source (provider) row supplies either when
+ * the canonical create schema permits it. Server-derived fields stay absent. Anything still missing
  * refuses the handoff here, naming the fields, so the model can call again —
  * rather than the person's submission failing on a NOT NULL column with a
  * page that cannot say why.
  */
 export function handoffModelValues(input: {
   required: readonly string[];
+  accepted: readonly string[];
   elicit: ElicitOnCreateEntry;
   modelValues: JsonRecord;
   sourceRow: JsonRecord;
 }): JsonRecord {
   const values: JsonRecord = { ...input.modelValues };
   for (const field of ["key", "name"]) {
-    if (values[field] === undefined && typeof input.sourceRow[field] === "string") {
+    if (input.accepted.includes(field) && values[field] === undefined && typeof input.sourceRow[field] === "string") {
       values[field] = input.sourceRow[field];
     }
   }

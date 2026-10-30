@@ -6,6 +6,7 @@ import { HttpError } from "../rest/http-error.js";
 import { getGeneratedCrudTables } from "../operations/entity/catalog.js";
 import { getGeneratedEntity } from "../operations/entity/queries.js";
 import { entityOperationContract, entityOperationRef, executeEntityOperation } from "../operations/entity/runtime.js";
+import { valuesSchemaOf } from "../operations/entity/input-validation.js";
 import { serializeEntityRow } from "../operations/entity/serialize-result.js";
 import { mintConfiguration } from "./configuration-handoff.js";
 import { handoffModelValues } from "./configuration-submission.js";
@@ -53,7 +54,7 @@ export async function startConfigurationForSession(
   const minted = await mintConfiguration({
     db, session, tenantId: session.tenantId, userId: session.userId, relationId: session.relationId ?? null,
     table: table.name, elicit,
-    modelValues: handoffModelValues({ required: [], elicit, modelValues: body.values, sourceRow: row }),
+    modelValues: handoffModelValues({ required: [], accepted: Object.keys(valuesSchemaOf(operation)?.properties ?? {}), elicit, modelValues: body.values, sourceRow: row }),
     definitions: row[secure.definitionsField] as Record<string, unknown>[],
     displayName: String(row.name ?? secure.sourceEntity),
   });

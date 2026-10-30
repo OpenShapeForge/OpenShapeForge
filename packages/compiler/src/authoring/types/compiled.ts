@@ -802,7 +802,7 @@ export interface CompiledEntityContract {
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
       collectionEmptyState?: { title: LocalizedText; description?: LocalizedText; illustration?: "empty-collection"; primaryAction?: "create" };
-      collectionBoard?: { groupBy: string; scopeBy?: string; groupSummary?: string; card: { title: string; subtitle?: string[]; body?: string[] } };
+      collectionBoard?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: string; currency: string }; card: { title: string; subtitle?: string[]; amount?: { value: string; currency: string }; body?: string[] } };
       recordContext?: { fields: string[]; relationships?: string[]; contacts?: import("./views.js").ContactContextPresentation; records?: import("./views.js").RelatedRecordContextPresentation[] };
       /** Authored layout-renderer exceptions; hosts resolve these opaque keys. */
       renderers?: {

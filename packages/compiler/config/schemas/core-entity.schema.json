@@ -1283,8 +1283,16 @@
                 "groupBy": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group by", "nl": "Groeperen op" } } },
                 "scopeBy": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "groupTargetField", "x-osf-i18n": { "title": { "en": "Group scope field", "nl": "Groepsbereikveld" } } },
                 "groupSummary": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "groupTargetField", "x-osf-i18n": { "title": { "en": "Group summary field", "nl": "Groepssamenvattingsveld" } } },
+                "aggregate": { "type": "object", "additionalProperties": false, "required": ["sum", "currency"], "properties": {
+                  "sum": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Sum field path", "nl": "Somveldpad" } } },
+                  "currency": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Currency field path", "nl": "Valutaveldpad" } } }
+                }, "x-osf-i18n": { "title": { "en": "Group aggregate", "nl": "Groepstotaal" } } },
                 "card": { "type": "object", "additionalProperties": false, "required": ["title"], "x-osf-i18n": { "title": { "en": "Card", "nl": "Kaart" } }, "properties": {
                   "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title path", "nl": "Titelpad" } } },
+                  "amount": { "type": "object", "additionalProperties": false, "required": ["value", "currency"], "properties": {
+                    "value": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Amount field path", "nl": "Bedragveldpad" } } },
+                    "currency": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Currency field path", "nl": "Valutaveldpad" } } }
+                  }, "x-osf-i18n": { "title": { "en": "Card amount", "nl": "Kaartbedrag" } } },
                   "subtitle": { "type": "array", "x-osf-i18n": { "title": { "en": "Subtitle fields", "nl": "Ondertitelvelden" } }, "items": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Field path", "nl": "Veldpad" } } } },
                   "body": { "type": "array", "x-osf-i18n": { "title": { "en": "Card fields", "nl": "Kaartvelden" } }, "items": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Field path", "nl": "Veldpad" } } } }
                 } }

@@ -2214,6 +2214,24 @@ test("board group summaries require the readable collection used for grouping", 
   expect(build).toThrow("board group summary requires a readable grouping entity collection");
 });
 
+test("board money paths refer to typed scalar fields on the same record", () => {
+  const owner = entity("Deal", "deal", [field("displayName"), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } }), field("quoteId", { osfType: "Quote", relationship: { target: "Quote" } })], coreView(), [{ key: "quoteId", fieldKey: "quoteId", kind: "belongsTo", target: "Quote", foreignKey: "quote_id" }]);
+  const quote = entity("Quote", "quote", [field("amountBase", { osfType: "decimal", baseType: "number" }), field("currencyCode")], coreView());
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", aggregate: { sum: "quoteId.amountBase", currency: "quoteId.currencyCode" }, card: { title: "displayName", amount: { value: "quoteId.amountBase", currency: "quoteId.currencyCode" } } };
+  const build = () => buildWebManifest([owner, quote]);
+  const board = build().entities.Deal!.views.collection.board!;
+  expect(board.aggregate?.sum).toMatchObject({ targetEntityId: "Quote", field: "amountBase", cardinality: "one" });
+  expect(board.card.amount?.currency).toMatchObject({ targetEntityId: "Quote", field: "currencyCode", cardinality: "one" });
+  owner.contract.interfaces!.web!.collectionBoard!.card.amount!.currency = "displayName";
+  expect(build).toThrow("board amount and currency must be single scalar fields on the same record");
+  owner.contract.interfaces!.web!.collectionBoard!.card.amount!.currency = "quoteId.currencyCode";
+  quote.contract.model.fields.find(item => item.key === "currencyCode")!.baseType = "number";
+  expect(build).toThrow("board amount and currency must be single scalar fields on the same record");
+  quote.contract.model.fields.find(item => item.key === "currencyCode")!.baseType = "string";
+  quote.contract.storage.columns = quote.contract.storage.columns.filter(item => item.field !== "amountBase");
+  expect(build).toThrow("board aggregate requires persisted scalar fields");
+});
+
 test("a board does not expose a reference as a raw scalar without a readable relationship", () => {
   const owner = entity("Task", "task", [field("displayName"), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } }), field("customerId", { osfType: "Customer", relationship: { target: "Customer" } })], coreView());
   owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", body: ["customerId"] } };

@@ -962,7 +962,35 @@ function projectEntity(
     };
     const title = valuePath(authoredBoard.card.title);
     if (title.cardinality !== "one") throw new Error(`${entityName}: board card title must be single-valued.`);
-    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), ...(authoredBoard.groupSummary ? { groupSummary: authoredBoard.groupSummary } : {}), card: { title, ...(authoredBoard.card.subtitle ? { subtitle: authoredBoard.card.subtitle.map(valuePath) } : {}), body: (authoredBoard.card.body ?? []).map(valuePath) } };
+    const money = (amountExpression: string, currencyExpression: string, persisted: boolean) => {
+      const amount = valuePath(amountExpression);
+      const currency = valuePath(currencyExpression);
+      const target = all.get(amount.targetEntityId);
+      const amountField = target?.contract.model.fields.find(item => item.key === amount.field);
+      const currencyField = target?.contract.model.fields.find(item => item.key === currency.field);
+      if (!amount.field || !currency.field || amount.cardinality !== "one" || currency.cardinality !== "one"
+        || amount.targetEntityId !== currency.targetEntityId || JSON.stringify(amount.path) !== JSON.stringify(currency.path)
+        || !amountField || !["number", "integer"].includes(amountField.baseType) || currencyField?.baseType !== "string") {
+        throw new Error(`${entityName}: board amount and currency must be single scalar fields on the same record reached by the same path.`);
+      }
+      if (persisted) {
+        let owner = source;
+        for (const step of amount.path) {
+          const relationship = owner.contract.model.relationships.find(item => `${owner.contract.entity.name}.${item.key}` === step.relationshipId);
+          const next = relationship && all.get(relationship.target);
+          if (!relationship || relationship.kind !== "belongsTo" || !relationship.foreignKey || relationship.provider || !next || next.contract.source) {
+            throw new Error(`${entityName}: board aggregate requires persisted belongs-to relationships.`);
+          }
+          owner = next;
+        }
+        const stored = (field: typeof amountField) => !field.computed && !field.typedBy && (!field.variables || field.variables === "none") && owner.contract.storage.columns.some(column => column.field === field.key);
+        if (!stored(amountField) || !stored(currencyField!)) throw new Error(`${entityName}: board aggregate requires persisted scalar fields.`);
+      }
+      return { amount, currency };
+    };
+    const cardAmount = authoredBoard.card.amount && money(authoredBoard.card.amount.value, authoredBoard.card.amount.currency, false);
+    const aggregate = authoredBoard.aggregate && money(authoredBoard.aggregate.sum, authoredBoard.aggregate.currency, true);
+    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), ...(authoredBoard.groupSummary ? { groupSummary: authoredBoard.groupSummary } : {}), ...(aggregate ? { aggregate: { sum: aggregate.amount, currency: aggregate.currency } } : {}), card: { title, ...(authoredBoard.card.subtitle ? { subtitle: authoredBoard.card.subtitle.map(valuePath) } : {}), ...(cardAmount ? { amount: { value: cardAmount.amount, currency: cardAmount.currency } } : {}), body: (authoredBoard.card.body ?? []).map(valuePath) } };
   }
   for (const groups of [authoredCreateGroups, updateGroups]) assertVisibilityFields(entityName, "form group", groups, fields);
 

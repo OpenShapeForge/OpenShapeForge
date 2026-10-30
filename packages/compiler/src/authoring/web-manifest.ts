@@ -585,11 +585,14 @@ function projectField(
   }
   const optionSource = fieldOptionSource(field);
   const fieldPolicy = compileFieldValuePolicy(field);
+  // Presentation props are applied after the semantic unit by field renderers.
+  // Project the same effective unit for compact renderers and summaries.
+  const unit = typeof presentation?.props?.unit === "string" ? presentation.props.unit : field.unit;
   return {
     id: `${parent}.${field.key}`, key: field.key,
     label: localized(field.label, field.key), description: localized(field.description, ""),
     osfType: field.osfType,
-    ...(field.unit ? { unit: field.unit } : {}),
+    ...(unit ? { unit } : {}),
     ...(field.document ? { document: structuredClone(field.document) } : {}),
     baseType: field.baseType,
     cardinality: field.cardinality === "collection" ? "many" : "one",
@@ -915,6 +918,16 @@ function projectEntity(
     }
     if (authoredBoard.groupSummary) {
       const target = group.relationship && all.get(group.relationship.targetEntityId);
+      if (!group.relationship) {
+        throw new Error(`${entityName}: board group summary requires an entity relationship for grouping.`);
+      }
+      // The header is populated from the same authorized collection that supplies
+      // the lanes; a get-only or unrelated option source cannot provide it.
+      if (!target || target.contract.source || !target.operations.list
+        || (group.optionSource && (group.optionSource.type !== "entity" || group.optionSource.source !== group.relationship.targetEntityId))
+        || (!group.optionSource && group.options?.length)) {
+        throw new Error(`${entityName}: board group summary requires a readable grouping entity collection.`);
+      }
       const summary = target?.contract.model.fields.find(field => field.key === authoredBoard.groupSummary);
       const provider = target?.contract.model.relationships.some(item => item.fieldKey === authoredBoard.groupSummary);
       if (!summary || summary.cardinality === "collection" || summary.baseType === "object" || summary.relationship?.target || provider) {

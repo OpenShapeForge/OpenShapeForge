@@ -178,6 +178,7 @@ export type WebFieldProjection = {
    * The renderer registry keys on it; `baseType` is its structural base.
    */
   osfType: string;
+  /** Effective unit: presentation props override a field-authored unit. */
   unit?: string;
   baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   /** Logical dynamic form metadata; physical storage stays server-side. */

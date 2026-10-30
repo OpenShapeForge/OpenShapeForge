@@ -1258,8 +1258,11 @@ entity update Operation. Domain-wide restrictions need their own server-side
 contract. Drag starts acquisition of the normal edit lease in parallel; drop is
 optimistic, and a failed lease or update restores the card.
 
-`groupSummary` optionally names a readable scalar field on the grouping entity.
-Its value uses the normal typed field renderer, including an authored unit.
+`groupSummary` optionally names a scalar field on the grouping entity. The
+grouping choices must come from that entity's readable collection. Its value
+uses the normal typed field renderer, including its effective unit. A unit in
+presentation props overrides a field-authored unit; the web projection exposes
+the effective unit to compact renderers as well.
 `subtitle` is an optional list of typed paths displayed directly beneath the
 card title; `body` remains available for other card fields.
 

@@ -2174,11 +2174,44 @@ test("board scope names a single field on the grouping entity", () => {
   expect(build().entities.Task!.views.collection.board?.scopeBy).toBe("processId");
   expect(build().entities.Task!.views.collection.board?.groupSummary).toBe("probability");
   expect(build().entities.Stage!.fields.probability?.unit).toBe("%");
+  const probability = stage.contract.model.fields.find(field => field.key === "probability")!;
+  probability.render = { component: "FieldIntegerDecimal", props: { unit: "points" } };
+  expect(build().entities.Stage!.fields.probability?.unit).toBe("points");
+  delete probability.unit;
+  expect(build().entities.Stage!.fields.probability?.unit).toBe("points");
+  probability.render = { component: "Input" };
+  expect(build().entities.Stage!.fields.probability?.unit).toBeUndefined();
+  probability.unit = "%";
   owner.contract.interfaces!.web!.collectionBoard!.groupSummary = "missing";
   expect(build).toThrow("board group summary must name a scalar field");
   owner.contract.interfaces!.web!.collectionBoard!.groupSummary = "probability";
+  probability.cardinality = "collection";
+  expect(build).toThrow("board group summary must name a scalar field");
+  probability.cardinality = "single";
+  probability.baseType = "object";
+  expect(build).toThrow("board group summary must name a scalar field");
+  probability.baseType = "integer";
+  probability.relationship = { target: "Task" };
+  expect(build).toThrow("board group summary must name a scalar field");
+  delete probability.relationship;
   owner.contract.interfaces!.web!.collectionBoard!.scopeBy = "missing";
   expect(build).toThrow("board scope must name a persisted filterable single scalar field");
+});
+
+test("board group summaries require the readable collection used for grouping", () => {
+  const owner = entity("Task", "task", [field("displayName"), field("stage", { osfType: "Stage", relationship: { target: "Stage" } })], coreView(), [{ key: "stage", fieldKey: "stage", kind: "belongsTo", target: "Stage", foreignKey: "stage_id" }]);
+  const stage = entity("Stage", "stage", [field("displayName"), field("probability", { baseType: "integer" })], coreView());
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", groupSummary: "probability", card: { title: "displayName" } };
+  const build = () => buildWebManifest([owner, stage]);
+  expect(build().entities.Task!.views.collection.board?.groupSummary).toBe("probability");
+  const group = owner.contract.model.fields.find(field => field.key === "stage")!;
+  group.options = { type: "static", items: [{ value: "open", label: text("Open") }] };
+  expect(build).toThrow("board group summary requires a readable grouping entity collection");
+  group.options = { type: "entity", source: "Other", valueField: "id" };
+  expect(build).toThrow("board group summary requires a readable grouping entity collection");
+  group.options = { type: "entity", source: "Stage", valueField: "id" };
+  stage.contract.interfaces!.web!.operations!.list = false;
+  expect(build).toThrow("board group summary requires a readable grouping entity collection");
 });
 
 test("a board does not expose a reference as a raw scalar without a readable relationship", () => {

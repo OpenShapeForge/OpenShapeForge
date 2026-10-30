@@ -144,6 +144,16 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     expect(await getGeneratedEntity(runtime.db, { ...viewer, tenantId: randomUUID() }, { table: table.name, id: String(created.id) })).toBeNull();
   });
 
+  test("identity batch filters retain tenant and field protection", async () => {
+    const own = await record();
+    const other = await createGeneratedEntity(runtime.db, { ...writer, tenantId: randomUUID() }, { table: table.name, values: {
+      label: "Other tenant", explicitSecret: "other secret", data: { label: "pii", visible: "other", restricted: "secret", fixed: "initial", contacts: [] },
+    } });
+    const result = await listGeneratedEntities(runtime.db, viewer, { table: table.name, limit: 10, filter: { id: { in: [own.id, other.id] } } });
+    expect(result.rows.map(row => row.id)).toEqual([own.id]);
+    expect(result.rows[0]?.explicit_secret).toBeNull();
+  });
+
   test("public JSON edits preserve omitted protected siblings in the database", async () => {
     const created = await record();
     const contact = contactsOf(created)[0]!;

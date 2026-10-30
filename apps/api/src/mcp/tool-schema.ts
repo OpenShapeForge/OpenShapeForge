@@ -89,6 +89,11 @@ export const ENVELOPE_KEYS = new Set([
   "confirmationAnswer",
 ]);
 
+/** Transport controls are Operation envelope fields, never entity values. */
+export function withoutEnvelopeKeys(values: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(values).filter(([key]) => !ENVELOPE_KEYS.has(key)));
+}
+
 /**
  * The tool schema with the authored values taken out: an update's `values`
  * becomes a bare object, a create keeps only its transport controls and

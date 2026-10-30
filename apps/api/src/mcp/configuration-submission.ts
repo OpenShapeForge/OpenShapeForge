@@ -79,7 +79,9 @@ export function parseSubmission(
  * The already-stored row a submission belongs to, if any: the row in the
  * target table whose `key` equals the key the model supplied when it minted
  * the handoff. A second submission for that key - a retried form, a rotated
- * secret - must update this row, never create a duplicate beside it.
+ * secret - is refused; a separate update Operation is required. This lookup
+ * covers caller-supplied keys only. Server-derived keys are allocated with
+ * their configured collision semantics during canonical create.
  */
 export function findExistingConfiguration(
   rows: readonly JsonRecord[],
@@ -114,8 +116,8 @@ export function handoffFailureCode(error: unknown): string {
  * person only for the elicited values, so every other required create
  * argument has to be known when the form is minted. A model routinely omits
  * an accepted key or name; the source (provider) row supplies either when
- * the canonical create schema permits it. Server-derived fields stay absent. Anything still missing
- * refuses the handoff here, naming the fields, so the model can call again —
+ * the canonical create schema permits it. Server-derived fields stay absent.
+ * The handoff refuses any remaining missing fields, so the model can call again —
  * rather than the person's submission failing on a NOT NULL column with a
  * page that cannot say why.
  */

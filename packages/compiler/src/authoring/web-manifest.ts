@@ -897,6 +897,9 @@ function projectEntity(
     if (!group || group.cardinality !== "one" || (!group.relationship && !group.optionSource && !group.options?.length)) {
       throw new Error(`${entityName}: board grouping requires a single relationship or choice field.`);
     }
+    if (group.relationship && !group.optionSource && !group.options?.length && !all.get(group.relationship.targetEntityId)?.operations.list) {
+      throw new Error(`${entityName}: board grouping requires a readable collection of choices.`);
+    }
     const valuePath = (expression: string): WebValuePath => {
       const parts = expression.split(".");
       if (parts.length > 5 || parts.some(part => !part)) throw new Error(`${entityName}: invalid board path ${expression}.`);
@@ -908,19 +911,23 @@ function projectEntity(
         const relation = owner.contract.model.relationships.find(item => item.key === key);
         if (relation) {
           const resolved = compileRelationshipPath(entityName, owner, all, [key]);
+          if (!resolved.target.operations.list) throw new Error(`${entityName}: board path ${expression} requires a readable collection.`);
           path.push(...resolved.path);
           many ||= resolved.many;
           owner = resolved.target;
           if (i === parts.length - 1) return { path, targetEntityId: owner.contract.entity.name, osfType: owner.contract.entity.name, cardinality: many ? "many" : "one" };
         } else {
           const field = owner.contract.model.fields.find(item => item.key === key);
-          if (!field || i !== parts.length - 1) throw new Error(`${entityName}: invalid board path ${expression}.`);
+          const providerField = owner.contract.model.relationships.some(item => item.provider && item.fieldKey === key);
+          if (!field || field.baseType === "object" || providerField || i !== parts.length - 1) throw new Error(`${entityName}: invalid board path ${expression}.`);
           return { path, targetEntityId: owner.contract.entity.name, field: key, osfType: field.osfType, cardinality: many || field.cardinality === "collection" ? "many" : "one" };
         }
       }
       throw new Error(`${entityName}: invalid board path ${expression}.`);
     };
-    board = { groupBy: authoredBoard.groupBy, card: { title: valuePath(authoredBoard.card.title), body: (authoredBoard.card.body ?? []).map(valuePath) } };
+    const title = valuePath(authoredBoard.card.title);
+    if (title.cardinality !== "one") throw new Error(`${entityName}: board card title must be single-valued.`);
+    board = { groupBy: authoredBoard.groupBy, card: { title, body: (authoredBoard.card.body ?? []).map(valuePath) } };
   }
   for (const groups of [authoredCreateGroups, updateGroups]) assertVisibilityFields(entityName, "form group", groups, fields);
 

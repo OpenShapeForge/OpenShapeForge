@@ -2145,6 +2145,9 @@ test("board card paths preserve related entity type and collection cardinality",
   expect(build().entities.Deal!.views.collection.board!.card.body[1]).toMatchObject({
     targetEntityId: "Product", field: "displayName", osfType: "string", cardinality: "many",
   });
+  owner.contract.interfaces!.web!.collectionBoard!.card.title = "lines.productId";
+  expect(build).toThrow("board card title must be single-valued");
+  owner.contract.interfaces!.web!.collectionBoard!.card.title = "displayName";
   owner.contract.interfaces!.web!.collectionBoard!.card.body = ["lines.missing"];
   expect(build).toThrow("invalid board path");
   owner.contract.interfaces!.web!.collectionBoard!.card.body = [];

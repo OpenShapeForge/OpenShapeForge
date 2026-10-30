@@ -243,7 +243,6 @@ export async function revokeInboundEndpoint(
       from platform.inbound_endpoints e
      where e.id = ${input.id}::uuid and e.tenant_id = app.current_tenant()
   `.execute(trx);
-  await restoreInboundEndpointGateWait(trx, previousLockTimeout);
   // `tenant_id = app.current_tenant()` beside the policy, not instead of it.
   // The policy is what enforces the fence; spelling it here as well means a
   // statement that somehow ran without the policy still cannot reach another
@@ -259,6 +258,7 @@ export async function revokeInboundEndpoint(
       from platform.inbound_endpoints
      where id = ${input.id}::uuid and tenant_id = app.current_tenant()
   `.execute(trx);
+  await restoreInboundEndpointGateWait(trx, previousLockTimeout);
   const row = current.rows[0];
   return row ? endpointSummaryOf(row) : undefined;
 }

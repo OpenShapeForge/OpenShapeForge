@@ -356,7 +356,6 @@ export async function markInboundDispatchInTransaction(
       from platform.inbound_deliveries d
      where d.id = ${reference.workId}::uuid
   `.execute(trx);
-  await restoreInboundEndpointGateWait(trx, previousLockTimeout);
   // Committed before the request leaves, so a crash between here and the
   // Operation leaves this attempt on record as having started one. Holding the
   // gate is what makes the predicate's own statement snapshot decisive: a
@@ -376,6 +375,7 @@ export async function markInboundDispatchInTransaction(
        and app.inbound_endpoint_active(d.endpoint_id, d.tenant_id)
        and d.status in ('pending', 'dispatching')
   `.execute(trx);
+  await restoreInboundEndpointGateWait(trx, previousLockTimeout);
   if (Number(result.numAffectedRows ?? 0n) !== 1) {
     // Includes a revocation that landed since the resolve a moment ago, and a
     // revocation that won the gate while this attempt waited for it. The broker

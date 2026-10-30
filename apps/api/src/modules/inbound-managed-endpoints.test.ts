@@ -19,7 +19,7 @@ const registration: RuntimeInboundConnectionRegistration = {
   dispatch: { operationId: "integration.receive", inputField: "delivery" },
   idempotencyKey: "reconcile.test",
 };
-function fixture(overrides: { active?: boolean; connection?: RuntimeConnectionResolution; authorized?: boolean } = {}) {
+function fixture(overrides: { active?: boolean; connection?: RuntimeConnectionResolution; authorized?: boolean; concurrentMismatch?: boolean } = {}) {
   let row: EndpointRow | undefined;
   const inserts: InsertEndpointInput[] = [];
   const connection = overrides.connection ?? { ok: true, connection: { connectionId: CONNECTION, adapterKey: "jira-cloud", connectionKey: "jira", transport: "rest", connectionScope: "tenant", ownerUserId: null, values: { webhookSigningSecret: SECRET }, secretKeys: ["webhookSigningSecret"], egressGrant: {} as never } };
@@ -47,6 +47,7 @@ function fixture(overrides: { active?: boolean; connection?: RuntimeConnectionRe
           secret_algorithm: input.storedSecret.algorithm, service_identity_id: input.serviceIdentityId,
           operation_id: input.dispatch.operationId, operation_input_field: input.dispatch.inputField,
           status: "active", created_by: input.createdBy, created_at: new Date(), revoked_at: null, revoked_reason: null };
+        if (overrides.concurrentMismatch) { row.endpoint_key = "another-provider"; return undefined; }
         return endpointSummaryOf(row);
       },
       revoke: async (_session, input) => row && row.id === input.id && row.connection_id === input.connectionId ? { ...endpointSummaryOf(row), status: "revoked", revokedAt: new Date().toISOString() } : undefined,
@@ -98,6 +99,7 @@ test("secret rotation or Connection removal refuses later delivery without expos
   expect(await api.connectionIsCurrent(session, { connectionId: CONNECTION, endpointId: endpoint.id })).toBe(true);
   (connection.connection.values as Record<string, string>).webhookSigningSecret = "synthetic-different-rotated-secret-value";
   expect(await api.connectionIsCurrent(session, { connectionId: CONNECTION, endpointId: endpoint.id })).toBe(false);
+  await expect(api.registerForConnection(session, registration)).rejects.toThrow(/signing secret has changed/);
   connection.connection.secretKeys = [];
   expect(await api.connectionIsCurrent(session, { connectionId: CONNECTION, endpointId: endpoint.id })).toBe(false);
   (connection as { ok: boolean }).ok = false;
@@ -121,4 +123,10 @@ test("a repeated registration cannot confirm a corrupt identity profile", async 
   await api.registerForConnection(session, registration);
   corruptIdentity();
   await expect(api.registerForConnection(session, registration)).rejects.toThrow(/invalid Connection endpoint/);
+});
+
+
+test("a concurrent registration winner with different configuration is refused", async () => {
+  const { api } = fixture({ concurrentMismatch: true });
+  await expect(api.registerForConnection(session, registration)).rejects.toThrow(/different or invalid Connection endpoint/);
 });

@@ -286,7 +286,7 @@ roleLabels:
 # Hand-authored client roles below complement roles derived from entity YAML.
 clientRoles:
   erp-provider:
-    # Host-managed inbound endpoints can be reconciled only by explicitly granted service identities.
+    # Host provisioning grants this to the chosen organization service account; it is not granted by default.
     - Platform.InboundEndpointManage
     - Organization.Security.Manage
     - Connectors.ExampleObjectStore.Read

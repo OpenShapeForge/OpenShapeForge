@@ -1047,3 +1047,15 @@ test("endpoint revocation restores the caller's lock timeout", async () => {
     });
   });
 }, TEST_TIMEOUT);
+
+test("endpoint revocation bounds a contended critical-section row lock", async () => {
+  await withScratch(async ({ app, tenantA, userA }) => {
+    const session = tenantSession(tenantA, userA);
+    const endpoint = await register(app, tenantA, userA);
+    await withDbSession(app, session, async locked => {
+      await sql`select id from platform.inbound_endpoints where id=${endpoint.id}::uuid for update`.execute(locked);
+      await expect(withDbSession(app, session, trx => revokeInboundEndpoint(trx, { id: endpoint.id, reason: null }),
+        { independent: true })).rejects.toThrow(/lock timeout/i);
+    });
+  });
+}, TEST_TIMEOUT);

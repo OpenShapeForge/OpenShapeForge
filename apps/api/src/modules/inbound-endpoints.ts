@@ -352,8 +352,9 @@ export function createInboundEndpointServices(
         storedSecret: encryptSecret(keys, `${actor.tenantId}:${id}`, INBOUND_SECRET_FIELD, secret),
       });
       if (stored) return view(stored);
-      // A concurrent transaction won the partial unique key. Its insert has
-      // committed before ON CONFLICT returns; compare the winner exactly.
+      // Under the default READ COMMITTED isolation, ON CONFLICT waits for a
+      // winning insert to commit and the next statement can see it. Stricter
+      // isolation may instead raise a serialization failure for the caller to retry.
       const winner = await options.managed!.find(session, registrationKey);
       if (!winner) throw new Error("The concurrent Connection endpoint could not be read.");
       return sameRegistration(winner);

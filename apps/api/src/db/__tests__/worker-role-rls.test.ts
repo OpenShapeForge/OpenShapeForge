@@ -243,6 +243,9 @@ describe("worker-role RLS axis", () => {
             .rejects.toThrow(/permission denied for (table|schema)/);
           await expect(sql`select 1 from erp.authorization_operation_policies limit 1`.execute(db))
             .rejects.toThrow(/permission denied for (table|schema)/);
+          // The current worker-granted tables are platform-owned and have no
+          // authored-entity guard. If an authored table gains worker access,
+          // add a direct managed-row denial test in addition to this projection.
           for (const [tenantId, managed] of [[fixture.tenantA, true], [fixture.tenantB, false]] as const) {
             await withDbSession(db, { tenantId, userId: subject, roles: [], scope: "self" }, async trx => {
               const result = await sql<{managed: boolean; allowed: boolean; exposed: boolean}>`
@@ -250,6 +253,9 @@ describe("worker-role RLS axis", () => {
                   app.authorization_allows('Notebook', '{}'::jsonb) as allowed,
                   (current_setting('app.authorization_rules')::jsonb->'states' <> '{}'::jsonb) as exposed`.execute(trx);
               expect(result.rows[0]).toEqual({ managed, allowed: !managed, exposed: false });
+              const locks = await sql<{ held: boolean }>`select exists(select 1 from pg_locks
+                where pid=pg_backend_pid() and locktype='advisory' and mode='ShareLock') as held`.execute(trx);
+              expect(locks.rows[0]?.held).toBe(managed);
             });
           }
 

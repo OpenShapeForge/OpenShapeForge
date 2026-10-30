@@ -174,9 +174,9 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
   // these three columns and returns only the tenant's managed entity names.
   await sql`grant select (tenant_id, ${sql.id(entityColumnName('AuthorizationOperationPolicy','entityType'))}, ${sql.id(entityColumnName('AuthorizationOperationPolicy','managed'))}) on ${policies} to ${sql.id(resolver)}`.execute(db);
   await sql`drop policy if exists authorization_worker_managed_lookup on ${policies}`.execute(db);
-  await sql`create policy authorization_worker_managed_lookup on ${policies} for select to ${sql.id(resolver)} using (tenant_id=app.current_tenant())`.execute(db);
-  await sql`grant create on schema app to ${sql.id(resolver)}`.execute(db);
+  await sql`create policy authorization_worker_managed_lookup on ${policies} as restrictive for select to ${sql.id(resolver)} using (tenant_id=app.current_tenant())`.execute(db);
   await sql`
+    grant create on schema app to ${sql.id(resolver)};
     create or replace function app.authorization_worker_rules() returns jsonb
     language sql stable security definer set search_path=pg_catalog,pg_temp as $function$
       select jsonb_build_object('actor','{}'::jsonb,'states','{}'::jsonb,
@@ -186,8 +186,8 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
     revoke all on function app.authorization_worker_rules() from public;
     grant execute on function app.authorization_worker_rules() to ${sql.id(WORKER_ROLE)};
     alter function app.authorization_worker_rules() owner to ${sql.id(resolver)};
+    revoke create on schema app from ${sql.id(resolver)};
   `.execute(db);
-  await sql`revoke create on schema app from ${sql.id(resolver)}`.execute(db);
   await sql`
     create or replace function app.authorization_rules_for_actor() returns jsonb
     language sql stable as $function$

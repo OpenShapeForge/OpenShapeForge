@@ -160,8 +160,13 @@ async function applyAuthorizationSession<T>(trx: Transaction<T>): Promise<void> 
         if to_regprocedure('app.authorization_worker_rules()') is null then
           raise exception 'Worker authorization projection is not installed';
         end if;
-        perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
-        perform set_config('app.authorization_rules',app.authorization_worker_rules()::text,true);
+        rules := app.authorization_worker_rules();
+        if jsonb_array_length(coalesce(rules->'managedEntities','[]'::jsonb)) > 0 then
+          perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
+          -- A policy may have changed while this worker waited.
+          rules := app.authorization_worker_rules();
+        end if;
+        perform set_config('app.authorization_rules',rules::text,true);
         return;
       end if;
       dependencies:=coalesce(nullif(current_setting('app.audit_read_operations',true),''),'[]')::jsonb;

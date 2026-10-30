@@ -11,6 +11,7 @@ import { expandRoleComposites } from '../../auth/person-roles.js';
 import { memberRoleClientId } from '../../auth/employee-invitations.js';
 import compiledInventory from '../../generated/compiler/authorization-operations.json' with {type:'json'};
 import accessPolicy from '../../generated/compiler/access-policy.json' with {type:'json'};
+import { databaseRole } from '../database-roles.js';
 import { APP_ROLE } from './app-role.js';
 
 type InventorySeed = { checksum: string; rows: Array<{ id:string; entity:string; roles:string[]; grantable:boolean; fields:Record<string,{column:string;type:string}> }> };
@@ -98,6 +99,11 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
   const table=(entity:string)=>sql.table(entityTableName(entity));
   const col=(alias:string,entity:string,field:string)=>sql.ref(alias+'.'+entityColumnName(entity,field));
   const knownRoles=[...new Set([...accessPolicy.roles,...accessPolicy.permissions,...compiledInventory.rows.flatMap(operation=>operation.roles),...Object.values(roleComposites).flatMap(realm=>Object.keys(realm.clients[memberRoleClientId() as keyof typeof realm.clients]??{}))])].filter(role=>!role.startsWith('Platform.'));
+  const matchingSubject=(alias:string)=>sql`case ${col(alias,'AuthorizationProfileAssignment','subjectKind')}
+    when 'user' then app.current_principal_class()='person' and ${col(alias,'AuthorizationProfileAssignment','subjectKey')}=actor.context->>'identityId'
+    when 'group' then app.current_principal_class()='person' and actor.context->'groupIds' ? ${col(alias,'AuthorizationProfileAssignment','subjectKey')}
+    when 'role' then actor.context->'roles' ? ${col(alias,'AuthorizationProfileAssignment','subjectKey')}
+    else false end`;
   const roleExpansions=Object.fromEntries(Object.keys(roleComposites).map(realm=>[realm,Object.fromEntries(knownRoles.map(role=>[role,expandRoleComposites(realm,[role],memberRoleClientId()).filter(role=>!role.startsWith('Platform.'))]))]));
   await sql`
     create or replace function app.authorization_actor() returns jsonb
@@ -141,6 +147,25 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
     end;
     $function$;
   `.execute(db);
+  // Reuse the existing non-login identity resolver for a tenant-fenced boolean FK lookup.
+  // It gains no group name/content read and no write privilege.
+  const resolver=databaseRole('identityResolver').name;
+  await sql`grant usage on schema ${sql.id(entityTableName('RelationGroup').split('.')[0]!)} to ${sql.id(resolver)}`.execute(db);
+  await sql`grant select(id,tenant_id,status) on ${table('RelationGroup')} to ${sql.id(resolver)}`.execute(db);
+  await sql`drop policy if exists authorization_group_subject_lookup on ${table('RelationGroup')}`.execute(db);
+  await sql`create policy authorization_group_subject_lookup on ${table('RelationGroup')} for select to ${sql.id(resolver)} using(tenant_id=app.current_tenant())`.execute(db);
+  await sql`
+    create or replace function app.authorization_group_exists(group_key text) returns boolean
+    language plpgsql stable security definer set search_path=pg_catalog,pg_temp as $function$
+    begin
+      if not app.has_any_role(array['Organization.Security.Manage']) then return false; end if;
+      return exists(select 1 from ${table('RelationGroup')} g where g.tenant_id=app.current_tenant() and g.id::text=group_key and g.status='active');
+    end;
+    $function$;
+    revoke all on function app.authorization_group_exists(text) from public;
+    grant execute on function app.authorization_group_exists(text) to ${sql.id(APP_ROLE)};
+    alter function app.authorization_group_exists(text) owner to ${sql.id(resolver)};
+  `.execute(db);
   const policies=table('AuthorizationOperationPolicy'),assignments=table('AuthorizationProfileAssignment'),profiles=table('AuthorizationProfile'),versions=table('AuthorizationProfileVersion');
   await sql`
     create or replace function app.authorization_rules_for_actor() returns jsonb
@@ -152,20 +177,18 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
         'states',coalesce((select jsonb_object_agg(${col('s','AuthorizationOperationPolicy','operationId')},jsonb_build_object(
           'entity',i.entity_name,'managed',${col('s','AuthorizationOperationPolicy','managed')},'grantable',coalesce(i.grantable,false),'fields',i.fields,
           'listFields',${col('s','AuthorizationOperationPolicy','listFields')},
-          'rules',coalesce((select case when count(*)>100 then '[]'::jsonb else jsonb_agg(matched.condition) end from (select distinct v.id, policy_row->'row'->${sql.lit(entityColumnName('AuthorizationProfilePolicy','condition'))} as condition
+          'rules',case when exists(select 1 from ${assignments} direct where direct.tenant_id=app.current_tenant()
+            and ${col('direct','AuthorizationProfileAssignment','active')} and ${col('direct','AuthorizationProfileAssignment','profileVersion')} is null and ${col('direct','AuthorizationProfileAssignment','operationId')}=i.id
+            and ${matchingSubject('direct')}) then '[null]'::jsonb else coalesce((select case when count(*)>100 then '[]'::jsonb else jsonb_agg(matched.condition) end from (select distinct v.id, policy_row->'row'->${sql.lit(entityColumnName('AuthorizationProfilePolicy','condition'))} as condition
             from ${assignments} a
             join ${versions} v on v.tenant_id=a.tenant_id and v.id=${col('a','AuthorizationProfileAssignment','profileVersion')}
             join ${profiles} p on p.tenant_id=v.tenant_id and p.id=${col('v','AuthorizationProfileVersion','profile')}
             cross join lateral jsonb_array_elements(coalesce(v.snapshot->'head'->'children'->${sql.lit(entityTableName('AuthorizationProfilePolicy').split('.').at(-1)!)},'[]'::jsonb)) policy_row
-            where a.tenant_id=app.current_tenant() and ${col('a','AuthorizationProfileAssignment','active')} and ${col('p','AuthorizationProfile','active')}
+            where a.tenant_id=app.current_tenant() and (${col('a','AuthorizationProfileAssignment','operationId')} is null or ${col('a','AuthorizationProfileAssignment','operationId')}=i.id) and ${col('a','AuthorizationProfileAssignment','active')} and ${col('p','AuthorizationProfile','active')}
               and v.status='published' and v.snapshot->>'entity'='AuthorizationProfile'
               and v.snapshot->'head'->'row'->>${sql.lit(entityColumnName('AuthorizationProfile','targetEntity'))}=i.entity_name
               and policy_row->'row'->>${sql.lit(entityColumnName('AuthorizationProfilePolicy','operationId'))}=i.id
-              and case ${col('a','AuthorizationProfileAssignment','subjectKind')}
-                when 'user' then app.current_principal_class()='person' and ${col('a','AuthorizationProfileAssignment','subjectKey')}=actor.context->>'identityId'
-                when 'group' then app.current_principal_class()='person' and actor.context->'groupIds' ? ${col('a','AuthorizationProfileAssignment','subjectKey')}
-                when 'role' then actor.context->'roles' ? ${col('a','AuthorizationProfileAssignment','subjectKey')}
-                else false end limit 101) matched),'[]'::jsonb)))
+              and ${matchingSubject('a')} limit 101) matched),'[]'::jsonb) end))
           from ${policies} s left join platform.authorization_operation_inventory i on i.id=${col('s','AuthorizationOperationPolicy','operationId')}
           where s.tenant_id=app.current_tenant()),'{}'::jsonb)) from actor;
     $function$;
@@ -232,13 +255,28 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
       perform pg_advisory_xact_lock(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
       if tg_op='DELETE' then return old; end if;
       if tg_table_name=${sql.lit(entityTableName('AuthorizationProfileAssignment').split('.').at(-1)!)} then
+       if new.profile_version is null and nullif(new.operation_id,'') is null then
+         raise exception 'VALIDATION: Choose a profile version or a direct Operation' using errcode='23514';
+       end if;
        if new.active then
-        if not exists(select 1 from ${versions} v where v.tenant_id=new.tenant_id and v.id=new.profile_version and v.status='published') then
+        if new.profile_version is null then
+          if not exists(select 1 from platform.authorization_operation_inventory i where i.id=new.operation_id and i.grantable) then
+            raise exception 'VALIDATION: The direct grant is outside the application ceiling' using errcode='23514';
+          end if;
+        elsif not exists(select 1 from ${versions} v where v.tenant_id=new.tenant_id and v.id=new.profile_version and v.status='published') then
           raise exception 'VALIDATION: Choose a published profile version in this organization' using errcode='23514';
+        end if;
+        if new.profile_version is not null and nullif(new.operation_id,'') is not null and not exists(
+          select 1 from ${versions} v cross join lateral jsonb_array_elements(coalesce(v.snapshot->'head'->'children'->${sql.lit(entityTableName('AuthorizationProfilePolicy').split('.').at(-1)!)},'[]'::jsonb)) policy_row
+          join platform.authorization_operation_inventory i on i.id=new.operation_id and i.grantable
+          where v.tenant_id=new.tenant_id and v.id=new.profile_version and v.snapshot->'head'->'row'->>${sql.lit(entityColumnName('AuthorizationProfile','targetEntity'))}=i.entity_name
+            and policy_row->'row'->>${sql.lit(entityColumnName('AuthorizationProfilePolicy','operationId'))}=new.operation_id
+        ) then
+          raise exception 'VALIDATION: The profile has no eligible policy for this Operation' using errcode='23514';
         end if;
         if not (case new.subject_kind
           when 'user' then exists(select 1 from platform.identity_relations member where member.tenant_id=new.tenant_id and member.identity_id::text=new.subject_key and member.status='linked' and not member.access_blocked)
-          when 'group' then exists(select 1 from ${table('RelationGroup')} subject_group where subject_group.tenant_id=new.tenant_id and subject_group.id::text=new.subject_key and subject_group.status='active')
+          when 'group' then app.authorization_group_exists(new.subject_key)
           when 'role' then new.subject_key in (select jsonb_array_elements_text(${sql.lit(JSON.stringify(knownRoles))}::jsonb)) or exists(select 1 from platform.organization_access_roles role where role.tenant_id=new.tenant_id and 'custom:'||role.id::text=new.subject_key)
           else false end) then
           raise exception 'VALIDATION: Choose an active subject in this organization' using errcode='23514';
@@ -292,6 +330,7 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
     end;
     $function$;
   `.execute(db);
+  await sql`create unique index if not exists authorization_direct_subject_uidx on ${assignments}(tenant_id,operation_id,subject_kind,subject_key) where profile_version is null and active`.execute(db);
   for(const entity of ['AuthorizationProfile','AuthorizationProfilePolicy','AuthorizationProfileAssignment','AuthorizationOperationPolicy']) {
     const target=table(entity);
     await sql`drop trigger if exists authorization_content_guard on ${target}`.execute(db);
@@ -318,7 +357,8 @@ async function installAuthorizationRowPolicies(db: OpenShapeForgeDatabase) {
       const scope=sql.join(subtype.subtype!.scope.map(scope=>sql`${sql.ref(scope.column)} is not distinct from ${sql.lit(scope.value)}`),sql` and `);
       checks.push(sql`(not (${scope}) or not (select app.authorization_entity_managed(${sql.lit(subtype.source!.authoringEntityName!)})) or app.authorization_allows(${sql.lit(subtype.source!.authoringEntityName!)},to_jsonb(${row})))`);
     }
-    const predicate=sql`app.bypass_rls() or (${sql.join(checks,sql` and `)})`;
+    const subjectLookup=entity==='RelationGroup'?sql`current_user=${sql.lit(databaseRole('identityResolver').name)} and app.has_any_role(array['Organization.Security.Manage'])`:sql`false`;
+    const predicate=sql`app.bypass_rls() or (${subjectLookup}) or (${sql.join(checks,sql` and `)})`;
     await sql`drop policy if exists authorization_profile_scope on ${target}`.execute(db);
     await sql`create policy authorization_profile_scope on ${target} as restrictive for all using (${predicate}) with check (${predicate})`.execute(db);
   }

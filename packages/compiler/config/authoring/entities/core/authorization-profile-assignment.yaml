@@ -41,7 +41,7 @@ fields:
       storageClass: core
   - key: profileVersion
     osfType: AuthorizationProfileVersion
-    required: true
+    required: false
     label:
       en: profileVersion
       nl: profileVersion
@@ -50,6 +50,27 @@ fields:
       storageClass: core
     relationship:
       ownership: reference
+  - key: operationId
+    osfType: string
+    required: false
+    label:
+      en: Operation (direct grant or profile scope)
+      nl: Operation (directe toekenning of profielscope)
+    persisted:
+      column: operation_id
+      storageClass: core
+    options:
+      type: dynamic
+      source: collection.options
+      parameters:
+        entity: AuthorizationProfileAssignment
+        field: operationId
+        catalog: operations
+    description:
+      en: Required for a direct grant. With a profile version, limits the assignment
+        to this Operation.
+      nl: Verplicht voor een directe toekenning. Met een profielversie beperkt dit de
+        toekenning tot deze Operation.
   - key: subjectKind
     osfType: string
     required: true
@@ -83,6 +104,15 @@ fields:
     persisted:
       column: subject_key
       storageClass: core
+    options:
+      type: dynamic
+      source: collection.options
+      parameters:
+        entity: AuthorizationProfileAssignment
+        field: subjectKey
+        catalog: subjects
+      bindings:
+        referenceEntity: subjectKind
   - key: active
     osfType: boolean
     required: true
@@ -183,6 +213,7 @@ interfaces:
               fields: &a1
                 - name
                 - profileVersion
+                - operationId
                 - subjectKind
                 - subjectKey
                 - active

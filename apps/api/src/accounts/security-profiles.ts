@@ -90,3 +90,39 @@ export function registerAuthorizationProfileValidation(): void {
     validateAuthorizationProfileSnapshot(event.version.snapshot);
   });
 }
+
+/** Directory choices share the existing collection-options capability and tenant fences. */
+export async function securitySubjectChoices(context:Pick<import('../modules/contract.js').ModuleOperationContext,'db'|'session'>,input:{kind:string;search:string;first:number;after?:string;locale:'en'|'nl'}) {
+  if(!context.db||!context.session?.tenantId||!context.session.roles.includes(SECURITY_MANAGE)) invalid('Security management permission required.');
+  const {sql}=await import('kysely');
+  const {withDbSession}=await import('../db/session.js');
+  const session=context.session!;
+  if(input.kind==='user')return withDbSession(context.db!,session,async trx=>{
+    const rows=(await sql<{value:string;label:string}>`select i.id::text as value,coalesce(i.display_name,'Account') as label
+      from platform.identities i join platform.identity_relations ir on ir.identity_id=i.id
+      where ir.tenant_id=${session.tenantId}::uuid and ir.status='linked' and not ir.access_blocked
+        and (${input.search}='' or i.display_name ilike ${'%'+input.search+'%'} or i.id::text=${input.search})
+        and i.id::text>${input.after??''} order by i.id::text limit ${input.first+1}`.execute(trx)).rows;
+    const items=rows.slice(0,input.first);return {items,nextCursor:rows.length>input.first?items.at(-1)!.value:null};
+  });
+  if(input.kind==='role'){
+    const {roleCatalog}=await import('./roles.js');
+    const {accessPolicy}=await import('./access-policy.js');
+    const stored=await withDbSession(context.db!,session,async trx=>(await sql<{value:string;label:string}>`select 'custom:'||id::text as value,label from platform.organization_access_roles where tenant_id=${session.tenantId}::uuid`.execute(trx)).rows);
+    const entries=[...inventory.rows.flatMap(operation=>operation.roles),...accessPolicy.permissions].filter(key=>!key.startsWith('Platform.')).map(value=>({value,label:value}));
+    entries.push(...roleCatalog(input.locale).map(role=>({value:role.key,label:role.label})),...stored);
+    const sorted=[...new Map(entries.map(item=>[item.value,item])).values()].filter(item=>`${item.value} ${item.label}`.toLowerCase().includes(input.search.toLowerCase())).sort((a,b)=>a.value.localeCompare(b.value));
+    const after=input.after?sorted.findIndex(item=>item.value===input.after)+1:0,items=sorted.slice(after,after+input.first);
+    return {items,nextCursor:sorted.length>after+input.first?items.at(-1)!.value:null};
+  }
+  if(input.kind==='group'){
+    const {getGeneratedCrudTables}=await import('../operations/entity/catalog.js');
+    const {listGeneratedEntitiesForTable}=await import('../operations/entity/queries.js');
+    const {withAuditContext}=await import('../platform/audit-context.js');
+    const table=getGeneratedCrudTables().find(table=>table.source?.authoringEntityName==='RelationGroup');
+    if(!table)invalid('The group directory is unavailable.');
+    const page=await withAuditContext('RelationGroup.list',session.credential,()=>listGeneratedEntitiesForTable(context.db!,session,table,{limit:input.first,...(input.after?{cursor:input.after}:{}),fixedWhere:[{column:entityColumnName('RelationGroup','status'),value:'active'}],...(input.search?{filter:{name:{contains:input.search}}}:{})}));
+    return {items:page.rows.map(row=>({value:String(row[table.primaryKey!]),label:String(row[entityColumnName('RelationGroup','name')]??row[table.primaryKey!])})),nextCursor:page.nextCursor};
+  }
+  invalid('Choose a user, group or role.');
+}

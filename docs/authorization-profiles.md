@@ -31,7 +31,10 @@ is treated as safely enforceable merely because it has a label or an ID.
   Insert them through `AuthorizationProfile.insertPolicy`.
 - `AuthorizationProfile.publish` uses the standard snapshot publisher. Published
   `AuthorizationProfileVersion` rows cannot be edited or deleted.
-- `AuthorizationProfileAssignment` pins a published version to a subject.
+- `AuthorizationProfileAssignment` pins a published version to a subject, or
+  grants one Operation directly. A direct grant needs `operationId`. A profile assignment can also
+  specify `operationId` to restrict the version to that one policy. Without
+  an Operation scope it applies to every policy in the published version.
   A user key is an **OSF account identity ID**, not a login-provider subject.
 - `AuthorizationOperationPolicy` selects application defaults or managed access
   for one Operation, and pins the reviewed list fields.

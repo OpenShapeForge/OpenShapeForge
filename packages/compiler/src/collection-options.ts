@@ -11,7 +11,7 @@ export function collectionOptionSources(entities:Entities){return entities.flatM
 export function collectionOptionsDefinition(entities:Entities):PluginOperationContract{return {
  key:'collection.options',title:'List filter options',description:'Find authorized existing collection values and resolve reference choices without reconstructing missing historical labels.',handler:'listCollectionOptions',
  auth:{mode:'session',anyAuthenticatedSession:true},tenancy:{mode:'required'},idempotency:{mode:'none'},effects:{data:'read',external:'none'},
- inputSchema:{type:'object',additionalProperties:false,required:['entity','field'],properties:{entity:{type:'string'},field:{type:'string'},search:{type:'string',maxLength:200},locale:{type:'string',enum:['en','nl']},first:{type:'integer',minimum:1,maximum:100},after:{type:'string',maxLength:8192},referenceEntity:{type:'string'},catalog:{type:'string',enum:['operations','fields']},filter:{type:'object'}}},
+ inputSchema:{type:'object',additionalProperties:false,required:['entity','field'],properties:{entity:{type:'string'},field:{type:'string'},search:{type:'string',maxLength:200},locale:{type:'string',enum:['en','nl']},first:{type:'integer',minimum:1,maximum:100},after:{type:'string',maxLength:8192},referenceEntity:{type:'string'},catalog:{type:'string',enum:['operations','fields','subjects']},filter:{type:'object'}}},
  outputSchema:{type:'object',required:['items','nextCursor'],properties:{
   items:{type:'array',items:{type:'object',required:['value','label'],properties:{value:{type:'string'},label:{type:'string'}}}},
   nextCursor:{type:['string','null']}

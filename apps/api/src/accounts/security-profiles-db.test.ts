@@ -75,6 +75,14 @@ test('a tenant assignment stays inside the ceiling and a withdrawn profile stops
  expect('error' in hiddenFilter).toBe(true);
  const opened=await executeEntityOperation(restricted(),{...audience},{operation:{id:'Relation.get',intent:'get'},input:{id:customer}});
  expect('error' in opened).toBe(true);
+ await expect(createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfileAssignment'),values:{name:'Ambiguous',operationId:'Relation.get',profileVersion:version.id,subjectKind:'user',subjectKey:identity,active:true}})).rejects.toBeDefined();
+ await createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfileAssignment'),values:{name:'Scoped profile',operationId:'Relation.list',profileVersion:version.id,subjectKind:'user',subjectKey:identity,active:true}});
+ expect(await allows('supplier')).toBe(false); // scoping a profile must not turn it into an unconditional direct grant
+ const direct=await createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfileAssignment'),values:{name:'Direct get',operationId:'Relation.get',subjectKind:'user',subjectKey:identity,active:true}});
+ const directlyOpened=await executeEntityOperation(restricted(),{...audience},{operation:{id:'Relation.get',intent:'get'},input:{id:supplier}});
+ expect('error' in directlyOpened).toBe(false);
+ await sql`update erp.authorization_profile_assignments set active=false where id=${direct.id}::uuid`.execute(privileged());
+
  const group=randomUUID();
  await sql`insert into erp.relation_groups(id,tenant_id,name,status,group_type) values(${group}::uuid,${tenant}::uuid,'Readers','active','team')`.execute(privileged());
  await sql`insert into erp.relation_group_memberships(tenant_id,relation_id,relation_group_id,status) values(${tenant}::uuid,${customer}::uuid,${group}::uuid,'active')`.execute(privileged());
@@ -86,6 +94,11 @@ test('a tenant assignment stays inside the ceiling and a withdrawn profile stops
   const version=(result as {value:{id:string}}).value;
   return createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfileAssignment'),values:{name:operationId,profileVersion:version.id,subjectKind,subjectKey,active:true}});
  };
+ const {securitySubjectChoices}=await import('./security-profiles.js');
+ const people=await securitySubjectChoices({...platformFor(manager).context,db:restricted()},{kind:'user',search:'Reader',first:25,locale:'en'});
+ expect(people.items.some(item=>item.value===identity)).toBe(true);
+ const directoryGroups=await securitySubjectChoices({...platformFor(manager).context,db:restricted()},{kind:'group',search:'Readers',first:25,locale:'en'});
+ expect(directoryGroups.items.some(item=>item.value===group&&item.label==='Readers')).toBe(true);
  await addProfile('Relation.get',rule('equals',literal('supplier')),'group',group);
  const grouped={...audience,relationGroupIds:[group]};
  const supplierAccess=await executeEntityOperation(restricted(),grouped,{operation:{id:'Relation.get',intent:'get'},input:{id:supplier}});

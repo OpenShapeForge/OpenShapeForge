@@ -1,3 +1,4 @@
+import { securitySubjectChoices } from '../accounts/security-profiles.js';
 // SPDX-License-Identifier: BUSL-1.1
 import securityInventory from '../generated/compiler/authorization-operations.json' with {type:'json'};
 import {operationFailure} from '@openshapeforge/operations';
@@ -19,7 +20,8 @@ export function nativeCollectionOptionsHandler(operation:OperationContract,modul
  if(operation.key!=='collection.options'||operation.plugin!=='core'||operation.implementation?.type!=='collection-options'||operation.auth.mode!=='session'||operation.tenancy.mode!=='required'||operation.effects?.data!=='read')throw Error('Invalid collection options binding.');
  const sources=operation.implementation.sources;
  const resources=moduleRealtimeResources(modules);
- return async(input,{session,platform})=>{
+ return async(input,context)=>{
+  const {session,platform}=context;
   if(!session?.tenantId||!platform)throw operationFailure({code:'UNAUTHENTICATED',message:'Select an organization.'});
   const definitions=await platform.operations.list(session), available=new Map(definitions.map(d=>[d.id,d]));
   const source=sources.find(s=>s.entity===input.entity&&available.has(s.list));
@@ -46,6 +48,9 @@ export function nativeCollectionOptionsHandler(operation:OperationContract,modul
   // Reuse the existing catalog choice source; the compiler-owned inventory remains the ceiling.
   if (input.catalog && source.entity.startsWith('Authorization')) {
     if (!session.roles.includes('Organization.Security.Manage')) throw operationFailure({code:'FORBIDDEN',message:'Security management permission required.'});
+    if(input.catalog==='subjects' && source.entity==='AuthorizationProfileAssignment' && field==='subjectKey') {
+      return {value:await securitySubjectChoices(context,{kind:String(input.referenceEntity??''),search,first,...(typeof input.after==='string'?{after:input.after}:{}),locale:input.locale==='nl'?'nl':'en'})};
+    }
     const operations = securityInventory.rows.filter(operation => operation.grantable && (!input.referenceEntity || operation.entity===input.referenceEntity));
     const entries = input.catalog==='operations' ? operations.map(operation=>({value:operation.id,label:operation.id}))
       : input.catalog==='fields' ? [...new Set(operations.flatMap(operation=>Object.keys(operation.fields)))].map(field=>({value:field,label:field})) : [];

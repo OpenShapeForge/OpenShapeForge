@@ -441,7 +441,7 @@ export interface EntityWebViewDefinition {
   [name: string]: unknown;
   collection: {
     /** Optional grouped board presentation of this same collection. */
-    board?: { groupBy: string; card: { title: string; body?: string[] } };
+    board?: { groupBy: string; scopeBy?: string; card: { title: string; body?: string[] } };
     /** Opaque host renderer-registry key; omission uses the generic collection renderer. */
     renderer?: string;
     route: string | LocalizedText;

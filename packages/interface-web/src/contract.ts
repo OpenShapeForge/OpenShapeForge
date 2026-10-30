@@ -235,7 +235,7 @@ export type WebTimelinePresentation = {
 };
 
 export type WebCollectionView = {
-  board?: { groupBy: string; card: { title: WebValuePath; body: WebValuePath[] } };
+  board?: { groupBy: string; scopeBy?: string; card: { title: WebValuePath; body: WebValuePath[] } };
   presentation?: WebTimelinePresentation;
   id: string;
   kind: "collection";

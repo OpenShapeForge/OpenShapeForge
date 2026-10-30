@@ -2154,3 +2154,13 @@ test("board card paths preserve related entity type and collection cardinality",
   owner.contract.interfaces!.web!.collectionBoard!.groupBy = "displayName";
   expect(build).toThrow("board grouping requires a single relationship or choice field");
 });
+
+test("board scope names a single field on the grouping entity", () => {
+  const owner = entity("Task", "task", [field("displayName"), field("stage", { osfType: "Stage", relationship: { target: "Stage" } })], coreView(), [{ key: "stage", fieldKey: "stage", kind: "belongsTo", target: "Stage", foreignKey: "stage_id" }]);
+  const stage = entity("Stage", "stage", [field("displayName"), field("processId")], coreView());
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", scopeBy: "processId", card: { title: "displayName" } };
+  const build = () => buildWebManifest([owner, stage]);
+  expect(build().entities.Task!.views.collection.board?.scopeBy).toBe("processId");
+  owner.contract.interfaces!.web!.collectionBoard!.scopeBy = "missing";
+  expect(build).toThrow("board scope must name a single scalar field");
+});

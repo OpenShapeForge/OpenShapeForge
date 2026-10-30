@@ -213,6 +213,17 @@ function buildFilterConditions(
       );
     }
 
+    // Generated list Operations do not run the JSON input schema. Reject
+    // malformed identity filters before PostgreSQL attempts a uuid cast.
+    if (column.name === table.primaryKey && column.type === "uuid") {
+      const operand = value && typeof value === "object" && !Array.isArray(value)
+        ? (value as { in?: unknown; eq?: unknown }).in ?? (value as { eq?: unknown }).eq : value;
+      const values = Array.isArray(operand) ? operand : [operand];
+      if (values.some(id => typeof id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id))) {
+        throw generatedCrudError(`Invalid identity filter ${key} for ${table.name}.`, "BAD_USER_INPUT");
+      }
+    }
+
     if (isInFilter) {
       if (!Array.isArray(value) || value.length === 0) {
         continue;

@@ -900,6 +900,13 @@ function projectEntity(
     if (group.relationship && !group.optionSource && !group.options?.length && !all.get(group.relationship.targetEntityId)?.operations.list) {
       throw new Error(`${entityName}: board grouping requires a readable collection of choices.`);
     }
+    if (authoredBoard.scopeBy) {
+      const target = group.relationship && all.get(group.relationship.targetEntityId);
+      const scope = target?.contract.model.fields.find(field => field.key === authoredBoard.scopeBy);
+      if (!scope || scope.cardinality === "collection" || scope.baseType === "object") {
+        throw new Error(`${entityName}: board scope must name a single scalar field on the grouping entity.`);
+      }
+    }
     const valuePath = (expression: string): WebValuePath => {
       const parts = expression.split(".");
       if (parts.length > 5 || parts.some(part => !part)) throw new Error(`${entityName}: invalid board path ${expression}.`);
@@ -927,7 +934,7 @@ function projectEntity(
     };
     const title = valuePath(authoredBoard.card.title);
     if (title.cardinality !== "one") throw new Error(`${entityName}: board card title must be single-valued.`);
-    board = { groupBy: authoredBoard.groupBy, card: { title, body: (authoredBoard.card.body ?? []).map(valuePath) } };
+    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), card: { title, body: (authoredBoard.card.body ?? []).map(valuePath) } };
   }
   for (const groups of [authoredCreateGroups, updateGroups]) assertVisibilityFields(entityName, "form group", groups, fields);
 

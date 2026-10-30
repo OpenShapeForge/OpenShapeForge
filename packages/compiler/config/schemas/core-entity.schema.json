@@ -1281,6 +1281,7 @@
               "type": "object", "additionalProperties": false, "required": ["groupBy", "card"],
               "properties": {
                 "groupBy": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group by", "nl": "Groeperen op" } } },
+                "scopeBy": { "$ref": "#/$defs/fieldKey", "x-osf-i18n": { "title": { "en": "Group scope field", "nl": "Groepsbereikveld" } } },
                 "card": { "type": "object", "additionalProperties": false, "required": ["title"], "x-osf-i18n": { "title": { "en": "Card", "nl": "Kaart" } }, "properties": {
                   "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title path", "nl": "Titelpad" } } },
                   "body": { "type": "array", "x-osf-i18n": { "title": { "en": "Card fields", "nl": "Kaartvelden" } }, "items": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Field path", "nl": "Veldpad" } } } }

@@ -922,7 +922,7 @@ function projectEntity(
         const key = parts[i]!;
         const relation = owner.contract.model.relationships.find(item => item.key === key);
         if (relation) {
-          if (path.length >= 4) throw new Error(`${entityName}: board path requires at most four relationships.`);
+          if (path.length >= 4) throw new Error(`${entityName}: board path ${expression} requires at most four relationships.`);
           const resolved = compileRelationshipPath(entityName, owner, all, [key], "board");
           if (!resolved.target.operations.list) throw new Error(`${entityName}: board path ${expression} requires a readable collection.`);
           path.push(...resolved.path);

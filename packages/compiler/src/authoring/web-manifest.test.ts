@@ -2155,6 +2155,16 @@ test("board card paths preserve related entity type and collection cardinality",
   expect(build).toThrow("board grouping requires a single relationship or choice field");
 });
 
+test("board card relationship paths allow four hops and reject five", () => {
+  const owner = entity("Root", "root", [field("name"), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } })], coreView(), [{ key: "next", kind: "hasMany", target: "Node1", foreignKey: "root_id" }]);
+  const nodes = Array.from({ length: 5 }, (_, i) => entity(`Node${i + 1}`, `node${i + 1}`, [field("name")], coreView(), i < 4 ? [{ key: "next", kind: "hasMany", target: `Node${i + 2}`, foreignKey: "parent_id" }] : []));
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "name", body: ["next.next.next.next"] } };
+  const build = () => buildWebManifest([owner, ...nodes]);
+  expect(build().entities.Root!.views.collection.board!.card.body[0]!.path).toHaveLength(4);
+  owner.contract.interfaces!.web!.collectionBoard!.card.body = ["next.next.next.next.next"];
+  expect(build).toThrow("board path next.next.next.next.next requires at most four relationships");
+});
+
 test("board scope names a single field on the grouping entity", () => {
   const owner = entity("Task", "task", [field("displayName"), field("stage", { osfType: "Stage", relationship: { target: "Stage" } })], coreView(), [{ key: "stage", fieldKey: "stage", kind: "belongsTo", target: "Stage", foreignKey: "stage_id" }]);
   const stage = entity("Stage", "stage", [field("displayName"), field("processId")], coreView());

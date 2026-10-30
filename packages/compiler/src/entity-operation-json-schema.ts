@@ -658,6 +658,10 @@ export function entityOperationJsonSchemas(
         if(field?.baseType==="string"&&field.validation?.format!=="uuid")Object.assign(properties,{contains:{type:"string",maxLength:500},startsWith:{type:"string",maxLength:500}});
         filterProperties[key]={...presentation(schema),oneOf:[schema,{type:"object",additionalProperties:false,minProperties:1,properties}]};
       }
+      // Batched authorized reference reads use the canonical record identity.
+      // The executor applies tenant and row access to this filter as to every list.
+      filterProperties.id ??= { oneOf: [id, { type: "object", additionalProperties: false, minProperties: 1,
+        properties: { eq: id, in: { type: "array", minItems: 1, maxItems: 100, items: id } } }] };
       Object.assign(filterProperties, relationshipAnyFilters(contract, contracts, referentiedata));
       const filterDefinitions = {entityFilter: {
         type:"object", additionalProperties:false, maxProperties:30,

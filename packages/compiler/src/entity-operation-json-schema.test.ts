@@ -240,6 +240,10 @@ describe("canonical entity Operation JSON Schemas", () => {
     constrained.model.relationships.push({ key: "memberships", kind: "hasMany", target: "Membership", foreignKey: "work_item_id" });
     const list = entityOperationJsonSchemas(constrained, constrained.entityOperations.list!, [...contracts, membership], {});
     const filter = (list.inputSchema.$defs as Record<string, any>).entityFilter;
+    expect(filter.properties.id.oneOf).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "string", format: "uuid" }),
+      expect.objectContaining({ properties: expect.objectContaining({ in: expect.objectContaining({ type: "array", maxItems: 100 }) }) }),
+    ]));
     expect(filter.properties.title.oneOf).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "string" }),
       expect.objectContaining({ type: "object", additionalProperties: false, minProperties: 1, properties: expect.objectContaining({ eq: expect.objectContaining({ type: "string" }), in: expect.objectContaining({ type: "array" }), contains: expect.objectContaining({ type: "string" }) }) }),

@@ -4,20 +4,11 @@ import type { LocalizedText } from './authoring/types/common.js';
 import type { OperationCatalogDefinition } from './authoring/types.js';
 import type { CompiledEntityInfo, PluginOperationContract } from './plugins.js';
 
-/**
- * Every role that may reach application search: the read roles of the core
- * entities it covers, plus the roles the catalog-backed collection pages are
- * listed with (`catalogApplicationSearchSources`).
- *
- * The list is any-of, so a session holding only a catalog's role has to be
- * admitted to call search at all. Admission is not disclosure: the handler
- * enumerates per session (`platform.operations.list`) and a page whose own
- * list Operation that session may not invoke is dropped before it is matched.
- */
+/** Search authenticates the active tenant; every source independently authorizes its actual list Operation. */
 export function applicationSearchDefinition(entities: readonly Pick<CompiledEntityInfo,'contract'>[], catalogRoles: readonly string[] = []): PluginOperationContract {
   return {
     key:'application.search', title:'Search application', description:'Find readable application entities and records by names and descriptions in every authored language.',
-    handler:'searchApplication', auth:{mode:'session',roles:[...new Set([...entities.flatMap(({contract})=>contract.authorization.roles.read),...catalogRoles])].sort()},
+    handler:'searchApplication', auth:{mode:'session',anyAuthenticatedSession:true},
     tenancy:{mode:'required'}, idempotency:{mode:'none'}, effects:{data:'read',external:'none'},
     inputSchema:{type:'object',additionalProperties:false,properties:{query:{type:'string',maxLength:200},locale:{type:'string',enum:['en','nl']},
       entity:{type:'string',maxLength:200},after:{type:'string',maxLength:4096},first:{type:'integer',minimum:1,maximum:20}}},

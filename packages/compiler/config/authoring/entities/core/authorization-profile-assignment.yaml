@@ -1,0 +1,207 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: AuthorizationProfileAssignment
+title: Authorization profile assignment
+description: Authorization profile assignment managed by an authorized security
+  manager within the application ceiling.
+language: en
+labels:
+  en: Authorization profile assignment
+  nl: Authorization profile assignment
+pluralLabels:
+  en: Authorization profile assignment records
+  nl: Authorization profile assignment records
+domains:
+  - organization
+authorization:
+  roles:
+    read:
+      - Organization.Security.Manage
+    create:
+      - Organization.Security.Manage
+    update:
+      - Organization.Security.Manage
+    delete:
+      - Organization.Security.Manage
+  rowAccess:
+    enabled: true
+    empty: public
+displayTemplate: "{{name}}"
+filterField: name
+fields:
+  - key: name
+    osfType: string
+    required: true
+    label:
+      en: name
+      nl: name
+    persisted:
+      column: name
+      storageClass: core
+  - key: profileVersion
+    osfType: AuthorizationProfileVersion
+    required: true
+    label:
+      en: profileVersion
+      nl: profileVersion
+    persisted:
+      column: profile_version
+      storageClass: core
+    relationship:
+      ownership: reference
+  - key: subjectKind
+    osfType: string
+    required: true
+    label:
+      en: subjectKind
+      nl: subjectKind
+    persisted:
+      column: subject_kind
+      storageClass: core
+    options:
+      type: static
+      items:
+        - value: user
+          label:
+            en: user
+            nl: user
+        - value: group
+          label:
+            en: group
+            nl: group
+        - value: role
+          label:
+            en: role
+            nl: role
+  - key: subjectKey
+    osfType: string
+    required: true
+    label:
+      en: subjectKey
+      nl: subjectKey
+    persisted:
+      column: subject_key
+      storageClass: core
+  - key: active
+    osfType: boolean
+    required: true
+    label:
+      en: active
+      nl: active
+    persisted:
+      column: active
+      storageClass: core
+    defaultValue: true
+operations:
+  list:
+    name: list Authorization profile assignment
+    description: list a tenant-owned authorization profile assignment.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: get Authorization profile assignment
+    description: get a tenant-owned authorization profile assignment.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: create Authorization profile assignment
+    description: create a tenant-owned authorization profile assignment.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: update Authorization profile assignment
+    description: update a tenant-owned authorization profile assignment.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    concurrency:
+      version:
+        mode: required
+        field: updatedAt
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic
+  web:
+    views:
+      collection:
+        route: /authorization-profile-assignments
+        title:
+          en: Authorization profile assignment
+          nl: Authorization profile assignment
+        columns:
+          - key: name
+          - key: profileVersion
+          - key: subjectKind
+      record:
+        routes:
+          read: /authorization-profile-assignments/:id
+          create: /authorization-profile-assignments/new
+        title: "{{name}}"
+        layout:
+          groups:
+            - title:
+                en: Authorization profile assignment
+                nl: Authorization profile assignment
+              fields: &a1
+                - name
+                - profileVersion
+                - subjectKind
+                - subjectKey
+                - active
+        modes:
+          create:
+            title:
+              en: Create
+              nl: Toevoegen
+            groups:
+              - title:
+                  en: Authorization profile assignment
+                  nl: Authorization profile assignment
+                fields: *a1
+          update:
+            title:
+              en: Edit
+              nl: Bewerken
+            groups:
+              - title:
+                  en: Authorization profile assignment
+                  nl: Authorization profile assignment
+                fields: *a1

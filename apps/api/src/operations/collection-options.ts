@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import securityInventory from '../generated/compiler/authorization-operations.json' with {type:'json'};
 import {operationFailure} from '@openshapeforge/operations';
 import type {ModuleOperationHandler} from '../modules/contract.js';
 import type {OperationContract} from './runtime.js';
@@ -40,6 +41,18 @@ export function nativeCollectionOptionsHandler(operation:OperationContract,modul
     if('error'in response)throw operationFailure(response.error);
     for(const group of (response.data as any).groups??[])for(const item of group.items)candidates.set(item.id,item.label);
    }
+  }
+  // Security managers author target metadata without needing the target's audience role.
+  // Reuse the existing catalog choice source; the compiler-owned inventory remains the ceiling.
+  if (input.catalog && source.entity.startsWith('Authorization')) {
+    if (!session.roles.includes('Organization.Security.Manage')) throw operationFailure({code:'FORBIDDEN',message:'Security management permission required.'});
+    const operations = securityInventory.rows.filter(operation => operation.grantable && (!input.referenceEntity || operation.entity===input.referenceEntity));
+    const entries = input.catalog==='operations' ? operations.map(operation=>({value:operation.id,label:operation.id}))
+      : input.catalog==='fields' ? [...new Set(operations.flatMap(operation=>Object.keys(operation.fields)))].map(field=>({value:field,label:field})) : [];
+    const selected=entries.filter(entry=>`${entry.value} ${entry.label}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>a.value.localeCompare(b.value));
+    const after=typeof input.after==='string'?selected.findIndex(entry=>entry.value===input.after)+1:0;
+    const items=selected.slice(after,after+first);
+    return {value:{items,nextCursor:selected.length>after+first?items.at(-1)!.value:null}};
   }
   const catalogue=new Map<string,string>();
   if(input.catalog==='operations')for(const d of definitions){const label=typeof d.name==='string'?d.name:d.name?.[input.locale==='nl'?'nl':'en']??d.id;catalogue.set(d.id,label);}

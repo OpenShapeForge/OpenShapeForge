@@ -1931,6 +1931,7 @@ export function buildWebManifest(
 ): WebManifestV1 {
   materializeCollectionOperations(entities, referentiedata);
   const resolved: Required<WebManifestOptions> = {
+    authorizationOperations: options.authorizationOperations ?? [],
     requireTranslations: options.requireTranslations ?? false,
     locale: options.locale ?? "en",
     context: options.context ?? "core",
@@ -1994,6 +1995,7 @@ export function buildWebManifest(
   }
   if (missing.length) throw new Error(`Missing required UI translations: ${missing.join(", ")}`);
   return {
+    ...(resolved.authorizationOperations.length ? { authorizationOperations: resolved.authorizationOperations.map(({fields,...operation})=>({...operation,fields:Object.fromEntries(Object.entries(fields).map(([key,{type,display}])=>[key,{type,display:!!display}]))})) } : {}),
     contract: "openshapeforge.web-manifest",
     version: 1,
     locale: resolved.locale,

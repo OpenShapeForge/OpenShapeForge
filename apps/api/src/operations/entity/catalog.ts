@@ -1,4 +1,6 @@
+import { auditContext } from "../../platform/audit-context.js";
 import { filterFieldNames } from "./filter-groups.js";
+import { authorizationProfileDecision, authorizationListFields } from "../../auth/authorization-profile-decision.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { generatedCrudTables, isGeneratedCrudTableEligible } from "./table-registry.js";
 export { getGeneratedCrudTables, isGeneratedCrudTableEligible, recordActionTable } from "./table-registry.js";
@@ -15,7 +17,7 @@ import {
   assertClassifiedQueryFieldsAllowed,
   redactRow,
 } from "../../graphql/generated-authz.js";
-import { fieldNameForColumn, tableColumnMap } from "./columns.js";
+import { fieldColumnMap, fieldNameForColumn, tableColumnMap } from "./columns.js";
 import { normalizeEntityStorageRow } from "./serialize-result.js";
 import { entityValueCarriers, projectEntityValueRow } from "./entity-value-io.js";
 import { assertStoredTypedValuesSupported, projectTypedValues } from "./typed-values.js";
@@ -112,7 +114,8 @@ export function requireEntityOperation(
     });
   }
   const sessionRoles = session.roles ?? [];
-  if (!sessionRoles.some((role) => allowed.has(role))) {
+  const profile = authorizationProfileDecision(session, `${table.source?.authoringEntityName}.${operation}`, table.source?.authoringEntityName);
+  if (profile === false || (profile !== true && !sessionRoles.some((role) => allowed.has(role)))) {
     throw operationFailure(notAuthorizedRefusal(table, operation));
   }
   // After the roles, never instead of them: the entity's principal-class
@@ -282,6 +285,13 @@ export function assertClassifiedQueryAllowed(
   },
   exactFilterFields = false,
 ): void {
+  const allowed = authorizationListFields(session, table.source?.authoringEntityName);
+  if (allowed && auditContext()?.operationId !== `${table.source?.authoringEntityName}.get`) {
+    const queried = [...filterFieldNames(input.filter), ...(input.sort?.field ? [input.sort.field] : [])];
+    if (queried.some(field => { const logical = !exactFilterFields && !fieldColumnMap(table).has(field) && field.endsWith("In") ? field.slice(0,-2) : field; return !allowed.includes(logical) && logical !== "id"; })) {
+      throw generatedCrudError("Filtering or sorting by a field outside the list projection is not permitted.", "FORBIDDEN");
+    }
+  }
   assertClassifiedQueryFieldsAllowed(
     table.columns,
     table.source?.authorization,

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { withAuditContext } from "../../platform/audit-context.js";
+import { resolveAuthorizationProfileAccess } from "../../auth/authorization-profile-session.js";
 import { columnFieldPolicy, hasUnreadableField } from "./field-policy.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DbSessionInput } from "../../db/session.js";
-import { sql } from "kysely";
+import { sql, type RawBuilder } from "kysely";
 import { canReadClassifiedColumns } from "../../graphql/generated-authz.js";
 import {
   isElicitedOutputColumn,
@@ -11,9 +13,8 @@ import {
   generatedCrudError,
   assertClassifiedQueryAllowed,
 } from "./catalog.js";
-import { fieldColumnMap, fieldNameForColumn, primaryKeyEquals } from "./columns.js";
-import { listGeneratedEntitiesForTable } from "./queries.js";
-import { subtypeScopeWhere } from "./subtype-scope.js";
+import { fieldColumnMap, fieldNameForColumn } from "./columns.js";
+import { fetchGeneratedEntityRow, listGeneratedEntitiesForTable } from "./queries.js";
 import type {
   CountedEntityConnection,
   GeneratedCrudRelationship,
@@ -47,6 +48,7 @@ export async function listGeneratedEntityRelation(
   session: DbSessionInput,
   input: RelationInput,
 ): Promise<GeneratedEntityConnection> {
+  await resolveAuthorizationProfileAccess(session, db);
   // Metadata is compiler-owned. Never accept a caller's replacement join or FK.
   const relationship = input.parentTable.source?.graphql?.relationships?.find((entry) =>
     entry.name === input.relationship.name && entry.target === input.targetTable.source?.graphql?.typeName);
@@ -74,20 +76,28 @@ export async function listGeneratedEntityRelation(
   const parent = input.parentTable;
   const target = input.targetTable;
   if (!parent.primaryKey || !target.primaryKey) throw generatedCrudError("Relationship requires primary keys.", "INTERNAL_SERVER_ERROR");
-  // A subtype parent traverses from its own rows only; the target side is
-  // scoped by the list below when the target is a subtype itself.
-  const parentPredicate = sql`${primaryKeyEquals(parent, String(parentId), "relation_parent")}
-    ${parent.tenantScoped ? sql`and relation_parent.tenant_id = ${session.tenantId}` : sql``}
-    ${subtypeScopeWhere(parent, "relation_parent")}`;
+  // Refuse an unreadable join column before opening a database session.
+  if(!relationship.via) {
+    const columnTable=relationship.resolve==='belongsTo'?parent:target;
+    const column=columnTable.columns.find(column=>column.name===relationship.foreignKey);
+    if(!column)throw generatedCrudError("Relationship foreign-key metadata is invalid.","INTERNAL_SERVER_ERROR");
+    assertClassifiedQueryAllowed(columnTable,session,{filter:{[fieldNameForColumn(column)]:parentId}},true);
+    if(isElicitedOutputColumn(columnTable,column))throw generatedCrudError("Secure input cannot be traversed as a relationship.","FORBIDDEN");
+  }
+  const parentOperation=isGeneratedCrudOperationEnabled(parent,"get")?"get":"list";
+  // Re-read the parent under its own Operation before following its authoritative FK.
+  // A target's list/get permission never lends the parent its own Operation context.
+  const currentParent=await withAuditContext(`${parent.source?.authoringEntityName}.${parentOperation}`,undefined,
+    ()=>fetchGeneratedEntityRow(db,session,parent,String(parentId)));
+  if(!currentParent)return {rows:[],nextCursor:null,totalCount:emptyCount};
   let where;
-  let orderBy;
+  let orderBy:RawBuilder<unknown>|undefined;
   if (relationship.via) {
     const via = sql.id(relationship.viaSchema ?? parent.schema, relationship.via);
-    const linkPredicate = sql`relation_link.source_id = ${sql.id("relation_parent", parent.primaryKey)}
+    const linkPredicate = sql`relation_link.source_id::text = ${String(parentId)}
       and relation_link.target_id = ${sql.id("row_source", target.primaryKey)}
-      ${parent.tenantScoped ? sql`and relation_link.tenant_id = relation_parent.tenant_id` : sql``}`;
-    where = sql`exists (select 1 from ${sql.id(parent.schema, parent.table)} as relation_parent
-      join ${via} as relation_link on ${linkPredicate} where ${parentPredicate})`;
+      ${parent.tenantScoped ? sql`and relation_link.tenant_id = ${session.tenantId}` : sql``}`;
+    where = sql`exists (select 1 from ${via} as relation_link where ${linkPredicate})`;
     if (relationship.sortable && relationship.positionColumn) {
       orderBy = sql`(select ${sql.id("relation_link", relationship.positionColumn)} from ${via} as relation_link
         where relation_link.source_id::text = ${String(parentId)} and relation_link.target_id = ${sql.id("row_source", target.primaryKey)}
@@ -101,24 +111,25 @@ export async function listGeneratedEntityRelation(
     if (!column) throw generatedCrudError("Relationship foreign-key metadata is invalid.", "INTERNAL_SERVER_ERROR");
     assertClassifiedQueryAllowed(columnTable, session, { filter: { [fieldNameForColumn(column)]: parentId } }, true);
     if (isElicitedOutputColumn(columnTable, column)) throw generatedCrudError("Secure input cannot be traversed as a relationship.", "FORBIDDEN");
-    const join = belongsTo
-      ? sql`${sql.id("relation_parent", column.name)} = ${sql.id("row_source", target.primaryKey)}`
-      : sql`${sql.id("row_source", column.name)} = ${sql.id("relation_parent", parent.primaryKey)}`;
-    where = sql`exists (select 1 from ${sql.id(parent.schema, parent.table)} as relation_parent where ${parentPredicate} and ${join})`;
+    const foreignValue=belongsTo?currentParent[column.name]:parentId;
+    if(foreignValue==null)return {rows:[],nextCursor:null,totalCount:emptyCount};
+    where = belongsTo
+      ? sql`${sql.id("row_source",target.primaryKey)}::text=${String(foreignValue)}`
+      : sql`${sql.id("row_source",column.name)}::text=${String(foreignValue)}`;
     if (relationship.sortable && relationship.positionColumn) {
       if (!target.columns.some((column) => column.name === relationship.positionColumn)) throw generatedCrudError("Relationship position metadata is invalid.", "INTERNAL_SERVER_ERROR");
       orderBy = sql`${sql.id("row_source", relationship.positionColumn)} asc, ${sql.id("row_source", target.primaryKey)} asc`;
     }
   }
   const targetDefaultSort = relationship.resolve === "belongsTo" ? undefined : readableDefaultSort(input.targetTable, session);
-  return listGeneratedEntitiesForTable(db, session, input.targetTable, {
+  return withAuditContext(`${target.source?.authoringEntityName}.${relationship.resolve === "belongsTo" ? "get" : "list"}`,undefined,()=>listGeneratedEntitiesForTable(db, session, input.targetTable, {
     limit: relationship.resolve === "belongsTo" ? 1 : input.limit ?? 50,
     ...(input.cursor ? { cursor: input.cursor } : {}),
     ...(input.includeTotalCount ? { includeTotalCount: true } : {}),
     ...(targetDefaultSort
       ? { sort: { field: targetDefaultSort.field, direction: targetDefaultSort.direction } }
       : {}),
-  }, { where, ...(orderBy ? { orderBy } : {}) });
+  }, { where, ...(orderBy ? { orderBy } : {}) }));
 }
 
 /**

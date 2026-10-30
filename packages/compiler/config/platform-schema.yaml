@@ -1246,3 +1246,15 @@ tables:
       - { name: blueprint_tenant_id, type: uuid, required: true }
       - { name: blueprint_id, type: text, required: true }
       - { name: source_version, type: integer, required: true }
+  - schema: platform
+    name: authorization_operation_inventory
+    tenantScoped: false
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: text, primaryKey: true }
+      - { name: entity_name, type: text, required: true }
+      - { name: roles, type: 'text[]', required: true }
+      - { name: grantable, type: boolean, required: true }
+      - { name: fields, type: jsonb, required: true }
+      - { name: checksum, type: text, required: true }

@@ -35,7 +35,7 @@ export function nativeApplicationSearchHandler(operation:OperationContract):Modu
     await Promise.all(Array.from({length:Math.min(4,selected.length)},async()=>{
       while(index<selected.length){
         const source=selected[index++]!;
-        if(!source.field||!source.get||!available.has(source.get))continue;
+        if(!source.field)continue;
         const table=getGeneratedCrudTables().find(t=>t.source?.authoringEntityName===source.entity);
         const readable=(field:string)=>{
           if(!table)return true;

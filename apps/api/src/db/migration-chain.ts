@@ -103,6 +103,7 @@ import { applyOperationExecutionReceiptsMigration } from "./migrations/operation
 import { applyAuditHistory } from "./migrations/audit-history.js";
 import { applyJobsMigration } from "./migrations/jobs.js";
 import { applyRecordActionsMigration } from "./migrations/record-actions.js";
+import { applyAuthorizationProfilesMigration } from "./migrations/authorization-profiles.js";
 import {
   applyGeneratedSchemaMigration,
   type GeneratedSchemaMigrationResult,
@@ -214,6 +215,7 @@ export async function runMigrationChain(
   // needs every table to exist, a plugin's included, because it enumerates
   // the entities that declared an action from the manifest.
   await applyRecordActionsMigration(db);
+  await applyAuthorizationProfilesMigration(db);
   const pageConfigs = await applyEntityPageConfigsSeed(db);
   const moduleSeeds: Record<string, CatalogSeedResult> = {};
   for (const seed of options.moduleSeeds ?? []) {

@@ -1,0 +1,252 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: AuthorizationProfile
+title: Authorization profile
+description: Authorization profile managed by an authorized security manager
+  within the application ceiling.
+language: en
+labels:
+  en: Authorization profile
+  nl: Authorization profile
+pluralLabels:
+  en: Authorization profile records
+  nl: Authorization profile records
+domains:
+  - organization
+authorization:
+  roles:
+    read:
+      - Organization.Security.Manage
+    create:
+      - Organization.Security.Manage
+    update:
+      - Organization.Security.Manage
+    delete:
+      - Organization.Security.Manage
+  rowAccess:
+    enabled: true
+    empty: public
+displayTemplate: "{{name}}"
+filterField: name
+fields:
+  - key: name
+    osfType: string
+    required: true
+    label:
+      en: name
+      nl: name
+    persisted:
+      column: name
+      storageClass: core
+  - key: key
+    osfType: string
+    required: true
+    label:
+      en: key
+      nl: key
+    persisted:
+      column: key
+      storageClass: core
+    validation:
+      maxLength: 100
+      pattern: ^[a-z][a-z0-9.-]*$
+  - key: targetEntity
+    osfType: entityTypeName
+    required: true
+    label:
+      en: targetEntity
+      nl: targetEntity
+    persisted:
+      column: target_entity
+      storageClass: core
+  - key: description
+    osfType: multilineText
+    required: false
+    label:
+      en: description
+      nl: description
+    persisted:
+      column: description
+      storageClass: core
+  - key: active
+    osfType: boolean
+    required: true
+    defaultValue: true
+    label:
+      en: Active
+      nl: Actief
+    persisted:
+      column: active
+      storageClass: core
+operations:
+  list:
+    name: list Authorization profile
+    description: list a tenant-owned authorization profile.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: get Authorization profile
+    description: get a tenant-owned authorization profile.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: create Authorization profile
+    description: create a tenant-owned authorization profile.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: update Authorization profile
+    description: update a tenant-owned authorization profile.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    concurrency:
+      version:
+        mode: required
+        field: updatedAt
+    confirmation:
+      mode: none
+  insertPolicy:
+    name:
+      en: Add Operation policy
+      nl: Operatieregel toevoegen
+    description: Add an owned Operation policy to the editable profile draft.
+    implementation:
+      type: collection
+      action: insert
+      field: policies
+    effects: &a1
+      data: write
+      external: none
+    reliability: &a2
+      idempotency:
+        mode: none
+    concurrency: &a3
+      version:
+        mode: required
+        field: updatedAt
+    confirmation: &a4
+      mode: none
+  removePolicy:
+    name: Remove Operation policy
+    description: Remove a policy from the editable profile.
+    implementation:
+      type: collection
+      action: remove
+      field: policies
+    effects: *a1
+    reliability: *a2
+    concurrency: *a3
+    confirmation: *a4
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic
+  web:
+    views:
+      collection:
+        route: /authorization-profiles
+        title:
+          en: Authorization profile
+          nl: Authorization profile
+        columns:
+          - key: name
+          - key: key
+          - key: targetEntity
+      record:
+        routes:
+          read: /authorization-profiles/:id
+          create: /authorization-profiles/new
+        title: "{{name}}"
+        layout:
+          tabs:
+            - id: policies
+              label:
+                en: Operation policies
+                nl: Operatieregels
+              relationship: policies
+            - id: details
+              label:
+                en: Details
+                nl: Details
+              groups:
+                - title:
+                    en: Authorization profile
+                    nl: Authorization profile
+                  fields: &a5
+                    - name
+                    - key
+                    - targetEntity
+                    - description
+                    - active
+            - id: versions
+              label:
+                en: Published versions
+                nl: Gepubliceerde versies
+              relationship: versions
+        modes:
+          create:
+            title:
+              en: Create
+              nl: Toevoegen
+            groups:
+              - title:
+                  en: Authorization profile
+                  nl: Authorization profile
+                fields: *a5
+          update:
+            title:
+              en: Edit
+              nl: Bewerken
+            groups:
+              - title:
+                  en: Authorization profile
+                  nl: Authorization profile
+                fields: *a5
+versioning:
+  strategy: publishedSnapshot
+  versionEntity: AuthorizationProfileVersion
+  versionsField: versions
+  snapshot:
+    ownedRelationships: recursive
+indexes:
+  - name: authorization_profiles_tenant_key_uidx
+    fields:
+      - tenantId
+      - key
+    unique: true

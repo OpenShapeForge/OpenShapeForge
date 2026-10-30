@@ -1,7 +1,11 @@
+import { assertCurrentAccountAuthority } from "../../accounts/account-current-authority.js";
+import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { classifyDatabaseError } from "../../db/database-refusals.js";
 import { applyRelatedChanges } from "./related-update.js";
 import { getGeneratedCrudTables } from "./table-registry.js";
+import { authorizationProfileDecision } from "../../auth/authorization-profile-decision.js";
+import { resolveAuthorizationProfileAccess } from "../../auth/authorization-profile-session.js";
 import { withAuditContext } from "../../platform/audit-context.js";
 import { createFromBlueprint } from "./blueprints.js";
 import { assertCallerTopLevelFields } from "./field-policy.js";
@@ -134,10 +138,12 @@ type OperationAuthorizationSession = Pick<DbSessionInput, "roles"> & {
 export function pluginOperationAuthAllowsOffer(
   auth: (typeof pluginOperations)[number]["auth"],
   session: OperationAuthorizationSession,
+  operation?: { key: string; target?: { entityName?: string } },
 ): boolean {
+  const profile = operation ? authorizationProfileDecision(session,operation.key,operation.target?.entityName) : undefined;
   return auth.mode === "public" ||
     (auth.mode === "session" &&
-      sessionOperationRolesAllow(auth.roles, session.roles ?? []) &&
+      (profile ?? sessionOperationRolesAllow(auth.roles, session.roles ?? [])) &&
       sessionOperationRoleGroupsAllow(auth.roleGroups, session.roles ?? []) &&
       (!(auth.scopes?.length) || (session.credential !== "api-key" &&
         auth.scopes.every((scope) => session.oauthScopes?.includes(scope)))));
@@ -579,7 +585,7 @@ export function restEditLeaseOperationIdsForSession(
       if (
         (operation.intent !== "update" && operation.intent !== "delete") ||
         operation.concurrency?.editLease?.mode !== "required" ||
-        !operation.authorization.roles.some((role) => heldRoles.has(role))
+        !(authorizationProfileDecision(session, operation.id, operation.entityName) ?? operation.authorization.roles.some((role) => heldRoles.has(role)))
       ) {
         return false;
       }
@@ -610,7 +616,7 @@ export function canonicalEditLeaseOperationIdsForSession(
     .filter((operation) =>
       (operation.intent === "update" || operation.intent === "delete") &&
       operation.concurrency?.editLease?.mode === "required" &&
-      operation.authorization.roles.some((role) => heldRoles.has(role))
+      (authorizationProfileDecision(session, operation.id, operation.entityName) ?? operation.authorization.roles.some((role) => heldRoles.has(role)))
     )
     .map(({ id }) => id);
   return [
@@ -630,7 +636,7 @@ export function pluginEditLeaseOperationIdsForSession(
       operation.concurrency?.version?.mode === "required" &&
       operation.concurrency.editLease?.mode === "required" &&
       operation.auth.mode === "session" &&
-      pluginOperationAuthAllowsOffer(operation.auth, session) &&
+      pluginOperationAuthAllowsOffer(operation.auth, session, operation) &&
       (transport !== "mcp" || operation.transports.mcp.enabled)
     )
     .map(({ key }) => key);
@@ -648,17 +654,18 @@ export function entityOperationContract(operationId: string): EntityOperationCon
 }
 
 /** Central acquisition entry point shared by REST, MCP and Web adapters. */
-export async function acquireEditLeaseForEntityOperation(
+async function acquireEditLeaseWithContext(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput & { oauthScopes?: readonly string[]; credential?: string },
   input: { operationId: string; targetId: string },
 ): Promise<EntityEditLease> {
+  await resolveAuthorizationProfileAccess(session, db);
   const custom = pluginOperations.find((operation) => operation.key === input.operationId);
   if (custom) {
     if (
       custom.target?.scope !== "record" ||
       custom.auth.mode !== "session" ||
-      !pluginOperationAuthAllowsOffer(custom.auth, session) ||
+      !pluginOperationAuthAllowsOffer(custom.auth, session, custom) ||
       !custom.concurrency?.version ||
       !custom.concurrency.editLease
     ) {
@@ -716,6 +723,11 @@ export async function acquireEditLeaseForEntityOperation(
   });
 }
 
+/** Acquire against the Operation being edited, independently of list/get. */
+export function acquireEditLeaseForEntityOperation(db:OpenShapeForgeDatabase,session:DbSessionInput & {oauthScopes?:readonly string[];credential?:string},input:{operationId:string;targetId:string}):Promise<EntityEditLease> {
+  return withAuditContext(input.operationId,session.credential as import('../../auth/trusted-context.js').SessionCredential|undefined,()=>acquireEditLeaseWithContext(db,session,input));
+}
+
 /**
  * Produce the request-bound offers an interface may show. Operations the
  * session is not authorized to invoke are omitted rather than disclosed.
@@ -761,7 +773,7 @@ export function getEntityOperationOffers(
       (operation) =>
         operation.entityName === entityName &&
         intents.includes(operation.intent) &&
-        operation.authorization.roles.some((role) => heldRoles.has(role)) &&
+        (authorizationProfileDecision(session, operation.id, operation.entityName) ?? operation.authorization.roles.some((role) => heldRoles.has(role))) &&
         (!target || hasRecordPermissions(operation.authorization.recordPermissions)),
     )
     .map((operation) => {
@@ -783,7 +795,7 @@ export function getEntityOperationOffers(
     .filter((operation) =>
       operation.target?.entityName === entityName &&
       operation.target.scope === scope &&
-      pluginOperationAuthAllowsOffer(operation.auth, session) &&
+      pluginOperationAuthAllowsOffer(operation.auth, session, operation) &&
       (!target ||
         operation.auth.mode !== "session" ||
         !operation.auth.recordPermission ||
@@ -949,6 +961,7 @@ async function executeEntityOperationWithContext(
   completion?: SecureCompletion,
 ): Promise<EntityOperationResult> {
   try {
+    await resolveAuthorizationProfileAccess(session, db);
     const table = tableForEntityOperation(request.operation);
     // Authorization precedes request controls and database access. Otherwise
     // an unauthorized caller can distinguish lease/version/challenge state
@@ -977,16 +990,14 @@ async function executeEntityOperationWithContext(
      * yet" is still true and no further wait remains.
      */
     const governed = <T>(mutate: () => Promise<T>): Promise<T> =>
-      withDbSession(db, session, (trx) =>
-        // The invocation's own rollback boundary. This transaction may be a
-        // caller's: an outer Operation that wrote its own rows and then
-        // reached entity CRUD through core joins it, and the refusal below is
-        // returned to that caller as an error result rather than thrown
-        // through it. Without a boundary the lease and challenge this
-        // mutation consumed would stay behind, to be committed with the
-        // caller's unrelated work.
-        withInvocationSavepoint(trx, () =>
-          withOwnedExecutionAdmission(trx, session, admit, mutate)));
+      withDbSession(db, session, async (trx) => {
+        const principal=session as TrustedSessionContext;
+        if(operation.id.startsWith('Authorization') && principal.issuer && principal.tenantId && principal.userId) {
+          await assertCurrentAccountAuthority(db,trx,principal as TrustedSessionContext & {tenantId:string;userId:string},'Organization.Security.Manage');
+        }
+        return withInvocationSavepoint(trx, () =>
+          withOwnedExecutionAdmission(trx, session, admit, mutate));
+      });
     // Admission on actual execution, not on the offer: the ordinary CRUD
     // fast path is where REST, GraphQL and MCP all write, so the host
     // execution policies run here too — after authorization, so a refusal

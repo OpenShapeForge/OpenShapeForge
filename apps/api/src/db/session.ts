@@ -2,6 +2,7 @@
 import { withRuntimeSpan } from "@openshapeforge/observability";
 import { auditContext, runWithAuditContext, type AuditContext } from "../platform/audit-context.js";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { inheritAuthorizationProfileAccess } from "../auth/authorization-profile-decision.js";
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { readStatementTimeoutMs } from "../config/limits.js";
@@ -136,14 +137,38 @@ function resolveAuditSession(input: AuditContext | null | undefined = auditConte
 function auditSessionSettings(audit: AuditContext) {
   return [
     sql`set_config('app.audit_operation', ${audit.operationId}, true)`,
+    sql`set_config('app.audit_read_operations', ${JSON.stringify(audit.readOperations ?? [])}, true)`,
     sql`set_config('app.audit_correlation', ${audit.correlationId}, true)`,
     sql`set_config('app.audit_actor_kind', ${audit.actorKind}, true)`,
   ];
 }
 
+/** Shared policy admission locks use the same transaction-scoped advisory-lock convention as account management. */
+async function applyAuthorizationSession<T>(trx: Transaction<T>): Promise<void> {
+  await sql`do $authorization$ declare rules jsonb; dependencies jsonb; locked boolean; begin
+    if to_regprocedure('app.authorization_rules_for_actor()') is not null then
+      if app.bypass_rls() or app.current_tenant() is null then
+        perform set_config('app.authorization_rules','',true);
+        return;
+      end if;
+      dependencies:=coalesce(nullif(current_setting('app.audit_read_operations',true),''),'[]')::jsonb;
+      locked:=app.authorization_requires_lock(current_setting('app.audit_operation',true),dependencies);
+      if locked then perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0)); end if;
+      rules := app.authorization_rules_for_actor();
+      if not locked and (rules->'states'->current_setting('app.audit_operation',true)->>'managed'='true' or exists(select 1 from jsonb_array_elements_text(coalesce(nullif(current_setting('app.audit_read_operations',true),''),'[]')::jsonb) dependency where rules->'states'->dependency->>'managed'='true')) then
+        perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
+        -- A withdrawal may have committed while admission waited for its lock.
+        rules := app.authorization_rules_for_actor();
+      end if;
+      perform set_config('app.authorization_rules',rules::text,true);
+    end if;
+  end $authorization$`.execute(trx);
+}
+
 async function applyAuditSession<T>(trx: Transaction<T>, input: AuditContext | null | undefined): Promise<AuditContext> {
   const audit = resolveAuditSession(input);
   await sql`select ${sql.join(auditSessionSettings(audit))}`.execute(trx);
+  await applyAuthorizationSession(trx);
   return audit;
 }
 
@@ -446,7 +471,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
   assertUuid(input.tenantId, "tenantId");
   assertUuid(input.userId, "userId");
 
-  return sealSession({
+  const session = sealSession({
     tenantId: input.tenantId,
     userId: input.userId,
     ...verifiedAuditIdentity(input),
@@ -462,6 +487,8 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
     principalClass: resolvePrincipalClass(input),
     scope: normalizeScope(input.scope),
   });
+  inheritAuthorizationProfileAccess(input, session);
+  return session;
 }
 
 export async function applyDbSession<TDatabase>(
@@ -488,6 +515,7 @@ export async function applyDbSession<TDatabase>(
       ? [sql`set_config('statement_timeout', ${String(statementTimeoutMs)}, true)`]
       : []),
     sql`set_config('app.bypass_rls', 'false', true)`,
+    sql`set_config('app.authorization_rules', '', true)`,
     sql`set_config('app.shared_read_barrier', ${options.sharedReadBarrier ?? ''}, true)`,
     sql`set_config('app.tenant_id', ${session.tenantId}, true)`,
     sql`set_config('app.user_id', ${session.userId}, true)`,
@@ -564,6 +592,7 @@ export async function applyDbSession<TDatabase>(
   if (exact.length > 0) await sql`select set_config('app.user_groups', ${descendants.join(",")}, true),
     set_config('app.user_groups_exact', ${exact.join(",")}, true),
     set_config('app.user_groups_ancestors', ${ancestors.join(",")}, true)`.execute(trx);
+  await applyAuthorizationSession(trx);
   return audit;
 }
 
@@ -638,7 +667,7 @@ export async function withDbSession<TDatabase, TResult>(
     if (!options.independent) {
       const audit = auditContext() ?? active.audit;
       const trx = active.trx as Transaction<TDatabase>;
-      if (audit?.operationId === active.audit?.operationId && audit?.correlationId === active.audit?.correlationId && audit?.actorKind === active.audit?.actorKind) return callback(trx, active.session);
+      if (audit?.operationId === active.audit?.operationId && audit?.correlationId === active.audit?.correlationId && audit?.actorKind === active.audit?.actorKind && JSON.stringify(audit?.readOperations ?? []) === JSON.stringify(active.audit?.readOperations ?? [])) return callback(trx, active.session);
       await applyAuditSession(trx, audit);
       try {
         const result = await activeDbSession.run({ ...active, audit }, () => callback(trx, active.session));

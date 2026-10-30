@@ -2164,3 +2164,9 @@ test("board scope names a single field on the grouping entity", () => {
   owner.contract.interfaces!.web!.collectionBoard!.scopeBy = "missing";
   expect(build).toThrow("board scope must name a persisted filterable single scalar field");
 });
+
+test("a board does not expose a reference as a raw scalar without a readable relationship", () => {
+  const owner = entity("Task", "task", [field("displayName"), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } }), field("customerId", { osfType: "Customer", relationship: { target: "Customer" } })], coreView());
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", body: ["customerId"] } };
+  expect(() => buildWebManifest([owner, entity("Customer", "customer", [field("displayName")], coreView())])).toThrow("invalid board path");
+});

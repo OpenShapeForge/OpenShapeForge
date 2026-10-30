@@ -1280,10 +1280,10 @@
             "board": {
               "type": "object", "additionalProperties": false, "required": ["groupBy", "card"],
               "properties": {
-                "groupBy": { "$ref": "#/$defs/fieldKey" },
-                "card": { "type": "object", "additionalProperties": false, "required": ["title"], "properties": {
-                  "title": { "type": "string", "minLength": 1 },
-                  "body": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+                "groupBy": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group by", "nl": "Groeperen op" } } },
+                "card": { "type": "object", "additionalProperties": false, "required": ["title"], "x-osf-i18n": { "title": { "en": "Card", "nl": "Kaart" } }, "properties": {
+                  "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title path", "nl": "Titelpad" } } },
+                  "body": { "type": "array", "x-osf-i18n": { "title": { "en": "Card fields", "nl": "Kaartvelden" } }, "items": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Field path", "nl": "Veldpad" } } } }
                 } }
               },
               "x-osf-i18n": { "title": { "en": "Board", "nl": "Bord" } }

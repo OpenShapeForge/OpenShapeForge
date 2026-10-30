@@ -72,7 +72,6 @@ function assertPlanReadable(plan: Plan, session: DbSessionInput, input: Pick<Lis
   });
   for (const hop of plan.hops) {
     assertFieldReadable(hop.parent, session, hop.foreign);
-    requireEntityOperation(hop.target, "get", session);
     requireEntityOperation(hop.target, "list", session);
   }
   const target = plan.hops.at(-1)?.target ?? plan.root;
@@ -122,7 +121,7 @@ export async function aggregateBoardGroupsForTable(db: OpenShapeForgeDatabase, s
     const value = sql.id(previous, plan.amount.name);
     const currency = sql.id(previous, plan.currency.name);
     const group = sql.id("row_source", plan.group.name);
-    const incomplete = sql.join([...missing, sql`${value} is null`, sql`${currency} is null`, sql`${currency} = ''`], sql` or `);
+    const incomplete = sql.join([...missing, sql`${value} is null`, sql`${currency} is null`, sql`${currency} !~ '^[A-Z]{3}$'`], sql` or `);
     const result = await sql<{ group_value: string | null; currency_value: string | null; total: string | null; incomplete: boolean }>`
       select ${group}::text as group_value, ${currency}::text as currency_value,
         sum(${value})::text as total, bool_or(${incomplete}) as incomplete

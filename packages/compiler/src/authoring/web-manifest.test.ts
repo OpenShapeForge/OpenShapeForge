@@ -2233,6 +2233,9 @@ test("board money paths refer to typed scalar fields on the same record", () => 
   quote.contract.model.fields.find(item => item.key === "currencyCode")!.baseType = "number";
   expect(build).toThrow("board amount and currency must be single scalar fields on the same record");
   quote.contract.model.fields.find(item => item.key === "currencyCode")!.baseType = "string";
+  quote.contract.storage.columns.find(item => item.field === "currencyCode")!.type = "varchar";
+  expect(build).toThrow("board aggregate requires persisted scalar fields");
+  quote.contract.storage.columns.find(item => item.field === "currencyCode")!.type = "text";
   quote.contract.storage.columns = quote.contract.storage.columns.filter(item => item.field !== "amountBase");
   expect(build).toThrow("board aggregate requires persisted scalar fields");
 });

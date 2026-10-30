@@ -156,7 +156,7 @@ describe("canonical entity Operation JSON Schemas", () => {
     expect(list.inputSchema.properties).toHaveProperty("includeBoardTotals");
     expect(list.outputSchema.properties).toHaveProperty("boardTotals");
     const properties = list.outputSchema.properties as Record<string, any>;
-    const validate = new Ajv2020().compile(properties.boardTotals);
+    const validate = new Ajv2020.default({ strict: false }).compile(properties.boardTotals);
     expect(validate([{ group: "open", available: true, totals: [{ currency: "EUR", amount: "999999999999999.03" }] }])).toBe(true);
     expect(validate([{ group: "open", available: true, totals: [{ currency: "EUR", amount: 1 }] }])).toBe(false);
   });

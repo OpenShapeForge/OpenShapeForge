@@ -33,6 +33,18 @@ function tableByName(manifest: PlatformSchemaManifest, name: string) {
 }
 
 describe("rowAccess → rowScope translation (§B.3)", () => {
+  it("emits the server-owned board aggregate only when configured", () => {
+    const without = compileFixtures(["rowaccess-owner", "rowaccess-owner-target"]);
+    expect(tableByName(without, "row_access_owners")?.source?.boardAggregate).toBeUndefined();
+    const withBoard = compileAuthoringBackendManifest(FIXTURE_DIR, {
+      mode: "promote", entityAllowlist: ["rowaccess-owner", "rowaccess-owner-target"], schemaByModule: { core: "erp" },
+      onCandidate: ({ contract }) => {
+        if (contract.entity.name !== "RowAccessOwner") return;
+        contract.interfaces = { ...contract.interfaces, web: { operations: { list: true }, collectionBoard: { groupBy: "ownerId", aggregate: { sum: "amount", currency: "currency" }, card: { title: "title" } } } };
+      },
+    });
+    expect(tableByName(withBoard, "row_access_owners")?.source?.boardAggregate).toEqual({ groupBy: "ownerId", sum: "amount", currency: "currency" });
+  });
   it("owner entity (empty:public) → userColumns + nullVisibleColumns", () => {
     const manifest = compileFixtures(["rowaccess-owner", "rowaccess-owner-target"]);
     const table = tableByName(manifest, "row_access_owners");

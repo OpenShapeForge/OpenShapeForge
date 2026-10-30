@@ -1275,9 +1275,11 @@ optional `aggregate` uses an exact stored numeric field and currency from that
 same record, reached only via stored, unconstrained belongs-to relationships.
 The list Operation accepts `includeBoardTotals` when configured and returns
 per-group totals as decimal strings, separated by currency. A group whose
-amount, currency or relationship is unavailable is marked unavailable rather
-than returning a partial total. The aggregate uses the list's filter and its
-authorized rows, and is independent of the page size.
+amount, currency or relationship is unavailable, or whose currency is not a
+three-letter uppercase code, is marked unavailable rather than returning a
+partial total. The aggregate uses the list's filter and its authorized rows,
+and is independent of the page size. At most 1,000 group-and-currency pairs
+are accepted; a larger result refuses the totals request.
 
 The `groupTargetField` choice marker identifies fields on the selected grouping
 entity. Schema-driven editors that do not yet follow the selected `groupBy`

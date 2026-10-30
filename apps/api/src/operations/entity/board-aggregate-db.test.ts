@@ -4,12 +4,15 @@ import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
+import { withDbSession } from "../../db/session.js";
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { aggregateBoardGroupsForTable } from "./board-aggregate.js";
 import { bindAuthorizationProfileAccess } from "../../auth/authorization-profile-decision.js";
 import { withAuditContext } from "../../platform/audit-context.js";
 import { listGeneratedEntitiesForTable } from "./queries.js";
+import { generatedCrudTables } from "./table-registry.js";
+import { entityOperationRef, executeEntityOperation } from "./runtime.js";
 import type { GeneratedCrudTable } from "./types.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -41,17 +44,18 @@ beforeAll(async () => {
   const storage = (table: GeneratedCrudTable) => ({ schema: table.schema, name: table.table, tenantScoped: true, columns: table.columns.map(({ generated: _generated, ...entry }) => entry), rowScope: { userColumns: ["viewer"], nullVisibleColumns: ["viewer"] }, indexes: [{ name: `${table.table}_tenant_id_key`, columns: ["tenant_id", "id"], unique: true }] });
   const artifacts = generateArtifacts({ version: 1, tables: [storage(root), storage(target)] });
   await sql.raw(artifacts.find((entry: { path: string }) => entry.path.endsWith("schema.sql"))!.contents).execute(privileged.db);
+  await sql`create schema if not exists platform; create table platform.entity_edit_leases (id uuid, tenant_id uuid, entity_id text, target_id text, operation_id text, owner_user_id uuid, owner_display_name text, acquired_version text, inactivity_timeout_seconds integer, expires_at timestamptz); grant usage on schema platform to openshapeforge_app; grant select on platform.entity_edit_leases to openshapeforge_app`.execute(privileged.db);
   await sql`grant usage on schema app, erp to openshapeforge_app; grant select, insert, update, delete on all tables in schema erp to openshapeforge_app; grant execute on all functions in schema app to openshapeforge_app`.execute(privileged.db);
   restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 1 });
 }, 30000);
 afterAll(async () => { await restricted?.close(); await privileged?.close(); if (created) await admin?.unsafe(`drop database "${scratchName}" with (force)`); await admin?.close(); });
 
 test("sum preserves decimals, scope, filters and separate currencies", async () => {
-  const q1 = randomUUID(), q2 = randomUUID(), q3 = randomUUID(), qForeign = randomUUID(), qHidden = randomUUID(), qNoAmount = randomUUID();
-  for (const [id, owner, viewer, amount, currency] of [[q1,tenant,user,"999999999999999.01","EUR"],[q2,tenant,user,"0.02","EUR"],[q3,tenant,user,"7.25","USD"],[qForeign,foreignTenant,user,"400","EUR"],[qHidden,tenant,otherUser,"300","EUR"],[qNoAmount,tenant,user,null,"EUR"]]) {
+  const q1 = randomUUID(), q2 = randomUUID(), q3 = randomUUID(), qForeign = randomUUID(), qHidden = randomUUID(), qNoAmount = randomUUID(), qBadCurrency = randomUUID();
+  for (const [id, owner, viewer, amount, currency] of [[q1,tenant,user,"999999999999999.01","EUR"],[q2,tenant,user,"0.02","EUR"],[q3,tenant,user,"7.25","USD"],[qForeign,foreignTenant,user,"400","EUR"],[qHidden,tenant,otherUser,"300","EUR"],[qNoAmount,tenant,user,null,"EUR"],[qBadCurrency,tenant,user,"1","eur"]]) {
     await sql`insert into erp.contact_details (id,tenant_id,viewer,amount,currency) values (${id}::uuid,${owner}::uuid,${viewer}::uuid,${amount}::numeric,${currency})`.execute(privileged!.db);
   }
-  for (const [owner,viewer,stage,quote] of [[tenant,user,"open",q1],[tenant,user,"open",q2],[tenant,user,"open",q3],[foreignTenant,user,"open",qForeign],[tenant,otherUser,"open",qHidden],[tenant,user,"hidden",qHidden],[tenant,user,"missing",null],[tenant,user,"nullable",qNoAmount],[tenant,user,"mixed",q1],[tenant,user,"mixed",q3],[tenant,user,"mixed",qHidden]]) {
+  for (const [owner,viewer,stage,quote] of [[tenant,user,"open",q1],[tenant,user,"open",q2],[tenant,user,"open",q3],[foreignTenant,user,"open",qForeign],[tenant,otherUser,"open",qHidden],[tenant,user,"hidden",qHidden],[tenant,user,"missing",null],[tenant,user,"nullable",qNoAmount],[tenant,user,"invalid",qBadCurrency],[tenant,user,"mixed",q1],[tenant,user,"mixed",q3],[tenant,user,"mixed",qHidden]]) {
     await sql`insert into erp.relations (id,tenant_id,viewer,stage,quote_id) values (${randomUUID()}::uuid,${owner}::uuid,${viewer}::uuid,${stage},${quote}::uuid)`.execute(privileged!.db);
   }
   const result = await aggregateBoardGroupsForTable(restricted!.db, session, root, [root,target], { filter: {} });
@@ -62,6 +66,7 @@ test("sum preserves decimals, scope, filters and separate currencies", async () 
   expect(result.find(group => group.group === "hidden")).toEqual({ group: "hidden", available: false, totals: [] });
   expect(result.find(group => group.group === "missing")).toEqual({ group: "missing", available: false, totals: [] });
   expect(result.find(group => group.group === "nullable")).toEqual({ group: "nullable", available: false, totals: [] });
+  expect(result.find(group => group.group === "invalid")).toEqual({ group: "invalid", available: false, totals: [] });
   expect(result.find(group => group.group === "mixed")).toEqual({ group: "mixed", available: false, totals: [] });
   // Route restriction and search/advanced terms share the canonical list filter.
   const filter = { and: [{ viewer: { eq: user } }, { stage: { eq: "open" } }, { stage: { contains: "pen" } }] };
@@ -79,9 +84,37 @@ test("sum preserves decimals, scope, filters and separate currencies", async () 
   const restrictedSession = { ...session };
   bindAuthorizationProfileAccess(restrictedSession, { managedEntities: [], operations: {}, listFields: { [target.source!.authoringEntityName!]: ["id", "currency"] } });
   await expect(aggregateBoardGroupsForTable(restricted!.db, restrictedSession, root, [root, target], {})).rejects.toThrow("outside the list projection");
+  const listOnlySession = { ...session };
+  bindAuthorizationProfileAccess(listOnlySession, { managedEntities: [target.source!.authoringEntityName!], operations: { [`${target.source!.authoringEntityName}.list`]: true, [`${target.source!.authoringEntityName}.get`]: false }, listFields: { [target.source!.authoringEntityName!]: ["id", "amount", "currency"] } });
+  const listOnly = await aggregateBoardGroupsForTable(restricted!.db, listOnlySession, root, [root, target], { filter: { stage: { eq: "open" } } });
+  expect(listOnly).toEqual([open]);
   const constrainedRoot = { ...root, source: { ...root.source!, graphql: { ...root.source!.graphql!, relationships: [{ ...root.source!.graphql!.relationships![0]!, constraints: { currency: { eq: "EUR" } } }] } } };
   await expect(aggregateBoardGroupsForTable(restricted!.db, session, constrainedRoot, [constrainedRoot, target], {})).rejects.toThrow("Invalid board aggregate relationship");
   const scopedTarget: GeneratedCrudTable = { ...target, subtype: { base: { entityName: "ContactDetail", entityId: "core.ContactDetail", slug: "contact-detail", table: target.name }, scope: [{ field: "currency", column: "currency", value: "EUR" }], hiddenColumns: [] } };
   const scoped = await aggregateBoardGroupsForTable(restricted!.db, session, root, [root, scopedTarget], { filter: { stage: { eq: "open" } } });
   expect(scoped).toEqual([{ group: "open", available: false, totals: [] }]);
+  const snapshot = await withDbSession(restricted!.db, session, async () => {
+    const before = await withAuditContext(`${root.source!.authoringEntityName}.list`, undefined, () => listGeneratedEntitiesForTable(restricted!.db, session, root, { filter: { stage: { eq: "open" } }, includeTotalCount: true }));
+    await sql`insert into erp.relations (id,tenant_id,viewer,stage,quote_id) values (${randomUUID()}::uuid,${tenant}::uuid,${user}::uuid,'open',${q2}::uuid)`.execute(privileged!.db);
+    const totals = await aggregateBoardGroupsForTable(restricted!.db, session, root, [root,target], { filter: { stage: { eq: "open" } } });
+    return { before, totals };
+  }, { isolationLevel: "repeatable read" });
+  expect(snapshot.before.totalCount).toBe(3);
+  expect(snapshot.totals).toEqual([open]);
+  const after = await aggregateBoardGroupsForTable(restricted!.db, session, root, [root,target], { filter: { stage: { eq: "open" } } });
+  expect(after[0]!.totals).toContainEqual({ currency: "EUR", amount: "999999999999999.05" });
+  const oldRoot = generatedCrudTables.get(root.name)!;
+  const oldTarget = generatedCrudTables.get(target.name)!;
+  generatedCrudTables.set(root.name, root);
+  generatedCrudTables.set(target.name, target);
+  try {
+    const malformed = await executeEntityOperation(restricted!.db, session, { operation: entityOperationRef(root, "list"), input: { includeBoardTotals: "yes" as never } });
+    expect("error" in malformed && malformed.error.code).toBe("BAD_USER_INPUT");
+    const envelope = await executeEntityOperation(restricted!.db, session, { operation: entityOperationRef(root, "list"), input: { filter: { stage: { eq: "open" } }, limit: 1, includeBoardTotals: true }, offerIntents: [] });
+    expect("error" in envelope ? envelope.error : envelope.intent === "list" ? envelope.data.boardTotals : undefined).toEqual(after);
+    expect(!("error" in envelope) && envelope.intent === "list" ? envelope.data.items : undefined).toHaveLength(1);
+  } finally {
+    generatedCrudTables.set(root.name, oldRoot);
+    generatedCrudTables.set(target.name, oldTarget);
+  }
 });

@@ -1064,11 +1064,17 @@ async function executeEntityOperationWithContext(
           throw generatedCrudError("includeBoardTotals must be a boolean.", "BAD_USER_INPUT");
         }
         const pageInput = listPageInput(request.input);
-        const connection = await listGeneratedEntities(db, session, {
-          ...pageInput,
-          table: table.name,
-        });
-        const boardTotals = request.input?.includeBoardTotals ? await aggregateBoardGroups(db, session, { table: table.name, ...(pageInput.filter !== undefined ? { filter: pageInput.filter } : {}) }) : undefined;
+        const readPage = async () => {
+          const connection = await listGeneratedEntities(db, session, { ...pageInput, table: table.name });
+          const boardTotals = request.input?.includeBoardTotals ? await aggregateBoardGroups(db, session, { table: table.name, ...(pageInput.filter !== undefined ? { filter: pageInput.filter } : {}) }) : undefined;
+          return { connection, boardTotals };
+        };
+        // One snapshot prevents a concurrent write from appearing in the sums
+        // but not in the page (or the reverse). Nested reads reapply their own
+        // audit and authorization context on this transaction.
+        const { connection, boardTotals } = request.input?.includeBoardTotals
+          ? await withDbSession(db, session, readPage, { isolationLevel: "repeatable read" })
+          : await readPage();
         const targets = connection.rows.map((row) => offerTarget(row, table));
         const unavailableByTarget = await businessAndLeaseUnavailability(
           db,

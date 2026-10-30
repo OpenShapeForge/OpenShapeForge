@@ -991,7 +991,8 @@ function projectEntity(
         }
         const stored = (field: typeof amountField) => !field.computed && !field.typedBy && (!field.variables || field.variables === "none") && owner.contract.storage.columns.some(column => column.field === field.key);
         const amountColumn = owner.contract.storage.columns.find(column => column.field === amountField.key);
-        if (!stored(amountField) || !stored(currencyField!) || !amountColumn || !["numeric", "integer", "bigint"].includes(amountColumn.type)) {
+        const currencyColumn = owner.contract.storage.columns.find(column => column.field === currencyField!.key);
+        if (!stored(amountField) || !stored(currencyField!) || !amountColumn || !["numeric", "integer", "bigint"].includes(amountColumn.type) || currencyColumn?.type !== "text") {
           throw new Error(`${entityName}: board aggregate requires persisted scalar fields and an exact numeric amount.`);
         }
       }

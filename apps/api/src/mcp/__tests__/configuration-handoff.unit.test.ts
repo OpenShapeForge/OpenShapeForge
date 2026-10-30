@@ -14,6 +14,8 @@ import {
   peekConfiguration,
   type PendingConfiguration,
 } from "../configuration-handoff.js";
+import { withoutEnvelopeKeys } from "../tool-schema.js";
+import { valuesSchemaOf } from "../../operations/entity/input-validation.js";
 import { renderConfigurationForm } from "../browser-pages.js";
 import { renderConfigurationApp, renderMessagePage } from "../configuration-app.js";
 import {
@@ -281,24 +283,46 @@ describe("handoffModelValues", () => {
   };
   const required = ["key", "name", "adapterId", "configurationValues"];
   const sourceRow = { id: "adapter-1", key: "google-gmail", name: "Google" };
+  const accepted = [...required];
 
   it("fills the key and name a model left out from the source row", () => {
-    expect(handoffModelValues({ required, elicit, modelValues: { adapterId: "adapter-1" }, sourceRow })).toEqual({
+    expect(handoffModelValues({ required, accepted, elicit, modelValues: { adapterId: "adapter-1" }, sourceRow })).toEqual({
       adapterId: "adapter-1",
       key: "google-gmail",
       name: "Google",
     });
   });
 
+  it("does not inject a server-derived key excluded from the create schema", () => {
+    const operation = { inputSchema: { properties: { values: { properties: {
+      name: { type: "string" }, adapterId: { type: "string" }, configurationValues: { type: "object" },
+    } } } } };
+    const accepted = Object.keys(valuesSchemaOf(operation as never)?.properties ?? {});
+    expect(handoffModelValues({ required: ["name", "adapterId", "configurationValues"], accepted, elicit, modelValues: { name: "Jira", adapterId: "adapter-1" }, sourceRow })).toEqual({ name: "Jira", adapterId: "adapter-1" });
+  });
+
+  it("does not invent a name excluded from the create schema", () => {
+    expect(handoffModelValues({ required: ["adapterId"], accepted: ["adapterId"], elicit, modelValues: { adapterId: "adapter-1" }, sourceRow })).toEqual({ adapterId: "adapter-1" });
+  });
+
+  it("does not backfill when the canonical values schema is absent", () => {
+    const accepted = Object.keys(valuesSchemaOf({ inputSchema: {} } as never)?.properties ?? {});
+    expect(handoffModelValues({ required: ["adapterId"], accepted, elicit, modelValues: { adapterId: "adapter-1" }, sourceRow })).toEqual({ adapterId: "adapter-1" });
+  });
+
+  it("removes only MCP envelope controls, leaving invalid ordinary fields for validation", () => {
+    expect(withoutEnvelopeKeys({ adapterId: "adapter-1", confirmed: true, expectedVersion: 1, unknownField: "invalid" })).toEqual({ adapterId: "adapter-1", unknownField: "invalid" });
+  });
+
   it("keeps what the model did send", () => {
     const modelValues = { adapterId: "adapter-1", key: "gmail-hans", name: "Hans' Gmail" };
-    expect(handoffModelValues({ required, elicit, modelValues, sourceRow })).toEqual(modelValues);
+    expect(handoffModelValues({ required, accepted, elicit, modelValues, sourceRow })).toEqual(modelValues);
   });
 
   it("refuses a handoff whose other required arguments are still missing, naming them", () => {
-    expect(() => handoffModelValues({ required: [...required, "tenantSlug"], elicit, modelValues: { adapterId: "adapter-1" }, sourceRow }))
+    expect(() => handoffModelValues({ required: [...required, "tenantSlug"], accepted, elicit, modelValues: { adapterId: "adapter-1" }, sourceRow }))
       .toThrow(/Provide tenantSlug in the call/);
-    expect(() => handoffModelValues({ required, elicit, modelValues: {}, sourceRow: {} }))
+    expect(() => handoffModelValues({ required, accepted, elicit, modelValues: {}, sourceRow: {} }))
       .toThrow(/Provide key, name, adapterId in the call/);
   });
 });

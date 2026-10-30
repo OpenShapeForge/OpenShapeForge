@@ -3,15 +3,14 @@ kind: coreEntity
 module: core
 entity: AuthorizationProfile
 title: Authorization profile
-description: Authorization profile managed by an authorized security manager
-  within the application ceiling.
+description: Authorization profile managed by an authorized security manager within the application ceiling.
 language: en
 labels:
   en: Authorization profile
-  nl: Authorization profile
-pluralLabels:
-  en: Authorization profile records
-  nl: Authorization profile records
+  nl: Autorisatieprofiel
+pluralLabels: &a5
+  en: Authorization profiles
+  nl: Autorisatieprofielen
 domains:
   - organization
 authorization:
@@ -34,8 +33,8 @@ fields:
     osfType: string
     required: true
     label:
-      en: name
-      nl: name
+      en: Name
+      nl: Naam
     persisted:
       column: name
       storageClass: core
@@ -43,8 +42,8 @@ fields:
     osfType: string
     required: true
     label:
-      en: key
-      nl: key
+      en: Code
+      nl: Code
     persisted:
       column: key
       storageClass: core
@@ -55,8 +54,8 @@ fields:
     osfType: entityTypeName
     required: true
     label:
-      en: targetEntity
-      nl: targetEntity
+      en: Entity
+      nl: Entiteit
     persisted:
       column: target_entity
       storageClass: core
@@ -64,8 +63,8 @@ fields:
     osfType: multilineText
     required: false
     label:
-      en: description
-      nl: description
+      en: Description
+      nl: Omschrijving
     persisted:
       column: description
       storageClass: core
@@ -181,63 +180,89 @@ interfaces:
     views:
       collection:
         route: /authorization-profiles
-        title:
-          en: Authorization profile
-          nl: Authorization profile
+        title: *a5
         columns:
           - key: name
-          - key: key
+            sortable: true
           - key: targetEntity
+            sortable: true
+          - key: active
+            sortable: true
+        defaultSort:
+          key: name
+          direction: asc
       record:
         routes:
           read: /authorization-profiles/:id
           create: /authorization-profiles/new
         title: "{{name}}"
         layout:
+          preset: main-context
+          context:
+            fields:
+              - targetEntity
+              - active
           tabs:
+            - id: profile
+              label:
+                en: Profile
+                nl: Profiel
+              groups: &a6
+                - title:
+                    en: Profile
+                    nl: Profiel
+                  fields:
+                    - name
+                    - targetEntity
+                    - active
+                - title:
+                    en: Description
+                    nl: Omschrijving
+                  fields:
+                    - description
+                - title:
+                    en: Identification
+                    nl: Identificatie
+                  fields:
+                    - key
             - id: policies
               label:
                 en: Operation policies
                 nl: Operatieregels
-              relationship: policies
-            - id: details
+              relationship:
+                name: policies
+                overrides:
+                  columns:
+                    - operationId
+                    - condition
+                  fields:
+                    - operationId
+                    - condition
+            - id: assignments
               label:
-                en: Details
-                nl: Details
-              groups:
-                - title:
-                    en: Authorization profile
-                    nl: Authorization profile
-                  fields: &a5
-                    - name
-                    - key
-                    - targetEntity
-                    - description
-                    - active
+                en: Assignments
+                nl: Toekenningen
+              relationship:
+                name: versions
+                view: assignmentVersions
             - id: versions
               label:
-                en: Published versions
-                nl: Gepubliceerde versies
+                en: Versions
+                nl: Versies
               relationship: versions
         modes:
           create:
             title:
-              en: Create
-              nl: Toevoegen
-            groups:
-              - title:
-                  en: Authorization profile
-                  nl: Authorization profile
-                fields: *a5
+              en: Create authorization profile
+              nl: Autorisatieprofiel aanmaken
+            groups: *a6
           update:
             title:
-              en: Edit
-              nl: Bewerken
-            groups:
-              - title:
-                  en: Authorization profile
-                  nl: Authorization profile
-                fields: *a5
+              en: Edit profile
+              nl: Profiel bewerken
+            groups: *a6
+        actions:
+          - update
 versioning:
   strategy: publishedSnapshot
   versionEntity: AuthorizationProfileVersion

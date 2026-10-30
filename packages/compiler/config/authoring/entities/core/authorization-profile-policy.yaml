@@ -3,15 +3,15 @@ kind: coreEntity
 module: core
 entity: AuthorizationProfilePolicy
 title: Authorization profile policy
-description: Authorization profile policy managed by an authorized security
-  manager within the application ceiling.
+description: Authorization profile policy managed by an authorized security manager within the
+  application ceiling.
 language: en
 labels:
-  en: Authorization profile policy
-  nl: Authorization profile policy
-pluralLabels:
-  en: Authorization profile policy records
-  nl: Authorization profile policy records
+  en: Operation policy
+  nl: Operatieregel
+pluralLabels: &a1
+  en: Operation policies
+  nl: Operatieregels
 domains:
   - organization
 authorization:
@@ -34,8 +34,8 @@ fields:
     osfType: string
     required: true
     label:
-      en: operationId
-      nl: operationId
+      en: Operation
+      nl: Operation
     persisted:
       column: operation_id
       storageClass: core
@@ -50,8 +50,8 @@ fields:
     osfType: AuthorizationProfile
     required: true
     label:
-      en: profile
-      nl: profile
+      en: Profile
+      nl: Profiel
     persisted:
       column: profile
       storageClass: core
@@ -67,8 +67,8 @@ fields:
     osfType: condition
     required: false
     label:
-      en: condition
-      nl: condition
+      en: Condition
+      nl: Voorwaarde
     persisted:
       column: condition
       storageClass: core
@@ -142,12 +142,10 @@ interfaces:
     views:
       collection:
         route: /authorization-profile-policys
-        title:
-          en: Authorization profile policy
-          nl: Authorization profile policy
+        title: *a1
         columns:
           - key: operationId
-          - key: profile
+            sortable: true
           - key: condition
       record:
         routes:
@@ -155,33 +153,30 @@ interfaces:
           create: /authorization-profile-policys/new
         title: "{{operationId}}"
         layout:
-          groups:
+          preset: main-context
+          groups: &a2
             - title:
-                en: Authorization profile policy
-                nl: Authorization profile policy
-              fields: &a1
-                - operationId
+                en: Operation
+                nl: Operation
+              fields:
                 - profile
+                - operationId
+            - title:
+                en: Access condition
+                nl: Toegangsvoorwaarde
+              fields:
                 - condition
         modes:
           create:
             title:
-              en: Create
-              nl: Toevoegen
-            groups:
-              - title:
-                  en: Authorization profile policy
-                  nl: Authorization profile policy
-                fields: *a1
+              en: Add Operation policy
+              nl: Operatieregel toevoegen
+            groups: *a2
           update:
             title:
-              en: Edit
-              nl: Bewerken
-            groups:
-              - title:
-                  en: Authorization profile policy
-                  nl: Authorization profile policy
-                fields: *a1
+              en: Edit Operation policy
+              nl: Operatieregel bewerken
+            groups: *a2
 indexes:
   - name: authorization_profile_policies_tenant_operation_uidx
     fields:

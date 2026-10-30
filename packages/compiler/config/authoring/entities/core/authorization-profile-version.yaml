@@ -6,11 +6,11 @@ title: Authorization profile version
 description: An immutable published authorization profile snapshot.
 language: en
 labels:
-  en: Authorization profile version
-  nl: Authorization profile version
-pluralLabels:
-  en: Authorization profile versions
-  nl: Authorization profile versions
+  en: Profile version
+  nl: Profielversie
+pluralLabels: &a1
+  en: Profile versions
+  nl: Profielversies
 domains:
   - organization
 authorization:
@@ -26,7 +26,7 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
-displayTemplate: "{{versionNumber}}"
+displayTemplate: Version {{versionNumber}}
 indexes:
   - name: authorization_profile_versions_number_uidx
     fields:
@@ -46,6 +46,9 @@ fields:
           en: Versions
           nl: Versies
         ownership: owned
+    label:
+      en: Profile
+      nl: Profiel
   - key: versionNumber
     osfType: integer
     required: true
@@ -64,11 +67,10 @@ fields:
     immutable: true
     defaultValue: published
     description:
-      en: A profile version exists only as a published snapshot, so this is always
-        published. The editable draft state lives on the profile itself.
-      nl: Een profielversie bestaat alleen als gepubliceerde snapshot, dus dit is
-        altijd gepubliceerd. De bewerkbare conceptstatus staat op het profiel
-        zelf.
+      en: A profile version exists only as a published snapshot, so this is always published. The editable
+        draft state lives on the profile itself.
+      nl: Een profielversie bestaat alleen als gepubliceerde snapshot, dus dit is altijd gepubliceerd. De
+        bewerkbare conceptstatus staat op het profiel zelf.
     options:
       type: static
       items:
@@ -87,12 +89,8 @@ fields:
       en: Frozen content
       nl: Vastgelegde inhoud
     description:
-      en: The template with its variants and blocks exactly as publication froze them.
-        Every materialization of this version resolves from this content, which
-        is never updated afterwards.
-      nl: De template met zijn varianten en blokken precies zoals de publicatie ze
-        heeft vastgelegd. Iedere materialisatie van deze versie wordt hieruit
-        opgelost; deze inhoud wordt daarna nooit gewijzigd.
+      en: The immutable profile and Operation policies captured at publication.
+      nl: Het onveranderlijke profiel en de operatieregels zoals vastgelegd bij publicatie.
     persisted:
       column: snapshot
       storageClass: core
@@ -106,12 +104,10 @@ fields:
       en: Content checksum
       nl: Inhoudschecksum
     description:
-      en: Checksum over the frozen content, so identical content stays recognisable
-        across versions. It proves consistency, not approval or permission to
-        deliver.
-      nl: Controlesom over de vastgelegde inhoud, zodat identieke inhoud over versies
-        herkenbaar blijft. Die bewijst consistentie, geen goedkeuring of
-        toestemming voor verzending.
+      en: Checksum over the frozen content, so identical content stays recognisable across versions. It
+        proves consistency, not approval or permission to deliver.
+      nl: Controlesom over de vastgelegde inhoud, zodat identieke inhoud over versies herkenbaar blijft.
+        Die bewijst consistentie, geen goedkeuring of toestemming voor verzending.
     persisted:
       column: content_hash
       storageClass: core
@@ -171,3 +167,63 @@ interfaces:
   graphql: {}
   mcp:
     tools: generic
+  web:
+    views:
+      assignmentVersions:
+        kind: collection
+        collectionLayout: tabs
+        itemView: assignmentDetail
+        tabLabel: versionNumber
+      assignmentDetail:
+        kind: record
+        layout:
+          preset: main-context
+          tabs:
+            - id: assignments
+              label:
+                en: Assignments
+                nl: Toekenningen
+              relationship: assignments
+      collection:
+        route: /authorization-profile-versions
+        title: *a1
+        columns:
+          - key: versionNumber
+            sortable: true
+          - key: publishedAt
+            sortable: true
+          - key: publishedBy
+        defaultSort:
+          key: versionNumber
+          direction: desc
+      record:
+        routes:
+          read: /authorization-profile-versions/:id
+        title: Version {{versionNumber}}
+        layout:
+          preset: main-context
+          context:
+            fields:
+              - versionNumber
+              - publishedAt
+            relationships:
+              - profile
+          tabs:
+            - id: version
+              label:
+                en: Version
+                nl: Versie
+              groups:
+                - title:
+                    en: Published version
+                    nl: Gepubliceerde versie
+                  fields:
+                    - profile
+                    - versionNumber
+                    - publishedAt
+                    - publishedBy
+            - id: assignments
+              label:
+                en: Assignments
+                nl: Toekenningen
+              relationship: assignments

@@ -61,6 +61,7 @@ import {
 import { createInboundAdmission } from "../../modules/inbound-admission.js";
 import {
   createInboundAdmissionStore, inboundEndpointWriter, revokeInboundEndpoint,
+  findInboundConnectionEndpoint, findInboundRegistration, insertInboundEndpoint, revokeInboundConnectionEndpoint,
 } from "../../modules/inbound-store.js";
 import { createInboundEndpointServices } from "../../modules/inbound-endpoints.js";
 import {
@@ -987,5 +988,42 @@ test("a settled payload is removed on a bounded schedule; an unsettled one is ke
     const work = await resolve({ workId: stuckId, attempt: claim.attempts, workerId: randomUUID() });
     expect(work?.tenantId).toBe(tenantA);
     expect(work?.operation.id).toBe(OPERATION);
+  });
+}, TEST_TIMEOUT);
+
+
+test("managed Connection registration commits with its caller or rolls back together", async () => {
+  await withScratch(async ({ admin, app, tenantA, userA }) => {
+    const connectionId = randomUUID();
+    const service = { ...tenantSession(tenantA, userA), principalKind: "service", credential: "bearer",
+      organizationServiceIdentityId: SERVICE_IDENTITY, roles: ["Platform.InboundEndpointManage"] } as TrustedSessionContext;
+    const request = { connectionId, secretField: "webhookSigningSecret", endpointKey: KEY, signature: jira,
+      identity: { source: "body-digest" as const }, dispatch: { operationId: OPERATION, inputField: "delivery" },
+      idempotencyKey: "reconcile-one", expect: { endpointStatus: "inactive", endpointId: null } };
+    const run = async (fail: boolean) => withDbSession(app, service, async trx => {
+      const api = createInboundEndpointServices({ acceptsSession: candidate => candidate === service,
+        serviceIdentity: () => SERVICE_IDENTITY, resolveOperation: async () => ({ id: OPERATION,
+          reliability: { idempotency: { mode: "keyed", inputField: "key" } } } as unknown as RuntimeOperationDefinition),
+        store: inboundEndpointWriter(app), keyring,
+        managed: { activeTransaction: candidate => candidate === service,
+          connection: async () => ({ ok: true, connection: { connectionId, connectionKey: "fixture", adapterKey: KEY,
+            transport: "rest", connectionScope: "tenant", ownerUserId: null,
+            values: { webhookSigningSecret: SECRET }, secretKeys: ["webhookSigningSecret"], egressGrant: {} as never } }),
+          find: async (_session, key) => findInboundRegistration(trx, key),
+          findConnection: async (_session, input) => findInboundConnectionEndpoint(trx, input),
+          insert: async (_session, input) => insertInboundEndpoint(trx, input),
+          revoke: async (_session, input) => revokeInboundConnectionEndpoint(trx, input),
+        } });
+      const endpoint = await api.registerForConnection(service, request);
+      if (fail) throw new Error("subscription update failed");
+      return endpoint;
+    });
+    await expect(run(true)).rejects.toThrow("subscription update failed");
+    const count = async () => (await sql<{ count: string }>`select count(*)::text as count from platform.inbound_endpoints where tenant_id = ${tenantA}::uuid`.execute(admin)).rows[0]!.count;
+    expect(await count()).toBe("0");
+    const first = await run(false);
+    const second = await run(false);
+    expect(first.id).toBe(second.id);
+    expect(await count()).toBe("1");
   });
 }, TEST_TIMEOUT);

@@ -63,7 +63,7 @@ import { RecordAccessRuntime } from "./record-access.js";
 import { PrincipalRuntime } from "./principals.js";
 import { createWebhookSecretServices } from "./webhook-secrets.js";
 import { createInboundEndpointServices } from "./inbound-endpoints.js";
-import { inboundEndpointWriter } from "./inbound-store.js";
+import { inboundEndpointWriter, findInboundConnectionEndpoint, findInboundRegistration, insertInboundEndpoint, revokeInboundConnectionEndpoint } from "./inbound-store.js";
 import { ReadProgressRuntime, type ReadProgressDefinition } from "./read-progress.js";
 import type { RuntimeReadProgress } from "@openshapeforge/plugin-runtime";
 import {
@@ -488,6 +488,35 @@ export class ModulePlatformRuntime {
         // could not invoke themselves and have the service identity run it.
         resolveOperation: (session, operationId) => this.#getOperation(session, operationId),
         store: inboundEndpointWriter(db),
+        managed: {
+          activeTransaction: (session) => this.#operationTransactionStorage.getStore()?.session === session,
+          connection: (session, connectionId) => {
+            const active = this.#operationTransactionStorage.getStore();
+            if (!active || active.session !== session) throw new Error("An active Operation transaction is required.");
+            return resolveConnectionValues({ db: this.#db, session, selector: { connectionId },
+              transaction: active.trx, skipTokenRefresh: true });
+          },
+          find: (session, key) => {
+            const active = this.#operationTransactionStorage.getStore();
+            if (!active || active.session !== session) throw new Error("An active Operation transaction is required.");
+            return findInboundRegistration(active.trx, key);
+          },
+          findConnection: (session, input) => {
+            const active = this.#operationTransactionStorage.getStore();
+            if (!active || active.session !== session) throw new Error("An active Operation transaction is required.");
+            return findInboundConnectionEndpoint(active.trx, input);
+          },
+          insert: (session, input) => {
+            const active = this.#operationTransactionStorage.getStore();
+            if (!active || active.session !== session) throw new Error("An active Operation transaction is required.");
+            return insertInboundEndpoint(active.trx, input);
+          },
+          revoke: (session, input) => {
+            const active = this.#operationTransactionStorage.getStore();
+            if (!active || active.session !== session) throw new Error("An active Operation transaction is required.");
+            return revokeInboundConnectionEndpoint(active.trx, input);
+          },
+        },
       }),
       records: records.services,
       principals: principals.services,

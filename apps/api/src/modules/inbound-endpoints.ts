@@ -48,22 +48,22 @@
  * configuration value that would otherwise be forwarded straight into
  * `createHmac`, which accepts md5 and sha1 without complaint.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type {
   RuntimeInboundEndpoint, RuntimeInboundEndpointRegistration, RuntimeInboundEndpointServices,
-  RuntimeOperationDefinition,
+  RuntimeOperationDefinition, RuntimeConnectionResolution,
 } from "@openshapeforge/plugin-runtime";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { isVerifiedPersonSession } from "../auth/api-key/ceiling.js";
 import { requireConnectorAdmin } from "../connectors/authorization.js";
-import { encryptSecret, keyringFromEnv, type SecretKeyring } from "../platform/secrets.js";
+import { decryptSecret, encryptSecret, keyringFromEnv, type SecretKeyring } from "../platform/secrets.js";
 import {
   INBOUND_MAX_BODY_BYTES, normalizeInboundHeaderName, normalizeInboundSignatureScheme,
 } from "../platform/inbound-signature.js";
 import { INBOUND_ENDPOINT_KEY, INBOUND_SECRET_FIELD } from "./inbound-admission.js";
 import { normalizeInboundIdentity, type InboundIdentityProfile } from "./inbound-identity.js";
 import { inboundEndpointPath } from "../http/inbound-path.js";
-import type { EndpointSummary, InboundEndpointStore } from "./inbound-store.js";
+import { endpointSummaryOf, type EndpointRow, type EndpointSummary, type InboundEndpointStore, type InsertEndpointInput } from "./inbound-store.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const OPERATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,200}$/;
@@ -88,6 +88,15 @@ export type InboundEndpointServiceOptions = {
     session: TrustedSessionContext, operationId: string,
   ): Promise<RuntimeOperationDefinition | undefined>;
   store: InboundEndpointStore;
+  /** Core supplies these only on the canonical Operation transaction. */
+  managed?: {
+    activeTransaction(session: TrustedSessionContext): boolean;
+    connection(session: TrustedSessionContext, id: string): Promise<RuntimeConnectionResolution>;
+    find(session: TrustedSessionContext, registrationKey: string): Promise<EndpointRow | undefined>;
+    findConnection(session: TrustedSessionContext, input: { id: string; connectionId: string }): Promise<EndpointRow | undefined>;
+    insert(session: TrustedSessionContext, input: InsertEndpointInput): Promise<EndpointSummary>;
+    revoke(session: TrustedSessionContext, input: { id: string; connectionId: string }): Promise<EndpointSummary | undefined>;
+  };
   keyring?: SecretKeyring;
 };
 
@@ -259,7 +268,91 @@ export function createInboundEndpointServices(
     }
   };
 
+  const managedActor = (session: TrustedSessionContext): { tenantId: string; userId: string; serviceIdentityId: string } => {
+    const serviceIdentityId = session.tenantId ? options.serviceIdentity(session.tenantId) : undefined;
+    if (!options.acceptsSession(session) || !session.tenantId || !UUID.test(session.tenantId) ||
+        !session.userId || !UUID.test(session.userId) || session.credential !== "bearer" ||
+        session.principalKind !== "service" || !serviceIdentityId ||
+        session.organizationServiceIdentityId !== serviceIdentityId ||
+        !session.roles.includes("Platform.InboundEndpointManage") ||
+        !options.managed?.activeTransaction(session)) {
+      throw new Error("Connection endpoint reconciliation requires the configured organization service identity, its inbound capability, and an active Operation transaction.");
+    }
+    return { tenantId: session.tenantId, userId: session.userId, serviceIdentityId };
+  };
+
   return {
+    connectionIsCurrent: async (session, input) => {
+      const actor = managedActor(session);
+      if (!UUID.test(input.connectionId ?? "") || !UUID.test(input.endpointId ?? "")) return false;
+      const endpoint = await options.managed!.findConnection(session, { id: input.endpointId, connectionId: input.connectionId });
+      if (!endpoint || endpoint.status !== "active" || !endpoint.connection_secret_field) return false;
+      const resolved = await options.managed!.connection(session, input.connectionId);
+      if (!resolved.ok || resolved.connection.connectionId !== input.connectionId ||
+          resolved.connection.adapterKey !== endpoint.endpoint_key ||
+          !resolved.connection.secretKeys.includes(endpoint.connection_secret_field)) return false;
+      const currentSecret = resolved.connection.values[endpoint.connection_secret_field];
+      const keys = keyring();
+      if (!keys || typeof currentSecret !== "string") return false;
+      try {
+        const original = decryptSecret(keys, `${actor.tenantId}:${endpoint.id}`, INBOUND_SECRET_FIELD,
+          { ciphertext: endpoint.secret_ciphertext, keyId: endpoint.secret_key_id, algorithm: endpoint.secret_algorithm });
+        const currentBytes = Buffer.from(currentSecret, "utf8");
+        const originalBytes = Buffer.from(original, "utf8");
+        return currentBytes.length === originalBytes.length && timingSafeEqual(currentBytes, originalBytes);
+      } catch { return false; }
+    },
+    registerForConnection: async (session, input) => {
+      const actor = managedActor(session);
+      if (!UUID.test(input.connectionId ?? "") || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(input.secretField ?? "") ||
+          typeof input.idempotencyKey !== "string" || input.idempotencyKey.length < 1 || input.idempotencyKey.length > 200) {
+        throw new Error("Connection endpoint registration requires a Connection, a secret field and an idempotency key.");
+      }
+      const resolved = await options.managed!.connection(session, input.connectionId);
+      if (!resolved.ok || resolved.connection.connectionId !== input.connectionId ||
+          resolved.connection.adapterKey !== input.endpointKey || !resolved.connection.secretKeys.includes(input.secretField)) {
+        throw new Error("The selected Connection or confidential signing field is not available to this organization.");
+      }
+      const secret = resolved.connection.values[input.secretField];
+      if (typeof secret !== "string") throw new Error("The selected confidential signing field is not available.");
+      const normalized = normalizeInboundRegistration({ ...input, secret });
+      await bindDispatch(session, normalized.dispatch);
+      const keys = keyring();
+      if (!keys) throw new Error("Inbound endpoint secret encryption is not configured.");
+      const registrationKey = createHash("sha256").update(input.idempotencyKey, "utf8").digest("hex");
+      const existing = await options.managed!.find(session, registrationKey);
+      if (existing) {
+        const current = endpointSummaryOf(existing);
+        let oldSecret: string;
+        try {
+          oldSecret = decryptSecret(keys, `${actor.tenantId}:${existing.id}`, INBOUND_SECRET_FIELD,
+            { ciphertext: existing.secret_ciphertext, keyId: existing.secret_key_id, algorithm: existing.secret_algorithm });
+        } catch { throw new Error("The existing Connection endpoint cannot be opened."); }
+        if (existing.connection_id !== input.connectionId || existing.connection_secret_field !== input.secretField || oldSecret !== secret || current.status !== "active" ||
+            JSON.stringify({ endpointKey: current.endpointKey, signature: current.signature, identity: current.identity,
+              unsignedHeaders: current.unsignedHeaders, maxBodyBytes: current.maxBodyBytes, dispatch: current.dispatch }) !==
+            JSON.stringify(normalized)) {
+          throw new Error("The registration key is already bound to a different Connection endpoint.");
+        }
+        return view(current);
+      }
+      const id = randomUUID();
+      const stored = await options.managed!.insert(session, {
+        id, tenantId: actor.tenantId, createdBy: actor.userId, connectionId: input.connectionId, connectionSecretField: input.secretField, registrationKey,
+        ...normalized, serviceIdentityId: actor.serviceIdentityId,
+        storedSecret: encryptSecret(keys, `${actor.tenantId}:${id}`, INBOUND_SECRET_FIELD, secret),
+      });
+      return view(stored);
+    },
+    revokeForConnection: async (session, input) => {
+      managedActor(session);
+      if (!UUID.test(input.connectionId ?? "") || !UUID.test(input.endpointId ?? "")) {
+        throw new Error("Connection endpoint revocation requires its Connection and endpoint identifiers.");
+      }
+      const result = await options.managed!.revoke(session, { id: input.endpointId, connectionId: input.connectionId });
+      if (!result) throw new Error("No inbound endpoint for that Connection exists in this organization.");
+      return view(result);
+    },
     register: async (session, input) => {
       const { tenantId, userId } = administrator(session);
       const normalized = normalizeInboundRegistration(input);

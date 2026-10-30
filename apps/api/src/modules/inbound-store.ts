@@ -46,6 +46,9 @@ export type EndpointRow = {
   id: string;
   tenant_id: string;
   endpoint_key: string;
+  connection_id?: string | null;
+  connection_secret_field?: string | null;
+  registration_key?: string | null;
   signature_header: string;
   signature_algorithm: string;
   signature_encoding: string;
@@ -70,7 +73,7 @@ export type EndpointRow = {
 };
 
 const ENDPOINT_COLUMNS = [
-  "id", "tenant_id", "endpoint_key", "signature_header", "signature_algorithm",
+  "id", "tenant_id", "endpoint_key", "connection_id", "connection_secret_field", "registration_key", "signature_header", "signature_algorithm",
   "signature_encoding", "signature_prefix", "identity_source", "identity_fields",
   "identity_event_type_path", "unsigned_delivery_id_header", "unsigned_event_type_header",
   "max_body_bytes", "secret_ciphertext", "secret_key_id", "secret_algorithm",
@@ -167,6 +170,9 @@ export type InsertEndpointInput = {
   tenantId: string;
   createdBy: string;
   endpointKey: string;
+  connectionId?: string;
+  connectionSecretField?: string;
+  registrationKey?: string;
   signature: InboundAdmissionEndpoint["signature"];
   storedSecret: InboundAdmissionEndpoint["storedSecret"];
   identity: InboundIdentityProfile;
@@ -181,14 +187,14 @@ export async function insertInboundEndpoint(
 ): Promise<EndpointSummary> {
   const row = await sql<EndpointRow>`
     insert into platform.inbound_endpoints (
-      id, tenant_id, endpoint_key, signature_header, signature_algorithm, signature_encoding,
+      id, tenant_id, endpoint_key, connection_id, connection_secret_field, registration_key, signature_header, signature_algorithm, signature_encoding,
       signature_prefix, identity_source, identity_fields, identity_event_type_path,
       unsigned_delivery_id_header, unsigned_event_type_header, max_body_bytes,
       secret_ciphertext, secret_key_id, secret_algorithm,
       service_identity_id, operation_id, operation_input_field, created_by
     ) values (
       ${input.id}::uuid,
-      ${input.tenantId}::uuid, ${input.endpointKey}, ${input.signature.header}, ${input.signature.algorithm},
+      ${input.tenantId}::uuid, ${input.endpointKey}, ${input.connectionId ?? null}::uuid, ${input.connectionSecretField ?? null}, ${input.registrationKey ?? null}, ${input.signature.header}, ${input.signature.algorithm},
       ${input.signature.encoding}, ${input.signature.prefix ?? null},
       ${input.identity.source}, ${serializeInboundIdentityFields(input.identity.fields)},
       ${input.identity.eventTypePath},
@@ -366,6 +372,46 @@ export type InboundEndpointStore = {
   revoke(session: TrustedSessionContext, input: { id: string; reason: string | null }): Promise<EndpointSummary | undefined>;
   list(session: TrustedSessionContext, filter: { endpointKey?: string }): Promise<readonly EndpointSummary[]>;
 };
+
+/** Only usable inside the caller's already-open canonical Operation transaction. */
+export async function findInboundRegistration(
+  trx: Transaction<DB>, registrationKey: string,
+): Promise<EndpointRow | undefined> {
+  const rows = await sql<EndpointRow>`
+    select ${sql.join(ENDPOINT_COLUMNS.map((column) => sql.ref(column)))}
+      from platform.inbound_endpoints
+     where tenant_id = app.current_tenant() and registration_key = ${registrationKey}
+     for update
+  `.execute(trx);
+  return rows.rows[0];
+}
+
+/** Read only the endpoint bound to this tenant and exact Connection. */
+export async function findInboundConnectionEndpoint(
+  trx: Transaction<DB>, input: { id: string; connectionId: string },
+): Promise<EndpointRow | undefined> {
+  const rows = await sql<EndpointRow>`
+    select ${sql.join(ENDPOINT_COLUMNS.map((column) => sql.ref(column)))}
+      from platform.inbound_endpoints
+     where tenant_id = app.current_tenant() and id = ${input.id}::uuid
+       and connection_id = ${input.connectionId}::uuid
+     for share
+  `.execute(trx);
+  return rows.rows[0];
+}
+
+/** A Connection may revoke only its own endpoint in the active tenant. */
+export async function revokeInboundConnectionEndpoint(
+  trx: Transaction<DB>, input: { id: string; connectionId: string },
+): Promise<EndpointSummary | undefined> {
+  const rows = await sql<{ id: string }>`
+    select id from platform.inbound_endpoints
+     where tenant_id = app.current_tenant() and id = ${input.id}::uuid
+       and connection_id = ${input.connectionId}::uuid
+  `.execute(trx);
+  if (!rows.rows[0]) return undefined;
+  return revokeInboundEndpoint(trx, { id: input.id, reason: "connection subscription paused" });
+}
 
 /** Registration reads and writes, always inside a live verified tenant session. */
 export function inboundEndpointWriter(db: OpenShapeForgeDatabase): InboundEndpointStore {

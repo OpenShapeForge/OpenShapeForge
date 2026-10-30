@@ -232,6 +232,7 @@ export async function resolveVerifiedBearerSession(
       ...(isPerson ? { principalKind: "person" as const }
         : serviceAccount || isServiceAccountToken(claims as Record<string, unknown>)
           ? { principalKind: "service" as const } : {}),
+      ...(serviceAccount ? { organizationServiceIdentityId: serviceAccount.clientId } : {}),
       ...(isPerson ? { issuerRoles: [...identity.roles] } : {}),
       oauthScopes: identity.scopes ?? [],
       groups,

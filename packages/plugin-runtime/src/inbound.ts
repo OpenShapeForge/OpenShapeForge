@@ -219,7 +219,30 @@ export type RuntimeInboundDeliveryEnvelope = {
  * deliberately no `verify` and no secret read: admission is the host's HTTP
  * path, so a plugin cannot be handed bytes and asked whether they are genuine.
  */
+/** Connection-backed registration performed inside a canonical lifecycle Operation. */
+export type RuntimeInboundConnectionRegistration = Omit<RuntimeInboundEndpointRegistration, "secret"> & {
+  connectionId: string;
+  secretField: string;
+  /** Stable per lifecycle intent; a repeated key must name the same endpoint and configuration. */
+  idempotencyKey: string;
+  /** Caller-owned subscription state. The caller must lock and compare it within this Operation transaction. */
+  expect: { endpointStatus: string; endpointId: string | null };
+};
+export type RuntimeInboundConnectionRevocation = {
+  connectionId: string;
+  endpointId: string;
+  idempotencyKey: string;
+  expect: { endpointStatus: string; endpointId: string | null };
+};
+
 export type RuntimeInboundEndpointServices<Session> = {
+  /**
+   * Verify the exact active endpoint and Connection's confidential signing value without exposing it.
+   * The host holds a Connection share lock in the caller's canonical Operation transaction.
+   */
+  connectionIsCurrent(session: Session, input: { connectionId: string; endpointId: string }): Promise<boolean>;
+  registerForConnection(session: Session, input: RuntimeInboundConnectionRegistration): Promise<RuntimeInboundEndpoint>;
+  revokeForConnection(session: Session, input: RuntimeInboundConnectionRevocation): Promise<RuntimeInboundEndpoint>;
   /** A live verified tenant session registers for its own tenant and no other. */
   register(session: Session, input: RuntimeInboundEndpointRegistration): Promise<RuntimeInboundEndpoint>;
   /**

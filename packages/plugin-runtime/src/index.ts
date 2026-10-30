@@ -18,7 +18,7 @@ export {
   RUNTIME_INBOUND_SIGNATURE_ENCODINGS,
 } from "./inbound.js";
 export type {
-  RuntimeInboundAdmission, RuntimeInboundDeliveryEnvelope, RuntimeInboundDeliveryIdentity,
+  RuntimeInboundAdmission, RuntimeInboundConnectionRegistration, RuntimeInboundConnectionRevocation, RuntimeInboundDeliveryEnvelope, RuntimeInboundDeliveryIdentity,
   RuntimeInboundEndpoint, RuntimeInboundEndpointRegistration, RuntimeInboundEndpointServices,
   RuntimeInboundEndpointStatus, RuntimeInboundHashAlgorithm, RuntimeInboundIdentitySource,
   RuntimeInboundSignatureEncoding, RuntimeInboundSignatureScheme,

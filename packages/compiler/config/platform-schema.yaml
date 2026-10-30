@@ -1202,6 +1202,10 @@ tables:
       # equal the key the delivery was addressed to: it identifies a protocol
       # and carries no authority.
       - { name: endpoint_key, type: text, required: true }
+      # Connection binding for registrations made through the managed lifecycle.
+      - { name: connection_id, type: uuid }
+      - { name: connection_secret_field, type: text }
+      - { name: registration_key, type: text }
       - { name: signature_header, type: text, required: true }
       - { name: signature_algorithm, type: text, required: true }
       - { name: signature_encoding, type: text, required: true }
@@ -1252,6 +1256,10 @@ tables:
       - name: inbound_endpoints_tenant_id_uidx
         columns: [tenant_id, id]
         unique: true
+      - name: inbound_endpoints_registration_key_uidx
+        columns: [tenant_id, registration_key]
+        unique: true
+        where: registration_key IS NOT NULL
       - name: inbound_endpoints_tenant_key_idx
         columns: [tenant_id, endpoint_key, status]
 

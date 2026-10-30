@@ -55,6 +55,7 @@ test("real JWT verification admits only a configured service client without pers
     };
     const session = await resolveSessionContext(new Headers({ authorization: `Bearer ${await mint("automatic")}` }), { db });
     expect(session.tenantId).toBe(tenant);
+    expect(session.organizationServiceIdentityId).toBe("automatic");
     expect(session.roles).toContain("Relations.All.ReadWrite");
     expect(session.relation).toBeNull();
     expect(personStoreAccess).toBe(0);

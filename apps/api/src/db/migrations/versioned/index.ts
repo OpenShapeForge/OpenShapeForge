@@ -19,6 +19,7 @@ import { migrationFileChecksum, type VersionedMigration } from "../versioned-run
 import { sql } from "kysely";
 import m0020LegacySealedTenantSettings, { upgradeLegacySealedTenantSettings } from "./0020_legacy-sealed-tenant-settings.js";
 // migration-registry:imports — `bun run db:migration:new` inserts imports below this line.
+import m0021RelationRequiredColumns from "./0021_relation-required-columns.js";
 import m0019EmployeeInvitationRoles from "./0019_employee-invitation-roles.js";
 import m0018TypedTenantSettings from "./0018_typed-tenant-settings.js";
 import m0017TenantIdentityDefault from "./0017_tenant-identity-default.js";
@@ -39,5 +40,6 @@ export const versionedMigrations: VersionedMigration[] = [
   } },
   m0019EmployeeInvitationRoles,
   m0020LegacySealedTenantSettings,
+  m0021RelationRequiredColumns,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

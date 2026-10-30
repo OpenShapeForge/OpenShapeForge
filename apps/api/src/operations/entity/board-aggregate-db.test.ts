@@ -59,8 +59,10 @@ test("sum preserves decimals, scope, filters and separate currencies", async () 
     await sql`insert into erp.relations (id,tenant_id,viewer,stage,quote_id) values (${randomUUID()}::uuid,${owner}::uuid,${viewer}::uuid,${stage},${quote}::uuid)`.execute(privileged!.db);
   }
   const result = await aggregateBoardGroupsForTable(restricted!.db, session, root, [root,target], { filter: {} });
+  expect(result.map(group => group.group)).toEqual(["hidden", "invalid", "missing", "mixed", "nullable", "open"]);
   const open = result.find(group => group.group === "open")!;
   expect(open.available).toBe(true);
+  expect(open.totals.map(total => total.currency)).toEqual(["EUR", "USD"]);
   expect(open.totals).toContainEqual({ currency: "EUR", amount: "999999999999999.03" });
   expect(open.totals).toContainEqual({ currency: "USD", amount: "7.25" });
   expect(result.find(group => group.group === "hidden")).toEqual({ group: "hidden", available: false, totals: [] });
@@ -110,9 +112,27 @@ test("sum preserves decimals, scope, filters and separate currencies", async () 
   try {
     const malformed = await executeEntityOperation(restricted!.db, session, { operation: entityOperationRef(root, "list"), input: { includeBoardTotals: "yes" as never } });
     expect("error" in malformed && malformed.error.code).toBe("BAD_USER_INPUT");
-    const envelope = await executeEntityOperation(restricted!.db, session, { operation: entityOperationRef(root, "list"), input: { filter: { stage: { eq: "open" } }, limit: 1, includeBoardTotals: true }, offerIntents: [] });
+    let inserted = false;
+    const interleaved = restricted!.db.withPlugin({
+      transformQuery: args => args.node,
+      async transformResult(args) {
+        // Interleave at the real list query boundary, before its totals query.
+        if (!inserted && args.result.rows.some(row => {
+          const data = (row as { row?: { stage?: string } }).row;
+          return data?.stage === "open";
+        })) {
+          inserted = true;
+          await sql`insert into erp.relations (id,tenant_id,viewer,stage,quote_id) values (${randomUUID()}::uuid,${tenant}::uuid,${user}::uuid,'open',${q2}::uuid)`.execute(privileged!.db);
+        }
+        return args.result;
+      },
+    });
+    const envelope = await executeEntityOperation(interleaved, session, { operation: entityOperationRef(root, "list"), input: { filter: { stage: { eq: "open" } }, limit: 1, includeBoardTotals: true }, offerIntents: [] });
+    expect(inserted).toBe(true);
     expect("error" in envelope ? envelope.error : envelope.intent === "list" ? envelope.data.boardTotals : undefined).toEqual(after);
     expect(!("error" in envelope) && envelope.intent === "list" ? envelope.data.items : undefined).toHaveLength(1);
+    const latest = await aggregateBoardGroupsForTable(restricted!.db, session, root, [root,target], { filter: { stage: { eq: "open" } } });
+    expect(latest[0]!.totals).toContainEqual({ currency: "EUR", amount: "999999999999999.07" });
   } finally {
     generatedCrudTables.set(root.name, oldRoot);
     generatedCrudTables.set(target.name, oldTarget);

@@ -128,6 +128,7 @@ export async function aggregateBoardGroupsForTable(db: OpenShapeForgeDatabase, s
       from ${sql.id(root.schema, root.table)} as row_source ${sql.join(joins, sql` `)}
       where ${where}
       group by ${group}, ${currency}
+      order by ${group} asc nulls first, ${currency} asc nulls first
       limit 1001
     `.execute(trx);
     if (result.rows.length > 1000) throw generatedCrudError("Board aggregate has too many groups or currencies.", "BAD_USER_INPUT");

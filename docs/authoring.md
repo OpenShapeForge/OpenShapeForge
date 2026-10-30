@@ -1279,7 +1279,8 @@ amount, currency or relationship is unavailable, or whose currency is not a
 three-letter uppercase code, is marked unavailable rather than returning a
 partial total. The aggregate uses the list's filter and its authorized rows,
 and is independent of the page size. At most 1,000 group-and-currency pairs
-are accepted; a larger result refuses the totals request.
+are accepted; a larger result refuses the entire list request that asked for
+totals. A host can retry the list without totals.
 
 The `groupTargetField` choice marker identifies fields on the selected grouping
 entity. Schema-driven editors that do not yet follow the selected `groupBy`

@@ -191,6 +191,12 @@ function findExplicitHiddenReference(value: unknown, hidden: ReadonlySet<string>
   if (!isPlainObject(value)) return undefined;
   for (const [key, child] of Object.entries(value)) {
     const childPath = `${path}.${key}`;
+    if (key === "board" && isPlainObject(child)) {
+      const card = isPlainObject(child.card) ? child.card : {};
+      const paths = [child.groupBy, card.title, ...(Array.isArray(card.body) ? card.body : [])];
+      const leaked = paths.find(item => typeof item === "string" && hidden.has(item.split(".")[0]!));
+      if (leaked) return `${childPath} (${String(leaked)})`;
+    }
     if (REFERENCE_LIST_KEYS.has(key) && Array.isArray(child)) {
       for (const item of child) {
         const name = typeof item === "string" ? item : isPlainObject(item) ? (item.key ?? item.name ?? item.relationship) : undefined;
@@ -285,6 +291,13 @@ function pruneInheritedInterfaces(interfaces: Record<string, unknown>, hidden: R
       const collection = { ...views.collection };
       if (Array.isArray(collection.columns)) collection.columns = collection.columns.filter((column) => { const key = fieldEntryKey(column); return key === undefined || !hidden.has(key); });
       if (isPlainObject(collection.defaultSort) && typeof collection.defaultSort.key === "string" && hidden.has(collection.defaultSort.key)) delete collection.defaultSort;
+      if (isPlainObject(collection.board)) {
+        const board = collection.board;
+        const card = isPlainObject(board.card) ? board.card : {};
+        const hiddenPath = (value: unknown) => typeof value === "string" && hidden.has(value.split(".")[0]!);
+        if (hiddenPath(board.groupBy) || hiddenPath(card.title)) delete collection.board;
+        else collection.board = { ...board, card: { ...card, ...(Array.isArray(card.body) ? { body: card.body.filter(path => !hiddenPath(path)) } : {}) } };
+      }
       views.collection = collection;
     }
     if (isPlainObject(views.record)) {

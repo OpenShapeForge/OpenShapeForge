@@ -2162,5 +2162,5 @@ test("board scope names a single field on the grouping entity", () => {
   const build = () => buildWebManifest([owner, stage]);
   expect(build().entities.Task!.views.collection.board?.scopeBy).toBe("processId");
   owner.contract.interfaces!.web!.collectionBoard!.scopeBy = "missing";
-  expect(build).toThrow("board scope must name a single scalar field");
+  expect(build).toThrow("board scope must name a persisted filterable single scalar field");
 });

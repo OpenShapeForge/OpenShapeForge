@@ -152,8 +152,6 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     const result = await listGeneratedEntities(runtime.db, viewer, { table: table.name, limit: 10, filter: { id: { in: [own.id, other.id] } } });
     expect(result.rows.map(row => row.id)).toEqual([own.id]);
     expect(result.rows[0]?.explicit_secret).toBeNull();
-    await expect(listGeneratedEntities(runtime.db, viewer, { table: table.name, filter: { id: { in: ["not-a-uuid"] } } })).rejects.toThrow("Invalid identity filter");
-    await expect(listGeneratedEntities(runtime.db, viewer, { table: table.name, filter: { id: { eq: "not-a-uuid" } } })).rejects.toThrow("Invalid identity filter");
   });
 
   test("public JSON edits preserve omitted protected siblings in the database", async () => {

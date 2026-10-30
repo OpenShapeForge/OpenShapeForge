@@ -304,6 +304,14 @@ describe("composing a subtype over its base", () => {
     expect(teamContract.interfaces?.web?.recordContext?.fields).toEqual(["status"]);
     expect(view.form?.variants.create?.groups?.[0]?.fields).toEqual(["name", "status"]);
   });
+
+  test("drops an inherited board whose grouping field is hidden by the subtype", () => {
+    const docs = corpus();
+    const collection = ((((docs.group!.interfaces as Doc).web as Doc).views as Doc).collection as Doc);
+    collection.board = { groupBy: "groupType", card: { title: "name", body: ["status"] } };
+    const compiled = compile(loadEntity(authoringDir(docs), "team"));
+    expect(compiled.interfaces?.web?.collectionBoard).toBeUndefined();
+  });
 });
 
 describe("the backend manifest and generated artifacts", () => {

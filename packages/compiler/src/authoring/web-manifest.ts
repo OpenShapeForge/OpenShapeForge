@@ -962,6 +962,10 @@ function projectEntity(
     };
     const title = valuePath(authoredBoard.card.title);
     if (title.cardinality !== "one") throw new Error(`${entityName}: board card title must be single-valued.`);
+    const timestamp = authoredBoard.card.timestamp && valuePath(authoredBoard.card.timestamp);
+    if (timestamp && (!timestamp.field || timestamp.cardinality !== "one" || all.get(timestamp.targetEntityId)?.contract.model.fields.find(field => field.key === timestamp.field)?.baseType !== "datetime")) {
+      throw new Error(`${entityName}: board card timestamp must be a single datetime field.`);
+    }
     const money = (amountExpression: string, currencyExpression: string, persisted: boolean) => {
       const amount = valuePath(amountExpression);
       const currency = valuePath(currencyExpression);
@@ -974,6 +978,8 @@ function projectEntity(
         throw new Error(`${entityName}: board amount and currency must be single scalar fields on the same record reached by the same path.`);
       }
       if (persisted) {
+        const groupColumn = source.contract.storage.columns.find(column => column.field === authoredBoard.groupBy);
+        if (!groupColumn) throw new Error(`${entityName}: board aggregate requires a persisted grouping field.`);
         let owner = source;
         for (const step of amount.path) {
           const relationship = owner.contract.model.relationships.find(item => `${owner.contract.entity.name}.${item.key}` === step.relationshipId);
@@ -984,13 +990,16 @@ function projectEntity(
           owner = next;
         }
         const stored = (field: typeof amountField) => !field.computed && !field.typedBy && (!field.variables || field.variables === "none") && owner.contract.storage.columns.some(column => column.field === field.key);
-        if (!stored(amountField) || !stored(currencyField!)) throw new Error(`${entityName}: board aggregate requires persisted scalar fields.`);
+        const amountColumn = owner.contract.storage.columns.find(column => column.field === amountField.key);
+        if (!stored(amountField) || !stored(currencyField!) || !amountColumn || !["numeric", "integer", "bigint"].includes(amountColumn.type)) {
+          throw new Error(`${entityName}: board aggregate requires persisted scalar fields and an exact numeric amount.`);
+        }
       }
       return { amount, currency };
     };
     const cardAmount = authoredBoard.card.amount && money(authoredBoard.card.amount.value, authoredBoard.card.amount.currency, false);
     const aggregate = authoredBoard.aggregate && money(authoredBoard.aggregate.sum, authoredBoard.aggregate.currency, true);
-    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), ...(authoredBoard.groupSummary ? { groupSummary: authoredBoard.groupSummary } : {}), ...(aggregate ? { aggregate: { sum: aggregate.amount, currency: aggregate.currency } } : {}), card: { title, ...(authoredBoard.card.subtitle ? { subtitle: authoredBoard.card.subtitle.map(valuePath) } : {}), ...(cardAmount ? { amount: { value: cardAmount.amount, currency: cardAmount.currency } } : {}), body: (authoredBoard.card.body ?? []).map(valuePath) } };
+    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), ...(authoredBoard.groupSummary ? { groupSummary: authoredBoard.groupSummary } : {}), ...(aggregate ? { aggregate: { sum: aggregate.amount, currency: aggregate.currency } } : {}), card: { title, ...(timestamp ? { timestamp } : {}), ...(authoredBoard.card.subtitle ? { subtitle: authoredBoard.card.subtitle.map(valuePath) } : {}), ...(cardAmount ? { amount: { value: cardAmount.amount, currency: cardAmount.currency } } : {}), body: (authoredBoard.card.body ?? []).map(valuePath) } };
   }
   for (const groups of [authoredCreateGroups, updateGroups]) assertVisibilityFields(entityName, "form group", groups, fields);
 

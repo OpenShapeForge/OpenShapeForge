@@ -1289,6 +1289,7 @@
                 }, "x-osf-i18n": { "title": { "en": "Group aggregate", "nl": "Groepstotaal" } } },
                 "card": { "type": "object", "additionalProperties": false, "required": ["title"], "x-osf-i18n": { "title": { "en": "Card", "nl": "Kaart" } }, "properties": {
                   "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title path", "nl": "Titelpad" } } },
+                  "timestamp": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Timestamp path", "nl": "Tijdstippad" } } },
                   "amount": { "type": "object", "additionalProperties": false, "required": ["value", "currency"], "properties": {
                     "value": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Amount field path", "nl": "Bedragveldpad" } } },
                     "currency": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Currency field path", "nl": "Valutaveldpad" } } }

@@ -2215,13 +2215,18 @@ test("board group summaries require the readable collection used for grouping", 
 });
 
 test("board money paths refer to typed scalar fields on the same record", () => {
-  const owner = entity("Deal", "deal", [field("displayName"), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } }), field("quoteId", { osfType: "Quote", relationship: { target: "Quote" } })], coreView(), [{ key: "quoteId", fieldKey: "quoteId", kind: "belongsTo", target: "Quote", foreignKey: "quote_id" }]);
+  const owner = entity("Deal", "deal", [field("displayName"), field("updatedAt", { baseType: "datetime" }), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } }), field("quoteId", { osfType: "Quote", relationship: { target: "Quote" } })], coreView(), [{ key: "quoteId", fieldKey: "quoteId", kind: "belongsTo", target: "Quote", foreignKey: "quote_id" }]);
   const quote = entity("Quote", "quote", [field("amountBase", { osfType: "decimal", baseType: "number" }), field("currencyCode")], coreView());
-  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", aggregate: { sum: "quoteId.amountBase", currency: "quoteId.currencyCode" }, card: { title: "displayName", amount: { value: "quoteId.amountBase", currency: "quoteId.currencyCode" } } };
+  quote.contract.storage.columns.find(item => item.field === "amountBase")!.type = "numeric";
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", aggregate: { sum: "quoteId.amountBase", currency: "quoteId.currencyCode" }, card: { title: "displayName", timestamp: "updatedAt", amount: { value: "quoteId.amountBase", currency: "quoteId.currencyCode" } } };
   const build = () => buildWebManifest([owner, quote]);
   const board = build().entities.Deal!.views.collection.board!;
   expect(board.aggregate?.sum).toMatchObject({ targetEntityId: "Quote", field: "amountBase", cardinality: "one" });
   expect(board.card.amount?.currency).toMatchObject({ targetEntityId: "Quote", field: "currencyCode", cardinality: "one" });
+  expect(board.card.timestamp).toMatchObject({ targetEntityId: "Deal", field: "updatedAt", osfType: "datetime", cardinality: "one" });
+  owner.contract.interfaces!.web!.collectionBoard!.card.timestamp = "displayName";
+  expect(build).toThrow("board card timestamp must be a single datetime field");
+  owner.contract.interfaces!.web!.collectionBoard!.card.timestamp = "updatedAt";
   owner.contract.interfaces!.web!.collectionBoard!.card.amount!.currency = "displayName";
   expect(build).toThrow("board amount and currency must be single scalar fields on the same record");
   owner.contract.interfaces!.web!.collectionBoard!.card.amount!.currency = "quoteId.currencyCode";

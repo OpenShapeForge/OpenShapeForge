@@ -14,6 +14,7 @@ journal, and manifest-derived e2e + load tests. Start with
 | [plugins.md](plugins.md) | The `CompilerPlugin` contract, `ownedPaths`, determinism rules, and both shipped examples (entity-docs, notebook) |
 | [maintenance.md](maintenance.md) | Trusted module maintenance: audited store lifecycle, scoped canonical Operations, explicit seed jobs and CLI |
 | [jobs.md](jobs.md) | The durable job queue: `platform.jobs`, enqueue/claim/settle, `outcome_unknown`, the `job-worker` role, the `mail.deliver` kind and SMTP provider, the `jobs.*` Operations |
+| [inbound-deliveries.md](inbound-deliveries.md) | Authenticated inbound provider webhooks: the bounded HMAC over exact bytes, tenant from a stored registration, the durable receipt, duplicate and crash handling, the plugin registration API and what a plugin still owes |
 | [connectors.md](connectors.md) | Connector contracts, licensing and entitlement, configuration and secrets, the execution trust model |
 | [identity-providers.md](identity-providers.md) | External identity providers: what OSF ships vs. what a host authors, the `keycloak.identityProviders` contract, Apple, validation rules, reconciling an existing realm, Keycloak/provider lockstep |
 | [api.md](api.md) | The generic CRUD engine, multi-tenancy + RLS, auth (Keycloak bearer / trusted-context HMAC), the entity-event journal, env + local stack |

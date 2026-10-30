@@ -126,6 +126,8 @@ export type TrustedSessionContext = {
    * the absent case. Never caller input on any carrier.
    */
   principalKind?: "person" | "service";
+  /** Verified configured organization service account client id, from bearer claims only. */
+  organizationServiceIdentityId?: string;
   /**
    * The verified application behind a machine session. Only the API-key
    * carrier sets it; see {@link VerifiedAppPrincipal}.

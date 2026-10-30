@@ -23,12 +23,13 @@ test("real JWT verification admits only a configured service client without pers
     const connection = await acquire();
     connection.executeQuery = async (query) => {
       if (query.sql.includes("set_config(")) return { rows: [] };
+      if (query.sql.includes("current_setting('app.authorization_rules'")) return { rows: [{ rules: null }] };
       if (query.sql.includes("select ir.access_blocked")) {
         memberAccessChecks++;
         return { rows: [] };
       }
       personStoreAccess++;
-      throw new Error("Person enrollment store must not be accessed for the configured automatic account.");
+      throw new Error(`Unexpected query: ${query.sql}`);
     };
     return connection;
   };
@@ -55,6 +56,7 @@ test("real JWT verification admits only a configured service client without pers
     };
     const session = await resolveSessionContext(new Headers({ authorization: `Bearer ${await mint("automatic")}` }), { db });
     expect(session.tenantId).toBe(tenant);
+    expect(session.organizationServiceIdentityId).toBe("automatic");
     expect(session.roles).toContain("Relations.All.ReadWrite");
     expect(session.relation).toBeNull();
     expect(personStoreAccess).toBe(0);

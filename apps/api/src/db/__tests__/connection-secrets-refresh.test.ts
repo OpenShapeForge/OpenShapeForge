@@ -371,3 +371,25 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
     TEST_TIMEOUT,
   );
 });
+
+test("transaction-scoped Connection resolution locks against rotation and avoids token refresh", async () => {
+  const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
+  const session = sessionFor(seed.tenantId, seed.userId);
+  const endpoint = tokenEndpoint(() => { throw new Error("unexpected refresh"); });
+  await withDbSession(app, session, async (trx) => {
+    const result = await resolveConnectionValues({ db: app, session,
+      selector: { connectionId: seed.personalId }, transaction: trx, skipTokenRefresh: true,
+      keyring: KEYRING, fetchImpl: endpoint.fetchImpl, artifacts: ARTIFACTS });
+    expect(result.ok).toBe(true);
+    expect(endpoint.exchanges()).toBe(0);
+    // A concurrent credential rotation must not commit during the checked operation.
+    await expect(withDbSession(app, session, async (other) => {
+      await sql`set local lock_timeout = '100ms'`.execute(other);
+      await sql`update integration.connections set configuration_values = '{}'::jsonb where id = ${seed.personalId}::uuid`.execute(other);
+    }, { independent: true })).rejects.toThrow();
+  });
+  await withDbSession(app, session, async (trx) => {
+    const changed = await sql`update integration.connections set configuration_values = '{}'::jsonb where id = ${seed.personalId}::uuid`.execute(trx);
+    expect(Number(changed.numAffectedRows)).toBe(1);
+  });
+}, TEST_TIMEOUT);

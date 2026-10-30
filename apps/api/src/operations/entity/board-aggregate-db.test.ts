@@ -8,6 +8,8 @@ import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { aggregateBoardGroupsForTable } from "./board-aggregate.js";
 import { bindAuthorizationProfileAccess } from "../../auth/authorization-profile-decision.js";
+import { withAuditContext } from "../../platform/audit-context.js";
+import { listGeneratedEntitiesForTable } from "./queries.js";
 import type { GeneratedCrudTable } from "./types.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -45,11 +47,11 @@ beforeAll(async () => {
 afterAll(async () => { await restricted?.close(); await privileged?.close(); if (created) await admin?.unsafe(`drop database "${scratchName}" with (force)`); await admin?.close(); });
 
 test("sum preserves decimals, scope, filters and separate currencies", async () => {
-  const q1 = randomUUID(), q2 = randomUUID(), q3 = randomUUID(), qForeign = randomUUID(), qHidden = randomUUID();
-  for (const [id, owner, viewer, amount, currency] of [[q1,tenant,user,"999999999999999.01","EUR"],[q2,tenant,user,"0.02","EUR"],[q3,tenant,user,"7.25","USD"],[qForeign,foreignTenant,user,"400","EUR"],[qHidden,tenant,otherUser,"300","EUR"]]) {
+  const q1 = randomUUID(), q2 = randomUUID(), q3 = randomUUID(), qForeign = randomUUID(), qHidden = randomUUID(), qNoAmount = randomUUID();
+  for (const [id, owner, viewer, amount, currency] of [[q1,tenant,user,"999999999999999.01","EUR"],[q2,tenant,user,"0.02","EUR"],[q3,tenant,user,"7.25","USD"],[qForeign,foreignTenant,user,"400","EUR"],[qHidden,tenant,otherUser,"300","EUR"],[qNoAmount,tenant,user,null,"EUR"]]) {
     await sql`insert into erp.contact_details (id,tenant_id,viewer,amount,currency) values (${id}::uuid,${owner}::uuid,${viewer}::uuid,${amount}::numeric,${currency})`.execute(privileged!.db);
   }
-  for (const [owner,viewer,stage,quote] of [[tenant,user,"open",q1],[tenant,user,"open",q2],[tenant,user,"open",q3],[foreignTenant,user,"open",qForeign],[tenant,otherUser,"open",qHidden],[tenant,user,"hidden",qHidden],[tenant,user,"missing",null],[tenant,user,"mixed",q1],[tenant,user,"mixed",q3],[tenant,user,"mixed",qHidden]]) {
+  for (const [owner,viewer,stage,quote] of [[tenant,user,"open",q1],[tenant,user,"open",q2],[tenant,user,"open",q3],[foreignTenant,user,"open",qForeign],[tenant,otherUser,"open",qHidden],[tenant,user,"hidden",qHidden],[tenant,user,"missing",null],[tenant,user,"nullable",qNoAmount],[tenant,user,"mixed",q1],[tenant,user,"mixed",q3],[tenant,user,"mixed",qHidden]]) {
     await sql`insert into erp.relations (id,tenant_id,viewer,stage,quote_id) values (${randomUUID()}::uuid,${owner}::uuid,${viewer}::uuid,${stage},${quote}::uuid)`.execute(privileged!.db);
   }
   const result = await aggregateBoardGroupsForTable(restricted!.db, session, root, [root,target], { filter: {} });
@@ -59,11 +61,21 @@ test("sum preserves decimals, scope, filters and separate currencies", async () 
   expect(open.totals).toContainEqual({ currency: "USD", amount: "7.25" });
   expect(result.find(group => group.group === "hidden")).toEqual({ group: "hidden", available: false, totals: [] });
   expect(result.find(group => group.group === "missing")).toEqual({ group: "missing", available: false, totals: [] });
+  expect(result.find(group => group.group === "nullable")).toEqual({ group: "nullable", available: false, totals: [] });
   expect(result.find(group => group.group === "mixed")).toEqual({ group: "mixed", available: false, totals: [] });
-  const filtered = await aggregateBoardGroupsForTable(restricted!.db, session, root, [root,target], { filter: { stage: { eq: "open" } } });
+  // Route restriction and search/advanced terms share the canonical list filter.
+  const filter = { and: [{ viewer: { eq: user } }, { stage: { eq: "open" } }, { stage: { contains: "pen" } }] };
+  const list = await withAuditContext(`${root.source!.authoringEntityName}.list`, undefined, () => listGeneratedEntitiesForTable(restricted!.db, session, root, { filter, limit: 1, includeTotalCount: true }));
+  expect(list.totalCount).toBe(3);
+  expect(list.rows).toHaveLength(1);
+  const filtered = await aggregateBoardGroupsForTable(restricted!.db, session, root, [root,target], { filter });
   expect(filtered).toEqual([open]);
   const deniedTarget = { ...target, columns: target.columns.map(entry => entry.name === "amount" ? { ...entry, fieldPolicy: { readRoles: ["not-granted"] } } : entry) };
   await expect(aggregateBoardGroupsForTable(restricted!.db, session, root, [root, deniedTarget], {})).rejects.toThrow("Not authorized");
+  const deniedForeign = { ...root, columns: root.columns.map(entry => entry.name === "quote_id" ? { ...entry, fieldPolicy: { readRoles: ["not-granted"] } } : entry) };
+  await expect(aggregateBoardGroupsForTable(restricted!.db, session, deniedForeign, [deniedForeign, target], {})).rejects.toThrow("Not authorized");
+  const deniedGroup = { ...root, columns: root.columns.map(entry => entry.name === "stage" ? { ...entry, fieldPolicy: { readRoles: ["not-granted"] } } : entry) };
+  await expect(aggregateBoardGroupsForTable(restricted!.db, session, deniedGroup, [deniedGroup, target], {})).rejects.toThrow("Not authorized");
   const restrictedSession = { ...session };
   bindAuthorizationProfileAccess(restrictedSession, { managedEntities: [], operations: {}, listFields: { [target.source!.authoringEntityName!]: ["id", "currency"] } });
   await expect(aggregateBoardGroupsForTable(restricted!.db, restrictedSession, root, [root, target], {})).rejects.toThrow("outside the list projection");

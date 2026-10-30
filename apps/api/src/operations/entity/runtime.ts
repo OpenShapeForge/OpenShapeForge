@@ -1063,11 +1063,12 @@ async function executeEntityOperationWithContext(
         if (request.input?.includeBoardTotals !== undefined && typeof request.input.includeBoardTotals !== "boolean") {
           throw generatedCrudError("includeBoardTotals must be a boolean.", "BAD_USER_INPUT");
         }
+        const pageInput = listPageInput(request.input);
         const connection = await listGeneratedEntities(db, session, {
-          ...listPageInput(request.input),
+          ...pageInput,
           table: table.name,
         });
-        const boardTotals = request.input?.includeBoardTotals ? await aggregateBoardGroups(db, session, { table: table.name, ...(request.input.filter !== undefined ? { filter: request.input.filter } : {}) }) : undefined;
+        const boardTotals = request.input?.includeBoardTotals ? await aggregateBoardGroups(db, session, { table: table.name, ...(pageInput.filter !== undefined ? { filter: pageInput.filter } : {}) }) : undefined;
         const targets = connection.rows.map((row) => offerTarget(row, table));
         const unavailableByTarget = await businessAndLeaseUnavailability(
           db,

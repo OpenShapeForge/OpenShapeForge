@@ -1277,6 +1277,17 @@
           "additionalProperties": false,
           "required": ["route", "columns"],
           "properties": {
+            "board": {
+              "type": "object", "additionalProperties": false, "required": ["groupBy", "card"],
+              "properties": {
+                "groupBy": { "$ref": "#/$defs/fieldKey" },
+                "card": { "type": "object", "additionalProperties": false, "required": ["title"], "properties": {
+                  "title": { "type": "string", "minLength": 1 },
+                  "body": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+                } }
+              },
+              "x-osf-i18n": { "title": { "en": "Board", "nl": "Bord" } }
+            },
             "renderer": {
               "$ref": "#/$defs/webRendererKeyV2",
               "x-osf-i18n": { "title": { "en": "Renderer", "nl": "Renderer" } },

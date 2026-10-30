@@ -54,6 +54,7 @@ import type {
   WebRelationshipProjection,
   WebStandaloneOperationRef,
   WebViewMode,
+  WebValuePath,
 } from "@openshapeforge/interface-web";
 export type * from "@openshapeforge/interface-web";
 
@@ -889,6 +890,38 @@ function projectEntity(
   // Every single entity reference is an authored field, so its writability and
   // presentation are projected above; relationships add no implicit fields.
   const fields = Object.fromEntries(explicitFields);
+  const authoredBoard = contract.interfaces?.web?.collectionBoard;
+  let board: WebCollectionView["board"];
+  if (authoredBoard) {
+    const group = fields[authoredBoard.groupBy];
+    if (!group || group.cardinality !== "one" || (!group.relationship && !group.optionSource && !group.options?.length)) {
+      throw new Error(`${entityName}: board grouping requires a single relationship or choice field.`);
+    }
+    const valuePath = (expression: string): WebValuePath => {
+      const parts = expression.split(".");
+      if (parts.some(part => !part)) throw new Error(`${entityName}: invalid board path ${expression}.`);
+      let owner = source;
+      let many = false;
+      const path: WebValuePath["path"] = [];
+      for (let i = 0; i < parts.length; i++) {
+        const key = parts[i]!;
+        const relation = owner.contract.model.relationships.find(item => item.key === key);
+        if (relation) {
+          const resolved = compileRelationshipPath(entityName, owner, all, [key]);
+          path.push(...resolved.path);
+          many ||= resolved.many;
+          owner = resolved.target;
+          if (i === parts.length - 1) return { path, targetEntityId: owner.contract.entity.name, osfType: owner.contract.entity.name, cardinality: many ? "many" : "one" };
+        } else {
+          const field = owner.contract.model.fields.find(item => item.key === key);
+          if (!field || i !== parts.length - 1) throw new Error(`${entityName}: invalid board path ${expression}.`);
+          return { path, targetEntityId: owner.contract.entity.name, field: key, osfType: field.osfType, cardinality: many || field.cardinality === "collection" ? "many" : "one" };
+        }
+      }
+      throw new Error(`${entityName}: invalid board path ${expression}.`);
+    };
+    board = { groupBy: authoredBoard.groupBy, card: { title: valuePath(authoredBoard.card.title), body: (authoredBoard.card.body ?? []).map(valuePath) } };
+  }
   for (const groups of [authoredCreateGroups, updateGroups]) assertVisibilityFields(entityName, "form group", groups, fields);
 
   let relationships = Object.fromEntries(contract.model.relationships.flatMap((relationship) => {
@@ -1233,7 +1266,7 @@ function projectEntity(
       message: "Generic create requires an atomic collection Operation and is currently unsupported.",
     } } } : {}),
     views: {
-      collection: createUnsupported ? { ...source.collection, operations: withoutCreate(source.collection.operations) } : source.collection,
+      collection: { ...source.collection, ...(board ? { board } : {}), ...(createUnsupported ? { operations: withoutCreate(source.collection.operations) } : {}) },
       ...(record ? { record } : {}),
       ...(Object.keys(named).length ? { named } : {}),
     },

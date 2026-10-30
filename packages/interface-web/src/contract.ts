@@ -235,6 +235,7 @@ export type WebTimelinePresentation = {
 };
 
 export type WebCollectionView = {
+  board?: { groupBy: string; card: { title: WebValuePath; body: WebValuePath[] } };
   presentation?: WebTimelinePresentation;
   id: string;
   kind: "collection";
@@ -253,6 +254,15 @@ export type WebCollectionView = {
   displayField: string;
   columns: Array<{ fieldId: string; key: string; label: LocalizedText }>;
   defaultSort?: { key: string; direction: "asc" | "desc" };
+};
+
+/** A typed read path; relationships are traversed before reading the optional terminal field. */
+export type WebValuePath = {
+  path: Array<{ entityId: string; relationshipId: string }>;
+  targetEntityId: string;
+  field?: string;
+  osfType: string;
+  cardinality: "one" | "many";
 };
 
 export type WebRelationshipProjection = {

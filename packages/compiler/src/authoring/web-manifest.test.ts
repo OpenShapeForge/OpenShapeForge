@@ -2131,3 +2131,17 @@ test("context paths follow canonical relationship graphs for homes and project m
     expect(build).toThrow("single string");
   }
 });
+
+test("board card paths preserve related entity type and collection cardinality", () => {
+  const owner = entity("Deal", "deal", [field("displayName"), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } })], coreView(), [{ key: "lines", kind: "hasMany", target: "Line", foreignKey: "deal_id" }]);
+  const line = entity("Line", "line", [field("productId", { osfType: "Product" })], coreView(), [{ key: "productId", fieldKey: "productId", kind: "belongsTo", target: "Product", foreignKey: "product_id" }]);
+  const product = entity("Product", "product", [field("displayName")], coreView());
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", body: ["lines.productId"] } };
+  const build = () => buildWebManifest([owner, line, product]);
+  expect(build().entities.Deal!.views.collection.board!.card.body[0]).toMatchObject({
+    targetEntityId: "Product", osfType: "Product", cardinality: "many",
+    path: [{ entityId: "Deal", relationshipId: "Deal.lines" }, { entityId: "Line", relationshipId: "Line.productId" }],
+  });
+  owner.contract.interfaces!.web!.collectionBoard!.card.body = ["lines.missing"];
+  expect(build).toThrow("invalid board path");
+});

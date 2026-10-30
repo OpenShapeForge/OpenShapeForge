@@ -1230,7 +1230,8 @@ A web collection can declare a board over an existing single-valued choice or
 entity reference. The grouping reference's collection supplies the columns,
 including columns with no records. Cards project existing typed fields and
 relationship paths; a path ending in an entity returns entity instances and a
-path traversing a collection returns multiple values.
+path traversing a collection returns multiple values. A card path can traverse
+up to four relationships.
 
 ```yaml
 interfaces:

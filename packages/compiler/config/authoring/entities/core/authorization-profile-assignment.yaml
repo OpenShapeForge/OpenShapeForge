@@ -3,15 +3,15 @@ kind: coreEntity
 module: core
 entity: AuthorizationProfileAssignment
 title: Authorization profile assignment
-description: Authorization profile assignment managed by an authorized security
-  manager within the application ceiling.
+description: Authorization profile assignment managed by an authorized security manager within the
+  application ceiling.
 language: en
 labels:
-  en: Authorization profile assignment
-  nl: Authorization profile assignment
-pluralLabels:
-  en: Authorization profile assignment records
-  nl: Authorization profile assignment records
+  en: Assignment
+  nl: Toekenning
+pluralLabels: &a1
+  en: Assignments
+  nl: Toekenningen
 domains:
   - organization
 authorization:
@@ -34,8 +34,8 @@ fields:
     osfType: string
     required: true
     label:
-      en: name
-      nl: name
+      en: Description
+      nl: Omschrijving
     persisted:
       column: name
       storageClass: core
@@ -43,19 +43,23 @@ fields:
     osfType: AuthorizationProfileVersion
     required: false
     label:
-      en: profileVersion
-      nl: profileVersion
+      en: Profile version
+      nl: Profielversie
     persisted:
       column: profile_version
       storageClass: core
     relationship:
       ownership: reference
+      inverse:
+        key: assignments
+        label: *a1
+        ownership: reference
   - key: operationId
     osfType: string
     required: false
     label:
-      en: Operation (direct grant or profile scope)
-      nl: Operation (directe toekenning of profielscope)
+      en: Operation scope
+      nl: Operation-beperking
     persisted:
       column: operation_id
       storageClass: core
@@ -67,16 +71,15 @@ fields:
         field: operationId
         catalog: operations
     description:
-      en: Required for a direct grant. With a profile version, limits the assignment
-        to this Operation.
-      nl: Verplicht voor een directe toekenning. Met een profielversie beperkt dit de
-        toekenning tot deze Operation.
+      en: Required for a direct grant. With a profile version, limits the assignment to this Operation.
+      nl: Verplicht voor een directe toekenning. Met een profielversie beperkt dit de toekenning tot deze
+        Operation.
   - key: subjectKind
     osfType: string
     required: true
     label:
-      en: subjectKind
-      nl: subjectKind
+      en: Audience type
+      nl: Type doelgroep
     persisted:
       column: subject_kind
       storageClass: core
@@ -85,22 +88,22 @@ fields:
       items:
         - value: user
           label:
-            en: user
-            nl: user
+            en: User
+            nl: Gebruiker
         - value: group
           label:
-            en: group
-            nl: group
+            en: Group
+            nl: Groep
         - value: role
           label:
-            en: role
-            nl: role
+            en: Role
+            nl: Rol
   - key: subjectKey
     osfType: string
     required: true
     label:
-      en: subjectKey
-      nl: subjectKey
+      en: Audience
+      nl: Doelgroep
     persisted:
       column: subject_key
       storageClass: core
@@ -117,8 +120,8 @@ fields:
     osfType: boolean
     required: true
     label:
-      en: active
-      nl: active
+      en: Active
+      nl: Actief
     persisted:
       column: active
       storageClass: core
@@ -193,46 +196,56 @@ interfaces:
     views:
       collection:
         route: /authorization-profile-assignments
-        title:
-          en: Authorization profile assignment
-          nl: Authorization profile assignment
+        title: *a1
         columns:
           - key: name
-          - key: profileVersion
+            sortable: true
           - key: subjectKind
+            sortable: true
+          - key: subjectKey
+          - key: operationId
+          - key: active
+            sortable: true
       record:
         routes:
           read: /authorization-profile-assignments/:id
           create: /authorization-profile-assignments/new
         title: "{{name}}"
         layout:
-          groups:
+          preset: main-context
+          context:
+            fields:
+              - subjectKind
+              - active
+            relationships:
+              - profileVersion
+          groups: &a2
             - title:
-                en: Authorization profile assignment
-                nl: Authorization profile assignment
-              fields: &a1
+                en: Assignment
+                nl: Toekenning
+              fields:
                 - name
                 - profileVersion
-                - operationId
+                - active
+            - title:
+                en: Audience
+                nl: Doelgroep
+              fields:
                 - subjectKind
                 - subjectKey
-                - active
+            - title:
+                en: Operation scope
+                nl: Operation-beperking
+              fields:
+                - operationId
         modes:
           create:
             title:
-              en: Create
-              nl: Toevoegen
-            groups:
-              - title:
-                  en: Authorization profile assignment
-                  nl: Authorization profile assignment
-                fields: *a1
+              en: Create assignment
+              nl: Toekenning aanmaken
+            groups: *a2
           update:
             title:
-              en: Edit
-              nl: Bewerken
-            groups:
-              - title:
-                  en: Authorization profile assignment
-                  nl: Authorization profile assignment
-                fields: *a1
+              en: Edit assignment
+              nl: Toekenning bewerken
+            groups: *a2

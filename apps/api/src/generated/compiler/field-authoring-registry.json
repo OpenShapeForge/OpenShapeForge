@@ -7582,11 +7582,11 @@
       },
       "label": {
         "en": "Authorization profile",
-        "nl": "Authorization profile"
+        "nl": "Autorisatieprofiel"
       },
       "pluralLabel": {
-        "en": "Authorization profile records",
-        "nl": "Authorization profile records"
+        "en": "Authorization profiles",
+        "nl": "Autorisatieprofielen"
       },
       "shape": [
         {
@@ -7594,8 +7594,8 @@
           "osfType": "string",
           "required": true,
           "label": {
-            "en": "name",
-            "nl": "name"
+            "en": "Name",
+            "nl": "Naam"
           },
           "persisted": {
             "column": "name",
@@ -7607,8 +7607,8 @@
           "osfType": "string",
           "required": true,
           "label": {
-            "en": "key",
-            "nl": "key"
+            "en": "Code",
+            "nl": "Code"
           },
           "persisted": {
             "column": "key",
@@ -7622,10 +7622,19 @@
         {
           "key": "targetEntity",
           "osfType": "entityTypeName",
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuthorizationProfile",
+              "field": "targetEntity",
+              "catalog": "entities"
+            }
+          },
           "required": true,
           "label": {
-            "en": "targetEntity",
-            "nl": "targetEntity"
+            "en": "Entity",
+            "nl": "Entiteit"
           },
           "persisted": {
             "column": "target_entity",
@@ -7637,8 +7646,8 @@
           "osfType": "multilineText",
           "required": false,
           "label": {
-            "en": "description",
-            "nl": "description"
+            "en": "Description",
+            "nl": "Omschrijving"
           },
           "persisted": {
             "column": "description",
@@ -7698,7 +7707,7 @@
       "baseType": "string",
       "label": {
         "en": "Authorization profile",
-        "nl": "Authorization profile"
+        "nl": "Autorisatieprofiel"
       },
       "validation": {
         "format": "uuid"
@@ -7725,12 +7734,12 @@
         "format": "uuid"
       },
       "label": {
-        "en": "Authorization profile assignment",
-        "nl": "Authorization profile assignment"
+        "en": "Assignment",
+        "nl": "Toekenning"
       },
       "pluralLabel": {
-        "en": "Authorization profile assignment records",
-        "nl": "Authorization profile assignment records"
+        "en": "Assignments",
+        "nl": "Toekenningen"
       },
       "shape": [
         {
@@ -7738,8 +7747,8 @@
           "osfType": "string",
           "required": true,
           "label": {
-            "en": "name",
-            "nl": "name"
+            "en": "Description",
+            "nl": "Omschrijving"
           },
           "persisted": {
             "column": "name",
@@ -7751,15 +7760,23 @@
           "osfType": "AuthorizationProfileVersion",
           "required": false,
           "label": {
-            "en": "profileVersion",
-            "nl": "profileVersion"
+            "en": "Profile version",
+            "nl": "Profielversie"
           },
           "persisted": {
             "column": "profile_version",
             "storageClass": "core"
           },
           "relationship": {
-            "ownership": "reference"
+            "ownership": "reference",
+            "inverse": {
+              "key": "assignments",
+              "label": {
+                "en": "Assignments",
+                "nl": "Toekenningen"
+              },
+              "ownership": "reference"
+            }
           }
         },
         {
@@ -7767,8 +7784,8 @@
           "osfType": "string",
           "required": false,
           "label": {
-            "en": "Operation (direct grant or profile scope)",
-            "nl": "Operation (directe toekenning of profielscope)"
+            "en": "Operation scope",
+            "nl": "Operation-beperking"
           },
           "persisted": {
             "column": "operation_id",
@@ -7793,8 +7810,8 @@
           "osfType": "string",
           "required": true,
           "label": {
-            "en": "subjectKind",
-            "nl": "subjectKind"
+            "en": "Audience type",
+            "nl": "Type doelgroep"
           },
           "persisted": {
             "column": "subject_kind",
@@ -7806,22 +7823,22 @@
               {
                 "value": "user",
                 "label": {
-                  "en": "user",
-                  "nl": "user"
+                  "en": "User",
+                  "nl": "Gebruiker"
                 }
               },
               {
                 "value": "group",
                 "label": {
-                  "en": "group",
-                  "nl": "group"
+                  "en": "Group",
+                  "nl": "Groep"
                 }
               },
               {
                 "value": "role",
                 "label": {
-                  "en": "role",
-                  "nl": "role"
+                  "en": "Role",
+                  "nl": "Rol"
                 }
               }
             ]
@@ -7832,8 +7849,8 @@
           "osfType": "string",
           "required": true,
           "label": {
-            "en": "subjectKey",
-            "nl": "subjectKey"
+            "en": "Audience",
+            "nl": "Doelgroep"
           },
           "persisted": {
             "column": "subject_key",
@@ -7857,8 +7874,8 @@
           "osfType": "boolean",
           "required": true,
           "label": {
-            "en": "active",
-            "nl": "active"
+            "en": "Active",
+            "nl": "Actief"
           },
           "persisted": {
             "column": "active",
@@ -7877,8 +7894,8 @@
       "entity": "AuthorizationProfileAssignment",
       "baseType": "string",
       "label": {
-        "en": "Authorization profile assignment",
-        "nl": "Authorization profile assignment"
+        "en": "Assignment",
+        "nl": "Toekenning"
       },
       "validation": {
         "format": "uuid"
@@ -7905,12 +7922,12 @@
         "format": "uuid"
       },
       "label": {
-        "en": "Authorization profile policy",
-        "nl": "Authorization profile policy"
+        "en": "Operation policy",
+        "nl": "Operatieregel"
       },
       "pluralLabel": {
-        "en": "Authorization profile policy records",
-        "nl": "Authorization profile policy records"
+        "en": "Operation policies",
+        "nl": "Operatieregels"
       },
       "shape": [
         {
@@ -7918,8 +7935,8 @@
           "osfType": "string",
           "required": true,
           "label": {
-            "en": "operationId",
-            "nl": "operationId"
+            "en": "Operation",
+            "nl": "Operation"
           },
           "persisted": {
             "column": "operation_id",
@@ -7940,8 +7957,8 @@
           "osfType": "AuthorizationProfile",
           "required": true,
           "label": {
-            "en": "profile",
-            "nl": "profile"
+            "en": "Profile",
+            "nl": "Profiel"
           },
           "persisted": {
             "column": "profile",
@@ -7964,8 +7981,8 @@
           "osfType": "condition",
           "required": false,
           "label": {
-            "en": "condition",
-            "nl": "condition"
+            "en": "Condition",
+            "nl": "Voorwaarde"
           },
           "persisted": {
             "column": "condition",
@@ -7983,8 +8000,8 @@
       "entity": "AuthorizationProfilePolicy",
       "baseType": "string",
       "label": {
-        "en": "Authorization profile policy",
-        "nl": "Authorization profile policy"
+        "en": "Operation policy",
+        "nl": "Operatieregel"
       },
       "validation": {
         "format": "uuid"
@@ -8011,12 +8028,12 @@
         "format": "uuid"
       },
       "label": {
-        "en": "Authorization profile version",
-        "nl": "Authorization profile version"
+        "en": "Profile version",
+        "nl": "Profielversie"
       },
       "pluralLabel": {
-        "en": "Authorization profile versions",
-        "nl": "Authorization profile versions"
+        "en": "Profile versions",
+        "nl": "Profielversies"
       },
       "shape": [
         {
@@ -8033,6 +8050,10 @@
               },
               "ownership": "owned"
             }
+          },
+          "label": {
+            "en": "Profile",
+            "nl": "Profiel"
           }
         },
         {
@@ -8089,8 +8110,8 @@
             "nl": "Vastgelegde inhoud"
           },
           "description": {
-            "en": "The template with its variants and blocks exactly as publication froze them. Every materialization of this version resolves from this content, which is never updated afterwards.",
-            "nl": "De template met zijn varianten en blokken precies zoals de publicatie ze heeft vastgelegd. Iedere materialisatie van deze versie wordt hieruit opgelost; deze inhoud wordt daarna nooit gewijzigd."
+            "en": "The immutable profile and Operation policies captured at publication.",
+            "nl": "Het onveranderlijke profiel en de operatieregels zoals vastgelegd bij publicatie."
           },
           "persisted": {
             "column": "snapshot",
@@ -8150,10 +8171,10 @@
           }
         },
         {
-          "key": "authorizationProfileAssignments",
+          "key": "assignments",
           "label": {
-            "en": "Authorization profile assignment records",
-            "nl": "Authorization profile assignment records"
+            "en": "Assignments",
+            "nl": "Toekenningen"
           },
           "osfType": "AuthorizationProfileAssignment",
           "cardinality": "collection",
@@ -8174,8 +8195,8 @@
       "entity": "AuthorizationProfileVersion",
       "baseType": "string",
       "label": {
-        "en": "Authorization profile version",
-        "nl": "Authorization profile version"
+        "en": "Profile version",
+        "nl": "Profielversie"
       },
       "validation": {
         "format": "uuid"
@@ -8185,7 +8206,7 @@
         "source": "AuthorizationProfileVersion",
         "valueField": "id"
       },
-      "displayTemplate": "{{versionNumber}}",
+      "displayTemplate": "Version {{versionNumber}}",
       "filterField": "id",
       "icon": "file",
       "render": {

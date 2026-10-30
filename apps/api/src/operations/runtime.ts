@@ -119,7 +119,7 @@ export type OperationContract = {
   /** Built-in executor selected only by the compiler, never request input. */
   implementation?:
     | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" }
-    | { type: "collection-options"; sources: Array<{entity:string;list:string;get?:string;labelField?:string;fields:Record<string,{type:string;many:boolean}>}> }
+    | { type: "collection-options"; sources: Array<{entity:string;labels?:{en?:string;nl?:string};list:string;get?:string;labelField?:string;fields:Record<string,{type:string;many:boolean}>}> }
     | { type: "application-search"; sources: Array<{entity:string;labels:Record<string,string>;description:string|Record<string,string>;list:string;get?:string;field?:string;descriptionField?:string}> }
     | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> }
     | { type: "constrained-reference-create"; targetEntityName: string; collectionEntityName?: string; parentField?: string; targetValues: Record<string, string | number | boolean>; childValues?: Record<string, string | number | boolean> };

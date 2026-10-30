@@ -49,3 +49,14 @@ test('private resource choices retain the ID when the canonical read is denied',
  }}} as any);
  expect(result).toEqual({value:{items:[{value:'run-1',label:'run-1'}],nextCursor:null}});
 });
+test('security managers choose ceiling entities without a target read grant',async()=>{
+ const {default:inventory}=await import('../generated/compiler/authorization-operations.json');
+ const target=inventory.rows.find(row=>row.grantable)!.entity;
+ const definition={id:'AuthorizationProfile.list',intent:'list',input:{kind:'json-schema',schema:{}}};
+ const handler=nativeCollectionOptionsHandler({...op,implementation:{type:'collection-options',sources:[{entity:'AuthorizationProfile',list:definition.id,fields:{targetEntity:{type:'string',many:false}}},{entity:target,labels:{nl:'Beheerdoel'},list:target+'.list',fields:{}}]}} as any);
+ const platform={operations:{get:async(_session:any,id:string)=>id===definition.id?definition:undefined}};
+ const input={entity:'AuthorizationProfile',field:'targetEntity',catalog:'entities',locale:'nl',search:'Beheerdoel'};
+ const result=await handler(input,{session:{tenantId:'tenant',roles:['Organization.Security.Manage']},platform} as any);
+ expect(result).toEqual({value:{items:[{value:target,label:'Beheerdoel'}],nextCursor:null}});
+ await expect(handler(input,{session:{tenantId:'tenant',roles:[]},platform} as any)).rejects.toMatchObject({operationError:{code:'FORBIDDEN'}});
+});

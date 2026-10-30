@@ -288,6 +288,7 @@ clientRoles:
   erp-provider:
     # Host-managed inbound endpoints can be reconciled only by explicitly granted service identities.
     - Platform.InboundEndpointManage
+    - Organization.Security.Manage
     - Connectors.ExampleObjectStore.Read
     - General.All.ReadWrite
     - General.All.Read

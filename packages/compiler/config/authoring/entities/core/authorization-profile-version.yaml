@@ -1,0 +1,229 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: AuthorizationProfileVersion
+title: Authorization profile version
+description: An immutable published authorization profile snapshot.
+language: en
+labels:
+  en: Profile version
+  nl: Profielversie
+pluralLabels: &a1
+  en: Profile versions
+  nl: Profielversies
+domains:
+  - organization
+authorization:
+  roles:
+    read:
+      - Organization.Security.Manage
+    create:
+      - Organization.Security.Manage
+    update:
+      - Organization.Security.Manage
+    delete:
+      - Organization.Security.Manage
+  rowAccess:
+    enabled: true
+    empty: public
+displayTemplate: Version {{versionNumber}}
+indexes:
+  - name: authorization_profile_versions_number_uidx
+    fields:
+      - tenantId
+      - profile
+      - versionNumber
+    unique: true
+fields:
+  - key: profile
+    osfType: AuthorizationProfile
+    required: true
+    immutable: true
+    relationship:
+      inverse:
+        key: versions
+        label:
+          en: Versions
+          nl: Versies
+        ownership: owned
+    label:
+      en: Profile
+      nl: Profiel
+  - key: versionNumber
+    osfType: integer
+    required: true
+    immutable: true
+    validation:
+      min: 1
+    label:
+      en: Version
+      nl: Versie
+    persisted:
+      column: version_number
+      storageClass: core
+  - key: status
+    osfType: string
+    required: true
+    immutable: true
+    defaultValue: published
+    description:
+      en: A profile version exists only as a published snapshot, so this is always published. The editable
+        draft state lives on the profile itself.
+      nl: Een profielversie bestaat alleen als gepubliceerde snapshot, dus dit is altijd gepubliceerd. De
+        bewerkbare conceptstatus staat op het profiel zelf.
+    options:
+      type: static
+      items:
+        - value: published
+          label:
+            en: Published
+            nl: Gepubliceerd
+    persisted:
+      column: status
+      storageClass: core
+  - key: snapshot
+    osfType: object
+    required: true
+    immutable: true
+    label:
+      en: Frozen content
+      nl: Vastgelegde inhoud
+    description:
+      en: The immutable profile and Operation policies captured at publication.
+      nl: Het onveranderlijke profiel en de operatieregels zoals vastgelegd bij publicatie.
+    persisted:
+      column: snapshot
+      storageClass: core
+  - key: contentHash
+    osfType: string
+    required: true
+    immutable: true
+    validation:
+      pattern: ^[a-f0-9]{64}$
+    label:
+      en: Content checksum
+      nl: Inhoudschecksum
+    description:
+      en: Checksum over the frozen content, so identical content stays recognisable across versions. It
+        proves consistency, not approval or permission to deliver.
+      nl: Controlesom over de vastgelegde inhoud, zodat identieke inhoud over versies herkenbaar blijft.
+        Die bewijst consistentie, geen goedkeuring of toestemming voor verzending.
+    persisted:
+      column: content_hash
+      storageClass: core
+  - key: publishedBy
+    osfType: string
+    required: true
+    immutable: true
+    validation:
+      format: uuid
+    label:
+      en: Published by
+      nl: Gepubliceerd door
+    persisted:
+      column: published_by
+      storageClass: core
+  - key: publishedAt
+    osfType: datetime
+    required: true
+    immutable: true
+    label:
+      en: Published at
+      nl: Gepubliceerd op
+    persisted:
+      column: published_at
+      storageClass: core
+operations:
+  list:
+    name: list Authorization profile
+    description: list a tenant-owned authorization profile.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: get Authorization profile
+    description: get a tenant-owned authorization profile.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic
+  web:
+    views:
+      assignmentVersions:
+        kind: collection
+        collectionLayout: tabs
+        itemView: assignmentDetail
+        tabLabel: versionNumber
+      assignmentDetail:
+        kind: record
+        layout:
+          preset: main-context
+          tabs:
+            - id: assignments
+              label:
+                en: Assignments
+                nl: Toekenningen
+              relationship: assignments
+      collection:
+        route: /authorization-profile-versions
+        title: *a1
+        columns:
+          - key: versionNumber
+            sortable: true
+          - key: publishedAt
+            sortable: true
+          - key: publishedBy
+        defaultSort:
+          key: versionNumber
+          direction: desc
+      record:
+        routes:
+          read: /authorization-profile-versions/:id
+        title: Version {{versionNumber}}
+        layout:
+          preset: main-context
+          context:
+            fields:
+              - versionNumber
+              - publishedAt
+            relationships:
+              - profile
+          tabs:
+            - id: version
+              label:
+                en: Version
+                nl: Versie
+              groups:
+                - title:
+                    en: Published version
+                    nl: Gepubliceerde versie
+                  fields:
+                    - profile
+                    - versionNumber
+                    - publishedAt
+                    - publishedBy
+            - id: assignments
+              label:
+                en: Assignments
+                nl: Toekenningen
+              relationship: assignments

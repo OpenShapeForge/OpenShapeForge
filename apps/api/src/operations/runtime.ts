@@ -1,4 +1,7 @@
+import { assertCurrentAccountAuthority } from "../accounts/account-current-authority.js";
 import { nativeCollectionOptionsHandler } from "./collection-options.js";
+import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
+import { resolveAuthorizationProfileAccess } from "../auth/authorization-profile-session.js";
 import { nativeApplicationSearchHandler } from "./application-search.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { withAuditContext } from "../platform/audit-context.js";
@@ -16,7 +19,7 @@ import {
 import { type ValidateFunction } from "ajv/dist/2020.js";
 import { GraphQLError } from "graphql";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { Transaction } from "kysely";
+import { sql, type Transaction } from "kysely";
 import rawCatalog from "../generated/operations/catalog.json" with { type: "json" };
 import { resolveSessionContext } from "../auth/identity.js";
 import { SessionAuthenticationUnavailableError } from "../auth/session-unavailable.js";
@@ -810,7 +813,8 @@ export function requireOperationAuthorization(
   if (operation.tenancy.mode === "required" && !session.tenantId) {
     throw new HttpError(401, "TENANT_REQUIRED", "Operation requires an authenticated tenant context.");
   }
-  if (!sessionOperationRolesAllow(operation.auth.roles, session.roles)) {
+  const profile = authorizationProfileDecision(session, operation.key, operation.target?.entityName);
+  if (profile === false || (profile !== true && !sessionOperationRolesAllow(operation.auth.roles, session.roles))) {
     throw new HttpError(403, "FORBIDDEN", "Session lacks a required operation role.");
   }
   if (!sessionOperationRoleGroupsAllow(operation.auth.roleGroups, session.roles)) {
@@ -930,6 +934,21 @@ async function assertCurrentRecordPermission(
 ): Promise<void> {
   const recordPermissions = operationRecordPermissions(operation);
   const recordActions = operationRecordActions(operation);
+  if (authorizationProfileDecision(context.session, operation.key, operation.target?.entityName) === true) {
+    if (operation.target?.scope === "record" && operation.target.inputField) {
+      const target = input[operation.target.inputField];
+      const table = targetTable(operation);
+      if (recordActions.length === 0) {
+        const { fetchGeneratedEntityRow } = await import("./entity/queries.js");
+        if (typeof target !== "string" || !await fetchGeneratedEntityRow(trx, context.session!, table, target, true)) {
+          throw operationFailure({ code: "FORBIDDEN", message: "The Operation is not permitted on this record." });
+        }
+      }
+    } else {
+      const result = await sql<{ allowed: boolean }>`select app.authorization_allows(${operation.target?.entityName}, '{}'::jsonb) as allowed`.execute(trx);
+      if (result.rows[0]?.allowed !== true) throw operationFailure({ code: "FORBIDDEN", message: "The Operation is not permitted." });
+    }
+  }
   if (recordPermissions.length === 0 && recordActions.length === 0) return;
   if (!operation.target || operation.target.scope !== "record" ||
     !operation.target.inputField || !context.session || !context.db) {
@@ -1082,6 +1101,10 @@ async function guardedCustomOperation(
   invokeHandler: (handlerInput: Record<string, unknown>) => Promise<ModuleOperationSuccessResult>,
 ): Promise<ModuleOperationSuccessResult> {
   const operation = bound.operation;
+  if(operation.auth.mode==='session' && operation.auth.roles?.includes('Organization.Security.Manage') && context.session?.issuer && context.session.tenantId && context.session.userId && context.platform && context.db) {
+    const principal=context.session as TrustedSessionContext & {tenantId:string;userId:string};
+    await withModuleOperationTransaction(context.platform,principal,trx=>assertCurrentAccountAuthority(context.db!,trx,principal,'Organization.Security.Manage'));
+  }
   const confirmation = operation.confirmation ?? { mode: "none" as const };
   if (confirmation.mode === "acknowledgement" && input.confirmed !== true) {
     throw operationFailure({
@@ -1094,8 +1117,10 @@ async function guardedCustomOperation(
   }
   const recordPermissions = operationRecordPermissions(operation);
   const recordActions = operationRecordActions(operation);
+  const profileGuard = authorizationProfileDecision(context.session, operation.key, operation.target?.entityName) === true;
   const forcesTransaction = operationIntent(operation) !== "invoke";
   const hasGuard = Boolean(
+    profileGuard ||
     bound.availability ||
     operation.concurrency ||
     confirmation.mode === "challenge" ||
@@ -1104,6 +1129,15 @@ async function guardedCustomOperation(
     forcesTransaction,
   );
   if (!hasGuard) return invokeHandler(customHandlerInput(operation, input));
+  if (profileGuard && operation.target?.scope === "collection") {
+    if (!context.platform || !context.session) throw operationFailure({ code: "FORBIDDEN", message: "A verified tenant session is required." });
+    return withModuleOperationTransaction(context.platform, context.session, async trx => {
+      const decision = await sql<{ allowed: boolean }>`select app.authorization_allows(${operation.target!.entityName}, '{}'::jsonb) as allowed`.execute(trx);
+      if (decision.rows[0]?.allowed !== true) throw operationFailure({ code: "FORBIDDEN", message: "The Operation is not permitted." });
+      return invokeHandler(customHandlerInput(operation, input));
+    });
+  }
+
   if (
     forcesTransaction &&
     operation.target?.scope === "collection" &&
@@ -1169,7 +1203,7 @@ async function guardedCustomOperation(
     : undefined;
   // Source-backed record Operations can have business availability without a
   // generated CRUD table. Only platform-owned record guards require one.
-  const table = recordPermissions.length > 0 || recordActions.length > 0 ||
+  const table = profileGuard || recordPermissions.length > 0 || recordActions.length > 0 ||
     expectedVersion || confirmation.mode === "challenge"
     ? targetTable(operation)
     : undefined;
@@ -1252,6 +1286,14 @@ async function guardedCustomOperation(
     context.platform,
     context.session,
     async (trx) => {
+      // Authorize the record inside the effect transaction, independently of get.
+      // Named-action reads retain their existing resolver and ACL admission.
+      if (profileGuard && recordActions.length === 0) {
+        const { fetchGeneratedEntityRow } = await import("./entity/queries.js");
+        if (!await fetchGeneratedEntityRow(trx, context.session!, table!, targetValue, true)) {
+          throw operationFailure({ code: "FORBIDDEN", message: "The Operation is not permitted on this record." });
+        }
+      }
       for (const permission of recordPermissions) {
         await assertRecordPermissionInTransaction(
           trx,
@@ -1445,6 +1487,7 @@ export async function invokeOperation(
   const input = asInput(inputValue);
   const ownedTarget = captureOwnedTarget(bound.operation, input);
   const run = async (activeContext: Parameters<ModuleOperationHandler>[1]) => {
+    if (activeContext.session) await resolveAuthorizationProfileAccess(activeContext.session, activeContext.db);
     requireOperationAuthorization(bound.operation, activeContext.session);
     assertGrantSubjectTarget(bound.operation, activeContext.session, input);
     // Host execution policies, on the declared effects of the Operation that

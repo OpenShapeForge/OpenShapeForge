@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { listInvitationRelations } from "./invitation-relations.js";
+import { registerAuthorizationProfileValidation } from "./security-profiles.js";
 import * as roles from "./roles.js";
 import * as custom from './custom-roles.js';
 import * as members from './members.js';
@@ -10,7 +11,7 @@ import * as organizationDirectory from "./organization-directory.js";
 import * as accountManagement from "./account-management.js";
 import { blockAccountAvailability, restoreAccountAvailability, roleAccountAvailability } from "./account-availability.js";
 import type {RuntimeModule} from '../modules/contract.js';
-const module: RuntimeModule = { name: "accounts", operationHandlers: {
+const module: RuntimeModule = { name: "accounts", init: async () => { registerAuthorizationProfileValidation(); }, operationHandlers: {
  listOrganizationAccounts:organizationDirectory.listOrganizationAccounts,getOrganizationAccount:organizationDirectory.getOrganizationAccount,
  blockOrganizationAccount:accountManagement.blockOrganizationAccount,restoreOrganizationAccount:accountManagement.restoreOrganizationAccount,
  assignOrganizationAccountRole:accountManagement.assignOrganizationAccountRole,revokeOrganizationAccountRole:accountManagement.revokeOrganizationAccountRole,

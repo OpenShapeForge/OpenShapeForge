@@ -1,3 +1,4 @@
+import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { operationErrorOf, operationFailure } from "@openshapeforge/operations";
 import type {
@@ -97,7 +98,7 @@ function requireCanonicalRoles(
   session: TrustedSessionContext,
 ): void {
   const heldRoles = new Set(session.roles);
-  if (!operation.authorization.roles.some((role) => heldRoles.has(role))) {
+  if (!(authorizationProfileDecision(session,operation.id,operation.entityName) ?? operation.authorization.roles.some((role) => heldRoles.has(role)))) {
     refusal("Not authorized to access this record.");
   }
 }

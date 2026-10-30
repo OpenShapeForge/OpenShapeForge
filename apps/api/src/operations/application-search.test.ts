@@ -10,14 +10,14 @@ test('only available sources are read, using canonical OR predicates and paginat
  const calls:any[]=[];
  const session={tenantId:'tenant',userId:'user'};
  const result=await nativeApplicationSearchHandler(operation as any)({query:'needle',locale:'nl',first:3},{session,platform:{operations:{
- list:async()=>[{id:'Example.list',input:{kind:'json-schema',schema:{properties:{filter:{},first:{}}}}},{id:'Example.get'}],
+ get:async(_session:any,id:string)=>[{id:'Example.list',input:{kind:'json-schema',schema:{properties:{filter:{},first:{}}}}},{id:'Example.get'}].find(d=>d.id===id),
  execute:async(s:any,request:any)=>{expect(s).toBe(session);calls.push(request);return {data:{items:[{id:'one',name:'Result'}],nextCursor:'next'}}}
  }}} as any);
  expect(calls).toHaveLength(1);expect(calls[0].input).toEqual({first:3,filter:{or:[{name:{contains:'needle'}},{description:{contains:'needle'}}]}});
  expect(('value' in result)?result.value:null).toMatchObject({groups:[{entity:'Example',items:[{id:'one',label:'Result'}],nextCursor:'next'}],incomplete:false});
 });
 test('empty input lists readable catalogue without reading records',async()=>{
- const result=await nativeApplicationSearchHandler(operation as any)({locale:'nl'},{session:{tenantId:'t'},platform:{operations:{list:async()=>[{id:'Example.list'}],execute:()=>{throw Error('Must not read')}}}} as any);
+ const result=await nativeApplicationSearchHandler(operation as any)({locale:'nl'},{session:{tenantId:'t'},platform:{operations:{get:async(_session:any,id:string)=>[{id:'Example.list'}].find(d=>d.id===id),execute:()=>{throw Error('Must not read')}}}} as any);
  expect(('value' in result)?result.value:null).toEqual({entities:[{entity:'Example',label:'Voorbeelden'}],groups:[],incomplete:false});
 });
 
@@ -31,7 +31,7 @@ const listed=(...ids:string[])=>ids.map(id=>id==='Example.list'?{id,input:{kind:
 test('a catalog-backed collection page is matched in either language and never read as a record',async()=>{
  const calls:any[]=[];
  const result=await nativeApplicationSearchHandler(withPage as any)({query:'ROLLEN',locale:'en'},{session:{tenantId:'t',userId:'u'},platform:{operations:{
-  list:async()=>listed('Example.list','Example.get','accounts.list-roles'),
+  get:async(_session:any,id:string)=>listed('Example.list','Example.get','accounts.list-roles').find(d=>d.id===id),
   execute:async(_session:any,request:any)=>{calls.push(request);return {data:{items:[]}}}
  }}} as any);
  // Labelled in the requested locale, matched on the authored Dutch title in
@@ -45,7 +45,7 @@ test('a catalog-backed collection page is matched in either language and never r
 
 test('a page whose list Operation this session cannot invoke is neither offered nor named',async()=>{
  const result=await nativeApplicationSearchHandler(withPage as any)({query:'rollen'},{session:{tenantId:'t',userId:'u'},platform:{operations:{
-  list:async()=>[],execute:()=>{throw Error('Must not read')}
+  get:async()=>undefined,execute:()=>{throw Error('Must not read')}
  }}} as any);
  expect(('value' in result)?result.value:null).toEqual({entities:[],groups:[],incomplete:false});
  // Not even the authored label of a page this session may not list.
@@ -54,7 +54,7 @@ test('a page whose list Operation this session cannot invoke is neither offered 
 
 test('a page is withheld without a verified tenant',async()=>{
  await expect(nativeApplicationSearchHandler(withPage as any)({query:'rollen'},{session:{userId:'u'},platform:{operations:{
-  list:async()=>{throw Error('Must not list')},execute:()=>{throw Error('Must not read')}
+  get:async()=>{throw Error('Must not discover')},execute:()=>{throw Error('Must not read')}
  }}} as any)).rejects.toMatchObject({operationError:{code:'UNAUTHENTICATED'}});
 });
 
@@ -63,8 +63,8 @@ test('the pages on offer come from the verified session, not from the input',asy
  const seen:any[]=[];
  const result=await nativeApplicationSearchHandler(withPage as any)(
   {query:'rollen',roles:['Organization.Access.Manage'],session:{tenantId:'other',roles:['Organization.Access.Manage']}} as any,
-  {session,platform:{operations:{list:async(given:any)=>{seen.push(given);return []},execute:()=>{throw Error('Must not read')}}}} as any);
- expect(seen).toHaveLength(1);
+  {session,platform:{operations:{get:async(given:any)=>{seen.push(given);return undefined},execute:()=>{throw Error('Must not read')}}}} as any);
+ expect(seen).toHaveLength(3);
  expect(seen[0]).toBe(session);
  expect(('value' in result)?result.value:null).toEqual({entities:[],groups:[],incomplete:false});
 });

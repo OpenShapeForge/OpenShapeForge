@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { authorizationProfilePredicate } from "../../auth/authorization-profile-sql.js";
+import { auditContext, runWithAuditContext } from "../../platform/audit-context.js";
+import { authorizationListFields } from "../../auth/authorization-profile-decision.js";
+import { resolveAuthorizationProfileAccess, bindAuthorizationProfileRules, type AuthorizationProfileRules } from "../../auth/authorization-profile-session.js";
+import { withAuditContext } from "../../platform/audit-context.js";
 import { structuredFilter } from "../../platform/structured-filter.js";
 import { filterLeaves } from "./filter-groups.js";
 import { sql, type RawBuilder } from "kysely";
@@ -125,6 +130,7 @@ function buildFilterConditions(
   session: DbSessionInput,
   filter?: Record<string, unknown> | null,
   fixedWhere: Array<{ column: string; value: unknown }> = [],
+  rules?: AuthorizationProfileRules,
 ) {
   filterLeaves(filter);
   const fields = fieldColumnMap(table);
@@ -155,7 +161,7 @@ function buildFilterConditions(
 
     if (key === "and" || key === "or") {
       conditions.push(sql`(${sql.join((value as Record<string, unknown>[]).map(child =>
-        buildFilterConditions(table, session, child)), key === "and" ? sql` and ` : sql` or `)})`);
+        buildFilterConditions(table, session, child, [], rules)), key === "and" ? sql` and ` : sql` or `)})`);
       continue;
     }
     const relationship = table.source?.graphql?.relationships?.find((candidate) => candidate.name === key);
@@ -178,7 +184,7 @@ function buildFilterConditions(
       // value of its last write.
       assertBoundFieldQueryAllowed(related, { filter: any as Record<string, unknown> }, true);
       const relatedFields = fieldColumnMap(related);
-      const relatedConditions = [];
+      const relatedConditions = [authorizationProfilePredicate(rules?.states[`${related.source?.authoringEntityName}.list`],rules?.actor ?? {},"related")];
       for (const [relatedKey, relatedValue] of Object.entries(any as Record<string, unknown>)) {
         const column = relatedFields.get(relatedKey);
         const eq = relatedValue && typeof relatedValue === "object" && !Array.isArray(relatedValue)
@@ -305,6 +311,7 @@ async function listGeneratedEntityRowsForTable(
 ): Promise<GeneratedEntityConnection> {
   // This helper intentionally bypasses entity-role checks for trusted runtime
   // projections, but it must not bypass the value-oracle boundary.
+  assertClassifiedQueryAllowed(table, session, input);
   assertElicitedQueryAllowed(table, input);
   // Nor the one boundary a bound value has: its column may be stale.
   assertBoundFieldQueryAllowed(table, input);
@@ -313,11 +320,23 @@ async function listGeneratedEntityRowsForTable(
   const fixedWhere = [...tenantFixedWhere(table, session), ...(input.fixedWhere ?? [])];
   // A subtype sees its own rows only, whatever the caller's filter says; the
   // discriminator may be hidden, so it is never an ordinary filter column.
-  const ordinaryWhere = sql`(${buildFilterConditions(table, session, input.filter, fixedWhere)})${subtypeScopeWhere(table, "row_source")}`;
-  const where = relationScope ? sql`(${ordinaryWhere}) and (${relationScope.where})` : ordinaryWhere;
+  const audit=auditContext();
+  const readOperations=[...new Set(filterLeaves(input.filter).flatMap(leaf=>Object.keys(leaf)).flatMap(key=>{
+    const edge=table.source?.graphql?.relationships?.find(edge=>edge.name===key);
+    const related=edge?getGeneratedCrudTables().find(candidate=>candidate.source?.graphql?.typeName===edge.target):undefined;
+    return related?.source?.authoringEntityName?[`${related.source.authoringEntityName}.list`]:[];
+  }))];
+  const read = () => withDbSession(db, session, async (trx, resolvedSession) => {
+    // Use the same current transaction policy for query admission and output.
+    const config = (await sql<{rules:AuthorizationProfileRules}>`select nullif(current_setting('app.authorization_rules',true),'')::jsonb as rules`.execute(trx)).rows[0]?.rules;
+    bindAuthorizationProfileRules(session, config);
+    assertClassifiedQueryAllowed(table, session, input);
+  const ordinaryWhere = sql`(${buildFilterConditions(table, session, input.filter, fixedWhere, config)})${subtypeScopeWhere(table, "row_source")}`;
+  const scopedWhere = relationScope ? sql`(${ordinaryWhere}) and (${relationScope.where})` : ordinaryWhere;
+  const profileWhere=authorizationProfilePredicate(config?.states[auditContext()?.operationId ?? ""],config?.actor ?? {},"row_source");
+  const where=sql`(${scopedWhere}) and (${profileWhere})`;
   const orderBy = relationScope?.orderBy ?? buildSortExpression(table, input.sort);
 
-  return withDbSession(db, session, async (trx, resolvedSession) => {
     const result = await sql<{ row: GeneratedEntityRow }>`
       select to_jsonb(row_source.*) as row
       from ${sql.id(table.schema, table.table)} as row_source
@@ -350,13 +369,16 @@ async function listGeneratedEntityRowsForTable(
       ? await resolveComputedEntityRows(trx, resolvedSession, table,
           await resolveBoundEntityRows(trx, resolvedSession, table, projectedRows))
       : projectedRows;
+    const listFields = projectOutput && auditContext()?.operationId === `${table.source?.authoringEntityName}.list` ? authorizationListFields(session, table.source?.authoringEntityName) : undefined;
+    const allowedColumns = listFields ? new Set([table.primaryKey!, ...table.columns.filter(column => listFields.includes(column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_, char: string) => char.toUpperCase()))).map(column => column.name)]) : undefined;
     return {
-      rows,
+      rows: allowedColumns ? rows.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => allowedColumns.has(key)))) : rows,
       totalCount,
       nextCursor:
         result.rows.length > limit ? encodeOffsetCursor(offset + limit) : null,
     };
   });
+  return audit && readOperations.length ? runWithAuditContext({...audit,readOperations},read) : read();
 }
 
 export function listGeneratedEntitiesForTable(
@@ -401,12 +423,13 @@ export async function listGeneratedEntities(
   session: DbSessionInput,
   input: ListPageInput & { table: string },
 ): Promise<GeneratedEntityConnection> {
+  await resolveAuthorizationProfileAccess(session, db);
   const table = readGeneratedCrudTable(input.table, "list", session);
   // Before any SQL runs: filtering or sorting by a column this session may not
   // read turns the result set (and totalCount) into an oracle for the value
   // redaction withholds.
   assertClassifiedQueryAllowed(table, session, input);
-  return listGeneratedEntitiesForTable(db, session, table, input);
+  return withAuditContext(`${table.source?.authoringEntityName}.list`, undefined, () => listGeneratedEntitiesForTable(db, session, table, input));
 }
 
 export async function getGeneratedEntity(
@@ -417,8 +440,9 @@ export async function getGeneratedEntity(
     id: string;
   },
 ): Promise<GeneratedEntityRow | null> {
+  await resolveAuthorizationProfileAccess(session, db);
   const table = readGeneratedCrudTable(input.table, "get", session);
-  const row = await fetchGeneratedEntityRow(db, session, table, input.id);
+  const row = await withAuditContext(`${table.source?.authoringEntityName}.get`, undefined, () => fetchGeneratedEntityRow(db, session, table, input.id));
   if (row === null) return null;
   const projected = projectGeneratedEntityRow(table, session, row);
   return withDbSession(db, session, async (trx, resolvedSession) => {

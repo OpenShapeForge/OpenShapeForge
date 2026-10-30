@@ -50,3 +50,4 @@ cookies.txt
 docs/entities.generated.md
 
 apps/api/src/generated/compiler/access-policy.json
+apps/api/src/generated/compiler/authorization-operations.json

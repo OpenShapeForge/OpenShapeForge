@@ -27,7 +27,7 @@ import {
 // Field-level redaction and the classified filter/sort guard are NOT applied
 // here: they live in the generated CRUD core, which every read below goes
 // through, so REST and future transports are covered by the same code (#164).
-import { assertOperationAllowed } from "./generated-authz.js";
+
 import type { GraphqlContext } from "./context.js";
 import { collectionMutationError } from "../operations/entity/collection-policy.js";
 import { projectGraphqlOperation } from "./operation-error.js";
@@ -866,7 +866,6 @@ const objectResolvers = Object.fromEntries(
         if (!targetTable || !relationshipReadEnabled(relationship, targetTable)) {
           return [];
         }
-        const targetAuthorization = targetTable.source?.authorization;
         return [
           [
             relationship.name,
@@ -878,7 +877,7 @@ const objectResolvers = Object.fromEntries(
               // Reading the related entity requires read authorization on the
               // TARGET entity (#94): a caller with no read grant on the target
               // cannot pull its rows through a relationship edge.
-              assertOperationAllowed(targetAuthorization, context.session, "read", relationship.target);
+
               const result = await listGeneratedEntityRelation(db, context.session, {
                 parent,
                 parentTable: table,
@@ -894,7 +893,7 @@ const objectResolvers = Object.fromEntries(
             `${relationship.name}Aggregate`,
             (parent: Record<string, unknown>, _args: unknown, context: GraphqlContext) => projectGraphqlOperation(async () => {
               const db = requireGeneratedDb(context);
-              assertOperationAllowed(targetAuthorization, context.session, "read", relationship.target);
+
               // The count IS this field, so it is always computed here.
               const result = await listGeneratedEntityRelation(db, context.session, {
                 parent,

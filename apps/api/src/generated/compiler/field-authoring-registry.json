@@ -7445,6 +7445,766 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "AuthorizationOperationPolicy": {
+      "kind": "entity",
+      "entity": "AuthorizationOperationPolicy",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Operation security settings",
+        "nl": "Operation security settings"
+      },
+      "pluralLabel": {
+        "en": "Operation security settings records",
+        "nl": "Operation security settings records"
+      },
+      "shape": [
+        {
+          "key": "operationId",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "operationId",
+            "nl": "operationId"
+          },
+          "persisted": {
+            "column": "operation_id",
+            "storageClass": "core"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuthorizationOperationPolicy",
+              "field": "operationId",
+              "catalog": "operations"
+            },
+            "bindings": {
+              "referenceEntity": "entityType"
+            }
+          },
+          "immutable": true
+        },
+        {
+          "key": "entityType",
+          "osfType": "entityTypeName",
+          "required": true,
+          "label": {
+            "en": "entityType",
+            "nl": "entityType"
+          },
+          "persisted": {
+            "column": "entity_type",
+            "storageClass": "core"
+          },
+          "immutable": true
+        },
+        {
+          "key": "managed",
+          "osfType": "boolean",
+          "required": true,
+          "label": {
+            "en": "managed",
+            "nl": "managed"
+          },
+          "persisted": {
+            "column": "managed",
+            "storageClass": "core"
+          },
+          "defaultValue": false
+        },
+        {
+          "key": "listFields",
+          "osfType": "string",
+          "required": false,
+          "label": {
+            "en": "listFields",
+            "nl": "listFields"
+          },
+          "persisted": {
+            "column": "list_fields",
+            "storageClass": "core"
+          },
+          "cardinality": "collection",
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuthorizationOperationPolicy",
+              "field": "listFields",
+              "catalog": "fields"
+            },
+            "bindings": {
+              "referenceEntity": "entityType"
+            }
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "authorizationOperationPolicyId": {
+      "kind": "entityId",
+      "entity": "AuthorizationOperationPolicy",
+      "baseType": "string",
+      "label": {
+        "en": "Operation security settings",
+        "nl": "Operation security settings"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "AuthorizationOperationPolicy",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{operationId}}",
+      "filterField": "operationId",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "AuthorizationProfile": {
+      "kind": "entity",
+      "entity": "AuthorizationProfile",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Authorization profile",
+        "nl": "Autorisatieprofiel"
+      },
+      "pluralLabel": {
+        "en": "Authorization profiles",
+        "nl": "Autorisatieprofielen"
+      },
+      "shape": [
+        {
+          "key": "name",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Name",
+            "nl": "Naam"
+          },
+          "persisted": {
+            "column": "name",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "key",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Code",
+            "nl": "Code"
+          },
+          "persisted": {
+            "column": "key",
+            "storageClass": "core"
+          },
+          "validation": {
+            "maxLength": 100,
+            "pattern": "^[a-z][a-z0-9.-]*$"
+          }
+        },
+        {
+          "key": "targetEntity",
+          "osfType": "entityTypeName",
+          "required": true,
+          "label": {
+            "en": "Entity",
+            "nl": "Entiteit"
+          },
+          "persisted": {
+            "column": "target_entity",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "description",
+          "osfType": "multilineText",
+          "required": false,
+          "label": {
+            "en": "Description",
+            "nl": "Omschrijving"
+          },
+          "persisted": {
+            "column": "description",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "active",
+          "osfType": "boolean",
+          "required": true,
+          "defaultValue": true,
+          "label": {
+            "en": "Active",
+            "nl": "Actief"
+          },
+          "persisted": {
+            "column": "active",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "policies",
+          "label": {
+            "en": "Operation policies",
+            "nl": "Operatieregels"
+          },
+          "osfType": "AuthorizationProfilePolicy",
+          "cardinality": "collection",
+          "relationship": {
+            "inverse": "profile",
+            "ownership": "owned"
+          }
+        },
+        {
+          "key": "versions",
+          "label": {
+            "en": "Versions",
+            "nl": "Versies"
+          },
+          "osfType": "AuthorizationProfileVersion",
+          "cardinality": "collection",
+          "relationship": {
+            "inverse": "profile",
+            "ownership": "owned"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      },
+      "versioned": true
+    },
+    "authorizationProfileId": {
+      "kind": "entityId",
+      "entity": "AuthorizationProfile",
+      "baseType": "string",
+      "label": {
+        "en": "Authorization profile",
+        "nl": "Autorisatieprofiel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "AuthorizationProfile",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "AuthorizationProfileAssignment": {
+      "kind": "entity",
+      "entity": "AuthorizationProfileAssignment",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Assignment",
+        "nl": "Toekenning"
+      },
+      "pluralLabel": {
+        "en": "Assignments",
+        "nl": "Toekenningen"
+      },
+      "shape": [
+        {
+          "key": "name",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Description",
+            "nl": "Omschrijving"
+          },
+          "persisted": {
+            "column": "name",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "profileVersion",
+          "osfType": "AuthorizationProfileVersion",
+          "required": false,
+          "label": {
+            "en": "Profile version",
+            "nl": "Profielversie"
+          },
+          "persisted": {
+            "column": "profile_version",
+            "storageClass": "core"
+          },
+          "relationship": {
+            "ownership": "reference",
+            "inverse": {
+              "key": "assignments",
+              "label": {
+                "en": "Assignments",
+                "nl": "Toekenningen"
+              },
+              "ownership": "reference"
+            }
+          }
+        },
+        {
+          "key": "operationId",
+          "osfType": "string",
+          "required": false,
+          "label": {
+            "en": "Operation scope",
+            "nl": "Operation-beperking"
+          },
+          "persisted": {
+            "column": "operation_id",
+            "storageClass": "core"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuthorizationProfileAssignment",
+              "field": "operationId",
+              "catalog": "operations"
+            }
+          },
+          "description": {
+            "en": "Required for a direct grant. With a profile version, limits the assignment to this Operation.",
+            "nl": "Verplicht voor een directe toekenning. Met een profielversie beperkt dit de toekenning tot deze Operation."
+          }
+        },
+        {
+          "key": "subjectKind",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Audience type",
+            "nl": "Type doelgroep"
+          },
+          "persisted": {
+            "column": "subject_kind",
+            "storageClass": "core"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "user",
+                "label": {
+                  "en": "User",
+                  "nl": "Gebruiker"
+                }
+              },
+              {
+                "value": "group",
+                "label": {
+                  "en": "Group",
+                  "nl": "Groep"
+                }
+              },
+              {
+                "value": "role",
+                "label": {
+                  "en": "Role",
+                  "nl": "Rol"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "subjectKey",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Audience",
+            "nl": "Doelgroep"
+          },
+          "persisted": {
+            "column": "subject_key",
+            "storageClass": "core"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuthorizationProfileAssignment",
+              "field": "subjectKey",
+              "catalog": "subjects"
+            },
+            "bindings": {
+              "referenceEntity": "subjectKind"
+            }
+          }
+        },
+        {
+          "key": "active",
+          "osfType": "boolean",
+          "required": true,
+          "label": {
+            "en": "Active",
+            "nl": "Actief"
+          },
+          "persisted": {
+            "column": "active",
+            "storageClass": "core"
+          },
+          "defaultValue": true
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "authorizationProfileAssignmentId": {
+      "kind": "entityId",
+      "entity": "AuthorizationProfileAssignment",
+      "baseType": "string",
+      "label": {
+        "en": "Assignment",
+        "nl": "Toekenning"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "AuthorizationProfileAssignment",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "AuthorizationProfilePolicy": {
+      "kind": "entity",
+      "entity": "AuthorizationProfilePolicy",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Operation policy",
+        "nl": "Operatieregel"
+      },
+      "pluralLabel": {
+        "en": "Operation policies",
+        "nl": "Operatieregels"
+      },
+      "shape": [
+        {
+          "key": "operationId",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Operation",
+            "nl": "Operation"
+          },
+          "persisted": {
+            "column": "operation_id",
+            "storageClass": "core"
+          },
+          "options": {
+            "type": "dynamic",
+            "source": "collection.options",
+            "parameters": {
+              "entity": "AuthorizationProfilePolicy",
+              "field": "operationId",
+              "catalog": "operations"
+            }
+          }
+        },
+        {
+          "key": "profile",
+          "osfType": "AuthorizationProfile",
+          "required": true,
+          "label": {
+            "en": "Profile",
+            "nl": "Profiel"
+          },
+          "persisted": {
+            "column": "profile",
+            "storageClass": "core"
+          },
+          "relationship": {
+            "inverse": {
+              "key": "policies",
+              "label": {
+                "en": "Operation policies",
+                "nl": "Operatieregels"
+              },
+              "ownership": "owned"
+            }
+          },
+          "immutable": true
+        },
+        {
+          "key": "condition",
+          "osfType": "condition",
+          "required": false,
+          "label": {
+            "en": "Condition",
+            "nl": "Voorwaarde"
+          },
+          "persisted": {
+            "column": "condition",
+            "storageClass": "core"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "authorizationProfilePolicyId": {
+      "kind": "entityId",
+      "entity": "AuthorizationProfilePolicy",
+      "baseType": "string",
+      "label": {
+        "en": "Operation policy",
+        "nl": "Operatieregel"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "AuthorizationProfilePolicy",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{operationId}}",
+      "filterField": "operationId",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "AuthorizationProfileVersion": {
+      "kind": "entity",
+      "entity": "AuthorizationProfileVersion",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Profile version",
+        "nl": "Profielversie"
+      },
+      "pluralLabel": {
+        "en": "Profile versions",
+        "nl": "Profielversies"
+      },
+      "shape": [
+        {
+          "key": "profile",
+          "osfType": "AuthorizationProfile",
+          "required": true,
+          "immutable": true,
+          "relationship": {
+            "inverse": {
+              "key": "versions",
+              "label": {
+                "en": "Versions",
+                "nl": "Versies"
+              },
+              "ownership": "owned"
+            }
+          },
+          "label": {
+            "en": "Profile",
+            "nl": "Profiel"
+          }
+        },
+        {
+          "key": "versionNumber",
+          "osfType": "integer",
+          "required": true,
+          "immutable": true,
+          "validation": {
+            "min": 1
+          },
+          "label": {
+            "en": "Version",
+            "nl": "Versie"
+          },
+          "persisted": {
+            "column": "version_number",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "status",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "defaultValue": "published",
+          "description": {
+            "en": "A profile version exists only as a published snapshot, so this is always published. The editable draft state lives on the profile itself.",
+            "nl": "Een profielversie bestaat alleen als gepubliceerde snapshot, dus dit is altijd gepubliceerd. De bewerkbare conceptstatus staat op het profiel zelf."
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "published",
+                "label": {
+                  "en": "Published",
+                  "nl": "Gepubliceerd"
+                }
+              }
+            ]
+          },
+          "persisted": {
+            "column": "status",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "snapshot",
+          "osfType": "object",
+          "required": true,
+          "immutable": true,
+          "label": {
+            "en": "Frozen content",
+            "nl": "Vastgelegde inhoud"
+          },
+          "description": {
+            "en": "The immutable profile and Operation policies captured at publication.",
+            "nl": "Het onveranderlijke profiel en de operatieregels zoals vastgelegd bij publicatie."
+          },
+          "persisted": {
+            "column": "snapshot",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "contentHash",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "validation": {
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "label": {
+            "en": "Content checksum",
+            "nl": "Inhoudschecksum"
+          },
+          "description": {
+            "en": "Checksum over the frozen content, so identical content stays recognisable across versions. It proves consistency, not approval or permission to deliver.",
+            "nl": "Controlesom over de vastgelegde inhoud, zodat identieke inhoud over versies herkenbaar blijft. Die bewijst consistentie, geen goedkeuring of toestemming voor verzending."
+          },
+          "persisted": {
+            "column": "content_hash",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "publishedBy",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "validation": {
+            "format": "uuid"
+          },
+          "label": {
+            "en": "Published by",
+            "nl": "Gepubliceerd door"
+          },
+          "persisted": {
+            "column": "published_by",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "publishedAt",
+          "osfType": "datetime",
+          "required": true,
+          "immutable": true,
+          "label": {
+            "en": "Published at",
+            "nl": "Gepubliceerd op"
+          },
+          "persisted": {
+            "column": "published_at",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "assignments",
+          "label": {
+            "en": "Assignments",
+            "nl": "Toekenningen"
+          },
+          "osfType": "AuthorizationProfileAssignment",
+          "cardinality": "collection",
+          "relationship": {
+            "inverse": "profileVersion",
+            "ownership": "reference"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      },
+      "versionEntityOf": "AuthorizationProfile"
+    },
+    "authorizationProfileVersionId": {
+      "kind": "entityId",
+      "entity": "AuthorizationProfileVersion",
+      "baseType": "string",
+      "label": {
+        "en": "Profile version",
+        "nl": "Profielversie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "AuthorizationProfileVersion",
+        "valueField": "id"
+      },
+      "displayTemplate": "Version {{versionNumber}}",
+      "filterField": "id",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "BankReconciliation": {
       "kind": "entity",
       "entity": "BankReconciliation",

@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Core-owned services made available to reviewed runtime modules. */
+import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
+import { inheritAuthorizationProfileAccess } from '../auth/authorization-profile-decision.js';
+import { resolveAuthorizationProfileAccess } from "../auth/authorization-profile-session.js";
 import { withRuntimeSpan } from "@openshapeforge/observability";
 import { isControlSession } from "../control/control-session.js";
 import { systemSessionForAdministrator } from "../control/platform-admin.js";
@@ -335,6 +338,7 @@ export function createModuleSessionCapability(
       return link ? deepFreezeClone(link) : link;
     },
   });
+  inheritAuthorizationProfileAccess(session,capability);
   return Object.freeze(capability) as unknown as TrustedSessionContext;
 }
 
@@ -812,9 +816,10 @@ export class ModulePlatformRuntime {
     // so only the static Operations — whose own authorization says whether a
     // control session may use them — are on offer.
     const controlSession = isControlRealmSession(session);
+    if (!controlSession) await resolveAuthorizationProfileAccess(session, this.#db);
     const heldRoles = new Set(session.roles);
     const entityOperations = controlSession ? [] : getEntityOperationContracts().filter((operation) =>
-      operation.authorization.roles.some((role) => heldRoles.has(role)) &&
+      (authorizationProfileDecision(session, operation.id, operation.entityName) ?? operation.authorization.roles.some((role) => heldRoles.has(role))) &&
       // The entity's principal-class policy, so an Operation this session
       // could not invoke is not listed as if it could. The derived
       // application search enumerates exactly this list before it reads
@@ -936,6 +941,7 @@ export class ModulePlatformRuntime {
       throw new Error("Module Operation lookup requires a live verified session.");
     }
     const controlSession = isControlRealmSession(session);
+    if (!controlSession) await resolveAuthorizationProfileAccess(session, this.#db);
     const entityContract = (id: string) => {
       const entityOperation = getEntityOperationContracts().find(
         (candidate) => candidate.id === id,
@@ -943,7 +949,7 @@ export class ModulePlatformRuntime {
       if (!entityOperation) return undefined;
       if (controlSession) return null;
       const heldRoles = new Set(session.roles);
-      return entityOperation.authorization.roles.some((role) => heldRoles.has(role))
+      return (authorizationProfileDecision(session, entityOperation.id, entityOperation.entityName) ?? entityOperation.authorization.roles.some((role) => heldRoles.has(role))) && entityOperationAdmitsPrincipal(entityOperation, session)
         ? entityOperation
         : null;
     };

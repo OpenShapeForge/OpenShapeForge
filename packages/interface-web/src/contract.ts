@@ -498,7 +498,14 @@ export type WebPage = {
   operations: string[];
 };
 
+/** Compiler-owned security metadata; the server independently enforces the ceiling. */
+export type WebAuthorizationOperation = {
+  id:string; entity:string; roles:readonly string[]; grantable:boolean;
+  fields:Readonly<Record<string,{type:string;display?:boolean}>>;
+};
+
 export type WebManifestV1 = {
+  authorizationOperations?: readonly WebAuthorizationOperation[];
   contract: "openshapeforge.web-manifest";
   version: 1;
   locale: "en" | "nl";
@@ -517,6 +524,7 @@ export type WebManifestV1 = {
 };
 
 export type WebManifestOptions = {
+  authorizationOperations?: readonly WebAuthorizationOperation[];
   /** Fail build when visible operation fields or choices lack bilingual UI copy. */
   requireTranslations?: boolean;
   locale?: "en" | "nl";

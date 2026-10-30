@@ -21,7 +21,8 @@ import {
   tenantRealmName,
 } from "./authoring/role-composites.js";
 import { buildRoleLabels, renderRoleLabels, ROLE_LABELS_PATH } from "./authoring/role-labels.js";
-import { buildAccessPolicy } from "./authoring/access-policy.js";
+import { buildAccessPolicy, buildAuthorizationOperationInventory } from "./authoring/access-policy.js";
+import { createHash } from "node:crypto";
 import {
   buildIdentityContract,
   IDENTITY_CONTRACT_PATH,
@@ -475,6 +476,8 @@ export async function collectAllArtifacts(
     return authored ? [{ plugin: plugin.name, contribution: authored }] : [];
   });
   const keycloakArtifacts = generateAuthoringKeycloakArtifacts(authoringDir);
+  const accessPolicy = buildAccessPolicy(loadAuthorizationConfigs(authoringDir), keycloakArtifacts);
+  const authorizationOperations = buildAuthorizationOperationInventory(operationCatalog, manifest, accessPolicy);
   const groups: ArtifactCollection["groups"] = {
     db: generateArtifacts(manifest, {
       databaseRoleNames,
@@ -587,8 +590,12 @@ export async function collectAllArtifacts(
           ],
     settings: [
       {
+        path: "apps/api/src/generated/compiler/authorization-operations.json",
+        contents: JSON.stringify({ checksum: createHash('sha256').update(JSON.stringify(authorizationOperations)).digest('hex'), rows: authorizationOperations }, null, 2) + "\n",
+      },
+      {
         path: "apps/api/src/generated/compiler/access-policy.json",
-        contents: JSON.stringify(buildAccessPolicy(loadAuthorizationConfigs(authoringDir), keycloakArtifacts), null, 2) + "\n",
+        contents: JSON.stringify(accessPolicy, null, 2) + "\n",
       },
       {
         path: SETTINGS_POLICY_PATH,
@@ -642,7 +649,7 @@ export async function collectAllArtifacts(
             path: "apps/product-web/src/generated/web-manifest.json",
             contents: renderWebManifest(buildWebManifest(
               entities,
-              { locale: "nl", routeLocale: "en" },
+              { locale: "nl", routeLocale: "en", authorizationOperations },
               standaloneWeb,
               referentiedata,
             )),

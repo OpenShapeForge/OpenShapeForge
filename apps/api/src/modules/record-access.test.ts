@@ -353,14 +353,33 @@ test("batch access enforces every record permission instead of substituting visi
   const oldPolicy = table.source!.authorization!.recordPermissions;
   operation.authorization.recordPermissions = ["view"];
   table.source!.authorization!.recordPermissions = {field:"authorization",column:"authorization",empty:"restricted",createRequires:["view"]};
-  let count = 0;
-  const state = harness(() => [{allowed: ++count === 1}]);state.live.add(session);
+  const state = harness(() => [{count: "1"}]);state.live.add(session);
   try {
     await expectFailure(state.services.assertAccessMany(session,{entityName:"Relation",ids:[recordId,"44444444-4444-4444-8444-444444444444"],intent:"get"}),"FORBIDDEN");
-    expect(count).toBe(2);expect(state.withSessionCalls()).toBe(1);
+    expect(state.queries).toHaveLength(1);expect(state.queries[0]!.sql).toContain("app.record_permission_allows");expect(state.withSessionCalls()).toBe(1);
   } finally {
     if(previous)operation.authorization.recordPermissions=previous;else delete operation.authorization.recordPermissions;
     if(oldPolicy)table.source!.authorization!.recordPermissions=oldPolicy;else delete table.source!.authorization!.recordPermissions;
+    await state.db.destroy();
+  }
+});
+
+test("a large permission batch uses bounded statements and requires every row", async () => {
+  const operation = getEntityOperationContracts().find(item => item.entityName === "Relation" && item.intent === "get")!;
+  const table = tableForEntityOperation({ id: operation.id, intent: operation.intent });
+  const previous = operation.authorization.recordPermissions, oldPolicy = table.source!.authorization!.recordPermissions;
+  operation.authorization.recordPermissions = ["view", "edit"];
+  table.source!.authorization!.recordPermissions = { field: "authorization", column: "authorization", empty: "restricted", createRequires: ["view"] };
+  const state = harness(query => [{ count: String(query.parameters.filter(value => typeof value === "string" && /^[a-f0-9-]{36}$/.test(value) && value !== tenantId).length) }]);
+  state.live.add(session);
+  const ids = Array.from({ length: 1001 }, (_, index) => `00000000-0000-4000-8000-${index.toString(16).padStart(12, "0")}`);
+  try {
+    await state.services.assertAccessMany(session, { entityName: "Relation", ids, intent: "get" });
+    expect(state.queries).toHaveLength(3);
+    for (const query of state.queries) expect(query.sql.match(/app\.record_permission_allows/g)).toHaveLength(2);
+  } finally {
+    if (previous) operation.authorization.recordPermissions = previous; else delete operation.authorization.recordPermissions;
+    if (oldPolicy) table.source!.authorization!.recordPermissions = oldPolicy; else delete table.source!.authorization!.recordPermissions;
     await state.db.destroy();
   }
 });

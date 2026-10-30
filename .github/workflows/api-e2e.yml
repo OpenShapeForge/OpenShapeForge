@@ -83,7 +83,10 @@ jobs:
       # keycloak/openshapeforge-control-realm.json, both gitignored. Without
       # this there are no realms to import.
       - name: Generate artifacts
-        run: bun run generate
+        run: |
+          cp test/fixtures/authoring/test-composition.yaml authoring.config.local.yaml
+          bun run generate
+          bun scripts/check-test-fixture-composition.ts test
 
       # Unlike web-e2e.yml this Keycloak needs the identity-configuration SPI:
       # the control-provisioning suite drives real tenant/organization

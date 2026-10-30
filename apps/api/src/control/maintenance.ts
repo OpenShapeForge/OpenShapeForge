@@ -22,6 +22,7 @@ import {
 } from "./organization-naming.js";
 import { provisionTenant } from "./provisioning.js";
 import { getTenant } from "./tenant-registry.js";
+import { normalizeKeycloakBase } from "./config.js";
 
 type Request = {
   action: "get" | "provision";
@@ -51,6 +52,15 @@ function origin(value: string): string {
     throw new ManagedMaintenanceError("MAINTENANCE_CONFIGURATION", "Managed maintenance requires HTTPS origins.");
   return url.origin;
 }
+/** A Keycloak base may include the deployment's reverse-proxy path prefix. */
+function keycloakBase(value: string): string {
+  const normalized = normalizeKeycloakBase(value);
+  if (!normalized?.startsWith("https://")) {
+    throw new ManagedMaintenanceError("MAINTENANCE_CONFIGURATION", "Managed maintenance requires an HTTPS Keycloak base URL.");
+  }
+  return normalized;
+}
+
 export function readManagedMaintenanceConfiguration(
   env: NodeJS.ProcessEnv,
 ): Configuration {
@@ -87,7 +97,7 @@ export function readManagedMaintenanceConfiguration(
     );
   return {
     keycloak: {
-      baseUrl: origin(required("OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL")),
+      baseUrl: keycloakBase(required("OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL")),
       ...(env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL
         ? {
             connectUrl: origin(env.OPENSHAPEFORGE_CONTROL_KEYCLOAK_CONNECT_URL),

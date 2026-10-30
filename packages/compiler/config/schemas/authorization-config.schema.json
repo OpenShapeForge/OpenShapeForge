@@ -404,6 +404,7 @@
         "properties": {
           "username": { "type": "string", "minLength": 1 },
           "email": { "type": "string" },
+          "emailVerified": { "type": "boolean", "description": "Set only when the operator has verified this user email." },
           "firstName": { "type": "string" },
           "lastName": { "type": "string" },
           "password": { "type": "string", "minLength": 1 },

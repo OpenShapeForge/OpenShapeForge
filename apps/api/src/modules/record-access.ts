@@ -18,6 +18,7 @@ import {
   RECORD_ACTION_NAME,
   assertRecordActionInTransaction,
   assertRecordPermissionInTransaction,
+  assertRecordPermissionsManyInTransaction,
   readRecordForActionInTransaction,
   recordActionDeclaration,
 } from "../operations/entity/record-permissions.js";
@@ -279,9 +280,7 @@ export class RecordAccessRuntime {
         const authorize = async (trx: Transaction<DB>) => {
           const permissions = session.credential === "grant" ? [] : (operation.authorization.recordPermissions ?? []);
           if (permissions.length) {
-            for (const id of ids) for (const permission of permissions) {
-              await assertRecordPermissionInTransaction(trx, session, table, id, permission);
-            }
+            await assertRecordPermissionsManyInTransaction(trx, session, table, ids, permissions);
             return;
           }
           // The same live RLS transaction and tenant/subtype fences as a single record.

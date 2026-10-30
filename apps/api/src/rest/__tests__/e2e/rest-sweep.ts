@@ -23,6 +23,7 @@ import {
   nextMarker,
   pluginCreateInput,
   contractSample,
+  recordPermissionsInput,
   tables,
   tablesByName,
 } from "../../../graphql/__tests__/e2e/entity-factory.js";
@@ -185,6 +186,11 @@ export async function buildColumnBody(
     if (!isMutableColumn(column)) continue;
     const field = fieldName(column);
     if (field in body) continue;
+    const samplePermissions = recordPermissionsInput(table, field);
+    if (samplePermissions) {
+      body[field] = samplePermissions;
+      continue;
+    }
     const fkTarget = fkTargets.get(column.name);
     if (fkTarget) {
       if (column.required) {

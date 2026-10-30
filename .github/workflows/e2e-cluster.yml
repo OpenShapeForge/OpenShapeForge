@@ -60,7 +60,9 @@ jobs:
 
       # The suite imports generated types and the entity manifest.
       - name: Generate artifacts
-        run: bun run generate
+        run: |
+          bun run generate
+          bun scripts/check-test-fixture-composition.ts production
 
       - name: Install Scaleway CLI
         run: |

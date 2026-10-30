@@ -30,12 +30,13 @@ export function assertHostRealm(config: ControlPlaneConfig): HostOperatorAuthori
   } catch {
     throw new ControlAuthorizationError("FORBIDDEN", "Host administration requires the host realm issuer.");
   }
-  if (base.pathname !== "/" || base.search || base.hash || issuer.origin !== base.origin ||
-      issuer.search || issuer.hash) {
+  if (!["http:", "https:"].includes(base.protocol) || base.username || base.password ||
+      base.search || base.hash || issuer.origin !== base.origin ||
+      issuer.username || issuer.password || issuer.search || issuer.hash) {
     throw new ControlAuthorizationError("FORBIDDEN", "Host administration requires the host realm issuer.");
   }
 
-  const prefix = "/realms/";
+  const prefix = `${base.pathname.replace(/\/+$/, "")}/realms/`;
   if (!issuer.pathname.startsWith(prefix) || issuer.pathname.slice(prefix.length).includes("/")) {
     throw new ControlAuthorizationError("FORBIDDEN", "Host administration requires the host realm issuer.");
   }

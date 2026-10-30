@@ -90,6 +90,7 @@ groups:
 users:
   - username: tenant-a-admin
     email: admin@tenant-a.example.test
+    emailVerified: true
     firstName: Alex
     lastName: Admin
     password: ${env:E2E_USER_PASSWORD_TENANT_A_ADMIN:-test}
@@ -100,6 +101,7 @@ users:
 
   - username: tenant-a-user
     email: user@tenant-a.example.test
+    emailVerified: true
     firstName: Taylor
     lastName: User
     password: ${env:E2E_USER_PASSWORD_TENANT_A_USER:-test}
@@ -108,6 +110,7 @@ users:
 
   - username: tenant-a-no-access
     email: no-access@tenant-a.example.test
+    emailVerified: true
     firstName: Noah
     lastName: Access
     password: ${env:E2E_USER_PASSWORD_TENANT_A_NO_ACCESS:-test}
@@ -116,6 +119,7 @@ users:
 
   - username: tenant-b-user
     email: user@tenant-b.example.test
+    emailVerified: true
     firstName: Bailey
     lastName: User
     password: ${env:E2E_USER_PASSWORD_TENANT_B_USER:-test}

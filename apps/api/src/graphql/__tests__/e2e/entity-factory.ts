@@ -428,6 +428,22 @@ export async function createRow(
   return id;
 }
 
+/** Give restricted fixture records the declared CRUD roles, without changing the
+ * seeded named-action axis or granting any role outside this entity's contract. */
+export function recordPermissionsInput(table: GeneratedTable, field: string): Record<string, unknown> | undefined {
+  const authorization = table.source?.authorization;
+  const config = authorization?.recordPermissions;
+  if (!config || config.field !== field || config.empty !== "restricted") return undefined;
+  const roles = authorization.roles;
+  const create = roles?.create ?? [];
+  return {
+    ...config.defaultValue,
+    view: { roles: [...new Set([...(roles?.read ?? []), ...create])] },
+    edit: { roles: [...new Set([...(roles?.update ?? []), ...create])] },
+    delete: { roles: [...new Set([...(roles?.delete ?? []), ...create])] },
+  };
+}
+
 /**
  * A complete create input for `table` built as `identity`: the column values
  * of an entity-backed create, or the plugin's authored input. Lets a test
@@ -466,6 +482,11 @@ export async function columnInput(
     const field = fieldName(column);
     if (field in overrides) {
       input[field] = overrides[field];
+      continue;
+    }
+    const samplePermissions = recordPermissionsInput(table, field);
+    if (samplePermissions) {
+      input[field] = samplePermissions;
       continue;
     }
     const fkTarget = fkTargets.get(column.name);

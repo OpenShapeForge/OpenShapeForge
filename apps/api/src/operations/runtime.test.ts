@@ -479,17 +479,19 @@ describe("canonical operation runtime", () => {
     expect(bound.has("control.list-tenants")).toBe(true);
     expect(bound.has("grants.revoke")).toBe(true);
     expect(bound.has("api-keys.list-integrations")).toBe(true);
+    expect(bound.has("entity.record-action.delegate")).toBe(true);
     expect(bound.has("AgreementMilestone.trigger")).toBe(true);
     expect(bound.has("BillingRun.execute")).toBe(true);
     expect(bound.has("source-sync.upsert")).toBe(true);
     expect(bound.has("entity.edit-lease.acquire")).toBe(true);
     expect(
-      [...bound.values()].every(({ operation }) =>
+      [...bound.entries()].filter(([, { operation }]) => !(
         operation.implementation?.type === "collection" ||
         operation.implementation?.type === "entity-type-list" ||
         operation.implementation?.type === "application-search" ||
         operation.implementation?.type === "collection-options" ||
         operation.implementation?.type === "constrained-reference-create" ||
+        operation.plugin === "accounts" ||
         operation.plugin === "osf-api-keys" ||
         operation.plugin === "osf-audit" ||
         operation.plugin === "osf-billing" ||
@@ -498,10 +500,11 @@ describe("canonical operation runtime", () => {
         operation.plugin === "osf-edit-leases" ||
         operation.plugin === "osf-grants" ||
         operation.plugin === "osf-jobs" ||
+        operation.plugin === "osf-record-actions" ||
         operation.plugin === "osf-source-sync" ||
         operation.plugin === "osf-transitions"
-      ),
-    ).toBe(true);
+      )).map(([id, { operation }]) => ({ id, plugin: operation.plugin })),
+    ).toEqual([]);
     // Once any operation module is present, every plugin operation must bind.
     const noOperationModule = { name: "no-operation-module" };
     expect(() => bindCanonicalOperationHandlers([noOperationModule])).not.toThrow();

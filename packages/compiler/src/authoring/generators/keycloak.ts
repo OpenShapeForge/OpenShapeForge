@@ -114,6 +114,7 @@ interface KeycloakUser {
   username: string;
   enabled: boolean;
   email?: string;
+  emailVerified?: boolean;
   firstName?: string;
   lastName?: string;
   credentials?: { type: "password"; value: string; temporary: false }[];
@@ -1458,6 +1459,7 @@ export function generateKeycloakRealmArtifacts(
     username: u.username,
     enabled: u.enabled ?? true,
     email: u.email,
+    emailVerified: u.emailVerified,
     firstName: u.firstName,
     lastName: u.lastName,
     credentials: [

@@ -1,5 +1,13 @@
 # Plugins
 
+In production, outbound HTTP calls require one initialized runtime module to
+provide the egress owner. Without one, the API emits startup warning
+`EGRESS_OWNER_REQUIRED` and refuses outbound calls with HTTP 503 of that code;
+connector invocations, OAuth exchanges and provider discovery cannot succeed.
+Deployments that intentionally make no outbound calls may run without an owner.
+Configure exactly one owner and its host allowlists before enabling outbound
+integrations. This requirement does not relax any TLS, DNS or host checks.
+
 Canonical read handlers can call `platform.readProgress?.report(session, {data, message})`
 to publish provisional evidence while the original request is still running.
 The ordinary final result remains mandatory and unchanged. Core accepts only

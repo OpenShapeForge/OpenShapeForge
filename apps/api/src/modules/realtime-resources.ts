@@ -17,14 +17,16 @@ export function moduleRealtimeResources(
   const resources = new Map<string, ModuleRealtimeResource>();
   for (const module of modules)
     for (const resource of module.realtimeResources ?? []) {
-      const labelFields = Object.values(resource.labelFields ?? {}).flat();
+      const labels = resource.labelFields;
+      const validLabels = labels === undefined || (labels !== null && typeof labels === "object" &&
+        Array.isArray(labels.en) && Array.isArray(labels.nl) &&
+        [...labels.en, ...labels.nl].every(field => typeof field === "string" &&
+          /^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)*$/.test(field)));
       if (
         !resource.entity ||
         !resource.readOperationId ||
         !/^[A-Za-z][A-Za-z0-9]*$/.test(resource.idInputField) ||
-        labelFields.some((field) =>
-          !/^[A-Za-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*)*$/.test(field)
-        ) ||
+        !validLabels ||
         resources.has(resource.entity) ||
         getGeneratedCrudTables().some(
           (table) => table.source?.authoringEntityName === resource.entity,

@@ -76,6 +76,7 @@ import {
   type ModuleRegistry,
 } from "../modules/registry.js";
 import type { ModuleRuntimeContext } from "../modules/contract.js";
+import { missingEgressOwnerDiagnostic } from "../modules/egress.js";
 import type { InitializedMaintenanceOwner } from "../modules/maintenance.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
 import { generatedRuntimeFieldSchemas } from "../modules/field-schemas.js";
@@ -451,6 +452,8 @@ export function createApiApp(options: {
       });
     }
     const egressOwner = assertSingleModuleEgressOwner(initialised.loaded);
+    const egressDiagnostic = missingEgressOwnerDiagnostic(process.env.NODE_ENV, egressOwner);
+    if (egressDiagnostic) app.log.warn({ code: egressDiagnostic.code }, egressDiagnostic.message);
     if (modulePlatform) {
       modulePlatform.registerDeclarativeServiceExecutor(
         createRuntimeDeclarativeServiceExecutor({

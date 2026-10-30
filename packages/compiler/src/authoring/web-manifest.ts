@@ -476,6 +476,30 @@ type ProjectableEntity = {
   collection: WebCollectionView;
 };
 
+/** Resolve canonical relationship steps once for every web presentation that uses a path. */
+function compileRelationshipPath(
+  entityName: string,
+  source: ProjectableEntity,
+  all: ReadonlyMap<string, ProjectableEntity>,
+  keys: readonly string[],
+): { path: Array<{ entityId: string; relationshipId: string }>; target: ProjectableEntity; many: boolean } {
+  if (!keys.length || keys.length > 4) throw new Error(`${entityName}: context record path requires one to four relationships.`);
+  let owner = source;
+  let many = false;
+  const path = keys.map(key => {
+    const relation = owner.contract.model.relationships.find(item => item.key === key);
+    const target = relation && all.get(relation.target);
+    if (!relation || !target || !target.operations[relation.kind === "hasMany" ? "list" : "get"]) {
+      throw new Error(`${entityName}: context record path ${key} requires a canonical readable relationship.`);
+    }
+    const step = { entityId: owner.contract.entity.name, relationshipId: `${owner.contract.entity.name}.${key}` };
+    many ||= relation.kind === "hasMany";
+    owner = target;
+    return step;
+  });
+  return { path, target: owner, many };
+}
+
 function projectableEntities(
   entities: readonly Pick<CompiledEntityInfo, "slug" | "contract">[],
   options: Required<WebManifestOptions>,
@@ -997,16 +1021,7 @@ function projectEntity(
   const contextRecords = authoredContext?.records?.map(definition => {
     if (contextRecordKeys.has(definition.key)) throw new Error(`${entityName}: duplicate context record ${definition.key}.`);
     contextRecordKeys.add(definition.key);
-    if (!definition.path.length || definition.path.length > 4) throw new Error(`${entityName}: context record path requires one to four relationships.`);
-    let owner = source;
-    const path = definition.path.map(key => {
-      const relation = owner.contract.model.relationships.find(item => item.key === key);
-      const target = relation && all.get(relation.target);
-      if (!relation || !target || !target.operations[relation.kind === "hasMany" ? "list" : "get"]) throw new Error(`${entityName}: context record path ${key} requires a canonical readable relationship.`);
-      const step = { entityId: owner.contract.entity.name, relationshipId: `${owner.contract.entity.name}.${key}` };
-      owner = target;
-      return step;
-    });
+    const { path, target: owner } = compileRelationshipPath(entityName, source, all, definition.path);
     const displayField = definition.displayField ?? owner.collection.displayField;
     const display = owner.contract.model.fields.find(field => field.key === displayField);
     if (!display || display.baseType !== "string" || display.cardinality === "collection") throw new Error(`${entityName}: context record display field ${displayField} must be a single string.`);

@@ -930,7 +930,7 @@ function projectEntity(
         } else {
           const field = owner.contract.model.fields.find(item => item.key === key);
           const providerField = owner.contract.model.relationships.some(item => item.provider && item.fieldKey === key);
-          if (!field || field.baseType === "object" || providerField || i !== parts.length - 1) throw new Error(`${entityName}: invalid board path ${expression}.`);
+          if (!field || field.baseType === "object" || field.relationship?.target || providerField || i !== parts.length - 1) throw new Error(`${entityName}: invalid board path ${expression}.`);
           return { path, targetEntityId: owner.contract.entity.name, field: key, osfType: field.osfType, cardinality: many || field.cardinality === "collection" ? "many" : "one" };
         }
       }

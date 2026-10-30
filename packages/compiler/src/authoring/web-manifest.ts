@@ -899,7 +899,7 @@ function projectEntity(
     }
     const valuePath = (expression: string): WebValuePath => {
       const parts = expression.split(".");
-      if (parts.some(part => !part)) throw new Error(`${entityName}: invalid board path ${expression}.`);
+      if (parts.length > 5 || parts.some(part => !part)) throw new Error(`${entityName}: invalid board path ${expression}.`);
       let owner = source;
       let many = false;
       const path: WebValuePath["path"] = [];

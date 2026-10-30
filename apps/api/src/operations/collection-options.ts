@@ -56,7 +56,8 @@ export function nativeCollectionOptionsHandler(operation:OperationContract,modul
     }
     const operations = securityInventory.rows.filter(operation => operation.grantable && (!input.referenceEntity || operation.entity===input.referenceEntity));
     const entries = input.catalog==='operations' ? operations.map(operation=>({value:operation.id,label:operation.id}))
-      : input.catalog==='fields' ? [...new Set(operations.flatMap(operation=>Object.keys(operation.fields)))].map(field=>({value:field,label:field})) : [];
+      : input.catalog==='fields' ? [...new Set(operations.flatMap(operation=>Object.keys(operation.fields)))].map(field=>({value:field,label:field}))
+      : input.catalog==='entities' ? [...new Set(operations.map(operation=>operation.entity))].map(value=>({value,label:sources.find(source=>source.entity===value)?.labels?.[input.locale==='nl'?'nl':'en']??value})) : [];
     const selected=entries.filter(entry=>`${entry.value} ${entry.label}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>a.value.localeCompare(b.value));
     const after=typeof input.after==='string'?selected.findIndex(entry=>entry.value===input.after)+1:0;
     const items=selected.slice(after,after+first);

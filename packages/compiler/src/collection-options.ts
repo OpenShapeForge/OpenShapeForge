@@ -6,12 +6,12 @@ export function collectionOptionSources(entities:Entities){return entities.flatM
  if(!list)return [];
  const allowed=c.source?.query?.filterFields;
  const get=c.entityOperations?.get?.id??c.pluginOperations?.find(op=>op.key==='get')?.id;
- return [{entity:c.entity.name,list,...(get?{get}:{}),...(c.entity.filterField?{labelField:c.entity.filterField}:{}),fields:Object.fromEntries(c.model.fields.filter(f=>f.baseType!=='object'&&(!allowed||allowed.includes(f.key))).map(f=>[f.key,{type:f.baseType,many:f.cardinality==='collection'}]))}];
+ return [{entity:c.entity.name,...(c.entity.labels?{labels:c.entity.labels}:{}),list,...(get?{get}:{}),...(c.entity.filterField?{labelField:c.entity.filterField}:{}),fields:Object.fromEntries(c.model.fields.filter(f=>f.baseType!=='object'&&(!allowed||allowed.includes(f.key))).map(f=>[f.key,{type:f.baseType,many:f.cardinality==='collection'}]))}];
 });}
 export function collectionOptionsDefinition(entities:Entities):PluginOperationContract{return {
  key:'collection.options',title:'List filter options',description:'Find authorized existing collection values and resolve reference choices without reconstructing missing historical labels.',handler:'listCollectionOptions',
  auth:{mode:'session',anyAuthenticatedSession:true},tenancy:{mode:'required'},idempotency:{mode:'none'},effects:{data:'read',external:'none'},
- inputSchema:{type:'object',additionalProperties:false,required:['entity','field'],properties:{entity:{type:'string'},field:{type:'string'},search:{type:'string',maxLength:200},locale:{type:'string',enum:['en','nl']},first:{type:'integer',minimum:1,maximum:100},after:{type:'string',maxLength:8192},referenceEntity:{type:'string'},catalog:{type:'string',enum:['operations','fields','subjects']},filter:{type:'object'}}},
+ inputSchema:{type:'object',additionalProperties:false,required:['entity','field'],properties:{entity:{type:'string'},field:{type:'string'},search:{type:'string',maxLength:200},locale:{type:'string',enum:['en','nl']},first:{type:'integer',minimum:1,maximum:100},after:{type:'string',maxLength:8192},referenceEntity:{type:'string'},catalog:{type:'string',enum:['operations','fields','subjects','entities']},filter:{type:'object'}}},
  outputSchema:{type:'object',required:['items','nextCursor'],properties:{
   items:{type:'array',items:{type:'object',required:['value','label'],properties:{value:{type:'string'},label:{type:'string'}}}},
   nextCursor:{type:['string','null']}

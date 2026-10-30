@@ -52,6 +52,13 @@ fields:
       pattern: ^[a-z][a-z0-9.-]*$
   - key: targetEntity
     osfType: entityTypeName
+    options:
+      type: dynamic
+      source: collection.options
+      parameters:
+        entity: AuthorizationProfile
+        field: targetEntity
+        catalog: entities
     required: true
     label:
       en: Entity

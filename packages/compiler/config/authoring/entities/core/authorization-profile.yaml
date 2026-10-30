@@ -189,9 +189,9 @@ interfaces:
         route: /authorization-profiles
         title: *a5
         columns:
-          - key: name
-            sortable: true
           - key: targetEntity
+            sortable: true
+          - key: name
             sortable: true
           - key: active
             sortable: true

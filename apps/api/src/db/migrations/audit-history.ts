@@ -274,7 +274,9 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
     const oldFields = new Set(Object.values(previous?.tracked ?? {}));
     const newFields = new Set(Object.values(config.tracked));
     const sourceColumn = (columns: Record<string, string> | undefined, field: string) => Object.entries(columns ?? {}).find(([, value]) => value === field)?.[0];
-    const resetFields = [...new Set([...oldFields, ...newFields])].filter(field => !existing.rows[0]?.enabled ||
+    // Renames conservatively invalidate coverage: a new identity must never
+    // inherit timestamps recorded for a different field or entity.
+    const resetFields = [...new Set([...oldFields, ...newFields])].filter(field => !existing.rows[0]?.enabled || previous?.entity !== config.entity ||
       sourceColumn(previous?.tracked, field) !== sourceColumn(config.tracked, field) ||
       previous?.trackingTargets?.[field] !== config.trackingTargets[field]);
     if (resetFields.length) {
@@ -285,6 +287,9 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
       await sql`select set_config('app.bypass_rls','true',true)`.execute(db);
       try {
         await sql`delete from platform.field_value_since where entity_type=${config.entity} and field_key in (${sql.join(resetFields.map(field => sql`${field}`))})`.execute(db);
+        if (previous?.entity && previous.entity !== config.entity) {
+          await sql`delete from platform.field_value_since where entity_type=${previous.entity} and field_key in (${sql.join(resetFields.map(field => sql`${field}`))})`.execute(db);
+        }
       } finally {
         await sql`select set_config('app.bypass_rls',${previousBypass},true)`.execute(db);
       }

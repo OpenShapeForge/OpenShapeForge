@@ -235,7 +235,10 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
     await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
     expect(await resumedSince()).toBeUndefined(); // the disabled interval has unknown coverage
     await withDbSession(runtime.db, session(tenant), tx => sql`update audit_probe.amounts set amount='130' where id=${resumedValue}::uuid`.execute(tx));
-    expect(await resumedSince()).toBeDefined();
+    const beforeReapply = await resumedSince();
+    expect(beforeReapply).toBeDefined();
+    await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
+    expect(await resumedSince()).toEqual(beforeReapply);
     tables[2]!.source!.graphql!.relationships!.find(item => item.name === "amount")!.target = "TrackedTargetV2";
     await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
     expect(await resumedSince()).toBeUndefined(); // a relationship to another entity is a new tracked meaning

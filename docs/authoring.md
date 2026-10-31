@@ -1250,6 +1250,8 @@ after the configured interval. It is evaluated on read and follows the source
 and target field and row permissions. Configuring the field activates
 transactional tracking on the next migration. Existing values remain unknown
 until they actually change; the migration does not invent their start time.
+Changing the tracked column, relationship target, or entity identity resets its
+previously tracked ages to unknown.
 
 In a board card, `indicator: waitingTooLong` selects this field. The indicator
 uses the field's label and appears when the returned status is `exceeded`.

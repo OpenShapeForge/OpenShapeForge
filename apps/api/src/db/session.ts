@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { withRuntimeSpan } from "@openshapeforge/observability";
+import { operationFailure } from "@openshapeforge/operations";
 import { auditContext, runWithAuditContext, type AuditContext } from "../platform/audit-context.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { inheritAuthorizationProfileAccess } from "../auth/authorization-profile-decision.js";
@@ -702,6 +703,7 @@ export async function withDbSession<TDatabase, TResult>(
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
   const result = await withRuntimeSpan("database.session", () => dbSessionHooks.run(hooks, () => withReadBarrierDatabase(db, session.tenantId, (database, barrier) => {
+    let transactionBudgetMs = barrier?.budgetMs;
     const runTransaction = (connection: Kysely<TDatabase>) => {
       const transaction = options.isolationLevel
         ? connection.transaction().setIsolationLevel(options.isolationLevel)
@@ -709,7 +711,7 @@ export async function withDbSession<TDatabase, TResult>(
       return transaction.execute(async (original) => {
         const execute = async (trx: Transaction<TDatabase>) => {
           const audit = await applyDbSession(trx, session, barrier ? {
-            statementTimeoutMs: Math.min(readStatementTimeoutMs() || barrier.budgetMs, barrier.budgetMs),
+            statementTimeoutMs: Math.min(readStatementTimeoutMs() || transactionBudgetMs!, transactionBudgetMs!),
             sharedReadBarrier: barrier.marker,
           } : {});
           return runWithAuditContext(audit, () => activeDbSession.run(
@@ -717,7 +719,7 @@ export async function withDbSession<TDatabase, TResult>(
             () => callback(trx, session),
           ));
         };
-        return barrier ? boundedReadTransaction(original, barrier.budgetMs, barrier.isActive, barrier.retain, execute) : execute(original);
+        return barrier ? boundedReadTransaction(original, transactionBudgetMs!, barrier.isActive, barrier.retain, execute) : execute(original);
       });
     };
     if (!options.isolationLevel) return runTransaction(database);
@@ -725,17 +727,30 @@ export async function withDbSession<TDatabase, TResult>(
     // The lock is held on the same backend before the transaction begins.
     const locked = async (connection: Kysely<TDatabase>) => {
       const timeoutMs = Math.min(readStatementTimeoutMs() || 30_000, barrier?.budgetMs ?? Number.MAX_SAFE_INTEGER);
-      const deadline = Date.now() + timeoutMs;
+      const startedAt = Date.now();
+      const deadline = startedAt + timeoutMs;
+      const discard = async (error: unknown) => {
+        barrier?.invalidate(error);
+        await sql`select pg_terminate_backend(pg_backend_pid())`.execute(connection).catch(() => {});
+      };
       for (;;) {
         if (barrier && !barrier.isActive()) throw new Error("Shared read metadata transaction has expired.");
-        const attempt = await sql<{ acquired: boolean }>`select pg_try_advisory_lock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0)) as acquired`.execute(connection);
+        let attempt;
+        try { attempt = await sql<{ acquired: boolean }>`select pg_try_advisory_lock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0)) as acquired`.execute(connection); }
+        catch (error) { await discard(error); throw error; }
         if (attempt.rows[0]?.acquired) break;
         const remaining = deadline - Date.now();
-        if (remaining <= 0) throw new Error("Authorization admission timed out.");
+        if (remaining <= 0) throw operationFailure({ code: "DATABASE_BUSY", message: "Authorization admission timed out.", retryable: true });
         await new Promise(resolve => setTimeout(resolve, Math.min(25, remaining)));
       }
       let failure: unknown;
-      try { return await runTransaction(connection); }
+      try {
+        if (barrier) {
+          transactionBudgetMs = barrier.budgetMs - (Date.now() - startedAt);
+          if (transactionBudgetMs <= 0) throw operationFailure({ code: "DATABASE_BUSY", message: "Authorization admission timed out.", retryable: true });
+        }
+        return await runTransaction(connection);
+      }
       catch (error) { failure = error; throw error; }
       finally {
         try {
@@ -743,7 +758,7 @@ export async function withDbSession<TDatabase, TResult>(
           if (!result.rows[0]?.unlocked) throw new Error("Authorization admission lock was lost.");
         } catch (error) {
           // A pooled backend with uncertain session-lock ownership is unsafe.
-          await sql`select pg_terminate_backend(pg_backend_pid())`.execute(connection).catch(() => {});
+          await discard(error);
           if (failure !== undefined) throw new AggregateError([failure, error], "Database work and authorization lock release both failed.");
           throw error;
         }

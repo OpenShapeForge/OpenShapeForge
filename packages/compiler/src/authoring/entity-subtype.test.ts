@@ -316,16 +316,20 @@ describe("composing a subtype over its base", () => {
   test("prunes hidden title parts from inherited boards", () => {
     const docs = corpus();
     const collection = ((((docs.group!.interfaces as Doc).web as Doc).views as Doc).collection as Doc);
-    collection.board = { groupBy: "status", card: { title: ["secretNote", "name"] } };
+    collection.board = { groupBy: "status", card: { title: ["secretNote", "name"], subtitle: ["secretNote", "name"], timestamp: "secretNote", amount: { value: "secretNote", currency: "name" } }, aggregate: { sum: "secretNote", currency: "name" } };
     const compiled = compile(loadEntity(authoringDir(docs), "team"));
     expect(compiled.interfaces?.web?.collectionBoard?.card.title).toEqual(["name"]);
+    expect(compiled.interfaces?.web?.collectionBoard?.card.subtitle).toEqual(["name"]);
+    expect(compiled.interfaces?.web?.collectionBoard?.card.timestamp).toBeUndefined();
+    expect(compiled.interfaces?.web?.collectionBoard?.card.amount).toBeUndefined();
+    expect(compiled.interfaces?.web?.collectionBoard?.aggregate).toBeUndefined();
   });
 
   test("rejects an explicitly authored board title containing a hidden field", () => {
     const docs = corpus();
     const collection = ((((docs.team!.interfaces as Doc).web as Doc).views as Doc).collection as Doc);
     collection.board = { groupBy: "status", card: { title: ["name", "secretNote"] } };
-    expect(() => compile(loadEntity(authoringDir(docs), "team"))).toThrow(/secretNote/);
+    expect(() => compile(loadEntity(authoringDir(docs), "team"))).toThrow(/referenced by the subtype's own configuration at interfaces\.web\.views\.collection\.board \(secretNote\)/);
   });
 });
 

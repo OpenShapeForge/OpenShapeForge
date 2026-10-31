@@ -1298,8 +1298,10 @@ uses the normal typed field renderer, including its effective unit. A unit in
 presentation props overrides a field-authored unit; the web projection exposes
 the effective unit to compact renderers as well.
 `title` accepts one single-valued path or a nonempty list of single-valued paths,
-displayed together in order. `subtitle` is an optional list of typed paths displayed directly beneath the
-card title; `body` remains available for other card fields.
+displayed together in order, separated by ` - `. An unreadable part displays an
+unavailable message; an empty part is omitted. `subtitle` is an optional list
+of typed paths displayed directly beneath the card title; `body` remains
+available for other card fields.
 
 `amount` pairs a single numeric field with a currency string from the same
 record and relationship path. `timestamp` is a single datetime path. The
@@ -1322,4 +1324,4 @@ The runtime resolves relationship steps through authorized canonical list
 Operations in bounded batches. Paths needing provider or association-backed
 reads are reported unavailable by this initial implementation. If a field or
 related instance is not readable, the board does not substitute an identifier
-for its display value. The card title must be single-valued.
+for its display value. Each card title path must be single-valued.

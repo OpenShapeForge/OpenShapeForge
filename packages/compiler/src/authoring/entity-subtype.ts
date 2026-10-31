@@ -295,9 +295,11 @@ function pruneInheritedInterfaces(interfaces: Record<string, unknown>, hidden: R
         const board = collection.board;
         const card = isPlainObject(board.card) ? board.card : {};
         const hiddenPath = (value: unknown) => typeof value === "string" && hidden.has(value.split(".")[0]!);
-        if (hiddenPath(board.groupBy) || (Array.isArray(card.title) ? card.title.some(hiddenPath) : hiddenPath(card.title))) delete collection.board;
+        const visibleTitle = Array.isArray(card.title) ? card.title.filter(value => !hiddenPath(value)) : hiddenPath(card.title) ? [] : [card.title];
+        if (hiddenPath(board.groupBy) || !visibleTitle.length) delete collection.board;
         else {
           const nextCard: Record<string, unknown> = { ...card, ...(Array.isArray(card.body) ? { body: card.body.filter(path => !hiddenPath(path)) } : {}) };
+          nextCard.title = Array.isArray(card.title) ? visibleTitle : visibleTitle[0];
           if (hiddenPath(nextCard.indicator)) delete nextCard.indicator;
           collection.board = { ...board, card: nextCard };
         }

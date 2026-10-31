@@ -312,6 +312,21 @@ describe("composing a subtype over its base", () => {
     const compiled = compile(loadEntity(authoringDir(docs), "team"));
     expect(compiled.interfaces?.web?.collectionBoard).toBeUndefined();
   });
+
+  test("prunes hidden title parts from inherited boards", () => {
+    const docs = corpus();
+    const collection = ((((docs.group!.interfaces as Doc).web as Doc).views as Doc).collection as Doc);
+    collection.board = { groupBy: "status", card: { title: ["secretNote", "name"] } };
+    const compiled = compile(loadEntity(authoringDir(docs), "team"));
+    expect(compiled.interfaces?.web?.collectionBoard?.card.title).toEqual(["name"]);
+  });
+
+  test("rejects an explicitly authored board title containing a hidden field", () => {
+    const docs = corpus();
+    const collection = ((((docs.team!.interfaces as Doc).web as Doc).views as Doc).collection as Doc);
+    collection.board = { groupBy: "status", card: { title: ["name", "secretNote"] } };
+    expect(() => compile(loadEntity(authoringDir(docs), "team"))).toThrow(/secretNote/);
+  });
 });
 
 describe("the backend manifest and generated artifacts", () => {

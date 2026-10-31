@@ -961,7 +961,8 @@ function projectEntity(
       throw new Error(`${entityName}: invalid board path ${expression}.`);
     };
     const title = (Array.isArray(authoredBoard.card.title) ? authoredBoard.card.title : [authoredBoard.card.title]).map(valuePath);
-    if (!title.length || title.some(part => part.cardinality !== "one")) throw new Error(`${entityName}: board card title must be single-valued.`);
+    if (!title.length) throw new Error(`${entityName}: board card title requires at least one path.`);
+    if (title.some(part => part.cardinality !== "one")) throw new Error(`${entityName}: board card title must be single-valued.`);
     const timestamp = authoredBoard.card.timestamp && valuePath(authoredBoard.card.timestamp);
     if (timestamp && (!timestamp.field || timestamp.cardinality !== "one" || all.get(timestamp.targetEntityId)?.contract.model.fields.find(field => field.key === timestamp.field)?.baseType !== "datetime")) {
       throw new Error(`${entityName}: board card timestamp must be a single datetime field.`);

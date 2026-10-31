@@ -11,6 +11,7 @@ import type { RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 type Config = { entity: string; entityIds: string[]; aggregate: string; schema: string; table: string; pk: string;
   fields: Record<string, { name: string; hidden: boolean; exact: boolean }>; visibility: string[];
   tracked: Record<string, string>;
+  trackingTargets: Record<string, string>;
   parents: Array<{ column: string; entity: string }> };
 
 type Timelines = Readonly<Record<string, { include?: readonly string[]; parents?: readonly string[] }>>;
@@ -56,6 +57,12 @@ export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelin
         const column = table.columns.find(column => column.sourceField === field.trackedField);
         if (!column) throw new Error(`${table.name}: temporal tracked field has no stored column.`);
         return [[column.name, field.trackedField]];
+      })),
+      trackingTargets: Object.fromEntries((table.source?.computedFields ?? []).flatMap(field => {
+        if (field.resolver !== "temporalThreshold") return [];
+        const relationship = table.source?.graphql?.relationships?.find(item => item.name === field.trackedField && item.resolve === "belongsTo");
+        if (!relationship) throw new Error(`${table.name}: temporal tracked relationship is missing.`);
+        return [[field.trackedField, relationship.target]];
       })),
       fields: Object.fromEntries(table.columns.filter(column => column.sourceField).map(column => [column.name, {
         name: column.sourceField!, exact: ["numeric", "bigint"].includes(column.type), hidden: !!table.retention || !!column.classification || !!column.fieldPolicy || /password|secret|token|credential|private.?key|cipher|encrypted/i.test(column.name),
@@ -266,7 +273,10 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
     const previous = existing.rows[0]?.config ? JSON.parse(existing.rows[0].config) as Config : undefined;
     const oldFields = new Set(Object.values(previous?.tracked ?? {}));
     const newFields = new Set(Object.values(config.tracked));
-    const resetFields = [...new Set([...oldFields, ...newFields])].filter(field => !existing.rows[0]?.enabled || oldFields.has(field) !== newFields.has(field));
+    const sourceColumn = (columns: Record<string, string> | undefined, field: string) => Object.entries(columns ?? {}).find(([, value]) => value === field)?.[0];
+    const resetFields = [...new Set([...oldFields, ...newFields])].filter(field => !existing.rows[0]?.enabled ||
+      sourceColumn(previous?.tracked, field) !== sourceColumn(config.tracked, field) ||
+      previous?.trackingTargets?.[field] !== config.trackingTargets[field]);
     if (resetFields.length) {
       // The migrator is intentionally not a BYPASSRLS role. This transaction-
       // local maintenance context clears stale ages across tenants before a

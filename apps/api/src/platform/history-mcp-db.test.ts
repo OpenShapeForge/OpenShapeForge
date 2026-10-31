@@ -39,6 +39,7 @@ const tables = [table("ProbeBudget", "budgets", ["name"], [{ name: "lines", targ
 tables[3]!.retention = { clock: { column: "name" }, rules: [{ id: "probe", action: "delete", duration: { maximum: { days: 1 } } }] };
 tables[2]!.realtime = { readPredicate: "true", visibilityColumns: ["private_note"] };
 tables[2]!.source!.computedFields = [{ field: "age", resolver: "temporalThreshold", trackedField: "amount", thresholdDays: "amount.limit" }];
+tables[2]!.source!.graphql!.relationships!.push({ name: "amount", fieldKey: "amount", target: "TrackedTarget", type: "TrackedTarget", kind: "belongsTo", resolve: "belongsTo", foreignKey: "amount" });
 
 test("AuditEvent YAML reads: uniform transactional registration, structured filters, raw details, composed timelines and tenant isolation", async () => {
   const name = `history_test_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -232,6 +233,9 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
     expect(await resumedSince()).toBeUndefined(); // the disabled interval has unknown coverage
     await withDbSession(runtime.db, session(tenant), tx => sql`update audit_probe.amounts set amount='130' where id=${resumedValue}::uuid`.execute(tx));
     expect(await resumedSince()).toBeDefined();
+    tables[2]!.source!.graphql!.relationships!.find(item => item.name === "amount")!.target = "TrackedTargetV2";
+    await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
+    expect(await resumedSince()).toBeUndefined(); // a relationship to another entity is a new tracked meaning
     const stored = await sql<{ payload: unknown }>`select payload from platform.entity_events`.execute(privileged.db);
     expect(JSON.stringify(stored.rows)).not.toMatch(/classified-never-store|changed-never-store|must-not-store/);
     await expect(sql`delete from platform.entity_events`.execute(privileged.db)).rejects.toThrow();

@@ -213,9 +213,10 @@ describe("actor: relation stamps under a trusted-context session", () => {
     } finally {
       process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = ISSUER;
     }
-    // The signed context must reject malformed tenant identifiers before use.
+    // Session admission must reject malformed tenant identifiers before database use.
     const headers = new Headers();
-    expect(() => applyTrustedContextHeaders(headers, { tenantId: "tenant-a", userId: "dev", roles: ROLES }, { secret: SECRET })).toThrow("tenantId must be a UUID");
+    applyTrustedContextHeaders(headers, { tenantId: "tenant-a", userId: "dev", roles: ROLES }, { secret: SECRET });
+    await expect(resolveSessionContext(headers, { db: restricted.db })).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
   }, 60_000);
 
   test("a session with no link is refused with FORBIDDEN, and the record stays", async () => {

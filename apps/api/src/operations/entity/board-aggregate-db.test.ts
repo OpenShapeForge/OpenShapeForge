@@ -165,7 +165,10 @@ test("temporal result uses current target threshold and respects target row and 
     values = new Map((await read()).rows.map(row => [row.id, (row.stagnation as { status: string }).status]));
     expect(values.get(record)).toBe("unknown");
     generatedCrudTables.set(target.name, target);
-    await expect(withDbSession(restricted!.db, session, () => read())).rejects.toThrow("requires a repeatable read transaction");
+    const nested = await withDbSession(restricted!.db, session, () => read());
+    expect(nested.rows.find(row => row.id === record)?.stagnation).toEqual({ status: "unknown", since: null, thresholdDays: null });
+    const nestedStable = await withDbSession(restricted!.db, session, () => read(), { isolationLevel: "serializable" });
+    expect(nestedStable.rows.find(row => row.id === record)?.stagnation).toMatchObject({ status: "within" });
   } finally {
     generatedCrudTables.set(root.name, oldRoot); generatedCrudTables.set(target.name, oldTarget);
   }

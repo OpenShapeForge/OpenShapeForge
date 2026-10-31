@@ -30,6 +30,14 @@ export async function resolveTemporalThresholdRows(trx: Transaction<DB>, session
   const definitions = (table.source?.computedFields ?? []).filter(field => field.resolver === "temporalThreshold");
   if (!definitions.length || !rows.length) return rows;
   const result = rows.map(row => ({ ...row }));
+  // Nested reads inherit their owner's transaction. If it cannot provide a
+  // stable snapshot, never combine independently changing ages and thresholds.
+  // The owning operation remains usable and the derived value is unknown.
+  const isolation = (await sql<{ transaction_isolation: string }>`show transaction_isolation`.execute(trx)).rows[0]?.transaction_isolation;
+  if (!["repeatable read", "serializable"].includes(isolation ?? "")) {
+    for (const row of result) for (const definition of definitions) row[definition.field] = { status: "unknown", since: null, thresholdDays: null };
+    return result;
+  }
   const rules = (await sql<{ rules: AuthorizationProfileRules | null }>`select nullif(current_setting('app.authorization_rules',true),'')::jsonb as rules`.execute(trx)).rows[0]?.rules ?? undefined;
   const now = new Date((await sql<{ now: Date }>`select statement_timestamp() as now`.execute(trx)).rows[0]!.now);
   for (const definition of definitions) {

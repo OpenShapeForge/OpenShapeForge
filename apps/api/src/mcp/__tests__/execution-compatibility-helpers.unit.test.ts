@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { emptyCatalogDatabase } from "./empty-catalog-db.js";
+import { emptyCatalogDatabase } from "../../db/__tests__/empty-catalog-db.js";
 /**
  * The helpers of a derived tool a plugin registers through execution
  * compatibility (connect, dry run) are listed under their public names for

@@ -8,7 +8,7 @@
  * target-read gate resolves its profile against an empty test catalogue before
  * returning the canonical refusal; no external database is needed.
  */
-import { emptyCatalogDatabase } from "../../mcp/__tests__/empty-catalog-db.js";
+import { emptyCatalogDatabase } from "../../db/__tests__/empty-catalog-db.js";
 import { describe, expect, test } from "bun:test";
 import { GraphQLError } from "graphql";
 import type { GraphqlContext } from "../context.js";

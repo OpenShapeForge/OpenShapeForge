@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { emptyCatalogDatabase } from "./empty-catalog-db.js";
+import { emptyCatalogDatabase } from "../../db/__tests__/empty-catalog-db.js";
 import { expect, test } from "bun:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import documents from "@openshapeforge/documents/runtime";

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { emptyCatalogDatabase } from "./empty-catalog-db.js";
+import { emptyCatalogDatabase } from "../../db/__tests__/empty-catalog-db.js";
 /**
  * Listing, osf_describe and the call path share one availability rule
  * (crudToolAvailable). The case that told them apart: a delete of an owned
@@ -157,7 +157,7 @@ describe("one availability rule for listing, describe and call", () => {
         expect(ids).toContain(operationId("Address", "list"));
         const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: id, input: { id: "33333333-3333-4333-8333-333333333333" } } });
         expect(result.isError).toBe(true);
-        expect(result.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
+        expect(result.structuredContent).toMatchObject({ error: { code: "NOT_FOUND", message: "The requested Operation is not available." } });
       });
     }
   });
@@ -167,7 +167,7 @@ describe("one availability rule for listing, describe and call", () => {
       const ids = await operationIds(client);
       expect(ids).not.toContain(quote); expect(ids).toContain(line); expect(ids).toContain(operationId("Quote", "list"));
       const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: quote, input: { quoteNumber: "Q-1" } } });
-      expect(result.isError).toBe(true); expect(result.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
+      expect(result.isError).toBe(true); expect(result.structuredContent).toMatchObject({ error: { code: "NOT_FOUND", message: "The requested Operation is not available." } });
     });
     const emptyCreates = tablesWithRequiredOwnerKey();
     for (const [key, table] of emptyCreates) {
@@ -179,7 +179,7 @@ describe("one availability rule for listing, describe and call", () => {
       const ids = await operationIds(client);
       expect(ids).not.toContain(quote); expect(ids).not.toContain(line); expect(ids).toContain(operationId("QuoteLine", "list"));
       const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: line, input: { lineNumber: 1 } } });
-      expect(result.isError).toBe(true); expect(result.structuredContent).toMatchObject({ error: { code: "NOT_FOUND" } });
+      expect(result.isError).toBe(true); expect(result.structuredContent).toMatchObject({ error: { code: "NOT_FOUND", message: "The requested Operation is not available." } });
     });
     await withServer(FINANCE, new Map(getGeneratedCrudTables().map(table => [table.name, table])), async client => {
       expect(await operationIds(client)).toEqual(expect.arrayContaining([quote, line]));

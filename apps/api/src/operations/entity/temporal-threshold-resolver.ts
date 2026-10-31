@@ -76,7 +76,7 @@ export async function resolveTemporalThresholdRows(trx: Transaction<DB>, session
       ${target.tenantScoped ? sql`and ${sql.id("row_source", "tenant_id")}=${session.tenantId}::uuid` : sql``}
       ${subtypeScopeWhere(target, "row_source")} and (${authorizationProfilePredicate(rules?.states[targetOperation], rules?.actor ?? {}, "row_source")})`.execute(trx)).rows : [];
     const times = records.length ? (await sql<{ record_id: string; since_at: Date }>`select record_id,since_at from platform.field_value_since
-      where tenant_id=${session.tenantId}::uuid and entity_type=${table.source?.authoringEntityName} and field_key=${definition.trackedField}
+      where tenant_id=${session.tenantId}::uuid and entity_type=${table.subtype?.base.entityName ?? table.source?.authoringEntityName} and field_key=${definition.trackedField}
       and record_id in (${sql.join(records.map(id => sql`${id}`))})`.execute(trx)).rows : [];
     const targetMap = new Map(targetRows.map(row => [row.id, row.threshold]));
     const sinceMap = new Map(times.map(row => [row.record_id, new Date(row.since_at)]));

@@ -153,6 +153,12 @@ test("temporal result uses current target threshold and respects target row and 
     expect(values.get(record)).toBe("exceeded");
     expect(values.get(hiddenRecord)).toBe("unknown");
     expect(values.get(noHistory)).toBe("unknown");
+    // Inherited fields use the physical base entity's history key.
+    const subtype: GeneratedCrudTable = { ...temporalRoot,
+      subtype: { base: { entityName: root.source!.authoringEntityName!, entityId: "core.Relation", slug: "relation", table: root.name }, scope: [], hiddenColumns: [] },
+      source: { ...temporalRoot.source!, authoringEntityName: "DerivedRelation" } };
+    const inherited = await withAuditContext("DerivedRelation.list", undefined, () => listGeneratedEntitiesForTable(restricted!.db, session, subtype, { filter: { stage: { eq: "temporal" } } }));
+    expect(inherited.rows.find(row => row.id === record)?.stagnation).toMatchObject({ status: "exceeded" });
     const wire = await executeEntityOperation(restricted!.db, session, { operation: entityOperationRef(temporalRoot, "list"), input: { filter: { stage: { eq: "temporal" } } }, offerIntents: [] });
     expect(!("error" in wire) && wire.intent === "list" ? wire.data.items.find(entry => entry.data.id === record)?.data.stagnation : undefined).toMatchObject({ status: "exceeded" });
     await sql`update erp.contact_details set amount=4 where id=${item}::uuid`.execute(privileged!.db);
@@ -176,4 +182,30 @@ test("temporal result uses current target threshold and respects target row and 
   } finally {
     generatedCrudTables.set(root.name, oldRoot); generatedCrudTables.set(target.name, oldTarget);
   }
+});
+
+test('a stable read takes its snapshot after an in-flight policy change', async () => {
+  await sql`create table public.policy_snapshot_probe (value integer not null)`.execute(privileged!.db);
+  await sql`insert into public.policy_snapshot_probe values (1)`.execute(privileged!.db);
+  await sql`grant select on public.policy_snapshot_probe to openshapeforge_app`.execute(privileged!.db);
+  let writerLocked!: () => void, releaseWriter!: () => void;
+  const writerReady = new Promise<void>(resolve => { writerLocked = resolve; });
+  const release = new Promise<void>(resolve => { releaseWriter = resolve; });
+  const writer = privileged!.db.transaction().execute(async trx => {
+    await sql`select pg_advisory_xact_lock(hashtextextended('osf.authorization:' || ${tenant}::text, 0))`.execute(trx);
+    await sql`update public.policy_snapshot_probe set value = 2`.execute(trx);
+    writerLocked();
+    await release;
+  });
+  await writerReady;
+  let completed = false;
+  const reader = withDbSession(restricted!.db, session, async trx =>
+    (await sql<{value: number}>`select value from public.policy_snapshot_probe`.execute(trx)).rows[0]!.value,
+    { isolationLevel: 'repeatable read' }).then(value => { completed = true; return value; });
+  try {
+    await Bun.sleep(100);
+    expect(completed).toBe(false);
+  } finally { releaseWriter(); }
+  await writer;
+  expect(await reader).toBe(2);
 });

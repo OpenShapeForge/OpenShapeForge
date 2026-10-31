@@ -702,27 +702,33 @@ export async function withDbSession<TDatabase, TResult>(
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
   const result = await withRuntimeSpan("database.session", () => dbSessionHooks.run(hooks, () => withReadBarrierDatabase(db, session.tenantId, (database, barrier) => {
-    const transaction = options.isolationLevel
-      ? database.transaction().setIsolationLevel(options.isolationLevel)
-      : database.transaction();
-    return transaction.execute(async (original) => {
-      const execute = async (trx: Transaction<TDatabase>) => {
-      const audit = await applyDbSession(trx, session, barrier ? {
-        statementTimeoutMs: Math.min(readStatementTimeoutMs() || barrier.budgetMs, barrier.budgetMs),
-        sharedReadBarrier: barrier.marker,
-      } : {});
-      return runWithAuditContext(audit, () => activeDbSession.run(
-        {
-          db: db as Kysely<unknown>,
-          trx: trx as Transaction<unknown>,
-          session,
-          audit,
-        },
-        () => callback(trx, session),
-      ));
-      };
-      return barrier ? boundedReadTransaction(original, barrier.budgetMs, barrier.isActive, barrier.retain, execute) : execute(original);
-    });
+    const runTransaction = (connection: Kysely<TDatabase>) => {
+      const transaction = options.isolationLevel
+        ? connection.transaction().setIsolationLevel(options.isolationLevel)
+        : connection.transaction();
+      return transaction.execute(async (original) => {
+        const execute = async (trx: Transaction<TDatabase>) => {
+          const audit = await applyDbSession(trx, session, barrier ? {
+            statementTimeoutMs: Math.min(readStatementTimeoutMs() || barrier.budgetMs, barrier.budgetMs),
+            sharedReadBarrier: barrier.marker,
+          } : {});
+          return runWithAuditContext(audit, () => activeDbSession.run(
+            { db: db as Kysely<unknown>, trx: trx as Transaction<unknown>, session, audit },
+            () => callback(trx, session),
+          ));
+        };
+        return barrier ? boundedReadTransaction(original, barrier.budgetMs, barrier.isActive, barrier.retain, execute) : execute(original);
+      });
+    };
+    if (!options.isolationLevel) return runTransaction(database);
+    // Stable snapshots must start after any in-flight policy writer commits.
+    // The lock is held on the same backend before the transaction begins.
+    const locked = async (connection: Kysely<TDatabase>) => {
+      await sql`select pg_advisory_lock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::text, 0))`.execute(connection);
+      try { return await runTransaction(connection); }
+      finally { await sql`select pg_advisory_unlock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::text, 0))`.execute(connection); }
+    };
+    return barrier ? locked(database) : database.connection().execute(locked);
   })));
 
   for (const hook of hooks.afterCommit) {

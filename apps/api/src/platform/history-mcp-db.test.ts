@@ -226,7 +226,10 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
       await sql`insert into audit_probe.amounts values(${resumedValue}::uuid,${tenant}::uuid,${resumedLine}::uuid,'100',null,null)`.execute(tx);
     });
     const resumedSince = async () => (await sql`select since_at from platform.field_value_since where tenant_id=${tenant}::uuid and record_id=${resumedValue} and field_key='amount'`.execute(privileged.db)).rows[0];
-    expect(await resumedSince()).toBeDefined();
+    const firstResumedSince = await resumedSince();
+    expect(firstResumedSince).toBeDefined();
+    await withDbSession(runtime.db, session(tenant), tx => sql`update audit_probe.amounts set private_note='unrelated' where id=${resumedValue}::uuid`.execute(tx));
+    expect(await resumedSince()).toEqual(firstResumedSince);
     await sql.raw('alter table audit_probe.amounts disable trigger track_field_value_since').execute(privileged.db);
     expect(await auditHistoryReady(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } })).toBe(false);
     await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });

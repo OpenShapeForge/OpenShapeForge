@@ -724,9 +724,30 @@ export async function withDbSession<TDatabase, TResult>(
     // Stable snapshots must start after any in-flight policy writer commits.
     // The lock is held on the same backend before the transaction begins.
     const locked = async (connection: Kysely<TDatabase>) => {
-      await sql`select pg_advisory_lock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0))`.execute(connection);
+      const timeoutMs = Math.min(readStatementTimeoutMs() || 30_000, barrier?.budgetMs ?? Number.MAX_SAFE_INTEGER);
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        if (barrier && !barrier.isActive()) throw new Error("Shared read metadata transaction has expired.");
+        const attempt = await sql<{ acquired: boolean }>`select pg_try_advisory_lock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0)) as acquired`.execute(connection);
+        if (attempt.rows[0]?.acquired) break;
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw new Error("Authorization admission timed out.");
+        await new Promise(resolve => setTimeout(resolve, Math.min(25, remaining)));
+      }
+      let failure: unknown;
       try { return await runTransaction(connection); }
-      finally { await sql`select pg_advisory_unlock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0))`.execute(connection); }
+      catch (error) { failure = error; throw error; }
+      finally {
+        try {
+          const result = await sql<{ unlocked: boolean }>`select pg_advisory_unlock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0)) as unlocked`.execute(connection);
+          if (!result.rows[0]?.unlocked) throw new Error("Authorization admission lock was lost.");
+        } catch (error) {
+          // A pooled backend with uncertain session-lock ownership is unsafe.
+          await sql`select pg_terminate_backend(pg_backend_pid())`.execute(connection).catch(() => {});
+          if (failure !== undefined) throw new AggregateError([failure, error], "Database work and authorization lock release both failed.");
+          throw error;
+        }
+      }
     };
     return barrier ? locked(database) : database.connection().execute(locked);
   })));

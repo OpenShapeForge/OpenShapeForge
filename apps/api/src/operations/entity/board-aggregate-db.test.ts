@@ -209,3 +209,27 @@ test('a stable read takes its snapshot after an in-flight policy change', async 
   await writer;
   expect(await reader).toBe(2);
 });
+
+test('authorization admission waits only for the configured database budget', async () => {
+  let writerLocked!: () => void, releaseWriter!: () => void;
+  const writerReady = new Promise<void>(resolve => { writerLocked = resolve; });
+  const release = new Promise<void>(resolve => { releaseWriter = resolve; });
+  const writer = privileged!.db.transaction().execute(async trx => {
+    await sql`select pg_advisory_xact_lock(hashtextextended('osf.authorization:' || ${tenant}::text, 0))`.execute(trx);
+    writerLocked();
+    await release;
+  });
+  await writerReady;
+  const previous = process.env.DB_STATEMENT_TIMEOUT_MS;
+  process.env.DB_STATEMENT_TIMEOUT_MS = '100';
+  try {
+    await expect(withDbSession(restricted!.db, session, async () => true, { isolationLevel: 'repeatable read' }))
+      .rejects.toThrow('Authorization admission timed out.');
+  } finally {
+    if (previous === undefined) delete process.env.DB_STATEMENT_TIMEOUT_MS; else process.env.DB_STATEMENT_TIMEOUT_MS = previous;
+    releaseWriter();
+    await writer;
+  }
+  const available = await sql<{ acquired: boolean }>`select pg_try_advisory_xact_lock(hashtextextended('osf.authorization:' || ${tenant}::text, 0)) as acquired`.execute(privileged!.db);
+  expect(available.rows[0]?.acquired).toBe(true);
+});

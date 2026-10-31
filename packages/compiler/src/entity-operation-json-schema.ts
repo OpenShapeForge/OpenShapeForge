@@ -247,6 +247,18 @@ export function entityRecordOutputSchema(
       !column.nullable,
     );
   }
+  for (const field of contract.model.fields) {
+    if (field.computed && "kind" in field.computed && field.computed.kind === "temporalThreshold") {
+      add(field.key, {
+        type: "object", "x-osf-type": field.osfType,
+        properties: {
+          status: { type: "string", enum: ["within", "exceeded", "unknown", "notApplicable"] },
+          since: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
+          thresholdDays: { anyOf: [{ type: "number" }, { type: "null" }] },
+        }, required: ["status", "since", "thresholdDays"], additionalProperties: false,
+      }, false);
+    }
+  }
   for (const [key, schema] of [
     ["id", { type: "string", format: "uuid" }],
     ["tenantId", { type: "string", format: "uuid" }],

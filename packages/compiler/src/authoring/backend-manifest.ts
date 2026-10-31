@@ -1431,6 +1431,11 @@ export function compileAuthoringBackendManifest(
       if (!field.readOnly || field.baseType !== "object" || field.cardinality === "collection") {
         throw new Error(`${candidate.contract.entity.name}.${field.key}: temporal threshold must be a read-only single object.`);
       }
+      const children = field.children ?? [];
+      const expected = new Map([["status", "string"], ["since", "datetime"], ["thresholdDays", "number"]]);
+      if (children.length !== expected.size || new Set(children.map(child => child.key)).size !== expected.size || children.some(child => expected.get(child.key) !== child.osfType || child.cardinality === "collection") || !children.find(child => child.key === "status")?.required) {
+        throw new Error(`${candidate.contract.entity.name}.${field.key}: temporal threshold children must be status (required string), since (datetime), and thresholdDays (number).`);
+      }
       if (field.authorization || field.permissions || field.classification) {
         throw new Error(`${candidate.contract.entity.name}.${field.key}: temporal threshold cannot declare a separate field policy; access follows its dependencies.`);
       }

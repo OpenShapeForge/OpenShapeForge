@@ -451,7 +451,7 @@ export async function getGeneratedEntity(
       const projected = projectGeneratedEntityRow(table, resolvedSession, row);
       const bound = await resolveBoundEntityRows(trx, resolvedSession, table, [projected]);
       return (await resolveComputedEntityRows(trx, resolvedSession, table, bound))[0] ?? null;
-    }, { isolationLevel: "repeatable read" }));
+    }, temporalReadOperations(table).length ? { isolationLevel: "repeatable read" } : {}));
   });
 }
 

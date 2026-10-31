@@ -161,6 +161,9 @@ test("temporal result uses current target threshold and respects target row and 
     generatedCrudTables.set(target.name, { ...target, columns: target.columns.map(column => column.name === "amount" ? { ...column, fieldPolicy: { readRoles: ["not-granted"] } } : column) });
     values = new Map((await read()).rows.map(row => [row.id, (row.stagnation as { status: string }).status]));
     expect(values.get(record)).toBe("unknown");
+    generatedCrudTables.set(target.name, { ...target, generatedCrudEligible: false });
+    values = new Map((await read()).rows.map(row => [row.id, (row.stagnation as { status: string }).status]));
+    expect(values.get(record)).toBe("unknown");
   } finally {
     generatedCrudTables.set(root.name, oldRoot); generatedCrudTables.set(target.name, oldTarget);
   }

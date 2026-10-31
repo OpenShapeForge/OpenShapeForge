@@ -8,6 +8,7 @@ import { auditContext, runWithAuditContext, withAuditContext } from "../../platf
 import { assertBoundFieldQueryAllowed } from "./field-bindings.js";
 import { assertClassifiedQueryAllowed, assertElicitedQueryAllowed, generatedCrudError, getGeneratedCrudTables, readGeneratedCrudTable, requireEntityOperation } from "./catalog.js";
 import { fieldColumnMap, fieldNameForColumn } from "./columns.js";
+import { assertFieldReadable } from "./field-read-access.js";
 import { filterLeaves } from "./filter-groups.js";
 import { buildFilterConditions, tenantFixedWhere } from "./queries.js";
 import { subtypeScopeWhere } from "./subtype-scope.js";
@@ -47,19 +48,6 @@ export function boardAggregatePlan(root: GeneratedCrudTable, tables: readonly Ge
     throw generatedCrudError("Board aggregate requires exact numeric and currency columns.", "INTERNAL_SERVER_ERROR");
   }
   return { root, group, hops, amount, currency };
-}
-
-export function assertFieldReadable(table: GeneratedCrudTable, session: DbSessionInput, column: GeneratedCrudColumn) {
-  const key = fieldNameForColumn(column);
-  if (column.typedBy || table.source?.computedFields?.some(field => field.field === key)) {
-    throw generatedCrudError("Board aggregation requires stored, non-computed fields.", "FORBIDDEN");
-  }
-  const input = { filter: { [key]: { eq: null } } };
-  withAuditContext(`${table.source?.authoringEntityName}.list`, undefined, () => {
-    assertClassifiedQueryAllowed(table, session, input, true);
-    assertElicitedQueryAllowed(table, input, true);
-    assertBoundFieldQueryAllowed(table, input, true);
-  });
 }
 
 function assertPlanReadable(plan: Plan, session: DbSessionInput, input: Pick<ListPageInput, "filter">) {

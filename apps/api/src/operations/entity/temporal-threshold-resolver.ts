@@ -7,7 +7,7 @@ import { authorizationProfilePredicate } from "../../auth/authorization-profile-
 import type { AuthorizationProfileRules } from "../../auth/authorization-profile-session.js";
 import { auditContext } from "../../platform/audit-context.js";
 import { operationErrorOf } from "@openshapeforge/operations";
-import { assertFieldReadable } from "./board-aggregate.js";
+import { assertFieldReadable } from "./field-read-access.js";
 import { fieldColumnMap } from "./columns.js";
 import { getGeneratedCrudTables, requireEntityOperation } from "./catalog.js";
 import { subtypeScopeWhere } from "./subtype-scope.js";
@@ -52,7 +52,7 @@ export async function resolveTemporalThresholdRows(trx: Transaction<DB>, session
         assertFieldReadable(target!, session, threshold!);
       } catch (error) {
         const failure = operationErrorOf(error);
-        if (!failure || failure.code !== "FORBIDDEN") throw error;
+        if (!failure || !["FORBIDDEN", "GENERATED_CRUD_OPERATION_NOT_ENABLED"].includes(failure.code)) throw error;
         readable = false;
       }
     }

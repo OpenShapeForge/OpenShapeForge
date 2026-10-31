@@ -24,13 +24,13 @@ export function evaluateTemporalThreshold(input: {
     return { status: "unknown", since: null, thresholdDays: null };
   }
   if (!input.applicable || input.thresholdDays === null) {
-    return { status: "notApplicable", since: null, thresholdDays: input.thresholdDays };
+    return { status: "notApplicable", since: null, thresholdDays: Number.isFinite(input.thresholdDays) ? input.thresholdDays : null };
   }
   const timestamp = input.since?.getTime();
   const now = input.now.getTime();
   if (timestamp === undefined || !Number.isFinite(timestamp) || !Number.isFinite(now) ||
       !Number.isFinite(input.thresholdDays) || input.thresholdDays < 0 || timestamp > now) {
-    return { status: "unknown", since: null, thresholdDays: input.thresholdDays };
+    return { status: "unknown", since: null, thresholdDays: Number.isFinite(input.thresholdDays) ? input.thresholdDays : null };
   }
   return {
     status: now - timestamp > input.thresholdDays * 86_400_000 ? "exceeded" : "within",

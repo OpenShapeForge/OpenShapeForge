@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { generateArtifacts } from "../generate.js";
+import { entityRecordOutputSchema } from "../entity-operation-json-schema.js";
 import type { ColumnDefinition, PlatformSchemaManifest } from "../schema.js";
 import {
   compileAuthoringBackendManifest,
@@ -46,6 +47,13 @@ describe("rowAccess → rowScope translation (§B.3)", () => {
       addField(root, "  - key: stalled\n    osfType: object\n    readOnly: true\n    computed: { kind: temporalThreshold, field: ownerId, thresholdDays: ownerId.limitDays }\n    children:\n      - { key: status, osfType: string, required: true }\n      - { key: since, osfType: datetime }\n      - { key: thresholdDays, osfType: number }");
       const compile = () => compileAuthoringBackendManifest(dir, { mode: "promote", entityAllowlist: ["rowaccess-owner", "rowaccess-owner-target"], schemaByModule: { core: "erp" } });
       expect(tableByName(compile(), "row_access_owners")?.source?.computedFields).toContainEqual({ field: "stalled", resolver: "temporalThreshold", trackedField: "ownerId", thresholdDays: "ownerId.limitDays" });
+      let output: ReturnType<typeof entityRecordOutputSchema> | undefined;
+      compileAuthoringBackendManifest(dir, { mode: "promote", entityAllowlist: ["rowaccess-owner", "rowaccess-owner-target"], schemaByModule: { core: "erp" }, onCandidate: ({ contract }) => { if (contract.entity.name === "RowAccessOwner") output = entityRecordOutputSchema(contract); } });
+      expect((output?.properties as Record<string, any>).stalled).toMatchObject({ type: "object", required: ["status", "since", "thresholdDays"], properties: { status: { enum: ["within", "exceeded", "unknown", "notApplicable"] } } });
+      const validRoot = readFileSync(root, "utf8");
+      writeFileSync(root, validRoot.replace("key: status, osfType: string", "key: level, osfType: string"));
+      expect(compile).toThrow("temporal threshold children");
+      writeFileSync(root, validRoot);
       writeFileSync(root, readFileSync(root, "utf8").replace("ownerId.limitDays", "ownerId.name"));
       expect(compile).toThrow("persisted single-valued numeric field");
     } finally { rmSync(dir, { recursive: true, force: true }); }

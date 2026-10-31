@@ -46,9 +46,12 @@ test("platform audit is filtered, paginated, secret-free and records its own rea
       expect(event.rows[0]?.payload.audit).toMatchObject({ actorSubject: input.actorSubject, actorId: input.actorSubject });
     });
     const opaqueActor = randomUUID();
-    await withSystemSession(runtime.db, { ...input, databaseActorId: opaqueActor, tenantId, reason: "regression: opaque system actor" }, async (trx) => {
+    await withSystemSession(runtime.db, { ...input, databaseActorId: opaqueActor, tenantId, reason: "regression: opaque system actor" }, async (trx, audit) => {
       const event = await sql<{ payload: { audit: { actorSubject: string; actorId: string } } }>`insert into platform.entity_events(id, tenant_id, aggregate_type, aggregate_id, event_type, payload) values (${randomUUID()}::uuid, ${tenantId}::uuid, 'Example', 'record', 'changed', '{}'::jsonb) returning payload`.execute(trx);
       expect(event.rows[0]?.payload.audit).toMatchObject({ actorSubject: opaqueActor, actorId: opaqueActor });
+      expect(JSON.stringify(event.rows[0]?.payload)).not.toContain(input.actorSubject);
+      const recorded = await sql<{ actor_subject: string }>`select actor_subject from platform.system_bypass_audit where id = ${audit.auditId}`.execute(trx);
+      expect(recorded.rows[0]?.actor_subject).toBe(input.actorSubject);
     });
     await withSystemSession(runtime.db, { ...input, reason: "platform-mcp: publish_catalog_entry service/alpha" }, async () => undefined);
     await withSystemSession(runtime.db, { ...input, reason: "platform-mcp: publish_catalog_entry service/bravo" }, async () => undefined);

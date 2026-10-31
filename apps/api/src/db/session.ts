@@ -827,7 +827,7 @@ export type SystemSessionInput = {
    * Keycloak. Audit rows record this.
    */
   actorSubject: string;
-  /** Optional internal UUID actor for SQL policies; audit keeps actorSubject. */
+  /** Internal UUID used for SQL policies and tenant-visible audit; bypass audit retains actorSubject. */
   databaseActorId?: string;
   /**
    * Roles the actor presents. Must include SYSTEM_BYPASS_ROLE or
@@ -847,7 +847,7 @@ export type SystemSessionInput = {
   tenantId?: string | null;
 };
 
-/** SQL policies accept UUIDs only; audit retains the original subject independently. */
+/** SQL policies accept UUIDs only; bypass audit retains the original subject independently. */
 export function systemDatabaseActorId(input: Pick<SystemSessionInput, "actorSubject" | "databaseActorId">): string {
   if (input.databaseActorId !== undefined) {
     assertUuid(input.databaseActorId, "databaseActorId");

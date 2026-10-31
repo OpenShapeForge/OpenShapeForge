@@ -164,7 +164,8 @@ export function buildFieldSchemaGroups(
         nl: "Gebruik voor afgeleide waarden. Het veld wordt dan doorgaans read-only.",
         en: "Use for derived values. The field is then typically read-only.",
       },
-      fields: showFullContractControls ? ["schemaComputedExpression", "schemaComputedDependencies"] : [],
+      fields: showFullContractControls && !(field.computed && "kind" in field.computed)
+        ? ["schemaComputedExpression", "schemaComputedDependencies"] : [],
       section: {
         collapsible: true,
         optional: {
@@ -337,7 +338,7 @@ export function buildFieldSchemaGroups(
     {
       id: "field-advanced",
       title: { nl: "Geavanceerd", en: "Advanced" },
-      groups: filterEmptyGroups(advancedGroups.filter(group => !(group.id === "field-computed" && field.computed && "kind" in field.computed))),
+      groups: filterEmptyGroups(advancedGroups),
     },
   ]);
   return groups;

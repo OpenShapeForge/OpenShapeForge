@@ -219,25 +219,30 @@ interfaces:
               - active
             relationships:
               - profileVersion
-          groups: &a2
-            - title:
-                en: Assignment
-                nl: Toekenning
-              fields:
-                - name
-                - profileVersion
-                - active
-            - title:
-                en: Audience
-                nl: Doelgroep
-              fields:
-                - subjectKind
-                - subjectKey
-            - title:
-                en: Operation scope
-                nl: Operation-beperking
-              fields:
-                - operationId
+          tabs:
+            - id: details
+              label:
+                en: Details
+                nl: Details
+              groups: &a2
+                - title:
+                    en: Assignment
+                    nl: Toekenning
+                  fields:
+                    - name
+                    - profileVersion
+                    - active
+                - title:
+                    en: Audience
+                    nl: Doelgroep
+                  fields:
+                    - subjectKind
+                    - subjectKey
+                - title:
+                    en: Operation scope
+                    nl: Operation-beperking
+                  fields:
+                    - operationId
         modes:
           create:
             title:

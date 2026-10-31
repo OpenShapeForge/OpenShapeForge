@@ -154,18 +154,23 @@ interfaces:
         title: "{{operationId}}"
         layout:
           preset: main-context
-          groups: &a2
-            - title:
-                en: Operation
-                nl: Operation
-              fields:
-                - profile
-                - operationId
-            - title:
-                en: Access condition
-                nl: Toegangsvoorwaarde
-              fields:
-                - condition
+          tabs:
+            - id: details
+              label:
+                en: Details
+                nl: Details
+              groups: &a2
+                - title:
+                    en: Operation
+                    nl: Operation
+                  fields:
+                    - profile
+                    - operationId
+                - title:
+                    en: Access condition
+                    nl: Toegangsvoorwaarde
+                  fields:
+                    - condition
         modes:
           create:
             title:

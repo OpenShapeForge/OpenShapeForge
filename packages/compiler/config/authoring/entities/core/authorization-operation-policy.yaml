@@ -171,15 +171,20 @@ interfaces:
           create: /authorization-operation-policies/new
         title: "{{operationId}}"
         layout:
-          groups:
-            - title:
-                en: Operation security settings
-                nl: Operation security settings
-              fields: &a1
-                - operationId
-                - entityType
-                - managed
-                - listFields
+          tabs:
+            - id: details
+              label:
+                en: Details
+                nl: Details
+              groups:
+                - title:
+                    en: Operation security settings
+                    nl: Operation security settings
+                  fields: &a1
+                    - operationId
+                    - entityType
+                    - managed
+                    - listFields
         modes:
           create:
             title:

@@ -716,7 +716,11 @@ describe("worker-role RLS axis", () => {
             for (const row of untouched.rows) {
               expect(row.qual).not.toContain("current_worker_role");
               expect(row.roles).not.toContain(WORKER_ROLE);
-              if (row.roles.length === 1 && row.roles[0] === resolver) {
+              if (row.roles.length === 1 && row.roles[0] === databaseRole("identityResolver").name && row.policyname === "authorization_group_subject_lookup") {
+                expect(row.cmd).toBe("SELECT");
+                expect(row.qual).toMatch(/^\(tenant_id = app\.current_tenant\(\)\)$/);
+                expect(row.check_expr).toBeNull();
+              } else if (row.roles.length === 1 && row.roles[0] === resolver) {
                 expect(row.policyname).toMatch(/_record_action_(read|lock|fence|delete_fence)$/);
                 expect(row.qual).not.toContain("bypass_rls");
                 if (row.permissive === "PERMISSIVE") {

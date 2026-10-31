@@ -266,10 +266,9 @@ export interface VisibilityConfig {
   logic?: "and" | "or";
 }
 
-export interface ComputedField {
-  expression: string;
-  dependencies: string[];
-}
+export type ComputedField =
+  | { expression: string; dependencies: string[] }
+  | { kind: "temporalThreshold"; field: string; thresholdDays: string };
 
 export interface FieldOptionStatic {
   value: string;

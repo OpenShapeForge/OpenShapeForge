@@ -11,6 +11,8 @@
  */
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { generateArtifacts } from "../generate.js";
 import type { ColumnDefinition, PlatformSchemaManifest } from "../schema.js";
 import {
@@ -33,6 +35,21 @@ function tableByName(manifest: PlatformSchemaManifest, name: string) {
 }
 
 describe("rowAccess → rowScope translation (§B.3)", () => {
+  it("compiles a temporal field with its stored relationship and rejects invalid thresholds", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osf-temporal-authoring-"));
+    try {
+      cpSync(FIXTURE_DIR, dir, { recursive: true });
+      const root = join(dir, "entities", "rowaccess-owner.yaml");
+      const target = join(dir, "entities", "rowaccess-owner-target.yaml");
+      const addField = (path: string, field: string) => writeFileSync(path, readFileSync(path, "utf8").replace("\noperations:", `\n${field}\noperations:`));
+      addField(target, "  - { key: limitDays, osfType: integer, persisted: { column: limit_days, storageClass: core } }");
+      addField(root, "  - key: stalled\n    osfType: object\n    readOnly: true\n    computed: { kind: temporalThreshold, field: ownerId, thresholdDays: ownerId.limitDays }\n    children:\n      - { key: status, osfType: string, required: true }\n      - { key: since, osfType: datetime }\n      - { key: thresholdDays, osfType: number }");
+      const compile = () => compileAuthoringBackendManifest(dir, { mode: "promote", entityAllowlist: ["rowaccess-owner", "rowaccess-owner-target"], schemaByModule: { core: "erp" } });
+      expect(tableByName(compile(), "row_access_owners")?.source?.computedFields).toContainEqual({ field: "stalled", resolver: "temporalThreshold", trackedField: "ownerId", thresholdDays: "ownerId.limitDays" });
+      writeFileSync(root, readFileSync(root, "utf8").replace("ownerId.limitDays", "ownerId.name"));
+      expect(compile).toThrow("persisted single-valued numeric field");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
   it("emits the server-owned board aggregate only when configured", () => {
     const without = compileFixtures(["rowaccess-owner", "rowaccess-owner-target"]);
     expect(tableByName(without, "row_access_owners")?.source?.boardAggregate).toBeUndefined();

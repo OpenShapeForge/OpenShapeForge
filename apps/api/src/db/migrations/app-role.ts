@@ -309,6 +309,9 @@ export async function applyAppRoleGrants(db: OpenShapeForgeDatabase) {
           ${sql.lit(APP_ROLE)}
         );
       end if;
+      if to_regclass('platform.field_value_since') is not null then
+        execute format('revoke insert, update, delete on platform.field_value_since from %I', ${sql.lit(APP_ROLE)});
+      end if;
     end
     $$;
   `.execute(db);

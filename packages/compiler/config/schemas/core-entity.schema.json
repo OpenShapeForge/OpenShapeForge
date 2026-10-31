@@ -1290,6 +1290,7 @@
                 "card": { "type": "object", "additionalProperties": false, "required": ["title"], "x-osf-i18n": { "title": { "en": "Card", "nl": "Kaart" } }, "properties": {
                   "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title path", "nl": "Titelpad" } } },
                   "timestamp": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Timestamp path", "nl": "Tijdstippad" } } },
+                  "indicator": { "$ref": "#/$defs/fieldKey", "x-osf-i18n": { "title": { "en": "Indicator field", "nl": "Indicatorveld" } } },
                   "amount": { "type": "object", "additionalProperties": false, "required": ["value", "currency"], "properties": {
                     "value": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Amount field path", "nl": "Bedragveldpad" } } },
                     "currency": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Currency field path", "nl": "Valutaveldpad" } } }
@@ -2558,19 +2559,26 @@
           }
         },
         "computed": {
-          "type": "object",
-          "required": ["expression", "dependencies"],
-          "properties": {
-            "expression": {
-              "type": "string"
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["expression", "dependencies"],
+              "properties": {
+                "expression": { "type": "string" },
+                "dependencies": { "type": "array", "items": { "type": "string" } }
+              }
             },
-            "dependencies": {
-              "type": "array",
-              "items": {
-                "type": "string"
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "field", "thresholdDays"],
+              "properties": {
+                "kind": { "const": "temporalThreshold" },
+                "field": { "type": "string", "minLength": 1 },
+                "thresholdDays": { "type": "string", "minLength": 1 }
               }
             }
-          }
+          ]
         },
         "runtime": {
           "type": "object",

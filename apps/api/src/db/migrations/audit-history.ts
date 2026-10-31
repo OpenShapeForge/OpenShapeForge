@@ -10,6 +10,7 @@ import type { RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 
 type Config = { entity: string; entityIds: string[]; aggregate: string; schema: string; table: string; pk: string;
   fields: Record<string, { name: string; hidden: boolean; exact: boolean }>; visibility: string[];
+  tracked: Record<string, string>;
   parents: Array<{ column: string; entity: string }> };
 
 type Timelines = Readonly<Record<string, { include?: readonly string[]; parents?: readonly string[] }>>;
@@ -50,6 +51,12 @@ export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelin
         const column = table.columns.find(column => column.name === name);
         return column && !physicalColumns.has(name) && (!table.retention || name === "id" || name.endsWith("_id")) && !column.classification && !column.fieldPolicy && !/password|secret|token|credential|private.?key|cipher|encrypted/i.test(name);
       }),
+      tracked: Object.fromEntries((table.source?.computedFields ?? []).flatMap(field => {
+        if (field.resolver !== "temporalThreshold") return [];
+        const column = table.columns.find(column => column.sourceField === field.trackedField);
+        if (!column) throw new Error(`${table.name}: temporal tracked field has no stored column.`);
+        return [[column.name, field.trackedField]];
+      })),
       fields: Object.fromEntries(table.columns.filter(column => column.sourceField).map(column => [column.name, {
         name: column.sourceField!, exact: ["numeric", "bigint"].includes(column.type), hidden: !!table.retention || !!column.classification || !!column.fieldPolicy || /password|secret|token|credential|private.?key|cipher|encrypted/i.test(column.name),
       }])), parents: (parentEdges.get(table.name) ?? []).map(edge => ({ column: edge.column, entity: edge.parent.source!.authoringEntityName! })) };
@@ -65,9 +72,13 @@ export async function auditHistoryReady(db: OpenShapeForgeDatabase, tables: read
     join pg_proc p on p.oid=t.tgfoid join pg_namespace fn on fn.oid=p.pronamespace
     where not t.tgisinternal and t.tgenabled in ('O','A') and fn.nspname='platform'
       and (t.tgname='audit_business_row' and p.proname='audit_business_row'
+        or t.tgname='track_field_value_since' and p.proname='track_field_value_since'
         or t.tgname='audit_event_envelope' and p.proname='audit_event_envelope')`.execute(db);
   const active = new Map(result.rows.filter(row => row.handler === "audit_business_row").map(row => [row.name, row.config]));
-  return result.rows.some(row => row.name === "platform.entity_events" && row.handler === "audit_event_envelope" && row.identity) && expected.every(config => active.get(`${config.schema}.${config.table}`) === JSON.stringify(config));
+  const tracked = new Map(result.rows.filter(row => row.handler === "track_field_value_since").map(row => [row.name, row.config]));
+  return result.rows.some(row => row.name === "platform.entity_events" && row.handler === "audit_event_envelope" && row.identity) &&
+    expected.every(config => active.get(`${config.schema}.${config.table}`) === JSON.stringify(config) &&
+      (!Object.keys(config.tracked).length || tracked.get(`${config.schema}.${config.table}`) === JSON.stringify(config)));
 }
 
 export async function applyAuditHistory(db: OpenShapeForgeDatabase, tables: readonly GeneratedCrudTable[] = manifest.tables as unknown as GeneratedCrudTable[], timelines: Timelines = auditCatalog.timelines): Promise<void> {
@@ -180,6 +191,26 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
       return null;
     end $$;
 
+    create or replace function platform.track_field_value_since() returns trigger
+    language plpgsql security definer set search_path=pg_catalog as $$
+    declare cfg jsonb=TG_ARGV[0]::jsonb; prior jsonb; current_row jsonb; event_row jsonb; tracked_column text; tracked_field text;
+    begin
+      if TG_OP<>'INSERT' then prior=to_jsonb(OLD); end if;
+      if TG_OP<>'DELETE' then current_row=to_jsonb(NEW); end if;
+      event_row=coalesce(current_row,prior);
+      for tracked_column,tracked_field in select key,value from jsonb_each_text(cfg->'tracked') loop
+        if TG_OP='DELETE' then
+          delete from platform.field_value_since where tenant_id=(event_row->>'tenant_id')::uuid and entity_type=cfg->>'entity'
+            and record_id=event_row->>(cfg->>'pk') and field_key=tracked_field;
+        elsif TG_OP='INSERT' or (prior->tracked_column) is distinct from (current_row->tracked_column) then
+          insert into platform.field_value_since(tenant_id,entity_type,record_id,field_key,since_at)
+            values((event_row->>'tenant_id')::uuid,cfg->>'entity',event_row->>(cfg->>'pk'),tracked_field,clock_timestamp())
+            on conflict (tenant_id,entity_type,record_id,field_key) do update set since_at=excluded.since_at;
+        end if;
+      end loop;
+      return null;
+    end $$;
+
     create or replace function platform.audit_event_envelope() returns trigger
     language plpgsql set search_path=pg_catalog as $$
     declare envelope jsonb=coalesce(NEW.payload->'audit','{}'::jsonb); identity text; correlation text; changes jsonb;
@@ -227,8 +258,33 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
   `).execute(db);
   for (const config of configs) {
     const qualified = sql.id(config.schema, config.table);
+    // Lock the business table before inspecting or replacing its tracking
+    // trigger, so no writer can slip through while its configuration changes.
+    await sql`lock table ${qualified} in access exclusive mode`.execute(db);
+    const existing = await sql<{ config: string | null; enabled: boolean }>`select tgenabled in ('O','A') as enabled, case when tgnargs=1 then convert_from(substring(tgargs from 1 for octet_length(tgargs)-1),'UTF8') else null end as config
+      from pg_trigger where tgrelid=${`${config.schema}.${config.table}`}::regclass and tgname='track_field_value_since' and not tgisinternal`.execute(db);
+    const previous = existing.rows[0]?.config ? JSON.parse(existing.rows[0].config) as Config : undefined;
+    const oldFields = new Set(Object.values(previous?.tracked ?? {}));
+    const newFields = new Set(Object.values(config.tracked));
+    const resetFields = [...new Set([...oldFields, ...newFields])].filter(field => !existing.rows[0]?.enabled || oldFields.has(field) !== newFields.has(field));
+    if (resetFields.length) {
+      // The migrator is intentionally not a BYPASSRLS role. This transaction-
+      // local maintenance context clears stale ages across tenants before a
+      // tracker is enabled, and is restored before normal migration work.
+      const previousBypass = (await sql<{ value: string | null }>`select current_setting('app.bypass_rls', true) as value`.execute(db)).rows[0]?.value ?? "";
+      await sql`select set_config('app.bypass_rls','true',true)`.execute(db);
+      try {
+        await sql`delete from platform.field_value_since where entity_type=${config.entity} and field_key in (${sql.join(resetFields.map(field => sql`${field}`))})`.execute(db);
+      } finally {
+        await sql`select set_config('app.bypass_rls',${previousBypass},true)`.execute(db);
+      }
+    }
     await sql`drop trigger if exists audit_business_row on ${qualified}`.execute(db);
     const argument = literal(JSON.stringify(config));
     await sql`create trigger audit_business_row after insert or update or delete on ${qualified} for each row execute function platform.audit_business_row(${sql.raw(argument)})`.execute(db);
+    await sql`drop trigger if exists track_field_value_since on ${qualified}`.execute(db);
+    if (Object.keys(config.tracked).length) {
+      await sql`create trigger track_field_value_since after insert or update or delete on ${qualified} for each row execute function platform.track_field_value_since(${sql.raw(argument)})`.execute(db);
+    }
   }
 }

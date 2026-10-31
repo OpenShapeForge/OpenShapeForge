@@ -202,10 +202,10 @@ export type GeneratedCrudTable = {
       };
     };
     hardDelete?: { requireNeverPublished: true };
-    computedFields?: Array<{
-      field: string;
-      resolver: "labelRules";
-    }>;
+    computedFields?: Array<
+      | { field: string; resolver: "labelRules" }
+      | { field: string; resolver: "temporalThreshold"; trackedField: string; thresholdDays: string }
+    >;
     crud?: {
       operations: Record<GeneratedCrudExposureOperation, boolean>;
     };

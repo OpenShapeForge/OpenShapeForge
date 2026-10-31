@@ -966,6 +966,10 @@ function projectEntity(
     if (timestamp && (!timestamp.field || timestamp.cardinality !== "one" || all.get(timestamp.targetEntityId)?.contract.model.fields.find(field => field.key === timestamp.field)?.baseType !== "datetime")) {
       throw new Error(`${entityName}: board card timestamp must be a single datetime field.`);
     }
+    const indicator = authoredBoard.card.indicator ? contract.model.fields.find(field => field.key === authoredBoard.card.indicator) : undefined;
+    if (authoredBoard.card.indicator && (!indicator?.computed || !("kind" in indicator.computed) || indicator.computed.kind !== "temporalThreshold")) {
+      throw new Error(`${entityName}: board indicator must reference a temporal threshold field.`);
+    }
     const money = (amountExpression: string, currencyExpression: string, persisted: boolean) => {
       const amount = valuePath(amountExpression);
       const currency = valuePath(currencyExpression);
@@ -1000,7 +1004,7 @@ function projectEntity(
     };
     const cardAmount = authoredBoard.card.amount && money(authoredBoard.card.amount.value, authoredBoard.card.amount.currency, false);
     const aggregate = authoredBoard.aggregate && money(authoredBoard.aggregate.sum, authoredBoard.aggregate.currency, true);
-    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), ...(authoredBoard.groupSummary ? { groupSummary: authoredBoard.groupSummary } : {}), ...(aggregate ? { aggregate: { sum: aggregate.amount, currency: aggregate.currency } } : {}), card: { title, ...(timestamp ? { timestamp } : {}), ...(authoredBoard.card.subtitle ? { subtitle: authoredBoard.card.subtitle.map(valuePath) } : {}), ...(cardAmount ? { amount: { value: cardAmount.amount, currency: cardAmount.currency } } : {}), body: (authoredBoard.card.body ?? []).map(valuePath) } };
+    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), ...(authoredBoard.groupSummary ? { groupSummary: authoredBoard.groupSummary } : {}), ...(aggregate ? { aggregate: { sum: aggregate.amount, currency: aggregate.currency } } : {}), card: { title, ...(timestamp ? { timestamp } : {}), ...(indicator ? { indicator: indicator.key } : {}), ...(authoredBoard.card.subtitle ? { subtitle: authoredBoard.card.subtitle.map(valuePath) } : {}), ...(cardAmount ? { amount: { value: cardAmount.amount, currency: cardAmount.currency } } : {}), body: (authoredBoard.card.body ?? []).map(valuePath) } };
   }
   for (const groups of [authoredCreateGroups, updateGroups]) assertVisibilityFields(entityName, "form group", groups, fields);
 

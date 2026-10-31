@@ -185,6 +185,6 @@ export function describeField(
     const reference = `References the ${field.relationship.entity} entity`;
     parts.push(options.relationshipInstruction ? `${reference} — ${options.relationshipInstruction}` : `${reference}.`);
   }
-  if (field.computed?.expression) parts.push("Derived server-side; any supplied value is ignored.");
+  if (field.computed) parts.push("Derived server-side; any supplied value is ignored.");
   return parts.length > 0 ? parts.join(" ") : undefined;
 }

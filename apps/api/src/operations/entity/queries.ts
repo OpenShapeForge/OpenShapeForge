@@ -21,6 +21,7 @@ import {
 } from "./catalog.js";
 import { fieldColumnMap, tableColumnMap } from "./columns.js";
 import { resolveComputedEntityRows } from "./computed-fields.js";
+import { temporalReadOperations } from "./temporal-threshold-resolver.js";
 import { assertBoundFieldQueryAllowed, resolveBoundEntityRows } from "./field-bindings.js";
 import { subtypeScopeWhere } from "./subtype-scope.js";
 import type {
@@ -321,11 +322,11 @@ async function listGeneratedEntityRowsForTable(
   // A subtype sees its own rows only, whatever the caller's filter says; the
   // discriminator may be hidden, so it is never an ordinary filter column.
   const audit=auditContext();
-  const readOperations=[...new Set(filterLeaves(input.filter).flatMap(leaf=>Object.keys(leaf)).flatMap(key=>{
+  const readOperations=[...new Set([...temporalReadOperations(table), ...filterLeaves(input.filter).flatMap(leaf=>Object.keys(leaf)).flatMap(key=>{
     const edge=table.source?.graphql?.relationships?.find(edge=>edge.name===key);
     const related=edge?getGeneratedCrudTables().find(candidate=>candidate.source?.graphql?.typeName===edge.target):undefined;
     return related?.source?.authoringEntityName?[`${related.source.authoringEntityName}.list`]:[];
-  }))];
+  })])];
   const read = () => withDbSession(db, session, async (trx, resolvedSession) => {
     // Use the same current transaction policy for query admission and output.
     const config = (await sql<{rules:AuthorizationProfileRules}>`select nullif(current_setting('app.authorization_rules',true),'')::jsonb as rules`.execute(trx)).rows[0]?.rules;
@@ -370,14 +371,14 @@ async function listGeneratedEntityRowsForTable(
           await resolveBoundEntityRows(trx, resolvedSession, table, projectedRows))
       : projectedRows;
     const listFields = projectOutput && auditContext()?.operationId === `${table.source?.authoringEntityName}.list` ? authorizationListFields(session, table.source?.authoringEntityName) : undefined;
-    const allowedColumns = listFields ? new Set([table.primaryKey!, ...table.columns.filter(column => listFields.includes(column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_, char: string) => char.toUpperCase()))).map(column => column.name)]) : undefined;
+    const allowedColumns = listFields ? new Set([table.primaryKey!, ...table.columns.filter(column => listFields.includes(column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_, char: string) => char.toUpperCase()))).map(column => column.name), ...(table.source?.computedFields ?? []).filter(field => listFields.includes(field.field)).map(field => field.field)]) : undefined;
     return {
       rows: allowedColumns ? rows.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => allowedColumns.has(key)))) : rows,
       totalCount,
       nextCursor:
         result.rows.length > limit ? encodeOffsetCursor(offset + limit) : null,
     };
-  });
+  }, temporalReadOperations(table).length ? { isolationLevel: "repeatable read" } : {});
   return audit && readOperations.length ? runWithAuditContext({...audit,readOperations},read) : read();
 }
 
@@ -442,12 +443,15 @@ export async function getGeneratedEntity(
 ): Promise<GeneratedEntityRow | null> {
   await resolveAuthorizationProfileAccess(session, db);
   const table = readGeneratedCrudTable(input.table, "get", session);
-  const row = await withAuditContext(`${table.source?.authoringEntityName}.get`, undefined, () => fetchGeneratedEntityRow(db, session, table, input.id));
-  if (row === null) return null;
-  const projected = projectGeneratedEntityRow(table, session, row);
-  return withDbSession(db, session, async (trx, resolvedSession) => {
-    const bound = await resolveBoundEntityRows(trx, resolvedSession, table, [projected]);
-    return (await resolveComputedEntityRows(trx, resolvedSession, table, bound))[0] ?? null;
+  return withAuditContext(`${table.source?.authoringEntityName}.get`, undefined, () => {
+    const audit = auditContext()!;
+    return runWithAuditContext({ ...audit, readOperations: temporalReadOperations(table) }, () => withDbSession(db, session, async (trx, resolvedSession) => {
+      const row = await fetchGeneratedEntityRow(db, resolvedSession, table, input.id);
+      if (row === null) return null;
+      const projected = projectGeneratedEntityRow(table, resolvedSession, row);
+      const bound = await resolveBoundEntityRows(trx, resolvedSession, table, [projected]);
+      return (await resolveComputedEntityRows(trx, resolvedSession, table, bound))[0] ?? null;
+    }, { isolationLevel: "repeatable read" }));
   });
 }
 

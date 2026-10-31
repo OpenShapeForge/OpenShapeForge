@@ -31,7 +31,7 @@ const CONTRACT_DECLARATIONS: readonly ContractDeclaration[] = [
   { kind: "interface", name: "FieldAuthorizationConfig" },
   { kind: "interface", name: "VisibilityCondition" },
   { kind: "interface", name: "VisibilityConfig" },
-  { kind: "interface", name: "ComputedField" },
+  { kind: "type", name: "ComputedField" },
   { kind: "interface", name: "FieldOptionStatic" },
   { kind: "interface", name: "FieldOptions" },
   { kind: "interface", name: "OsfTypeLookupDefinition" },

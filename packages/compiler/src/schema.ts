@@ -426,10 +426,10 @@ export type TableSourceDefinition = {
    */
   displayTemplate?: string;
   /** Interface-neutral values computed by the operation runtime after reading a row. */
-  computedFields?: Array<{
-    field: string;
-    resolver: "labelRules";
-  }>;
+  computedFields?: Array<
+    | { field: string; resolver: "labelRules" }
+    | { field: string; resolver: "temporalThreshold"; trackedField: string; thresholdDays: string }
+  >;
   graphql?: {
     typeName: string;
     singleQueryName: string;

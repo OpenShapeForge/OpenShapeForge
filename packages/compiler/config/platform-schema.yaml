@@ -240,6 +240,25 @@ tables:
       - name: entity_events_tenant_aggregate_sequence_idx
         columns: [tenant_id, aggregate_type, aggregate_id, sequence]
 
+  # Current-value ages are independent of the retention of the audit journal.
+  # Rows are created only by the server's configured temporal-field tracker.
+  - schema: platform
+    name: field_value_since
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: entity_type, type: text, required: true }
+      - { name: record_id, type: text, required: true }
+      - { name: field_key, type: text, required: true }
+      - { name: since_at, type: timestamptz, required: true }
+    indexes:
+      - name: field_value_since_identity_idx
+        columns: [tenant_id, entity_type, record_id, field_key]
+        unique: true
+
   # Central, interface-neutral edit leases for long-running human write modes.
   # A lease is record-wide: one actor editing a Relation blocks every other
   # lease-requiring operation on that same Relation until release or expiry.

@@ -49,7 +49,7 @@ export function boardAggregatePlan(root: GeneratedCrudTable, tables: readonly Ge
   return { root, group, hops, amount, currency };
 }
 
-function assertFieldReadable(table: GeneratedCrudTable, session: DbSessionInput, column: GeneratedCrudColumn) {
+export function assertFieldReadable(table: GeneratedCrudTable, session: DbSessionInput, column: GeneratedCrudColumn) {
   const key = fieldNameForColumn(column);
   if (column.typedBy || table.source?.computedFields?.some(field => field.field === key)) {
     throw generatedCrudError("Board aggregation requires stored, non-computed fields.", "FORBIDDEN");

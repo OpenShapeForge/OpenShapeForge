@@ -1226,6 +1226,34 @@ checks the currently generated database, REST, GraphQL, MCP and web artifacts.
 
 ### Collection boards
 
+An entity can also define a read-only temporal threshold over a stored
+single-valued relationship. The target entity owns the numeric threshold, so
+administrators can change it without changing authoring configuration:
+
+```yaml
+fields:
+  - key: waitingTooLong
+    osfType: object
+    readOnly: true
+    computed: { kind: temporalThreshold, field: statusId, thresholdDays: statusId.limitDays }
+    children:
+      - { key: status, osfType: string, required: true }
+      - { key: since, osfType: datetime }
+      - { key: thresholdDays, osfType: number }
+```
+
+The typed result has status `within`, `exceeded`, `unknown` or `notApplicable`,
+plus `since` and `thresholdDays`. An empty relationship or threshold is not
+applicable; missing tracking coverage or an unreadable dependency is unknown.
+The evaluator uses elapsed 24-hour intervals and exceeds the threshold only
+after the configured interval. It is evaluated on read and follows the source
+and target field and row permissions. Configuring the field activates
+transactional tracking on the next migration. Existing values remain unknown
+until they actually change; the migration does not invent their start time.
+
+In a board card, `indicator: waitingTooLong` selects this field. The indicator
+uses the field's label and appears when the returned status is `exceeded`.
+
 A web collection can declare a board over an existing single-valued choice or
 entity reference. The grouping reference's collection supplies the columns,
 including columns with no records. Cards project existing typed fields and

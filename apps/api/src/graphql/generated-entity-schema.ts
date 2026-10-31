@@ -324,6 +324,8 @@ export function renderTypeDefinition(
       return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
         `      ${field}: ${graphqlScalarForColumn(column)}${nonNullSuffix(column)}`;
     });
+  const computedFields = (table.source?.computedFields ?? []).filter(field => field.resolver === "temporalThreshold")
+    .map(field => `${renderDescription(fieldDocumentation.get(field.field)?.description, "      ")}      ${field.field}: JSON`);
   const relationshipFields = (graphql.relationships ?? [])
     .filter((relationship) =>
       isValidGraphqlName(relationship.name) &&
@@ -411,7 +413,7 @@ ${deleteInputBody}
   return `
 ${renderDescription(documentation?.description, "    ")}
     type ${graphql.typeName} {
-${[...columnFields, ...relationshipFields].join("\n")}
+${[...columnFields, ...computedFields, ...relationshipFields].join("\n")}
     }
 
     input ${graphql.typeName}Filter {

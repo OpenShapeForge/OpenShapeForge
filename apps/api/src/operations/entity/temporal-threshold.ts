@@ -13,11 +13,16 @@ export type TemporalThresholdResult = {
  * the caller, never as a fabricated timestamp or a negative answer.
  */
 export function evaluateTemporalThreshold(input: {
+  /** False when any dependency is unavailable or not readable by this actor. */
+  readable: boolean;
   applicable: boolean;
   since: Date | null;
   thresholdDays: number | null;
   now: Date;
 }): TemporalThresholdResult {
+  if (!input.readable) {
+    return { status: "unknown", since: null, thresholdDays: null };
+  }
   if (!input.applicable || input.thresholdDays === null) {
     return { status: "notApplicable", since: null, thresholdDays: input.thresholdDays };
   }

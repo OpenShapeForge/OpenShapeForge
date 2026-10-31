@@ -337,7 +337,7 @@ export function buildFieldSchemaGroups(
     {
       id: "field-advanced",
       title: { nl: "Geavanceerd", en: "Advanced" },
-      groups: filterEmptyGroups(advancedGroups),
+      groups: filterEmptyGroups(advancedGroups.filter(group => !(group.id === "field-computed" && field.computed && "kind" in field.computed))),
     },
   ]);
   return groups;

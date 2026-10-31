@@ -1245,6 +1245,7 @@ fields:
 The typed result has status `within`, `exceeded`, `unknown` or `notApplicable`,
 plus `since` and `thresholdDays`. An empty relationship or threshold is not
 applicable; missing tracking coverage or an unreadable dependency is unknown.
+A read that joins a transaction weaker than repeatable read also returns unknown.
 The evaluator uses elapsed 24-hour intervals and exceeds the threshold only
 after the configured interval. It is evaluated on read and follows the source
 and target field and row permissions. Configuring the field activates

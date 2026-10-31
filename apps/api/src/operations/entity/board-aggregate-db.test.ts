@@ -165,8 +165,12 @@ test("temporal result uses current target threshold and respects target row and 
     values = new Map((await read()).rows.map(row => [row.id, (row.stagnation as { status: string }).status]));
     expect(values.get(record)).toBe("unknown");
     generatedCrudTables.set(target.name, target);
-    const nested = await withDbSession(restricted!.db, session, () => read());
+    const nested = await withDbSession(restricted!.db, session, async tx => {
+      await sql`update erp.relations set stage='temporal' where id=${record}::uuid`.execute(tx);
+      return read();
+    });
     expect(nested.rows.find(row => row.id === record)?.stagnation).toEqual({ status: "unknown", since: null, thresholdDays: null });
+    expect((await sql<{ stage: string }>`select stage from erp.relations where id=${record}::uuid`.execute(privileged!.db)).rows[0]?.stage).toBe("temporal");
     const nestedStable = await withDbSession(restricted!.db, session, () => read(), { isolationLevel: "serializable" });
     expect(nestedStable.rows.find(row => row.id === record)?.stagnation).toMatchObject({ status: "within" });
   } finally {

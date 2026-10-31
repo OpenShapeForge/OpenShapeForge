@@ -687,7 +687,7 @@ export async function withDbSession<TDatabase, TResult>(
       const trx = active.trx as Transaction<TDatabase>;
       if (options.isolationLevel === "repeatable read") {
         const isolation = await sql<{ transaction_isolation: string }>`show transaction_isolation`.execute(trx);
-        if (isolation.rows[0]?.transaction_isolation === "read committed") {
+        if (!["repeatable read", "serializable"].includes(isolation.rows[0]?.transaction_isolation ?? "")) {
           throw new Error("Nested database work requires a repeatable read transaction.");
         }
       }

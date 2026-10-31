@@ -242,6 +242,17 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
     tables[2]!.source!.graphql!.relationships!.find(item => item.name === "amount")!.target = "TrackedTargetV2";
     await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
     expect(await resumedSince()).toBeUndefined(); // a relationship to another entity is a new tracked meaning
+    await sql`insert into platform.field_value_since(tenant_id,entity_type,record_id,field_key,since_at) values
+      (${tenant}::uuid,'ProbeValue','rename-old','amount',now()),
+      (${otherTenant}::uuid,'ProbeValue','rename-old-other','amount',now()),
+      (${tenant}::uuid,'RenamedProbeValue','rename-new','amount',now()),
+      (${tenant}::uuid,'OtherProbe','rename-unrelated','amount',now())`.execute(privileged.db);
+    tables[2]!.source!.authoringEntityName = 'RenamedProbeValue';
+    await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
+    const renamedRows = await sql<{ entity_type: string }>`select entity_type from platform.field_value_since where record_id like 'rename-%'`.execute(privileged.db);
+    expect(renamedRows.rows.map(row => row.entity_type)).toEqual(['OtherProbe']);
+    tables[2]!.source!.authoringEntityName = 'ProbeValue';
+    await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
     const stored = await sql<{ payload: unknown }>`select payload from platform.entity_events`.execute(privileged.db);
     expect(JSON.stringify(stored.rows)).not.toMatch(/classified-never-store|changed-never-store|must-not-store/);
     await expect(sql`delete from platform.entity_events`.execute(privileged.db)).rejects.toThrow();

@@ -237,7 +237,7 @@ export type WebTimelinePresentation = {
 };
 
 export type WebCollectionView = {
-  board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: WebValuePath; currency: WebValuePath }; card: { title: WebValuePath; timestamp?: WebValuePath; indicator?: string; subtitle?: WebValuePath[]; amount?: { value: WebValuePath; currency: WebValuePath }; body: WebValuePath[] } };
+  board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: WebValuePath; currency: WebValuePath }; card: { title: WebValuePath[]; timestamp?: WebValuePath; indicator?: string; subtitle?: WebValuePath[]; amount?: { value: WebValuePath; currency: WebValuePath }; body: WebValuePath[] } };
   presentation?: WebTimelinePresentation;
   id: string;
   kind: "collection";

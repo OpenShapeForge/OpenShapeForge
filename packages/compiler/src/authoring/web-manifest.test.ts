@@ -2139,6 +2139,8 @@ test("board card paths preserve related entity type and collection cardinality",
   owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", subtitle: ["lines.productId"], body: ["lines.productId", "lines.productId.displayName"] } };
   const build = () => buildWebManifest([owner, line, product]);
   expect(build().entities.Deal!.views.collection.board!.card.subtitle![0]).toMatchObject({ targetEntityId: "Product", cardinality: "many" });
+  owner.contract.interfaces!.web!.collectionBoard!.card.title = ["displayName", "displayName"];
+  expect(build().entities.Deal!.views.collection.board!.card.title).toHaveLength(2);
   expect(build().entities.Deal!.views.collection.board!.card.body[0]).toMatchObject({
     targetEntityId: "Product", osfType: "Product", cardinality: "many",
     path: [{ entityId: "Deal", relationshipId: "Deal.lines" }, { entityId: "Line", relationshipId: "Line.productId" }],
@@ -2146,7 +2148,7 @@ test("board card paths preserve related entity type and collection cardinality",
   expect(build().entities.Deal!.views.collection.board!.card.body[1]).toMatchObject({
     targetEntityId: "Product", field: "displayName", osfType: "string", cardinality: "many",
   });
-  owner.contract.interfaces!.web!.collectionBoard!.card.title = "lines.productId";
+  owner.contract.interfaces!.web!.collectionBoard!.card.title = ["displayName", "lines.productId"];
   expect(build).toThrow("board card title must be single-valued");
   owner.contract.interfaces!.web!.collectionBoard!.card.title = "displayName";
   owner.contract.interfaces!.web!.collectionBoard!.card.body = ["lines.missing"];

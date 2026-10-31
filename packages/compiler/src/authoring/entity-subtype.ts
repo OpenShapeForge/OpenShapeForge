@@ -193,7 +193,7 @@ function findExplicitHiddenReference(value: unknown, hidden: ReadonlySet<string>
     const childPath = `${path}.${key}`;
     if (key === "board" && isPlainObject(child)) {
       const card = isPlainObject(child.card) ? child.card : {};
-      const paths = [child.groupBy, card.title, ...(Array.isArray(card.body) ? card.body : [])];
+      const paths = [child.groupBy, ...(Array.isArray(card.title) ? card.title : [card.title]), ...(Array.isArray(card.body) ? card.body : [])];
       const leaked = paths.find(item => typeof item === "string" && hidden.has(item.split(".")[0]!));
       if (leaked) return `${childPath} (${String(leaked)})`;
     }
@@ -295,7 +295,7 @@ function pruneInheritedInterfaces(interfaces: Record<string, unknown>, hidden: R
         const board = collection.board;
         const card = isPlainObject(board.card) ? board.card : {};
         const hiddenPath = (value: unknown) => typeof value === "string" && hidden.has(value.split(".")[0]!);
-        if (hiddenPath(board.groupBy) || hiddenPath(card.title)) delete collection.board;
+        if (hiddenPath(board.groupBy) || (Array.isArray(card.title) ? card.title.some(hiddenPath) : hiddenPath(card.title))) delete collection.board;
         else {
           const nextCard: Record<string, unknown> = { ...card, ...(Array.isArray(card.body) ? { body: card.body.filter(path => !hiddenPath(path)) } : {}) };
           if (hiddenPath(nextCard.indicator)) delete nextCard.indicator;

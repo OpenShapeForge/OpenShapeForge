@@ -1277,8 +1277,8 @@ interfaces:
           groupSummary: defaultProbabilityPercent
           aggregate: { sum: quoteId.amountBase, currency: quoteId.currencyCode }
           card:
-            title: name
-            subtitle: [relationId, dealProducts.productId]
+            title: [relationId, name]
+            subtitle: [dealProducts.productId]
             amount: { value: quoteId.amountBase, currency: quoteId.currencyCode }
             timestamp: updatedAt
 ```
@@ -1297,7 +1297,8 @@ grouping choices must come from that entity's readable collection. Its value
 uses the normal typed field renderer, including its effective unit. A unit in
 presentation props overrides a field-authored unit; the web projection exposes
 the effective unit to compact renderers as well.
-`subtitle` is an optional list of typed paths displayed directly beneath the
+`title` accepts one single-valued path or a nonempty list of single-valued paths,
+displayed together in order. `subtitle` is an optional list of typed paths displayed directly beneath the
 card title; `body` remains available for other card fields.
 
 `amount` pairs a single numeric field with a currency string from the same

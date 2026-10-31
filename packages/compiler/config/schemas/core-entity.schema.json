@@ -1288,7 +1288,7 @@
                   "currency": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Currency field path", "nl": "Valutaveldpad" } } }
                 }, "x-osf-i18n": { "title": { "en": "Group aggregate", "nl": "Groepstotaal" } } },
                 "card": { "type": "object", "additionalProperties": false, "required": ["title"], "x-osf-i18n": { "title": { "en": "Card", "nl": "Kaart" } }, "properties": {
-                  "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title path", "nl": "Titelpad" } } },
+                  "title": { "oneOf": [{ "type": "string", "minLength": 1 }, { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }], "x-osf-i18n": { "title": { "en": "Title paths", "nl": "Titelpaden" } } },
                   "timestamp": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Timestamp path", "nl": "Tijdstippad" } } },
                   "indicator": { "$ref": "#/$defs/fieldKey", "x-osf-i18n": { "title": { "en": "Indicator field", "nl": "Indicatorveld" } } },
                   "amount": { "type": "object", "additionalProperties": false, "required": ["value", "currency"], "properties": {

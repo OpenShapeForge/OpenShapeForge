@@ -3,7 +3,7 @@
 import { Kysely, PostgresDialect } from 'kysely';
 import type { OpenShapeForgeDatabase } from '../connection.js';
 
-export function emptyCatalogDatabase(): OpenShapeForgeDatabase {
-  const connection = { query: async () => ({ rows: [], rowCount: 0 }), release: () => {} };
+export function emptyCatalogDatabase(statements?: string[]): OpenShapeForgeDatabase {
+  const connection = { query: async (query: string | { text: string }) => { statements?.push(typeof query === "string" ? query : query.text); return { rows: [], rowCount: 0 }; }, release: () => {} };
   return new Kysely({ dialect: new PostgresDialect({ pool: { connect: async () => connection, end: async () => {} } as never }) }) as OpenShapeForgeDatabase;
 }

@@ -364,8 +364,9 @@ describe("entity operation runtime", () => {
   });
 
   test("refuses an unauthorized mutation before inspecting its controls", async () => {
+    const statements: string[] = [];
     const result = await executeEntityOperation(
-      emptyCatalogDatabase(),
+      emptyCatalogDatabase(statements),
       {
         tenantId: "11111111-1111-4111-8111-111111111111",
         userId: "22222222-2222-4222-8222-222222222222",
@@ -383,6 +384,7 @@ describe("entity operation runtime", () => {
       },
     );
 
+    expect(statements.some(statement => /(?:from|into|update|delete\s+from)\s+"?erp"?\./i.test(statement))).toBe(false);
     expect(result).toEqual({
       intent: "delete",
       error: expect.objectContaining({ code: "FORBIDDEN", retryable: false }),
@@ -450,7 +452,8 @@ describe("entity operation runtime", () => {
 });
 
 test.each(['create', 'delete'] as const)('rejects relatedChanges on %s before opening a mutation', async (intent) => {
-  const result = await executeEntityOperation(emptyCatalogDatabase(), {
+  const statements: string[] = [];
+  const result = await executeEntityOperation(emptyCatalogDatabase(statements), {
     tenantId: '11111111-1111-4111-8111-111111111111',
     userId: '22222222-2222-4222-8222-222222222222',
     roles: ['Relations.All.ReadWrite', 'Relations.All.Delete'], groups: [], scope: 'tenant',
@@ -458,6 +461,7 @@ test.each(['create', 'delete'] as const)('rejects relatedChanges on %s before op
     operation: {id: `Relation.${intent}`, intent},
     input: {id: '00000000-0000-4000-8000-000000000001', values: {}, relatedChanges: []},
   });
+  expect(statements.some(statement => /(?:from|into|update|delete\s+from)\s+"?erp"?\./i.test(statement))).toBe(false);
   expect(result.intent).toBe(intent);
   expect('error' in result).toBe(true);
   if ('error' in result) expect(result.error).toMatchObject({code:'VALIDATION',message:'relatedChanges is only supported when updating a record.',retryable:false});

@@ -106,7 +106,7 @@ describe("primary-key lookups use the uncast key", () => {
     const target = tables.find((candidate) => candidate.name === "erp.assets")!;
     const relationship = parent.source!.graphql!.relationships!.find((entry) => entry.name === "assets")!;
     const role = parent.source!.authorization!.roles.read[0]!;
-    await listGeneratedEntityRelation(scriptedDatabase(statements, query => query.includes('as row_source') ? [{ row: { [parent.primaryKey!]: id } }] : []), session([role]), {
+    await listGeneratedEntityRelation(scriptedDatabase(statements, query => query.includes('to_jsonb(row_source.*)') && query.includes('\"erp\".\"asset_groups\"') ? [{ row: { [parent.primaryKey!]: id } }] : []), session([role]), {
       parent: { [parent.primaryKey!]: id },
       parentTable: parent,
       relationship,

@@ -14,6 +14,7 @@ import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { __buildGeneratedMcpServerForTests } from "../generated-mcp-server.js";
 import { handleModernMcpRequest } from "../modern-http.js";
 import { toolWithFailureOutputSchema } from "../tool-output-schema.js";
+import { emptyCatalogDatabase } from "../../db/__tests__/empty-catalog-db.js";
 import type { Tool } from "@modelcontextprotocol/server";
 
 function legacySchema(schema: NonNullable<Tool["outputSchema"]>) {
@@ -23,7 +24,7 @@ function legacySchema(schema: NonNullable<Tool["outputSchema"]>) {
 
 const session = { tenantId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222", roles: ["Organization.All.ReadWrite"], groups: [], scope: "self", credential: "trusted-context" } as never;
 function build() {
-  const db = {} as never;
+  const db = emptyCatalogDatabase();
   const platform = new ModulePlatformRuntime(db);
   const server = __buildGeneratedMcpServerForTests({ db, session, modulePlatform: platform,
     modules: [accountsRuntime, documentsRuntime as never, versioningRuntime as never, { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }),

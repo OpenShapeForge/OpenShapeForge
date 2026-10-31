@@ -247,6 +247,18 @@ export function entityRecordOutputSchema(
       !column.nullable,
     );
   }
+  for (const field of contract.model.fields) {
+    if (field.computed && "kind" in field.computed && field.computed.kind === "temporalThreshold") {
+      add(field.key, {
+        type: "object", "x-osf-type": field.osfType,
+        properties: {
+          status: { type: "string", enum: ["within", "exceeded", "unknown", "notApplicable"] },
+          since: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
+          thresholdDays: { anyOf: [{ type: "number" }, { type: "null" }] },
+        }, required: ["status", "since", "thresholdDays"], additionalProperties: false,
+      }, false);
+    }
+  }
   for (const [key, schema] of [
     ["id", { type: "string", format: "uuid" }],
     ["tenantId", { type: "string", format: "uuid" }],
@@ -666,6 +678,25 @@ export function entityOperationJsonSchemas(
         }]))}
       }};
       const sortable = entitySortableFieldKeys(contract, secureInputTarget, contracts);
+      const boardAggregate = Boolean(contract.interfaces?.web?.collectionBoard?.aggregate);
+      const pageSchema = entityListPageSchema(
+        {
+          type: "object",
+          properties: { data: record, operations: openOperationOffers() },
+          required: ["data", "operations"],
+          additionalProperties: false,
+        },
+        "optional",
+      );
+      if (boardAggregate) (pageSchema.properties as JsonObject).boardTotals = {
+        type: "array", maxItems: 1000, items: {
+          type: "object", additionalProperties: false, required: ["group", "available", "totals"],
+          properties: {
+            group: { type: ["string", "null"] }, available: { type: "boolean" },
+            totals: { type: "array", items: { type: "object", additionalProperties: false, required: ["currency", "amount"], properties: { currency: { type: "string" }, amount: { type: "string" } } } },
+          },
+        },
+      };
       return {
         inputSchema: {
           $defs: filterDefinitions,
@@ -688,18 +719,11 @@ export function entityOperationJsonSchemas(
               additionalProperties: false,
             },
             includeTotalCount: { type: "boolean" },
+            ...(boardAggregate ? { includeBoardTotals: { type: "boolean" } } : {}),
           },
           additionalProperties: false,
         },
-        outputSchema: entityListPageSchema(
-          {
-            type: "object",
-            properties: { data: record, operations: openOperationOffers() },
-            required: ["data", "operations"],
-            additionalProperties: false,
-          },
-          "optional",
-        ),
+        outputSchema: pageSchema,
       };
     }
     case "get":

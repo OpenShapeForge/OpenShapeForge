@@ -2131,3 +2131,123 @@ test("context paths follow canonical relationship graphs for homes and project m
     expect(build).toThrow("single string");
   }
 });
+
+test("board card paths preserve related entity type and collection cardinality", () => {
+  const owner = entity("Deal", "deal", [field("displayName"), field("productId", { osfType: "Product" }), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } })], coreView(), [{ key: "lines", kind: "hasMany", target: "Line", foreignKey: "deal_id" }, { key: "productId", fieldKey: "productId", kind: "belongsTo", target: "Product", foreignKey: "product_id" }]);
+  const line = entity("Line", "line", [field("productId", { osfType: "Product" })], coreView(), [{ key: "productId", fieldKey: "productId", kind: "belongsTo", target: "Product", foreignKey: "product_id" }]);
+  const product = entity("Product", "product", [field("displayName")], coreView());
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", subtitle: ["lines.productId"], body: ["lines.productId", "lines.productId.displayName"] } };
+  const build = () => buildWebManifest([owner, line, product]);
+  expect(build().entities.Deal!.views.collection.board!.card.subtitle![0]).toMatchObject({ targetEntityId: "Product", cardinality: "many" });
+  expect(build().entities.Deal!.views.collection.board!.card.title).toMatchObject([{ field: "displayName" }]);
+  owner.contract.interfaces!.web!.collectionBoard!.card.title = ["productId", "displayName"];
+  expect(build().entities.Deal!.views.collection.board!.card.title).toMatchObject([{ targetEntityId: "Product", cardinality: "one" }, { field: "displayName", cardinality: "one" }]);
+  owner.contract.interfaces!.web!.collectionBoard!.card.title = [];
+  expect(build).toThrow("requires at least one path");
+  owner.contract.interfaces!.web!.collectionBoard!.card.title = ["productId", "displayName"];
+  expect(build().entities.Deal!.views.collection.board!.card.body[0]).toMatchObject({
+    targetEntityId: "Product", osfType: "Product", cardinality: "many",
+    path: [{ entityId: "Deal", relationshipId: "Deal.lines" }, { entityId: "Line", relationshipId: "Line.productId" }],
+  });
+  expect(build().entities.Deal!.views.collection.board!.card.body[1]).toMatchObject({
+    targetEntityId: "Product", field: "displayName", osfType: "string", cardinality: "many",
+  });
+  owner.contract.interfaces!.web!.collectionBoard!.card.title = ["displayName", "lines.productId"];
+  expect(build).toThrow("board card title must be single-valued");
+  owner.contract.interfaces!.web!.collectionBoard!.card.title = "displayName";
+  owner.contract.interfaces!.web!.collectionBoard!.card.body = ["lines.missing"];
+  expect(build).toThrow("invalid board path");
+  owner.contract.interfaces!.web!.collectionBoard!.card.body = [];
+  owner.contract.interfaces!.web!.collectionBoard!.groupBy = "displayName";
+  expect(build).toThrow("board grouping requires a single relationship or choice field");
+});
+
+test("board card relationship paths allow four hops and reject five", () => {
+  const owner = entity("Root", "root", [field("name"), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } })], coreView(), [{ key: "next", kind: "hasMany", target: "Node1", foreignKey: "root_id" }]);
+  const nodes = Array.from({ length: 5 }, (_, i) => entity(`Node${i + 1}`, `node${i + 1}`, [field("name")], coreView(), i < 4 ? [{ key: "next", kind: "hasMany", target: `Node${i + 2}`, foreignKey: "parent_id" }] : []));
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "name", body: ["next.next.next.next"] } };
+  const build = () => buildWebManifest([owner, ...nodes]);
+  expect(build().entities.Root!.views.collection.board!.card.body[0]!.path).toHaveLength(4);
+  owner.contract.interfaces!.web!.collectionBoard!.card.body = ["next.next.next.next.next"];
+  expect(build).toThrow("board path next.next.next.next.next requires at most four relationships");
+});
+
+test("board scope names a single field on the grouping entity", () => {
+  const owner = entity("Task", "task", [field("displayName"), field("stage", { osfType: "Stage", relationship: { target: "Stage" } })], coreView(), [{ key: "stage", fieldKey: "stage", kind: "belongsTo", target: "Stage", foreignKey: "stage_id" }]);
+  const stage = entity("Stage", "stage", [field("displayName"), field("processId"), field("probability", { osfType: "integer", baseType: "integer", unit: "%" })], coreView());
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", scopeBy: "processId", groupSummary: "probability", card: { title: "displayName" } };
+  const build = () => buildWebManifest([owner, stage]);
+  expect(build().entities.Task!.views.collection.board?.scopeBy).toBe("processId");
+  expect(build().entities.Task!.views.collection.board?.groupSummary).toBe("probability");
+  expect(build().entities.Stage!.fields.probability?.unit).toBe("%");
+  const probability = stage.contract.model.fields.find(field => field.key === "probability")!;
+  probability.render = { component: "FieldIntegerDecimal", props: { unit: "points" } };
+  expect(build().entities.Stage!.fields.probability?.unit).toBe("points");
+  delete probability.unit;
+  expect(build().entities.Stage!.fields.probability?.unit).toBe("points");
+  probability.render = { component: "Input" };
+  expect(build().entities.Stage!.fields.probability?.unit).toBeUndefined();
+  probability.unit = "%";
+  owner.contract.interfaces!.web!.collectionBoard!.groupSummary = "missing";
+  expect(build).toThrow("board group summary must name a scalar field");
+  owner.contract.interfaces!.web!.collectionBoard!.groupSummary = "probability";
+  probability.cardinality = "collection";
+  expect(build).toThrow("board group summary must name a scalar field");
+  probability.cardinality = "single";
+  probability.baseType = "object";
+  expect(build).toThrow("board group summary must name a scalar field");
+  probability.baseType = "integer";
+  probability.relationship = { target: "Task" };
+  expect(build).toThrow("board group summary must name a scalar field");
+  delete probability.relationship;
+  owner.contract.interfaces!.web!.collectionBoard!.scopeBy = "missing";
+  expect(build).toThrow("board scope must name a persisted filterable single scalar field");
+});
+
+test("board group summaries require the readable collection used for grouping", () => {
+  const owner = entity("Task", "task", [field("displayName"), field("stage", { osfType: "Stage", relationship: { target: "Stage" } })], coreView(), [{ key: "stage", fieldKey: "stage", kind: "belongsTo", target: "Stage", foreignKey: "stage_id" }]);
+  const stage = entity("Stage", "stage", [field("displayName"), field("probability", { baseType: "integer" })], coreView());
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", groupSummary: "probability", card: { title: "displayName" } };
+  const build = () => buildWebManifest([owner, stage]);
+  expect(build().entities.Task!.views.collection.board?.groupSummary).toBe("probability");
+  const group = owner.contract.model.fields.find(field => field.key === "stage")!;
+  group.options = { type: "static", items: [{ value: "open", label: text("Open") }] };
+  expect(build).toThrow("board group summary requires a readable grouping entity collection");
+  group.options = { type: "entity", source: "Other", valueField: "id" };
+  expect(build).toThrow("board group summary requires a readable grouping entity collection");
+  group.options = { type: "entity", source: "Stage", valueField: "id" };
+  stage.contract.interfaces!.web!.operations!.list = false;
+  expect(build).toThrow("board group summary requires a readable grouping entity collection");
+});
+
+test("board money paths refer to typed scalar fields on the same record", () => {
+  const owner = entity("Deal", "deal", [field("displayName"), field("updatedAt", { baseType: "datetime" }), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } }), field("quoteId", { osfType: "Quote", relationship: { target: "Quote" } })], coreView(), [{ key: "quoteId", fieldKey: "quoteId", kind: "belongsTo", target: "Quote", foreignKey: "quote_id" }]);
+  const quote = entity("Quote", "quote", [field("amountBase", { osfType: "decimal", baseType: "number" }), field("currencyCode")], coreView());
+  quote.contract.storage.columns.find(item => item.field === "amountBase")!.type = "numeric";
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", aggregate: { sum: "quoteId.amountBase", currency: "quoteId.currencyCode" }, card: { title: "displayName", timestamp: "updatedAt", amount: { value: "quoteId.amountBase", currency: "quoteId.currencyCode" } } };
+  const build = () => buildWebManifest([owner, quote]);
+  const board = build().entities.Deal!.views.collection.board!;
+  expect(board.aggregate?.sum).toMatchObject({ targetEntityId: "Quote", field: "amountBase", cardinality: "one" });
+  expect(board.card.amount?.currency).toMatchObject({ targetEntityId: "Quote", field: "currencyCode", cardinality: "one" });
+  expect(board.card.timestamp).toMatchObject({ targetEntityId: "Deal", field: "updatedAt", osfType: "datetime", cardinality: "one" });
+  owner.contract.interfaces!.web!.collectionBoard!.card.timestamp = "displayName";
+  expect(build).toThrow("board card timestamp must be a single datetime field");
+  owner.contract.interfaces!.web!.collectionBoard!.card.timestamp = "updatedAt";
+  owner.contract.interfaces!.web!.collectionBoard!.card.amount!.currency = "displayName";
+  expect(build).toThrow("board amount and currency must be single scalar fields on the same record");
+  owner.contract.interfaces!.web!.collectionBoard!.card.amount!.currency = "quoteId.currencyCode";
+  quote.contract.model.fields.find(item => item.key === "currencyCode")!.baseType = "number";
+  expect(build).toThrow("board amount and currency must be single scalar fields on the same record");
+  quote.contract.model.fields.find(item => item.key === "currencyCode")!.baseType = "string";
+  quote.contract.storage.columns.find(item => item.field === "currencyCode")!.type = "varchar";
+  expect(build).toThrow("board aggregate requires persisted scalar fields");
+  quote.contract.storage.columns.find(item => item.field === "currencyCode")!.type = "text";
+  quote.contract.storage.columns = quote.contract.storage.columns.filter(item => item.field !== "amountBase");
+  expect(build).toThrow("board aggregate requires persisted scalar fields");
+});
+
+test("a board does not expose a reference as a raw scalar without a readable relationship", () => {
+  const owner = entity("Task", "task", [field("displayName"), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } }), field("customerId", { osfType: "Customer", relationship: { target: "Customer" } })], coreView());
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", body: ["customerId"] } };
+  expect(() => buildWebManifest([owner, entity("Customer", "customer", [field("displayName")], coreView())])).toThrow("invalid board path");
+});

@@ -46,6 +46,7 @@ import type { CoreReferentiedataSnapshot } from "../core-referentiedata-artifact
 import { assertDefaultSatisfiesContract, fieldBindingsCheckConstraint, fieldValueCheckConstraints } from "./field-value-checks.js";
 import { FIELD_BINDINGS_COLUMN } from "@openshapeforge/operations";
 import { TENANT_IDENTITY_CHECK_EXPRESSION, hasTenantIdentityCheck, tenantIdentityCheckName } from "../tenant-bound-references.js";
+import { validateTemporalThreshold, type TemporalField } from "./temporal-threshold.js";
 
 /**
  * Bridges the compiled per-operation role lists into the manifest as the
@@ -937,6 +938,7 @@ function buildSubtypeTable(
     ...(baseTable.retention ? { retention: structuredClone(baseTable.retention) } : {}),
     source: {
       path: candidate.path,
+      ...(contract.interfaces?.web?.collectionBoard?.aggregate ? { boardAggregate: { groupBy: contract.interfaces.web.collectionBoard.groupBy, ...contract.interfaces.web.collectionBoard.aggregate } } : {}),
       authoringEntityName: contract.entity.name,
       authoringEntitySlug: candidate.slug,
       generatedCrudEligibility: generatedCrudEligible ? "explicitly_enabled" : "explicitly_disabled",
@@ -1416,6 +1418,39 @@ export function compileAuthoringBackendManifest(
 
   detectCandidateCollisions(candidates, schemaByModule);
 
+  const temporalFields = (candidate: CompiledCandidate): TemporalField[] => candidate.contract.model.fields.map(field => ({
+    key: field.key,
+    osfType: field.osfType,
+    cardinality: field.cardinality,
+    ...(candidate.contract.storage.columns.some(column => column.field === field.key) ? { persisted: true } : {}),
+    ...(field.computed ? { computed: field.computed } : {}),
+  }));
+  for (const candidate of candidates) {
+    for (const field of candidate.contract.model.fields) {
+      if (!field.computed || !("kind" in field.computed) || field.computed.kind !== "temporalThreshold") continue;
+      if (!field.readOnly || field.baseType !== "object" || field.cardinality === "collection") {
+        throw new Error(`${candidate.contract.entity.name}.${field.key}: temporal threshold must be a read-only single object.`);
+      }
+      const children = field.children ?? [];
+      const expected = new Map([["status", "string"], ["since", "datetime"], ["thresholdDays", "number"]]);
+      if (children.length !== expected.size || new Set(children.map(child => child.key)).size !== expected.size || children.some(child => expected.get(child.key) !== child.osfType || child.cardinality === "collection") || !children.find(child => child.key === "status")?.required) {
+        throw new Error(`${candidate.contract.entity.name}.${field.key}: temporal threshold children must be status (required string), since (datetime), and thresholdDays (number).`);
+      }
+      if (field.authorization || field.permissions || field.classification) {
+        throw new Error(`${candidate.contract.entity.name}.${field.key}: temporal threshold cannot declare a separate field policy; access follows its dependencies.`);
+      }
+      const trackedField = field.computed.field;
+      const relationship = candidate.contract.model.relationships.find(item => item.key === trackedField);
+      if (!relationship || relationship.kind !== "belongsTo" || relationship.fieldKey !== trackedField || relationship.via || relationship.through || relationship.provider || (relationship.constraints && Object.keys(relationship.constraints).length)) {
+        throw new Error(`${candidate.contract.entity.name}.${field.key}: temporal threshold requires an unconstrained stored relationship.`);
+      }
+      validateTemporalThreshold(field.computed, temporalFields(candidate), entity => {
+        const target = candidates.find(item => item.contract.entity.name === entity);
+        return target ? temporalFields(target) : undefined;
+      });
+    }
+  }
+
   const definitionNames = entityValueDefinitionNames(candidates);
   for (const name of definitionNames) {
     const definition = candidates.find((candidate) => candidate.contract.entity.name === name);
@@ -1714,6 +1749,7 @@ export function compileAuthoringBackendManifest(
       ...(retention === undefined ? {} : { retention }),
       source: {
         path: candidate.path,
+        ...(candidate.contract.interfaces?.web?.collectionBoard?.aggregate ? { boardAggregate: { groupBy: candidate.contract.interfaces.web.collectionBoard.groupBy, ...candidate.contract.interfaces.web.collectionBoard.aggregate } } : {}),
         ...(candidate.contract.blueprint ? { blueprint: candidate.contract.blueprint } : {}),
         ...(candidate.contract.transitions ? { transitions: candidate.contract.transitions } : {}),
         authoringEntityName: candidate.contract.entity.name,
@@ -1737,9 +1773,13 @@ export function compileAuthoringBackendManifest(
           ? { displayTemplate: candidate.contract.entity.displayTemplate }
           : {}),
         ...(() => {
-          const computedFields = candidate.contract.model.fields
-            .filter((field) => field.osfType === "labelSet")
-            .map((field) => ({ field: field.key, resolver: "labelRules" as const }));
+          const computedFields: NonNullable<NonNullable<TableDefinition["source"]>["computedFields"]> = [];
+          for (const field of candidate.contract.model.fields) {
+            if (field.osfType === "labelSet") computedFields.push({ field: field.key, resolver: "labelRules" });
+            if (field.computed && "kind" in field.computed && field.computed.kind === "temporalThreshold") {
+              computedFields.push({ field: field.key, resolver: "temporalThreshold", trackedField: field.computed.field, thresholdDays: field.computed.thresholdDays });
+            }
+          }
           return computedFields.length > 0 ? { computedFields } : {};
         })(),
         graphql: {

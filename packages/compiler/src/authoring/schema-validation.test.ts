@@ -12,6 +12,7 @@
  *     refused by its own documentation.
  */
 import { describe, expect, it } from "bun:test";
+import { operationChoiceKeyword } from "@openshapeforge/operations";
 import Ajv2020 from "ajv/dist/2020.js";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -522,7 +523,7 @@ describe("coreEntity properties the compiler implements", () => {
     // operation, renderer or component key must carry one; a key that is an
     // identifier of something else (a variable source) must not.
     const defs = coreEntitySchema.$defs as Record<string, unknown>;
-    const kinds = new Set(["field", "sortableField", "relationship", "operation", "renderer", "component"]);
+    const kinds = new Set(operationChoiceKeyword.metaSchema.anyOf[0]!.enum);
     const unmarked: string[] = [];
     const seen: string[] = [];
     const visited = new Set<unknown>();

@@ -28,7 +28,12 @@ describe("no other carrier produces an application principal", () => {
       groups: [], principalKind: "service",
     }, { secret, nowMs });
     headers.set("x-osf-app-principal", integrationId);
+    headers.set("x-osf-app-principal-id", integrationId);
+    headers.set("x-osf-integration-id", integrationId);
     headers.set("x-osf-app-credential", credentialId);
+    headers.set("x-osf-app-credential-id", credentialId);
+    headers.set("x-osf-principal-class", "application");
+    headers.set("x-osf-principal-kind", "service");
     const session = readTrustedSessionContext(headers, { secret, nowMs });
     expect(session.tenantId).toBe(tenantId);
     expect(session.userId).toBe(serviceAccountUserId);

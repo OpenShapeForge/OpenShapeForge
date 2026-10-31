@@ -159,7 +159,10 @@ describe("artifact record authorization transaction scope", () => {
       const binding = observations.find(entry => entry.sql.includes("provider_bind_marker"));
       expect(record).toBeDefined();
       expect(binding?.connectionId).toBe(record!.connectionId);
-      expect(observations.filter(entry => entry.sql === "<commit>")).toHaveLength(1);
+      // Admission may use a separate policy-read transaction; the record and
+      // artifact binding must share exactly one successful Operation commit.
+      expect(observations.filter(entry => entry.sql === "<commit>" && entry.connectionId === record!.connectionId)).toHaveLength(1);
+      expect(observations.some(entry => entry.sql === "<rollback>" && entry.connectionId === record!.connectionId)).toBe(false);
     } finally { await db.destroy(); }
   });
   test("shares the read transaction with record checks without granting bind authority", async () => {

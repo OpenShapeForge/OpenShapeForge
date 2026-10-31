@@ -15,6 +15,7 @@ import {
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { httpStatusForCode } from "../connectors/provider-outcome.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import { emptyCatalogDatabase } from "../db/__tests__/empty-catalog-db.js";
 import { editLeaseOperationIdsForSession } from "../mcp/edit-lease-tools.js";
 import type { ModuleOperationContext } from "../modules/contract.js";
 import {
@@ -41,12 +42,12 @@ const sessionWith = (roles: readonly string[]): TrustedSessionContext =>
     credential: "bearer",
   }) as unknown as TrustedSessionContext;
 
-/** Any database access in these cases is itself the failure, so there is none to use. */
-const unusableDb = {} as OpenShapeForgeDatabase;
+/** Authorization may read the empty policy catalogue before refusing a lease. */
+const emptyPolicyDb = emptyCatalogDatabase();
 
 function contextFor(
   session: TrustedSessionContext | undefined,
-  db: OpenShapeForgeDatabase | undefined = unusableDb,
+  db: OpenShapeForgeDatabase | undefined = emptyPolicyDb,
 ): ModuleOperationContext {
   return { db, session, transport: "operation" } as unknown as ModuleOperationContext;
 }
@@ -120,11 +121,13 @@ describe("canonical edit-lease Operations", () => {
   });
 
   test("acquiring is authorized by the Operation it names, before any lease work", async () => {
+    const statements: string[] = [];
     expect(await refusalOf(run(
       "acquireEditLease",
       { operationId: update.id, targetId: "33333333-3333-4333-8333-333333333333" },
-      contextFor(sessionWith([])),
+      contextFor(sessionWith([]), emptyCatalogDatabase(statements)),
     ))).toBe("FORBIDDEN");
+    expect(statements.some(statement => /(?:from|into|update|delete\s+from)\s+"?platform"?\.\s*"?entity_edit_leases"?/i.test(statement))).toBe(false);
     // Naming an Operation is never a route to one the caller cannot invoke.
     expect(await refusalOf(run(
       "acquireEditLease",

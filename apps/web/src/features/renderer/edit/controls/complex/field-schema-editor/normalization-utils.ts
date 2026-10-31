@@ -100,6 +100,8 @@ export function normalizeComputed(
     return undefined;
   }
 
+  if ("kind" in computed) return computed;
+
   const expression = computed.expression.trim();
   const dependencies = normalizeStringArray(computed.dependencies);
 

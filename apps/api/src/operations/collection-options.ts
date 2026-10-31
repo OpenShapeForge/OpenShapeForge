@@ -1,4 +1,6 @@
+import { securitySubjectChoices } from '../accounts/security-profiles.js';
 // SPDX-License-Identifier: BUSL-1.1
+import securityInventory from '../generated/compiler/authorization-operations.json' with {type:'json'};
 import {operationFailure} from '@openshapeforge/operations';
 import type {ModuleOperationHandler} from '../modules/contract.js';
 import type {OperationContract} from './runtime.js';
@@ -18,10 +20,14 @@ export function nativeCollectionOptionsHandler(operation:OperationContract,modul
  if(operation.key!=='collection.options'||operation.plugin!=='core'||operation.implementation?.type!=='collection-options'||operation.auth.mode!=='session'||operation.tenancy.mode!=='required'||operation.effects?.data!=='read')throw Error('Invalid collection options binding.');
  const sources=operation.implementation.sources;
  const resources=moduleRealtimeResources(modules);
- return async(input,{session,platform})=>{
+ return async(input,context)=>{
+  const {session,platform}=context;
   if(!session?.tenantId||!platform)throw operationFailure({code:'UNAUTHENTICATED',message:'Select an organization.'});
-  const definitions=await platform.operations.list(session), available=new Map(definitions.map(d=>[d.id,d]));
-  const source=sources.find(s=>s.entity===input.entity&&available.has(s.list));
+  const candidate=sources.find(s=>s.entity===input.entity);
+  const wanted=[candidate?.list,sources.find(s=>s.entity===input.referenceEntity)?.list,sources.find(s=>s.entity===input.referenceEntity)?.get,typeof input.referenceEntity==='string'?resources.get(input.referenceEntity)?.readOperationId:undefined,'application.search'].filter((id):id is string=>typeof id==='string');
+  const definitions=(await Promise.all([...new Set(wanted)].map(id=>platform.operations.get(session,id)))).filter((definition):definition is NonNullable<typeof definition>=>!!definition);
+  const available=new Map(definitions.map(d=>[d.id,d]));
+  const source=candidate&&available.has(candidate.list)?candidate:undefined;
   const field=typeof input.field==='string'?input.field:'';
   if(!source||!Object.hasOwn(source.fields,field))throw operationFailure({code:'FORBIDDEN',message:'This filter source is unavailable.'});
   const table=getGeneratedCrudTables().find(t=>t.source?.authoringEntityName===source.entity);
@@ -40,6 +46,22 @@ export function nativeCollectionOptionsHandler(operation:OperationContract,modul
     if('error'in response)throw operationFailure(response.error);
     for(const group of (response.data as any).groups??[])for(const item of group.items)candidates.set(item.id,item.label);
    }
+  }
+  // Security managers author target metadata without needing the target's audience role.
+  // Reuse the existing catalog choice source; the compiler-owned inventory remains the ceiling.
+  if (input.catalog && source.entity.startsWith('Authorization')) {
+    if (!session.roles.includes('Organization.Security.Manage')) throw operationFailure({code:'FORBIDDEN',message:'Security management permission required.'});
+    if(input.catalog==='subjects' && source.entity==='AuthorizationProfileAssignment' && field==='subjectKey') {
+      return {value:await securitySubjectChoices(context,{kind:String(input.referenceEntity??''),search,first,...(typeof input.after==='string'?{after:input.after}:{}),locale:input.locale==='nl'?'nl':'en'})};
+    }
+    const operations = securityInventory.rows.filter(operation => operation.grantable && (!input.referenceEntity || operation.entity===input.referenceEntity));
+    const entries = input.catalog==='operations' ? operations.map(operation=>({value:operation.id,label:operation.id}))
+      : input.catalog==='fields' ? [...new Set(operations.flatMap(operation=>Object.keys(operation.fields)))].map(field=>({value:field,label:field}))
+      : input.catalog==='entities' ? [...new Set(operations.map(operation=>operation.entity))].map(value=>({value,label:sources.find(source=>source.entity===value)?.labels?.[input.locale==='nl'?'nl':'en']??value})) : [];
+    const selected=entries.filter(entry=>`${entry.value} ${entry.label}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>a.value.localeCompare(b.value));
+    const after=typeof input.after==='string'?selected.findIndex(entry=>entry.value===input.after)+1:0;
+    const items=selected.slice(after,after+first);
+    return {value:{items,nextCursor:selected.length>after+first?items.at(-1)!.value:null}};
   }
   const catalogue=new Map<string,string>();
   if(input.catalog==='operations')for(const d of definitions){const label=typeof d.name==='string'?d.name:d.name?.[input.locale==='nl'?'nl':'en']??d.id;catalogue.set(d.id,label);}

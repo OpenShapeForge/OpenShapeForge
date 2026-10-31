@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { bindAuthorizationProfileSource } from '../auth/authorization-profile-decision.js';
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 
@@ -95,6 +96,7 @@ export function sameStatefulMcpAuthorization(
  * snapshot taken at initialize would outlive exactly those changes.
  */
 type RequestScope = {
+  session: TrustedSessionContext;
   active: boolean;
   ids: readonly string[];
   relation: TrustedSessionContext["relation"];
@@ -115,6 +117,7 @@ export function createStatefulMcpSessionContext(
   established: TrustedSessionContext,
 ): TrustedSessionContext {
   const stateful = { ...established };
+  bindAuthorizationProfileSource(stateful,()=>{const request=freshRequestScope.getStore();return request ? request.active ? request.session : undefined : established;});
   Object.defineProperty(stateful, "relationGroupIds", {
     enumerable: true,
     configurable: false,
@@ -173,6 +176,7 @@ export async function withFreshRelationGroupMemberships<T>(
   work: () => Promise<T> | T,
 ): Promise<T> {
   const request: RequestScope = {
+    session: current,
     active: true,
     ids: Object.freeze([...(current.relationGroupIds ?? [])]),
     relation: current.relation ?? null,

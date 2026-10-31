@@ -1,3 +1,5 @@
+import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
+import inventory from "../generated/compiler/authorization-operations.json" with { type: "json" };
 // SPDX-License-Identifier: BUSL-1.1
 import { completeEntitySecureInput } from "../operations/entity/runtime.js";
 /**
@@ -295,7 +297,7 @@ export function operationMayInvoke(
     return false;
   const scopes = new Set(session.oauthScopes ?? []);
   return (
-    sessionOperationRolesAllow(tool.auth.roles, session.roles) &&
+    (authorizationProfileDecision(session, tool.key, inventory.rows.find(operation => operation.id === tool.key)?.entity) ?? sessionOperationRolesAllow(tool.auth.roles, session.roles)) &&
     sessionOperationRoleGroupsAllow(tool.auth.roleGroups, session.roles) &&
     (tool.auth.scopes ?? []).every((scope) => scopes.has(scope))
   );

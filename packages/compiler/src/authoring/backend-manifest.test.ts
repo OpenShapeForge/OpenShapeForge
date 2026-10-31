@@ -11,7 +11,10 @@
  */
 import { describe, expect, it } from "bun:test";
 import { join } from "node:path";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { generateArtifacts } from "../generate.js";
+import { entityRecordOutputSchema } from "../entity-operation-json-schema.js";
 import type { ColumnDefinition, PlatformSchemaManifest } from "../schema.js";
 import {
   compileAuthoringBackendManifest,
@@ -33,6 +36,40 @@ function tableByName(manifest: PlatformSchemaManifest, name: string) {
 }
 
 describe("rowAccess → rowScope translation (§B.3)", () => {
+  it("compiles a temporal field with its stored relationship and rejects invalid thresholds", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osf-temporal-authoring-"));
+    try {
+      cpSync(FIXTURE_DIR, dir, { recursive: true });
+      const root = join(dir, "entities", "rowaccess-owner.yaml");
+      const target = join(dir, "entities", "rowaccess-owner-target.yaml");
+      const addField = (path: string, field: string) => writeFileSync(path, readFileSync(path, "utf8").replace("\noperations:", `\n${field}\noperations:`));
+      addField(target, "  - { key: limitDays, osfType: integer, persisted: { column: limit_days, storageClass: core } }");
+      addField(root, "  - key: stalled\n    osfType: object\n    readOnly: true\n    computed: { kind: temporalThreshold, field: ownerId, thresholdDays: ownerId.limitDays }\n    children:\n      - { key: status, osfType: string, required: true }\n      - { key: since, osfType: datetime }\n      - { key: thresholdDays, osfType: number }");
+      const compile = () => compileAuthoringBackendManifest(dir, { mode: "promote", entityAllowlist: ["rowaccess-owner", "rowaccess-owner-target"], schemaByModule: { core: "erp" } });
+      expect(tableByName(compile(), "row_access_owners")?.source?.computedFields).toContainEqual({ field: "stalled", resolver: "temporalThreshold", trackedField: "ownerId", thresholdDays: "ownerId.limitDays" });
+      let output: ReturnType<typeof entityRecordOutputSchema> | undefined;
+      compileAuthoringBackendManifest(dir, { mode: "promote", entityAllowlist: ["rowaccess-owner", "rowaccess-owner-target"], schemaByModule: { core: "erp" }, onCandidate: ({ contract }) => { if (contract.entity.name === "RowAccessOwner") output = entityRecordOutputSchema(contract); } });
+      expect((output?.properties as Record<string, any>).stalled).toMatchObject({ type: "object", required: ["status", "since", "thresholdDays"], properties: { status: { enum: ["within", "exceeded", "unknown", "notApplicable"] } } });
+      const validRoot = readFileSync(root, "utf8");
+      writeFileSync(root, validRoot.replace("key: status, osfType: string", "key: level, osfType: string"));
+      expect(compile).toThrow("temporal threshold children");
+      writeFileSync(root, validRoot);
+      writeFileSync(root, readFileSync(root, "utf8").replace("ownerId.limitDays", "ownerId.name"));
+      expect(compile).toThrow("persisted single-valued numeric field");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  it("emits the server-owned board aggregate only when configured", () => {
+    const without = compileFixtures(["rowaccess-owner", "rowaccess-owner-target"]);
+    expect(tableByName(without, "row_access_owners")?.source?.boardAggregate).toBeUndefined();
+    const withBoard = compileAuthoringBackendManifest(FIXTURE_DIR, {
+      mode: "promote", entityAllowlist: ["rowaccess-owner", "rowaccess-owner-target"], schemaByModule: { core: "erp" },
+      onCandidate: ({ contract }) => {
+        if (contract.entity.name !== "RowAccessOwner") return;
+        contract.interfaces = { ...contract.interfaces, web: { operations: { list: true }, collectionBoard: { groupBy: "ownerId", aggregate: { sum: "amount", currency: "currency" }, card: { title: "title" } } } };
+      },
+    });
+    expect(tableByName(withBoard, "row_access_owners")?.source?.boardAggregate).toEqual({ groupBy: "ownerId", sum: "amount", currency: "currency" });
+  });
   it("owner entity (empty:public) → userColumns + nullVisibleColumns", () => {
     const manifest = compileFixtures(["rowaccess-owner", "rowaccess-owner-target"]);
     const table = tableByName(manifest, "row_access_owners");

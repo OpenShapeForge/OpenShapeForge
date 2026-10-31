@@ -164,7 +164,8 @@ export function buildFieldSchemaGroups(
         nl: "Gebruik voor afgeleide waarden. Het veld wordt dan doorgaans read-only.",
         en: "Use for derived values. The field is then typically read-only.",
       },
-      fields: showFullContractControls ? ["schemaComputedExpression", "schemaComputedDependencies"] : [],
+      fields: showFullContractControls && !(field.computed && "kind" in field.computed)
+        ? ["schemaComputedExpression", "schemaComputedDependencies"] : [],
       section: {
         collapsible: true,
         optional: {

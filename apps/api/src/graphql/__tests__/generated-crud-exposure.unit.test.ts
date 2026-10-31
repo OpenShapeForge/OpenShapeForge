@@ -38,6 +38,12 @@ function withOperations(
 }
 
 describe("generated GraphQL CRUD exposure", () => {
+  test("exposes a temporal result as read-only JSON", () => {
+    const table: GeneratedTable = { ...base, source: { ...base.source!, computedFields: [{ field: "stagnation", resolver: "temporalThreshold", trackedField: "status", thresholdDays: "status.limit" }] } };
+    const output = renderTypeDefinition(table);
+    expect(output).toContain("stagnation: JSON");
+    expect(output.match(/stagnation:/g)).toHaveLength(1);
+  });
   test("projects server-issued Operation interactions on the shared offer", () => {
     expect(renderTypeDefinition(base)).toContain("operations: [EntityOperationOffer!");
     expect(generatedEntityTypeDefs).toContain("interaction: EntityOperationInteraction");

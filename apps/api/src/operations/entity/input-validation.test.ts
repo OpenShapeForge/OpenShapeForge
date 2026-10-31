@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
+import { emptyCatalogDatabase } from "../../db/__tests__/empty-catalog-db.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { assertEntityValuesValid } from "./input-validation.js";
 import { entityOperationContract, executeEntityOperation } from "./runtime.js";
@@ -96,10 +97,12 @@ describe("entity write contract validation", () => {
   });
 
   test("executeEntityOperation refuses the REST-shaped create before touching the database", async () => {
-    const result = await executeEntityOperation({} as never, session, {
+    const statements: string[] = [];
+    const result = await executeEntityOperation(emptyCatalogDatabase(statements), session, {
       operation: { id: "Task.create", intent: "create" },
       input: { values: { title: "Call back", type: "follow_up", status: "banana", estimatedMinutes: 42.5 } },
     });
+    expect(statements.some(statement => /(?:from|into|update|delete\s+from)\s+"?erp"?\./i.test(statement))).toBe(false);
     expect(result).toEqual({
       intent: "create",
       error: expect.objectContaining({

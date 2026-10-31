@@ -187,6 +187,10 @@ describe("worker-role RLS axis", () => {
           await sql`update platform.tenants set keycloak_realm = 'host', keycloak_organization_id = ${organization}
             where id = ${tenant}::uuid`.execute(db);
         }
+        // Manage Notebook in only tenant A. A worker must learn only that
+        // managed name, never the policy rows or the other tenant's state.
+        await sql`insert into erp.authorization_operation_policies (tenant_id, operation_id, entity_type, managed)
+          values (${fixture.tenantA}::uuid, 'Notebook.deliver', 'Notebook', true)`.execute(db);
         return fixture;
       });
       const issuer = "https://identity.example.test/realms/host";
@@ -237,6 +241,23 @@ describe("worker-role RLS axis", () => {
             .rejects.toThrow(/permission denied for (table|schema)/);
           await expect(sql`select 1 from erp.relations limit 1`.execute(db))
             .rejects.toThrow(/permission denied for (table|schema)/);
+          await expect(sql`select 1 from erp.authorization_operation_policies limit 1`.execute(db))
+            .rejects.toThrow(/permission denied for (table|schema)/);
+          // The current worker-granted tables are platform-owned and have no
+          // authored-entity guard. If an authored table gains worker access,
+          // add a direct managed-row denial test in addition to this projection.
+          for (const [tenantId, managed] of [[fixture.tenantA, true], [fixture.tenantB, false]] as const) {
+            await withDbSession(db, { tenantId, userId: subject, roles: [], scope: "self" }, async trx => {
+              const result = await sql<{managed: boolean; allowed: boolean; exposed: boolean}>`
+                select app.authorization_entity_managed('Notebook') as managed,
+                  app.authorization_allows('Notebook', '{}'::jsonb) as allowed,
+                  (current_setting('app.authorization_rules')::jsonb->'states' <> '{}'::jsonb) as exposed`.execute(trx);
+              expect(result.rows[0]).toEqual({ managed, allowed: !managed, exposed: false });
+              const locks = await sql<{ held: boolean }>`select exists(select 1 from pg_locks
+                where pid=pg_backend_pid() and locktype='advisory' and mode='ShareLock') as held`.execute(trx);
+              expect(locks.rows[0]?.held).toBe(managed);
+            });
+          }
 
           await withDbSession(db, { tenantId: fixture.tenantA, userId: subject, roles: [], scope: "self" }, async (trx) => {
             for (const [tenant, realm, expected] of [
@@ -640,8 +661,17 @@ describe("worker-role RLS axis", () => {
               order by 1
             `.execute(conn);
 
-            // The whole list, enumerated: core's job queue (docs/jobs.md).
-            expect(policies.rows.map((row) => row.qualified)).toEqual(["platform.jobs"]);
+            // The whole list, enumerated: core's job queue (docs/jobs.md) and
+            // the inbound delivery receipts the same `job-worker` resolves
+            // durable dispatch work from (docs/inbound-deliveries.md). Both are
+            // queue bookkeeping the worker claims across tenants. The one
+            // piece of third-party content a receipt carries is encrypted with
+            // AAD bound to its own tenant, endpoint and receipt, so the role's
+            // cross-tenant read still opens nothing but the row it claimed —
+            // and `platform.inbound_endpoints`, which holds the provider
+            // secret, is deliberately NOT on this axis.
+            expect(policies.rows.map((row) => row.qualified))
+              .toEqual(["platform.inbound_deliveries", "platform.jobs"]);
             // USING and WITH CHECK move together, so a claim can also write back
             // — and neither may name the GUC without the connected role beside
             // it, which is the property #223 added.
@@ -674,8 +704,8 @@ describe("worker-role RLS axis", () => {
             // The other policies are untouched. Spot-checked on the business
             // tables the old blanket bypass exposed. An INSERT-only policy
             // (the tenant registry's) has no USING, only WITH CHECK.
-            const untouched = await sql<{ qual: string; permissive: string; roles: string[]; cmd: string; policyname: string; check_expr: string | null }>`
-              select coalesce(qual, with_check, '') as qual, permissive, roles, cmd, policyname, with_check as check_expr
+            const untouched = await sql<{ tablename: string; qual: string; permissive: string; roles: string[]; cmd: string; policyname: string; check_expr: string | null }>`
+              select tablename, coalesce(qual, with_check, '') as qual, permissive, roles, cmd, policyname, with_check as check_expr
               from pg_policies
               where schemaname = 'erp'
             `.execute(conn);
@@ -686,7 +716,25 @@ describe("worker-role RLS axis", () => {
             for (const row of untouched.rows) {
               expect(row.qual).not.toContain("current_worker_role");
               expect(row.roles).not.toContain(WORKER_ROLE);
-              if (row.roles.length === 1 && row.roles[0] === resolver) {
+              if (row.roles.length === 1 && row.roles[0] === databaseRole("identityResolver").name && row.policyname === "authorization_group_subject_lookup") {
+                expect(row.permissive).toBe("PERMISSIVE");
+                expect(row.cmd).toBe("SELECT");
+                expect(row.qual).toMatch(/^\(tenant_id = app\.current_tenant\(\)\)$/);
+                expect(row.check_expr).toBeNull();
+              } else if (row.roles.length === 1 && row.roles[0] === databaseRole("identityResolver").name && row.policyname === "authorization_worker_managed_lookup") {
+                expect(row.permissive).toBe("RESTRICTIVE");
+                expect(row.cmd).toBe("SELECT");
+                expect(row.qual).toMatch(/^\(tenant_id = app\.current_tenant\(\)\)$/);
+                expect(row.check_expr).toBeNull();
+              } else if (row.policyname === "authorization_profile_scope" && row.tablename === "relation_groups") {
+                expect(row.permissive).toBe("RESTRICTIVE");
+                expect(row.qual).toContain(`CURRENT_USER = '${databaseRole("identityResolver").name}'`);
+                expect(row.qual).toContain("Organization.Security.Manage");
+                expect(row.qual).toContain("app.bypass_rls()");
+                expect(row.qual).toContain("app.authorization_entity_managed");
+                expect(row.qual).toContain("app.authorization_allows");
+                expect(row.check_expr).toBe(row.qual);
+              } else if (row.roles.length === 1 && row.roles[0] === resolver) {
                 expect(row.policyname).toMatch(/_record_action_(read|lock|fence|delete_fence)$/);
                 expect(row.qual).not.toContain("bypass_rls");
                 if (row.permissive === "PERMISSIVE") {

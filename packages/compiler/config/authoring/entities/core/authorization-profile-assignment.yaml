@@ -1,0 +1,256 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: AuthorizationProfileAssignment
+title: Authorization profile assignment
+description: Authorization profile assignment managed by an authorized security manager within the
+  application ceiling.
+language: en
+labels:
+  en: Assignment
+  nl: Toekenning
+pluralLabels: &a1
+  en: Assignments
+  nl: Toekenningen
+domains:
+  - organization
+authorization:
+  roles:
+    read:
+      - Organization.Security.Manage
+    create:
+      - Organization.Security.Manage
+    update:
+      - Organization.Security.Manage
+    delete:
+      - Organization.Security.Manage
+  rowAccess:
+    enabled: true
+    empty: public
+displayTemplate: "{{name}}"
+filterField: name
+fields:
+  - key: name
+    osfType: string
+    required: true
+    label:
+      en: Description
+      nl: Omschrijving
+    persisted:
+      column: name
+      storageClass: core
+  - key: profileVersion
+    osfType: AuthorizationProfileVersion
+    required: false
+    label:
+      en: Profile version
+      nl: Profielversie
+    persisted:
+      column: profile_version
+      storageClass: core
+    relationship:
+      ownership: reference
+      inverse:
+        key: assignments
+        label: *a1
+        ownership: reference
+  - key: operationId
+    osfType: string
+    required: false
+    label:
+      en: Operation scope
+      nl: Operation-beperking
+    persisted:
+      column: operation_id
+      storageClass: core
+    options:
+      type: dynamic
+      source: collection.options
+      parameters:
+        entity: AuthorizationProfileAssignment
+        field: operationId
+        catalog: operations
+    description:
+      en: Required for a direct grant. With a profile version, limits the assignment to this Operation.
+      nl: Verplicht voor een directe toekenning. Met een profielversie beperkt dit de toekenning tot deze
+        Operation.
+  - key: subjectKind
+    osfType: string
+    required: true
+    label:
+      en: Audience type
+      nl: Type doelgroep
+    persisted:
+      column: subject_kind
+      storageClass: core
+    options:
+      type: static
+      items:
+        - value: user
+          label:
+            en: User
+            nl: Gebruiker
+        - value: group
+          label:
+            en: Group
+            nl: Groep
+        - value: role
+          label:
+            en: Role
+            nl: Rol
+  - key: subjectKey
+    osfType: string
+    required: true
+    label:
+      en: Audience
+      nl: Doelgroep
+    persisted:
+      column: subject_key
+      storageClass: core
+    options:
+      type: dynamic
+      source: collection.options
+      parameters:
+        entity: AuthorizationProfileAssignment
+        field: subjectKey
+        catalog: subjects
+      bindings:
+        referenceEntity: subjectKind
+  - key: active
+    osfType: boolean
+    required: true
+    label:
+      en: Active
+      nl: Actief
+    persisted:
+      column: active
+      storageClass: core
+    defaultValue: true
+operations:
+  list:
+    name: list Authorization profile assignment
+    description: list a tenant-owned authorization profile assignment.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: get Authorization profile assignment
+    description: get a tenant-owned authorization profile assignment.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: create Authorization profile assignment
+    description: create a tenant-owned authorization profile assignment.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: update Authorization profile assignment
+    description: update a tenant-owned authorization profile assignment.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    concurrency:
+      version:
+        mode: required
+        field: updatedAt
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic
+  web:
+    views:
+      collection:
+        route: /authorization-profile-assignments
+        title: *a1
+        columns:
+          - key: name
+            sortable: true
+          - key: subjectKind
+            sortable: true
+          - key: subjectKey
+          - key: operationId
+          - key: active
+            sortable: true
+      record:
+        routes:
+          read: /authorization-profile-assignments/:id
+          create: /authorization-profile-assignments/new
+        title: "{{name}}"
+        layout:
+          preset: main-context
+          context:
+            fields:
+              - subjectKind
+              - active
+            relationships:
+              - profileVersion
+          tabs:
+            - id: details
+              label:
+                en: Details
+                nl: Details
+              groups: &a2
+                - title:
+                    en: Assignment
+                    nl: Toekenning
+                  fields:
+                    - name
+                    - profileVersion
+                    - active
+                - title:
+                    en: Audience
+                    nl: Doelgroep
+                  fields:
+                    - subjectKind
+                    - subjectKey
+                - title:
+                    en: Operation scope
+                    nl: Operation-beperking
+                  fields:
+                    - operationId
+        modes:
+          create:
+            title:
+              en: Create assignment
+              nl: Toekenning aanmaken
+            groups: *a2
+          update:
+            title:
+              en: Edit assignment
+              nl: Toekenning bewerken
+            groups: *a2

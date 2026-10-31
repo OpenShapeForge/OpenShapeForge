@@ -9,6 +9,7 @@ import { fieldBindingsColumn, resolveBoundEntityRows } from "./field-bindings.js
 import { fieldBindingMap, operationErrorOf } from "@openshapeforge/operations";
 import { fieldNameForColumn } from "./columns.js";
 import type { GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
+import { resolveTemporalThresholdRows } from "./temporal-threshold-resolver.js";
 
 export type LabelRuleRow = {
   id: string;
@@ -140,7 +141,9 @@ export async function resolveComputedEntityRows(
 ): Promise<GeneratedEntityRow[]> {
   const labelFields = table.source?.computedFields
     ?.filter(({ resolver }) => resolver === "labelRules") ?? [];
-  if (labelFields.length === 0 || rows.length === 0) return rows;
+  if (rows.length === 0) return rows;
+  rows = await resolveTemporalThresholdRows(trx, session, table, rows);
+  if (labelFields.length === 0) return rows;
   const entityType = table.source?.authoringEntityName;
   if (!entityType) return rows;
   const rules = await activeLabelRules(trx, session, entityType);

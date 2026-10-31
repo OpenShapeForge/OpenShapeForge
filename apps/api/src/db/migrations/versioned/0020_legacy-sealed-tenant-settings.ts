@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: BUSL-1.1
+import { sql, type Kysely } from "kysely";
+import { decryptSecret, encryptSecret, keyringFromEnv, type StoredSecret, SECRET_ALGORITHM } from "@openshapeforge/plugin-runtime/secrets";
+import type { VersionedMigration } from "../versioned-runner.js";
+
+/** Compatibility implementation for pending 0018: its original source remains
+ * immutable, while this separately checksummed file extends it to the legacy
+ * browser-client {sealed} contract. Its registry up is intentionally a no-op:
+ * the wrapper runs and ledgers this file atomically with 0018.
+ *
+ * Carry the released scalar/plain JSON contract forward without guessing at
+ * inactive values or an untyped array's element contract. Unsupported legacy
+ * rows stop the transaction before any data is removed. A fresh build already
+ * has the target shape and records this migration as its baseline.
+ *
+ * ACCESS EXCLUSIVE protects the temporary RLS change: no concurrent reader or
+ * writer can access the table until its original RLS flags are restored and
+ * the migration transaction commits. Disabling RLS also requires table owner
+ * authority; a restricted runtime connection cannot run this transformation.
+ */
+export async function upgradeLegacySealedTenantSettings(db: Kysely<any>): Promise<void> {
+  const table=await sql<{present:boolean}>`select to_regclass('erp.tenant_settings') is not null as present`.execute(db);
+  if (!table.rows[0]?.present) return;
+  await sql`lock table erp.tenant_settings in access exclusive mode`.execute(db);
+  const columns=await sql<{name:string}>`select attname as name from pg_attribute where attrelid=to_regclass('erp.tenant_settings') and attnum>0 and not attisdropped`.execute(db);
+  if(!columns.rows.some(c=>c.name==='value_type'))return;
+  if(columns.rows.some(c=>['definition','value'].includes(c.name)))throw Error('Tenant settings have an ambiguous partial upgrade; no values were changed.');
+  const flags=await sql<{enabled:boolean;forced:boolean}>`select relrowsecurity as enabled,relforcerowsecurity as forced from pg_class where oid='erp.tenant_settings'::regclass`.execute(db);
+  await sql`alter table erp.tenant_settings disable row level security`.execute(db);
+  const rows=await sql<{id:string;tenant_id:string;namespace:string;key:string;value_type:string;value_text:string|null;value_json:unknown;is_secret:boolean}>`select id::text,tenant_id::text,namespace,key,value_type,value_text,value_json,is_secret from erp.tenant_settings`.execute(db);
+  const prepared=rows.rows.map(row=>{
+    let value: unknown = row.value_type==='string'?row.value_text:row.value_json;
+    if (row.value_type==='string' && row.is_secret && row.value_text===null && row.value_json!==null) {
+      const wrapped=row.value_json;
+      if (!wrapped || typeof wrapped!=='object' || Array.isArray(wrapped) || Object.keys(wrapped).length!==1 || !('sealed' in wrapped)) throw Error('Invalid legacy sealed tenant setting.');
+      const sealed=(wrapped as {sealed:unknown}).sealed;
+      if (!sealed || typeof sealed!=='object' || Array.isArray(sealed) || !('ciphertext' in sealed) || !('keyId' in sealed) || !('algorithm' in sealed) || typeof sealed.ciphertext!=='string' || typeof sealed.keyId!=='string' || typeof sealed.algorithm!=='string') throw Error('Invalid legacy sealed tenant setting.');
+      const keys=keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
+      if (!keys) throw Error('Configure secure value storage before migrating confidential tenant settings.');
+      if (sealed.algorithm !== SECRET_ALGORITHM) throw Error('Unsupported legacy tenant secret encryption algorithm.');
+      if (!keys.keys.has(sealed.keyId)) throw Error('A legacy tenant secret encryption key is unavailable.');
+      try { value=decryptSecret(keys,JSON.stringify(['tenant-setting',row.tenant_id,row.namespace,row.key]),'value',sealed as StoredSecret); }
+      catch { throw Error('Could not authenticate legacy sealed tenant setting.'); }
+    } else if(!['string','json'].includes(row.value_type)||(row.value_type==='string'?row.value_json!==null:row.value_text!==null))throw Error('Tenant settings contain unsupported or inactive legacy values; classify these before migrating.');
+    const type=value===null?'object':typeof value;
+    if(row.value_type==='json'&&(Array.isArray(value)||!['object','string','number','boolean'].includes(type)))throw Error('An untyped JSON array needs an explicit field definition before migrating.');
+    if(row.is_secret&&row.value_type!=='string')throw Error('A confidential JSON setting needs an explicit secret contract before migrating.');
+    const definition={key:'value',osfType:row.value_type==='string'?'string':type,...(row.is_secret?{classification:{sensitivity:'confidential',category:'credentials'}}:{})};
+    let stored=value;
+    if(row.is_secret&&value!==null){
+      const keys=keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
+      if(!keys)throw Error('Configure secure value storage before migrating confidential tenant settings.');
+      stored=encryptSecret(keys,`${row.tenant_id}:erp.tenant_settings:${row.id}`,'value',String(value));
+    }
+    return {id:row.id,definition,stored};
+  });
+  await sql`alter table erp.tenant_settings add column definition jsonb,add column value jsonb`.execute(db);
+  for(const row of prepared)await sql`update erp.tenant_settings set definition=${JSON.stringify(row.definition)}::text::jsonb,value=${row.stored===null?null:JSON.stringify(row.stored)}::text::jsonb where id=${row.id}::uuid`.execute(db);
+  await sql`alter table erp.tenant_settings alter column definition set not null,drop column value_type,drop column value_text,drop column value_json,drop column is_secret`.execute(db);
+  if(flags.rows[0]?.enabled)await sql`alter table erp.tenant_settings enable row level security`.execute(db);
+  if(flags.rows[0]?.forced)await sql`alter table erp.tenant_settings force row level security`.execute(db);
+}
+const migration: VersionedMigration={version:'0020_legacy-sealed-tenant-settings',fileUrl:import.meta.url,up:async()=>{}};
+export default migration;

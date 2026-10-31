@@ -67,7 +67,8 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // excluding `_base.yaml` — a baseEntity, and so unschemad by design — plus
   // the two entities of the notebook example plugin's authoring layer, plus
   // the two the repository's own record-action layer declares an action on.
-  "core-entity.schema.json": 160,
+  // Five authorization profile and operation-policy entities are now included.
+  "core-entity.schema.json": 165,
   // The platform's own administration (operations/control.yaml): the 23
   // control-realm Operations behind /api/control/v1 and the control MCP —
   // and the operator side of capability grants (operations/grants.yaml),

@@ -1,0 +1,212 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: AuthorizationOperationPolicy
+title: Operation security settings
+description: Operation security settings managed by an authorized security
+  manager within the application ceiling.
+language: en
+labels:
+  en: Operation security settings
+  nl: Operation security settings
+pluralLabels:
+  en: Operation security settings records
+  nl: Operation security settings records
+domains:
+  - organization
+authorization:
+  roles:
+    read:
+      - Organization.Security.Manage
+    create:
+      - Organization.Security.Manage
+    update:
+      - Organization.Security.Manage
+    delete:
+      - Organization.Security.Manage
+  rowAccess:
+    enabled: true
+    empty: public
+displayTemplate: "{{operationId}}"
+filterField: operationId
+fields:
+  - key: operationId
+    osfType: string
+    required: true
+    label:
+      en: operationId
+      nl: operationId
+    persisted:
+      column: operation_id
+      storageClass: core
+    options:
+      type: dynamic
+      source: collection.options
+      parameters:
+        entity: AuthorizationOperationPolicy
+        field: operationId
+        catalog: operations
+      bindings:
+        referenceEntity: entityType
+    immutable: true
+  - key: entityType
+    osfType: entityTypeName
+    required: true
+    label:
+      en: entityType
+      nl: entityType
+    persisted:
+      column: entity_type
+      storageClass: core
+    immutable: true
+  - key: managed
+    osfType: boolean
+    required: true
+    label:
+      en: managed
+      nl: managed
+    persisted:
+      column: managed
+      storageClass: core
+    defaultValue: false
+  - key: listFields
+    osfType: string
+    required: false
+    label:
+      en: listFields
+      nl: listFields
+    persisted:
+      column: list_fields
+      storageClass: core
+    cardinality: collection
+    options:
+      type: dynamic
+      source: collection.options
+      parameters:
+        entity: AuthorizationOperationPolicy
+        field: listFields
+        catalog: fields
+      bindings:
+        referenceEntity: entityType
+operations:
+  list:
+    name: list Operation security settings
+    description: list a tenant-owned operation security settings.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: get Operation security settings
+    description: get a tenant-owned operation security settings.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: create Operation security settings
+    description: create a tenant-owned operation security settings.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: update Operation security settings
+    description: update a tenant-owned operation security settings.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    concurrency:
+      version:
+        mode: required
+        field: updatedAt
+    confirmation:
+      mode: acknowledgement
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic
+  web:
+    views:
+      collection:
+        route: /authorization-operation-policies
+        title:
+          en: Operation security settings
+          nl: Operation security settings
+        columns:
+          - key: operationId
+          - key: entityType
+          - key: managed
+      record:
+        routes:
+          read: /authorization-operation-policies/:id
+          create: /authorization-operation-policies/new
+        title: "{{operationId}}"
+        layout:
+          tabs:
+            - id: details
+              label:
+                en: Details
+                nl: Details
+              groups:
+                - title:
+                    en: Operation security settings
+                    nl: Operation security settings
+                  fields: &a1
+                    - operationId
+                    - entityType
+                    - managed
+                    - listFields
+        modes:
+          create:
+            title:
+              en: Create
+              nl: Toevoegen
+            groups:
+              - title:
+                  en: Operation security settings
+                  nl: Operation security settings
+                fields: *a1
+          update:
+            title:
+              en: Edit
+              nl: Bewerken
+            groups:
+              - title:
+                  en: Operation security settings
+                  nl: Operation security settings
+                fields: *a1
+indexes:
+  - name: authorization_operation_policy_operation_uidx
+    fields:
+      - tenantId
+      - operationId
+    unique: true

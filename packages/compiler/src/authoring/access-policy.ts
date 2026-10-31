@@ -29,3 +29,27 @@ export function buildAccessPolicy(configs: readonly AuthorizationConfigFile[], r
   }
   return policy;
 }
+
+/** A database projection of the compiled application contract, never editable tenant content. */
+export function buildAuthorizationOperationInventory(
+  catalog: import('../plugins.js').StaticOperationCatalog,
+  manifest: import('../schema.js').PlatformSchemaManifest,
+  policy: { permissions: readonly string[] },
+) {
+  const rows = catalog.operations.flatMap(operation => {
+    const entity = 'entityName' in operation ? operation.entityName : operation.target?.entityName;
+    if (!entity) return [];
+    const roles = 'authorization' in operation ? operation.authorization.roles : operation.auth.mode === 'session' ? operation.auth.roles ?? [] : [];
+    const table = [...manifest.tables, ...(manifest.entitySubtypes ?? [])].find(table => table.source?.authoringEntityName === entity);
+    if (!table) return [{ id: operation.id, entity, roles, grantable: false, fields: {} as Record<string,{column:string;type:string;display:boolean}> }];
+    const displayFields = new Set([...(table.source?.displayTemplate ?? '').matchAll(/{{\s*([\w]+)\s*}}/g)].map(match => match[1]));
+    const fields = Object.fromEntries(table.columns.flatMap(column =>
+      !column.classification && !column.fieldPolicy && !column.document &&
+      ['text','uuid','boolean','integer'].includes(column.type)
+        ? [[column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_,char:string)=>char.toUpperCase()), { column: column.name, type: column.type, display: displayFields.has(column.sourceField ?? column.name.replace(/_([a-z0-9])/g, (_,char:string)=>char.toUpperCase())) }]] : []));
+    const grantable = !entity.startsWith('Authorization') && !roles.includes('Organization.Security.Manage') &&
+      (roles.some(role => policy.permissions.includes(role)) || ('auth' in operation && operation.auth.mode === 'session' && Boolean(operation.auth.recordAction)));
+    return [{ id: operation.id, entity, roles, grantable, fields }];
+  });
+  return rows.sort((a,b)=>a.id.localeCompare(b.id));
+}

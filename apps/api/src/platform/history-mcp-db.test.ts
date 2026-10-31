@@ -38,6 +38,8 @@ const tables = [table("ProbeBudget", "budgets", ["name"], [{ name: "lines", targ
 
 tables[3]!.retention = { clock: { column: "name" }, rules: [{ id: "probe", action: "delete", duration: { maximum: { days: 1 } } }] };
 tables[2]!.realtime = { readPredicate: "true", visibilityColumns: ["private_note"] };
+tables[2]!.source!.computedFields = [{ field: "age", resolver: "temporalThreshold", trackedField: "amount", thresholdDays: "amount.limit" }];
+tables[2]!.source!.graphql!.relationships!.push({ name: "amount", fieldKey: "amount", target: "TrackedTarget", type: "TrackedTarget", kind: "belongsTo", resolve: "belongsTo", foreignKey: "amount" });
 
 test("AuditEvent YAML reads: uniform transactional registration, structured filters, raw details, composed timelines and tenant isolation", async () => {
   const name = `history_test_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -66,6 +68,14 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
       await expect(withInvocationSavepoint(tx, () => withAuditContext("ProbeValue.refused", "trusted-context", () => withDbSession(runtime.db, session(tenant), nested => sql`select 1/0`.execute(nested))))).rejects.toThrow();
       await sql`insert into audit_probe.contacts values(${contact}::uuid,${tenant}::uuid,'Contact','classified-never-store')`.execute(tx);
     }));
+    const trackedSince = async () => (await sql<{ since_at: string }>`select since_at::text as since_at from platform.field_value_since where tenant_id=${tenant}::uuid and entity_type='ProbeValue' and record_id=${value} and field_key='amount'`.execute(privileged.db)).rows[0]?.since_at;
+    const originalSince = await trackedSince();
+    expect(originalSince).toBeDefined();
+    await withAuditContext("ProbeValue.noop", "trusted-context", () => withDbSession(runtime.db, session(tenant), async tx => {
+      await sql`update audit_probe.amounts set amount=amount where id=${value}::uuid`.execute(tx);
+    }));
+    expect(await trackedSince()).toEqual(originalSince);
+    await expect(withDbSession(runtime.db, session(tenant), tx => sql`update platform.field_value_since set since_at=now() where tenant_id=${tenant}::uuid`.execute(tx))).rejects.toThrow();
     const plan = await privileged.db.transaction().execute(async tx => {
       await sql`set local enable_seqscan=off`.execute(tx);
       return sql`explain select id from platform.entity_events where platform.audit_event_subjects(payload,aggregate_type,aggregate_id) @> ${jsonbLiteral([{ entityType: "ProbeBudget", recordId: budget }])}`.execute(tx);
@@ -74,10 +84,13 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
     await withAuditContext("ProbeBudget.adjust", "control-bearer", () => withDbSession(runtime.db, session(tenant), async tx => {
       await sql`update audit_probe.amounts set amount='120',private_note='changed-never-store' where id=${value}::uuid`.execute(tx);
     }));
+    const changedSince = await trackedSince();
+    expect(changedSince).not.toEqual(originalSince);
     // Rollback must discard both the state change and its audit event.
     await expect(withAuditContext("ProbeBudget.rollback", "trusted-context", () => withDbSession(runtime.db, session(tenant), async tx => {
       await sql`update audit_probe.amounts set amount='999' where id=${value}::uuid`.execute(tx); throw new Error("rollback");
     }))).rejects.toThrow("rollback");
+    expect(await trackedSince()).toEqual(changedSince);
     await withAuditContext("ProbeBudget.move", "control-bearer", () => withDbSession(runtime.db, session(tenant), async tx => {
       await sql`update audit_probe.lines set budget_id=${movedBudget}::uuid where id=${line}::uuid`.execute(tx);
     }));
@@ -206,6 +219,39 @@ test("AuditEvent YAML reads: uniform transactional registration, structured filt
     await sql.raw('alter table audit_probe.amounts enable trigger audit_business_row').execute(privileged.db);
     await sql.raw("drop trigger audit_business_row on audit_probe.amounts; create trigger audit_business_row after insert or update or delete on audit_probe.amounts for each row execute function platform.audit_business_row('{}')").execute(privileged.db);
     expect(await auditHistoryReady(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } })).toBe(false);
+    await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
+    const resumedLine = crypto.randomUUID(), resumedValue = crypto.randomUUID();
+    await withDbSession(runtime.db, session(tenant), async tx => {
+      await sql`insert into audit_probe.lines values(${resumedLine}::uuid,${tenant}::uuid,${budget}::uuid,'Resumed')`.execute(tx);
+      await sql`insert into audit_probe.amounts values(${resumedValue}::uuid,${tenant}::uuid,${resumedLine}::uuid,'100',null,null)`.execute(tx);
+    });
+    const resumedSince = async () => (await sql`select since_at from platform.field_value_since where tenant_id=${tenant}::uuid and record_id=${resumedValue} and field_key='amount'`.execute(privileged.db)).rows[0];
+    const firstResumedSince = await resumedSince();
+    expect(firstResumedSince).toBeDefined();
+    await withDbSession(runtime.db, session(tenant), tx => sql`update audit_probe.amounts set private_note='unrelated' where id=${resumedValue}::uuid`.execute(tx));
+    expect(await resumedSince()).toEqual(firstResumedSince);
+    await sql.raw('alter table audit_probe.amounts disable trigger track_field_value_since').execute(privileged.db);
+    expect(await auditHistoryReady(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } })).toBe(false);
+    await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
+    expect(await resumedSince()).toBeUndefined(); // the disabled interval has unknown coverage
+    await withDbSession(runtime.db, session(tenant), tx => sql`update audit_probe.amounts set amount='130' where id=${resumedValue}::uuid`.execute(tx));
+    const beforeReapply = await resumedSince();
+    expect(beforeReapply).toBeDefined();
+    await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
+    expect(await resumedSince()).toEqual(beforeReapply);
+    tables[2]!.source!.graphql!.relationships!.find(item => item.name === "amount")!.target = "TrackedTargetV2";
+    await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
+    expect(await resumedSince()).toBeUndefined(); // a relationship to another entity is a new tracked meaning
+    await sql`insert into platform.field_value_since(tenant_id,entity_type,record_id,field_key,since_at) values
+      (${tenant}::uuid,'ProbeValue','rename-old','amount',now()),
+      (${otherTenant}::uuid,'ProbeValue','rename-old-other','amount',now()),
+      (${tenant}::uuid,'RenamedProbeValue','rename-new','amount',now()),
+      (${tenant}::uuid,'OtherProbe','rename-unrelated','amount',now())`.execute(privileged.db);
+    tables[2]!.source!.authoringEntityName = 'RenamedProbeValue';
+    await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
+    const renamedRows = await sql<{ entity_type: string }>`select entity_type from platform.field_value_since where record_id like 'rename-%'`.execute(privileged.db);
+    expect(renamedRows.rows.map(row => row.entity_type)).toEqual(['OtherProbe']);
+    tables[2]!.source!.authoringEntityName = 'ProbeValue';
     await applyAuditHistory(privileged.db, tables, { ProbeBudget: { include: ["lines"] }, ProbeLine: { include: ["values"] } });
     const stored = await sql<{ payload: unknown }>`select payload from platform.entity_events`.execute(privileged.db);
     expect(JSON.stringify(stored.rows)).not.toMatch(/classified-never-store|changed-never-store|must-not-store/);

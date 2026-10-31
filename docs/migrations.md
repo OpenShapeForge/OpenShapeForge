@@ -105,9 +105,23 @@ migrate role, which on a managed instance has neither `SUPERUSER` nor
 roles the generated schema depends on in `apps/api/src/generated/db/manifest.json`
 under `databaseRoles` — the runtime login role, the worker login role and the
 `nologin` definer roles that own the cross-tenant blueprint read function, the
-identity-registry point lookups and the record-action lookup — and step 0
+pre-session registry point lookups and the record-action lookup — and step 0
 verifies them, failing *before any schema exists* with the exact administrator
 statements that satisfy the contract.
+
+`openshapeforge_identity_resolver` owns the point lookups that have to answer
+*before* a tenant session exists. Its generated `purpose` names the identity
+registry, which is where it began; the current inventory is
+`app.tenant_for_keycloak_organization`, `app.tenant_for_scoped_service`,
+`app.identity_subject` and — added with the authenticated inbound path
+([inbound-deliveries.md](inbound-deliveries.md)) —
+`app.inbound_endpoint_tenant` and `app.inbound_endpoint_active`. Each is a
+point lookup bounded by column-level `SELECT` and a read policy written to this
+role: for inbound that is `(id, tenant_id, status)` of
+`platform.inbound_endpoints`, so the sealed provider secret on that row is
+outside the definer's reach rather than merely unselected by its body. The
+worker connection holds `EXECUTE` on the liveness lookup only, applied after
+the role sweeps that grant `EXECUTE` on every function in `app`.
 
 A definer role exists so one function can read what its caller may not, and
 owns nothing else. `openshapeforge_record_action_resolver` is the narrowest of
@@ -589,6 +603,11 @@ file under `apps/api/src/db/migrations/versioned/` and registers it in
   file; editing an applied file fails every later run. List a previous hash in
   `supersededChecksums` only for an edit that cannot have changed what the
   migration did (a licence header, a comment), and say which commit caused it.
+  The pending `0018_typed-tenant-settings` exception runs the `0020` legacy
+  sealed-value compatibility implementation and records both file checksums
+  atomically. Existing databases that already recorded 0018 skip the wrapper;
+  0020 is then a no-op ledger entry. This preserves the historical 0018 hash
+  while making the additional transformation independently identifiable.
 - **Atomic** — each `up()` runs in its own `BEGIN`/`COMMIT` with its ledger
   row and is rolled back as a unit on failure.
 - **Tested** — a migration ships with a test that builds a database, puts it

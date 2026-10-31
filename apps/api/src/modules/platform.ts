@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Core-owned services made available to reviewed runtime modules. */
+import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
+import { inheritAuthorizationProfileAccess } from '../auth/authorization-profile-decision.js';
+import { resolveAuthorizationProfileAccess } from "../auth/authorization-profile-session.js";
 import { withRuntimeSpan } from "@openshapeforge/observability";
 import { isControlSession } from "../control/control-session.js";
 import { systemSessionForAdministrator } from "../control/platform-admin.js";
@@ -62,6 +65,8 @@ import { runtimeSettings } from "./settings.js";
 import { RecordAccessRuntime } from "./record-access.js";
 import { PrincipalRuntime } from "./principals.js";
 import { createWebhookSecretServices } from "./webhook-secrets.js";
+import { createInboundEndpointServices } from "./inbound-endpoints.js";
+import { inboundEndpointWriter, findInboundConnectionEndpoint, findInboundRegistration, insertInboundEndpointIfAbsent, revokeInboundConnectionEndpoint } from "./inbound-store.js";
 import { ReadProgressRuntime, type ReadProgressDefinition } from "./read-progress.js";
 import type { RuntimeReadProgress } from "@openshapeforge/plugin-runtime";
 import {
@@ -333,6 +338,7 @@ export function createModuleSessionCapability(
       return link ? deepFreezeClone(link) : link;
     },
   });
+  inheritAuthorizationProfileAccess(session,capability);
   return Object.freeze(capability) as unknown as TrustedSessionContext;
 }
 
@@ -473,6 +479,47 @@ export class ModulePlatformRuntime {
         runVerified: (session, work) => {
           if (activeOperationSessionStorage.getStore()) throw new Error("Signed webhook admission requires its own verified invocation.");
           return this.withActiveOperationSession(session, work);
+        },
+      }),
+      // Authenticated inbound provider deliveries. Registration only: the
+      // admission path is the host's own route, so nothing here can be handed
+      // bytes and asked whether they are genuine.
+      inboundEndpoints: createInboundEndpointServices({
+        acceptsSession: (session) => this.#acceptsScopedSession(session),
+        serviceIdentity: (tenantId) => organizationServiceIdentities().find((entry) => entry.tenantId === tenantId)?.clientId,
+        // The dispatch target is resolved through the caller's OWN catalog
+        // authorization, so nobody can bind a webhook to an Operation they
+        // could not invoke themselves and have the service identity run it.
+        resolveOperation: (session, operationId) => this.#getOperation(session, operationId),
+        store: inboundEndpointWriter(db),
+        managed: {
+          activeTransaction: (session) => this.#operationTransactionStorage.getStore()?.session === session,
+          connection: (session, connectionId) => {
+            const active = this.#operationTransactionStorage.getStore();
+            if (!active || active.session !== session) throw new Error("An active Operation transaction is required.");
+            return resolveConnectionValues({ db: this.#db, session, selector: { connectionId },
+              transaction: active.trx, skipTokenRefresh: true });
+          },
+          find: (session, key) => {
+            const active = this.#operationTransactionStorage.getStore();
+            if (!active || active.session !== session) throw new Error("An active Operation transaction is required.");
+            return findInboundRegistration(active.trx, key);
+          },
+          findConnection: (session, input) => {
+            const active = this.#operationTransactionStorage.getStore();
+            if (!active || active.session !== session) throw new Error("An active Operation transaction is required.");
+            return findInboundConnectionEndpoint(active.trx, input);
+          },
+          insert: (session, input) => {
+            const active = this.#operationTransactionStorage.getStore();
+            if (!active || active.session !== session) throw new Error("An active Operation transaction is required.");
+            return insertInboundEndpointIfAbsent(active.trx, input);
+          },
+          revoke: (session, input) => {
+            const active = this.#operationTransactionStorage.getStore();
+            if (!active || active.session !== session) throw new Error("An active Operation transaction is required.");
+            return revokeInboundConnectionEndpoint(active.trx, input);
+          },
         },
       }),
       records: records.services,
@@ -769,9 +816,10 @@ export class ModulePlatformRuntime {
     // so only the static Operations — whose own authorization says whether a
     // control session may use them — are on offer.
     const controlSession = isControlRealmSession(session);
+    if (!controlSession) await resolveAuthorizationProfileAccess(session, this.#db);
     const heldRoles = new Set(session.roles);
     const entityOperations = controlSession ? [] : getEntityOperationContracts().filter((operation) =>
-      operation.authorization.roles.some((role) => heldRoles.has(role)) &&
+      (authorizationProfileDecision(session, operation.id, operation.entityName) ?? operation.authorization.roles.some((role) => heldRoles.has(role))) &&
       // The entity's principal-class policy, so an Operation this session
       // could not invoke is not listed as if it could. The derived
       // application search enumerates exactly this list before it reads
@@ -893,6 +941,7 @@ export class ModulePlatformRuntime {
       throw new Error("Module Operation lookup requires a live verified session.");
     }
     const controlSession = isControlRealmSession(session);
+    if (!controlSession) await resolveAuthorizationProfileAccess(session, this.#db);
     const entityContract = (id: string) => {
       const entityOperation = getEntityOperationContracts().find(
         (candidate) => candidate.id === id,
@@ -900,7 +949,7 @@ export class ModulePlatformRuntime {
       if (!entityOperation) return undefined;
       if (controlSession) return null;
       const heldRoles = new Set(session.roles);
-      return entityOperation.authorization.roles.some((role) => heldRoles.has(role))
+      return (authorizationProfileDecision(session, entityOperation.id, entityOperation.entityName) ?? entityOperation.authorization.roles.some((role) => heldRoles.has(role))) && entityOperationAdmitsPrincipal(entityOperation, session)
         ? entityOperation
         : null;
     };

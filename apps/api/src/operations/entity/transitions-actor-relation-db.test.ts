@@ -213,15 +213,10 @@ describe("actor: relation stamps under a trusted-context session", () => {
     } finally {
       process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = ISSUER;
     }
-    // A tenant or user that is no uuid can hold no link and is not refused here.
+    // Session admission must reject malformed tenant identifiers before database use.
     const headers = new Headers();
     applyTrustedContextHeaders(headers, { tenantId: "tenant-a", userId: "dev", roles: ROLES }, { secret: SECRET });
-    delete process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
-    try {
-      expect((await resolveSessionContext(headers, { db: restricted.db })).credential).toBe("trusted-context");
-    } finally {
-      process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = ISSUER;
-    }
+    await expect(resolveSessionContext(headers, { db: restricted.db })).rejects.toMatchObject({ status: 503, code: "AUTHENTICATION_UNAVAILABLE" });
   }, 60_000);
 
   test("a session with no link is refused with FORBIDDEN, and the record stays", async () => {

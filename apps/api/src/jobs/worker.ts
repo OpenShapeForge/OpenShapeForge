@@ -54,6 +54,10 @@ import {
   type SettleJobResult,
 } from "./settle.js";
 import { claimJobs, type ClaimedJob } from "./store.js";
+import {
+  inboundBodyRetention, overdueInboundDeliveryBodies, purgeInboundDeliveryBodies,
+  type InboundBodyRetention, type OverdueInboundBodies,
+} from "./inbound/retention.js";
 
 /**
  * The worker role platform.jobs names in its policy (`workerAccess`). The
@@ -70,6 +74,13 @@ export type JobWorkerOptions = {
   kinds?: readonly string[];
   /** `done` jobs finished longer ago than this are swept; 0 disables the sweep. */
   doneRetentionDays?: number;
+  /**
+   * Bounds on how long a SETTLED inbound delivery keeps its retained payload,
+   * and the age at which an unsettled one is reported overdue. Not disableable,
+   * unlike the job sweep above: the payload is tenant data, and "keep it until
+   * someone notices" is not a lifecycle (jobs/inbound/retention.ts).
+   */
+  inboundBodyRetention?: InboundBodyRetention;
   sweepIntervalMs?: number;
 };
 
@@ -90,6 +101,7 @@ export function readJobWorkerOptions(env: NodeJS.ProcessEnv = process.env): JobW
     pollIntervalMs: Math.max(1, positive(env.OPENSHAPEFORGE_JOBS_POLL_INTERVAL_MS, DEFAULT_POLL_INTERVAL_MS)),
     leaseSeconds: Math.max(1, positive(env.OPENSHAPEFORGE_JOBS_LEASE_SECONDS, DEFAULT_LEASE_SECONDS)),
     doneRetentionDays: positive(env.OPENSHAPEFORGE_JOBS_DONE_RETENTION_DAYS, DEFAULT_DONE_RETENTION_DAYS),
+    inboundBodyRetention: inboundBodyRetention(env),
   };
 }
 
@@ -391,6 +403,21 @@ export async function sweepJobs(db: OpenShapeForgeDatabase, doneRetentionDays: n
   return withJobWorkerSession(db, (trx) => sweepDoneJobs(trx, doneRetentionDays));
 }
 
+/**
+ * Remove retained payloads of settled inbound deliveries past their bounds, and
+ * report the unsettled ones past the same age that were deliberately kept.
+ * Beside `sweepJobs` because it rides the same tick and the same worker
+ * session, and separate from it because it has no "0 disables it" case.
+ */
+export function sweepInboundBodies(
+  db: OpenShapeForgeDatabase, retention: InboundBodyRetention,
+): Promise<{ purged: number; overdue: OverdueInboundBodies }> {
+  return withJobWorkerSession(db, async (trx) => ({
+    purged: await purgeInboundDeliveryBodies(trx, retention),
+    overdue: await overdueInboundDeliveryBodies(trx, retention),
+  }));
+}
+
 export function startJobWorker(
   db: OpenShapeForgeDatabase,
   handlers: JobHandlerRegistry,
@@ -400,6 +427,7 @@ export function startJobWorker(
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const sweepIntervalMs = options.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS;
   const doneRetentionDays = options.doneRetentionDays ?? DEFAULT_DONE_RETENTION_DAYS;
+  const bodyRetention = options.inboundBodyRetention ?? inboundBodyRetention();
   let stopped = false;
   let active = false;
   let lastSweep = 0;
@@ -422,6 +450,31 @@ export function startJobWorker(
         lastSweep = Date.now();
         const swept = await sweepJobs(db, doneRetentionDays);
         if (swept > 0) log.info({ swept, doneRetentionDays }, "Swept done jobs past retention.");
+        // Separate from the job sweep: this one removes tenant payload rather
+        // than finished bookkeeping, so it runs whatever the job retention is
+        // set to and reports what it removed.
+        const bodies = await sweepInboundBodies(db, bodyRetention);
+        if (bodies.purged > 0) {
+          log.info(
+            { purged: bodies.purged, ...bodyRetention },
+            "Removed retained payloads of settled inbound deliveries past retention.",
+          );
+        }
+        // Accepted work that has not settled is kept, however old: the 2xx the
+        // provider got was a durable acceptance and these are the only bytes
+        // left. A log line is the whole of the escalation today — an operator
+        // alert on this count, and admission backpressure so the backlog stops
+        // growing at the edge, are not implemented.
+        if (bodies.overdue.count > 0) {
+          log.warn(
+            {
+              overdue: bodies.overdue.count,
+              oldestReceivedAt: bodies.overdue.oldestReceivedAt?.toISOString(),
+              maxAgeDays: bodyRetention.maxAgeDays,
+            },
+            "Inbound deliveries accepted long ago have still not settled; their payloads are retained and need operator action.",
+          );
+        }
       }
       const result = await processJobBatch(db, handlers, log, options, () => stopped);
       nextDelayMs = result.processed > 0 ? 0 : pollIntervalMs;

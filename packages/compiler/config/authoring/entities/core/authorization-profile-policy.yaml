@@ -1,0 +1,191 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: AuthorizationProfilePolicy
+title: Authorization profile policy
+description: Authorization profile policy managed by an authorized security manager within the
+  application ceiling.
+language: en
+labels:
+  en: Operation policy
+  nl: Operatieregel
+pluralLabels: &a1
+  en: Operation policies
+  nl: Operatieregels
+domains:
+  - organization
+authorization:
+  roles:
+    read:
+      - Organization.Security.Manage
+    create:
+      - Organization.Security.Manage
+    update:
+      - Organization.Security.Manage
+    delete:
+      - Organization.Security.Manage
+  rowAccess:
+    enabled: true
+    empty: public
+displayTemplate: "{{operationId}}"
+filterField: operationId
+fields:
+  - key: operationId
+    osfType: string
+    required: true
+    label:
+      en: Operation
+      nl: Operation
+    persisted:
+      column: operation_id
+      storageClass: core
+    options:
+      type: dynamic
+      source: collection.options
+      parameters:
+        entity: AuthorizationProfilePolicy
+        field: operationId
+        catalog: operations
+  - key: profile
+    osfType: AuthorizationProfile
+    required: true
+    label:
+      en: Profile
+      nl: Profiel
+    persisted:
+      column: profile
+      storageClass: core
+    relationship:
+      inverse:
+        key: policies
+        label:
+          en: Operation policies
+          nl: Operatieregels
+        ownership: owned
+    immutable: true
+  - key: condition
+    osfType: condition
+    required: false
+    label:
+      en: Condition
+      nl: Voorwaarde
+    persisted:
+      column: condition
+      storageClass: core
+operations:
+  list:
+    name: list Authorization profile policy
+    description: list a tenant-owned authorization profile policy.
+    implementation:
+      type: entity
+      action: list
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  get:
+    name: get Authorization profile policy
+    description: get a tenant-owned authorization profile policy.
+    implementation:
+      type: entity
+      action: get
+    effects:
+      data: read
+      external: none
+    reliability:
+      idempotency:
+        mode: natural
+    confirmation:
+      mode: none
+  create:
+    name: create Authorization profile policy
+    description: create a tenant-owned authorization profile policy.
+    implementation:
+      type: entity
+      action: create
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    confirmation:
+      mode: none
+  update:
+    name: update Authorization profile policy
+    description: update a tenant-owned authorization profile policy.
+    implementation:
+      type: entity
+      action: update
+    effects:
+      data: write
+      external: none
+    reliability:
+      idempotency:
+        mode: none
+    concurrency:
+      version:
+        mode: required
+        field: updatedAt
+    confirmation:
+      mode: none
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic
+  web:
+    views:
+      collection:
+        route: /authorization-profile-policys
+        title: *a1
+        columns:
+          - key: operationId
+            sortable: true
+          - key: condition
+      record:
+        routes:
+          read: /authorization-profile-policys/:id
+          create: /authorization-profile-policys/new
+        title: "{{operationId}}"
+        layout:
+          preset: main-context
+          tabs:
+            - id: details
+              label:
+                en: Details
+                nl: Details
+              groups: &a2
+                - title:
+                    en: Operation
+                    nl: Operation
+                  fields:
+                    - profile
+                    - operationId
+                - title:
+                    en: Access condition
+                    nl: Toegangsvoorwaarde
+                  fields:
+                    - condition
+        modes:
+          create:
+            title:
+              en: Add Operation policy
+              nl: Operatieregel toevoegen
+            groups: *a2
+          update:
+            title:
+              en: Edit Operation policy
+              nl: Operatieregel bewerken
+            groups: *a2
+indexes:
+  - name: authorization_profile_policies_tenant_operation_uidx
+    fields:
+      - tenantId
+      - profile
+      - operationId
+    unique: true

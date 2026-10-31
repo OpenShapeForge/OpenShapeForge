@@ -178,6 +178,8 @@ export type WebFieldProjection = {
    * The renderer registry keys on it; `baseType` is its structural base.
    */
   osfType: string;
+  /** Effective unit: presentation props override a field-authored unit. */
+  unit?: string;
   baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
@@ -235,6 +237,7 @@ export type WebTimelinePresentation = {
 };
 
 export type WebCollectionView = {
+  board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: WebValuePath; currency: WebValuePath }; card: { title: WebValuePath[]; timestamp?: WebValuePath; indicator?: string; subtitle?: WebValuePath[]; amount?: { value: WebValuePath; currency: WebValuePath }; body: WebValuePath[] } };
   presentation?: WebTimelinePresentation;
   id: string;
   kind: "collection";
@@ -253,6 +256,15 @@ export type WebCollectionView = {
   displayField: string;
   columns: Array<{ fieldId: string; key: string; label: LocalizedText }>;
   defaultSort?: { key: string; direction: "asc" | "desc" };
+};
+
+/** A typed read path; relationships are traversed before reading the optional terminal field. */
+export type WebValuePath = {
+  path: Array<{ entityId: string; relationshipId: string }>;
+  targetEntityId: string;
+  field?: string;
+  osfType: string;
+  cardinality: "one" | "many";
 };
 
 export type WebRelationshipProjection = {
@@ -498,7 +510,14 @@ export type WebPage = {
   operations: string[];
 };
 
+/** Compiler-owned security metadata; the server independently enforces the ceiling. */
+export type WebAuthorizationOperation = {
+  id:string; entity:string; roles:readonly string[]; grantable:boolean;
+  fields:Readonly<Record<string,{type:string;display?:boolean}>>;
+};
+
 export type WebManifestV1 = {
+  authorizationOperations?: readonly WebAuthorizationOperation[];
   contract: "openshapeforge.web-manifest";
   version: 1;
   locale: "en" | "nl";
@@ -517,6 +536,7 @@ export type WebManifestV1 = {
 };
 
 export type WebManifestOptions = {
+  authorizationOperations?: readonly WebAuthorizationOperation[];
   /** Fail build when visible operation fields or choices lack bilingual UI copy. */
   requireTranslations?: boolean;
   locale?: "en" | "nl";

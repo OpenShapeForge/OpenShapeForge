@@ -105,3 +105,72 @@ export type CompilerExpressionInput =
 // Kept as a structural alias so existing imports keep working; callers should
 // still only construct group/rule shapes where a boolean is expected.
 export type CompilerConditionInput = CompilerExpressionInput;
+
+// ---------------------------------------------------------------------------
+// Authorization-safe condition subset (opt-in)
+// ---------------------------------------------------------------------------
+// The contract above is open-world: an operand that is absent from the payload
+// is an ordinary missing value, so a negative operator reads it as a match —
+// `notIn` and `notEquals` against an operand the payload never carried are
+// `true`. That is the right answer for a workflow gate or a computed field, and
+// the wrong one for a condition that decides access, where an operand nobody
+// could resolve must never read as a grant.
+//
+// These types describe the narrower subset a caller opts into for that use. It
+// is a validation and evaluation contract over the same AST — not an
+// authorization decision, not a permission model, and not a statement about
+// what a caller may see: whoever asks still owns the decision, the operand
+// payload it is asked about, and every other check around it.
+
+export type CompilerAuthorizationSafeOperator =
+  | "equals"
+  | "notEquals"
+  | "greaterThan"
+  | "greaterThanOrEquals"
+  | "lessThan"
+  | "lessThanOrEquals"
+  | "contains"
+  | "notContains"
+  | "startsWith"
+  | "endsWith"
+  | "in"
+  | "notIn";
+
+// Why an expression is refused rather than answered. `unknownOperand` is the
+// evaluation-time case: the expression is well-formed, but an operand did not
+// resolve, so no completion of the missing values is provable.
+export type CompilerAuthorizationSafeRejection =
+  | "unsupportedExpression"
+  | "unsupportedOperator"
+  | "unsupportedOperand"
+  | "complexityExceeded"
+  | "unknownOperand";
+
+// Ceilings and the accepted operand roots. Every field is a ceiling or an
+// allow-list, so omitting one widens nothing beyond the documented default.
+export type CompilerAuthorizationSafeOptions = {
+  // Root segment every `path` operand must start with. Default: actorRelation, resource.
+  operandRoots?: readonly string[];
+  maxNodes?: number;
+  maxDepth?: number;
+  maxPathSegments?: number;
+};
+
+export type CompilerAuthorizationSafeValidation =
+  | { valid: true }
+  | {
+      valid: false;
+      rejection: CompilerAuthorizationSafeRejection;
+      // Names the offending construct and the type of the offending value,
+      // never a payload value: callers log this.
+      detail: string;
+    };
+
+export type CompilerAuthorizationSafeEvaluation =
+  | { outcome: "satisfied" }
+  | { outcome: "notSatisfied" }
+  | {
+      outcome: "rejected";
+      rejection: CompilerAuthorizationSafeRejection;
+      detail: string;
+    };

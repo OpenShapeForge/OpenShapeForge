@@ -75,7 +75,7 @@ export type OperationFieldDefinition = {
   reference?: { kind?: string; group?: string };
   render?: { component?: string; props?: Readonly<Record<string, unknown>> };
   relationship?: OperationFieldRelationship;
-  computed?: { expression?: string };
+  computed?: { expression?: string; kind?: string };
   shape?: readonly OperationFieldDefinition[];
   children?: readonly OperationFieldDefinition[];
   item?: OperationFieldDefinition;
@@ -157,7 +157,7 @@ export type ResolvedOperationField = {
   options?: OperationFieldOptions;
   render?: { component?: string; props?: Readonly<Record<string, unknown>> };
   relationship?: OperationFieldRelationship;
-  computed?: { expression?: string };
+  computed?: { expression?: string; kind?: string };
   /** The catalog-declared value schema of the field's type, when it has one. */
   schema?: OperationJsonSchema;
   children?: readonly ResolvedOperationField[];

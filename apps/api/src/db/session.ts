@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { withRuntimeSpan } from "@openshapeforge/observability";
+import { operationFailure } from "@openshapeforge/operations";
 import { auditContext, runWithAuditContext, type AuditContext } from "../platform/audit-context.js";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { inheritAuthorizationProfileAccess } from "../auth/authorization-profile-decision.js";
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { readStatementTimeoutMs } from "../config/limits.js";
+import { databaseRole } from "./database-roles.js";
 import { actingRelationId, type ActingRelationSource } from "./acting-relation.js";
 import { withReadBarrierDatabase } from "./read-barrier.js";
 import { boundedReadTransaction } from "./bounded-read-transaction.js";
@@ -136,14 +139,55 @@ function resolveAuditSession(input: AuditContext | null | undefined = auditConte
 function auditSessionSettings(audit: AuditContext) {
   return [
     sql`set_config('app.audit_operation', ${audit.operationId}, true)`,
+    sql`set_config('app.audit_read_operations', ${JSON.stringify(audit.readOperations ?? [])}, true)`,
     sql`set_config('app.audit_correlation', ${audit.correlationId}, true)`,
     sql`set_config('app.audit_actor_kind', ${audit.actorKind}, true)`,
   ];
 }
 
+/** Shared policy admission locks use the same transaction-scoped advisory-lock convention as account management. */
+async function applyAuthorizationSession<T>(trx: Transaction<T>): Promise<void> {
+  await sql`do $authorization$ declare rules jsonb; dependencies jsonb; locked boolean; begin
+    if to_regprocedure('app.authorization_rules_for_actor()') is not null then
+      if app.bypass_rls() or app.current_tenant() is null then
+        perform set_config('app.authorization_rules','',true);
+        return;
+      end if;
+      -- Workers may touch only worker-granted tables. They receive a
+      -- tenant-fenced list of managed entities and no grant rules: any access
+      -- to a managed entity is denied, while canonical Operations execute
+      -- separately under the API's verified service identity.
+      if current_user = ${sql.lit(databaseRole("worker").name)} then
+        if to_regprocedure('app.authorization_worker_rules()') is null then
+          raise exception 'Worker authorization projection is not installed';
+        end if;
+        rules := app.authorization_worker_rules();
+        if jsonb_array_length(coalesce(rules->'managedEntities','[]'::jsonb)) > 0 then
+          perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
+          -- A policy may have changed while this worker waited.
+          rules := app.authorization_worker_rules();
+        end if;
+        perform set_config('app.authorization_rules',rules::text,true);
+        return;
+      end if;
+      dependencies:=coalesce(nullif(current_setting('app.audit_read_operations',true),''),'[]')::jsonb;
+      locked:=app.authorization_requires_lock(current_setting('app.audit_operation',true),dependencies);
+      if locked then perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0)); end if;
+      rules := app.authorization_rules_for_actor();
+      if not locked and (rules->'states'->current_setting('app.audit_operation',true)->>'managed'='true' or exists(select 1 from jsonb_array_elements_text(coalesce(nullif(current_setting('app.audit_read_operations',true),''),'[]')::jsonb) dependency where rules->'states'->dependency->>'managed'='true')) then
+        perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
+        -- A withdrawal may have committed while admission waited for its lock.
+        rules := app.authorization_rules_for_actor();
+      end if;
+      perform set_config('app.authorization_rules',rules::text,true);
+    end if;
+  end $authorization$`.execute(trx);
+}
+
 async function applyAuditSession<T>(trx: Transaction<T>, input: AuditContext | null | undefined): Promise<AuditContext> {
   const audit = resolveAuditSession(input);
   await sql`select ${sql.join(auditSessionSettings(audit))}`.execute(trx);
+  await applyAuthorizationSession(trx);
   return audit;
 }
 
@@ -446,7 +490,7 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
   assertUuid(input.tenantId, "tenantId");
   assertUuid(input.userId, "userId");
 
-  return sealSession({
+  const session = sealSession({
     tenantId: input.tenantId,
     userId: input.userId,
     ...verifiedAuditIdentity(input),
@@ -462,6 +506,8 @@ export function createDbSessionContext(input: DbSessionInput): DbSessionContext 
     principalClass: resolvePrincipalClass(input),
     scope: normalizeScope(input.scope),
   });
+  inheritAuthorizationProfileAccess(input, session);
+  return session;
 }
 
 export async function applyDbSession<TDatabase>(
@@ -488,9 +534,11 @@ export async function applyDbSession<TDatabase>(
       ? [sql`set_config('statement_timeout', ${String(statementTimeoutMs)}, true)`]
       : []),
     sql`set_config('app.bypass_rls', 'false', true)`,
+    sql`set_config('app.authorization_rules', '', true)`,
     sql`set_config('app.shared_read_barrier', ${options.sharedReadBarrier ?? ''}, true)`,
     sql`set_config('app.tenant_id', ${session.tenantId}, true)`,
     sql`set_config('app.user_id', ${session.userId}, true)`,
+    sql`set_config('app.audit_actor_subject', '', true)`,
     sql`set_config('app.audit_identity_id', ${session.auditIdentityId??''}, true)`,
     sql`set_config('app.audit_actor_issuer', ${session.auditIssuer??''}, true)`,
     ...auditSessionSettings(audit),
@@ -564,6 +612,7 @@ export async function applyDbSession<TDatabase>(
   if (exact.length > 0) await sql`select set_config('app.user_groups', ${descendants.join(",")}, true),
     set_config('app.user_groups_exact', ${exact.join(",")}, true),
     set_config('app.user_groups_ancestors', ${ancestors.join(",")}, true)`.execute(trx);
+  await applyAuthorizationSession(trx);
   return audit;
 }
 
@@ -638,7 +687,7 @@ export async function withDbSession<TDatabase, TResult>(
     if (!options.independent) {
       const audit = auditContext() ?? active.audit;
       const trx = active.trx as Transaction<TDatabase>;
-      if (audit?.operationId === active.audit?.operationId && audit?.correlationId === active.audit?.correlationId && audit?.actorKind === active.audit?.actorKind) return callback(trx, active.session);
+      if (audit?.operationId === active.audit?.operationId && audit?.correlationId === active.audit?.correlationId && audit?.actorKind === active.audit?.actorKind && JSON.stringify(audit?.readOperations ?? []) === JSON.stringify(active.audit?.readOperations ?? [])) return callback(trx, active.session);
       await applyAuditSession(trx, audit);
       try {
         const result = await activeDbSession.run({ ...active, audit }, () => callback(trx, active.session));
@@ -654,27 +703,68 @@ export async function withDbSession<TDatabase, TResult>(
   const hooks = { afterCommit: [] as DbSessionAfterCommitHook[] };
 
   const result = await withRuntimeSpan("database.session", () => dbSessionHooks.run(hooks, () => withReadBarrierDatabase(db, session.tenantId, (database, barrier) => {
-    const transaction = options.isolationLevel
-      ? database.transaction().setIsolationLevel(options.isolationLevel)
-      : database.transaction();
-    return transaction.execute(async (original) => {
-      const execute = async (trx: Transaction<TDatabase>) => {
-      const audit = await applyDbSession(trx, session, barrier ? {
-        statementTimeoutMs: Math.min(readStatementTimeoutMs() || barrier.budgetMs, barrier.budgetMs),
-        sharedReadBarrier: barrier.marker,
-      } : {});
-      return runWithAuditContext(audit, () => activeDbSession.run(
-        {
-          db: db as Kysely<unknown>,
-          trx: trx as Transaction<unknown>,
-          session,
-          audit,
-        },
-        () => callback(trx, session),
-      ));
+    let transactionBudgetMs = barrier?.budgetMs;
+    const runTransaction = (connection: Kysely<TDatabase>) => {
+      const transaction = options.isolationLevel
+        ? connection.transaction().setIsolationLevel(options.isolationLevel)
+        : connection.transaction();
+      return transaction.execute(async (original) => {
+        const execute = async (trx: Transaction<TDatabase>) => {
+          const audit = await applyDbSession(trx, session, barrier ? {
+            statementTimeoutMs: Math.min(readStatementTimeoutMs() || transactionBudgetMs!, transactionBudgetMs!),
+            sharedReadBarrier: barrier.marker,
+          } : {});
+          return runWithAuditContext(audit, () => activeDbSession.run(
+            { db: db as Kysely<unknown>, trx: trx as Transaction<unknown>, session, audit },
+            () => callback(trx, session),
+          ));
+        };
+        return barrier ? boundedReadTransaction(original, transactionBudgetMs!, barrier.isActive, barrier.retain, execute) : execute(original);
+      });
+    };
+    if (!options.isolationLevel) return runTransaction(database);
+    // Stable snapshots must start after any in-flight policy writer commits.
+    // The lock is held on the same backend before the transaction begins.
+    const locked = async (connection: Kysely<TDatabase>) => {
+      const timeoutMs = Math.min(readStatementTimeoutMs() || 30_000, barrier?.budgetMs ?? Number.MAX_SAFE_INTEGER);
+      const startedAt = Date.now();
+      const deadline = startedAt + timeoutMs;
+      const discard = async (error: unknown) => {
+        barrier?.invalidate(error);
+        await sql`select pg_terminate_backend(pg_backend_pid())`.execute(connection).catch(() => {});
       };
-      return barrier ? boundedReadTransaction(original, barrier.budgetMs, barrier.isActive, barrier.retain, execute) : execute(original);
-    });
+      for (;;) {
+        if (barrier && !barrier.isActive()) throw new Error("Shared read metadata transaction has expired.");
+        let attempt;
+        try { attempt = await sql<{ acquired: boolean }>`select pg_try_advisory_lock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0)) as acquired`.execute(connection); }
+        catch (error) { await discard(error); throw error; }
+        if (attempt.rows[0]?.acquired) break;
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) throw operationFailure({ code: "DATABASE_BUSY", message: "Authorization admission timed out.", retryable: true });
+        await new Promise(resolve => setTimeout(resolve, Math.min(25, remaining)));
+      }
+      let failure: unknown;
+      try {
+        if (barrier) {
+          transactionBudgetMs = barrier.budgetMs - (Date.now() - startedAt);
+          if (transactionBudgetMs <= 0) throw operationFailure({ code: "DATABASE_BUSY", message: "Authorization admission timed out.", retryable: true });
+        }
+        return await runTransaction(connection);
+      }
+      catch (error) { failure = error; throw error; }
+      finally {
+        try {
+          const result = await sql<{ unlocked: boolean }>`select pg_advisory_unlock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0)) as unlocked`.execute(connection);
+          if (!result.rows[0]?.unlocked) throw new Error("Authorization admission lock was lost.");
+        } catch (error) {
+          // A pooled backend with uncertain session-lock ownership is unsafe.
+          await discard(error);
+          if (failure !== undefined) throw new AggregateError([failure, error], "Database work and authorization lock release both failed.");
+          throw error;
+        }
+      }
+    };
+    return barrier ? locked(database) : database.connection().execute(locked);
   })));
 
   for (const hook of hooks.afterCommit) {
@@ -760,6 +850,7 @@ export async function withCredentialResolutionSession<TDatabase, TResult>(
       );
     }
     await sql`select set_config('app.tenant_id', ${tenantId}, true)`.execute(trx);
+    await sql`select set_config('app.bypass_rls', 'false', true)`.execute(trx);
     // Deliberately no app.user_id, no app.roles, no app.scope, no
     // app.principal_class and no
     // app.app_principal_id: nothing this callback reads is user-, role- or
@@ -778,7 +869,7 @@ export type SystemSessionInput = {
    * Keycloak. Audit rows record this.
    */
   actorSubject: string;
-  /** Optional internal UUID actor for SQL policies; audit keeps actorSubject. */
+  /** Internal UUID used for SQL policies and tenant-visible audit; bypass audit retains actorSubject. */
   databaseActorId?: string;
   /**
    * Roles the actor presents. Must include SYSTEM_BYPASS_ROLE or
@@ -797,6 +888,15 @@ export type SystemSessionInput = {
    */
   tenantId?: string | null;
 };
+
+/** SQL policies accept UUIDs only; bypass audit retains the original subject independently. */
+export function systemDatabaseActorId(input: Pick<SystemSessionInput, "actorSubject" | "databaseActorId">): string {
+  if (input.databaseActorId !== undefined) {
+    assertUuid(input.databaseActorId, "databaseActorId");
+    return input.databaseActorId;
+  }
+  return UUID_PATTERN.test(input.actorSubject) ? input.actorSubject : "";
+}
 
 export type SystemSessionAuditContext = {
   /** The row written for this invocation; useful when an audit read must omit itself. */
@@ -833,8 +933,7 @@ export async function withSystemSession<TDatabase, TResult>(
   if (!input.reason || input.reason.trim().length === 0) {
     throw new Error("withSystemSession requires a non-empty reason for audit logging.");
   }
-  if (input.databaseActorId !== undefined)
-    assertUuid(input.databaseActorId, "databaseActorId");
+  const databaseActorId = systemDatabaseActorId(input);
 
   // A per-invocation audit id. Keying start/end on this uuid (the table PK)
   // instead of (actor_subject, started_at) keeps two concurrent same-actor
@@ -852,11 +951,11 @@ export async function withSystemSession<TDatabase, TResult>(
         assertUuid(input.tenantId, "tenantId");
         await sql`select set_config('app.tenant_id', ${input.tenantId}, true)`.execute(trx);
       }
-      await sql`select set_config('app.user_id', ${input.databaseActorId ?? input.actorSubject}, true)`.execute(trx);
-      const audit = auditContext();
-      const appliedAudit = await applyAuditSession(trx, audit ? { ...audit, actorKind: "system" } : null);
+      await sql`select set_config('app.user_id', ${databaseActorId}, true), set_config('app.audit_actor_subject', ${input.databaseActorId ?? input.actorSubject}, true)`.execute(trx);
       await sql`select set_config('app.roles', ${input.roles.join(",")}, true)`.execute(trx);
       await sql`select set_config('app.bypass_rls', 'true', true), set_config('app.shared_read_barrier', '', true)`.execute(trx);
+      const audit = auditContext();
+      const appliedAudit = await applyAuditSession(trx, audit ? { ...audit, actorKind: "system" } : null);
 
       await sql`
         insert into platform.system_bypass_audit

@@ -191,6 +191,14 @@ function findExplicitHiddenReference(value: unknown, hidden: ReadonlySet<string>
   if (!isPlainObject(value)) return undefined;
   for (const [key, child] of Object.entries(value)) {
     const childPath = `${path}.${key}`;
+    if (key === "board" && isPlainObject(child)) {
+      const card = isPlainObject(child.card) ? child.card : {};
+      const amount = isPlainObject(card.amount) ? card.amount : {};
+      const aggregate = isPlainObject(child.aggregate) ? child.aggregate : {};
+      const paths = [child.groupBy, ...(Array.isArray(card.title) ? card.title : [card.title]), ...(Array.isArray(card.subtitle) ? card.subtitle : []), ...(Array.isArray(card.body) ? card.body : []), card.timestamp, card.indicator, amount.value, amount.currency, aggregate.sum, aggregate.currency];
+      const leaked = paths.find(item => typeof item === "string" && hidden.has(item.split(".")[0]!));
+      if (leaked) return `${childPath} (${String(leaked)})`;
+    }
     if (REFERENCE_LIST_KEYS.has(key) && Array.isArray(child)) {
       for (const item of child) {
         const name = typeof item === "string" ? item : isPlainObject(item) ? (item.key ?? item.name ?? item.relationship) : undefined;
@@ -285,6 +293,28 @@ function pruneInheritedInterfaces(interfaces: Record<string, unknown>, hidden: R
       const collection = { ...views.collection };
       if (Array.isArray(collection.columns)) collection.columns = collection.columns.filter((column) => { const key = fieldEntryKey(column); return key === undefined || !hidden.has(key); });
       if (isPlainObject(collection.defaultSort) && typeof collection.defaultSort.key === "string" && hidden.has(collection.defaultSort.key)) delete collection.defaultSort;
+      if (isPlainObject(collection.board)) {
+        const board = collection.board;
+        const card = isPlainObject(board.card) ? board.card : {};
+        const hiddenPath = (value: unknown) => typeof value === "string" && hidden.has(value.split(".")[0]!);
+        const visibleTitle = Array.isArray(card.title) ? card.title.filter(value => !hiddenPath(value)) : hiddenPath(card.title) ? [] : [card.title];
+        if (hiddenPath(board.groupBy) || !visibleTitle.length) delete collection.board;
+        else {
+          const nextCard: Record<string, unknown> = { ...card, ...(Array.isArray(card.body) ? { body: card.body.filter(path => !hiddenPath(path)) } : {}) };
+          nextCard.title = Array.isArray(card.title) ? visibleTitle : visibleTitle[0];
+          if (Array.isArray(card.subtitle)) {
+            const subtitle = card.subtitle.filter(value => !hiddenPath(value));
+            if (subtitle.length) nextCard.subtitle = subtitle;
+            else delete nextCard.subtitle;
+          }
+          if (hiddenPath(card.timestamp)) delete nextCard.timestamp;
+          if (hiddenPath(nextCard.indicator)) delete nextCard.indicator;
+          if (isPlainObject(card.amount) && (hiddenPath(card.amount.value) || hiddenPath(card.amount.currency))) delete nextCard.amount;
+          const nextBoard: Record<string, unknown> = { ...board, card: nextCard };
+          if (isPlainObject(board.aggregate) && (hiddenPath(board.aggregate.sum) || hiddenPath(board.aggregate.currency))) delete nextBoard.aggregate;
+          collection.board = nextBoard;
+        }
+      }
       views.collection = collection;
     }
     if (isPlainObject(views.record)) {

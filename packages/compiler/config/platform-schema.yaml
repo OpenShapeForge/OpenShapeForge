@@ -240,6 +240,25 @@ tables:
       - name: entity_events_tenant_aggregate_sequence_idx
         columns: [tenant_id, aggregate_type, aggregate_id, sequence]
 
+  # Current-value ages are independent of the retention of the audit journal.
+  # Rows are created only by the server's configured temporal-field tracker.
+  - schema: platform
+    name: field_value_since
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: entity_type, type: text, required: true }
+      - { name: record_id, type: text, required: true }
+      - { name: field_key, type: text, required: true }
+      - { name: since_at, type: timestamptz, required: true }
+    indexes:
+      - name: field_value_since_identity_idx
+        columns: [tenant_id, entity_type, record_id, field_key]
+        unique: true
+
   # Central, interface-neutral edit leases for long-running human write modes.
   # A lease is record-wide: one actor editing a Relation blocks every other
   # lease-requiring operation on that same Relation until release or expiry.
@@ -1161,6 +1180,208 @@ tables:
         columns: [status, completed_at]
         where: completed_at IS NOT NULL
 
+  # Authenticated inbound provider deliveries: a registered endpoint, and the
+  # durable receipt of every delivery admitted through it. A plugin owns the
+  # product meaning (which adapter, which provider events, how an administrator
+  # configures a subscription); core owns the credential, the verification and
+  # the receipt, for the same reason platform.api_keys is core — a credential
+  # that resolves a tenant cannot be fenced by the tenant it resolves.
+  #
+  # tenantScoped: FALSE, exactly as platform.api_keys and for the same reason.
+  # `tenant_id` is an OUTPUT of admission, not an input to it: the generated
+  # tenant policy would gate the read that HAS to happen before any tenant is
+  # known. db/migrations/inbound.ts enables and forces row-level security with
+  # the same predicate every other platform.* row gets, and provides
+  # `app.inbound_endpoint_tenant(endpoint_id)` — a point lookup answering ONE
+  # tenant for ONE endpoint id — so admission can open an ordinary
+  # tenant-fenced session for the signature comparison and everything after it.
+  #
+  # The secret is the PROVIDER's shared signing secret, sealed with the same
+  # AES-256-GCM keyring as elicited Connection secrets and bound to
+  # tenant + endpoint, so a ciphertext moved between rows fails to open. There
+  # is no read path for it: rotation is a second registration plus a revocation
+  # of the first, which is also what admits both secrets during a provider's
+  # own cut-over window. `status` is active | revoked; a revoked row stops
+  # admitting the next delivery and withdraws no receipt already taken.
+  #
+  # The signature envelope (header, algorithm, encoding, prefix) is
+  # configuration, never read from a request: a delivery cannot name its own
+  # header or announce that it is unsigned. The admitted algorithms are bounded
+  # by a check constraint, because `createHmac` would otherwise accept every
+  # digest OpenSSL knows.
+  - schema: platform
+    name: inbound_endpoints
+    tenantScoped: false
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      # The provider family, e.g. 'jira-admin'. Public, in the URL, and must
+      # equal the key the delivery was addressed to: it identifies a protocol
+      # and carries no authority.
+      - { name: endpoint_key, type: text, required: true }
+      # Connection binding for registrations made through the managed lifecycle.
+      - { name: connection_id, type: uuid }
+      - { name: connection_secret_field, type: text }
+      - { name: registration_key, type: text }
+      - { name: signature_header, type: text, required: true }
+      - { name: signature_algorithm, type: text, required: true }
+      - { name: signature_encoding, type: text, required: true }
+      - { name: signature_prefix, type: text }
+      # How a delivery's STABLE IDENTITY is derived, and it is always from
+      # material the provider signed: `body-digest` keys on the digest of the
+      # verified bytes, `body-field` on declared paths inside the verified JSON
+      # body (comma-joined in `identity_fields`). No option reads a header —
+      # a header is outside the provider's HMAC, so keying on one would let a
+      # captured body replayed with a fresh id earn a second dispatch and a
+      # burned id suppress a distinct authentic event.
+      - { name: identity_source, type: text, required: true, default: "'body-digest'::text" }
+      - { name: identity_fields, type: text }
+      # Where the provider's event name lives INSIDE the signed body. The only
+      # event name a plugin may route on.
+      - { name: identity_event_type_path, type: text }
+      # Headers retained verbatim beside a receipt so an operator can correlate
+      # it with the provider's console. NOT covered by the signature, therefore
+      # never the delivery key, never routed on, never a tenant. The column
+      # names carry that, because a later reader will not re-derive it.
+      - { name: unsigned_delivery_id_header, type: text }
+      - { name: unsigned_event_type_header, type: text }
+      # This endpoint's ceiling on a delivery body. Bounded above by the host's
+      # own INBOUND_MAX_BODY_BYTES; a registration may only lower it.
+      - { name: max_body_bytes, type: integer, required: true, default: "262144" }
+      - { name: secret_ciphertext, type: text, required: true }
+      - { name: secret_key_id, type: text, required: true }
+      - { name: secret_algorithm, type: text, required: true }
+      # The organization service identity an accepted delivery is dispatched
+      # under, and the canonical Operation it is dispatched to. Recorded here so
+      # the worker never reads a dispatch target out of a payload; naming either
+      # grants nothing, both are re-authorized live at dispatch.
+      - { name: service_identity_id, type: text, required: true }
+      - { name: operation_id, type: text, required: true }
+      - { name: operation_input_field, type: text, required: true }
+      - { name: status, type: text, required: true, default: "'active'::text" }
+      # The verified user who registered this endpoint, under a live tenant
+      # session. Provenance and queue bookkeeping — NOT the authority the
+      # dispatched Operation runs under, which is the service identity above.
+      - { name: created_by, type: uuid, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+      - { name: revoked_at, type: timestamptz }
+      - { name: revoked_reason, type: text }
+    indexes:
+      # The target of inbound_deliveries' tenant-paired reference: a delivery
+      # structurally cannot point at another tenant's endpoint.
+      - name: inbound_endpoints_tenant_id_uidx
+        columns: [tenant_id, id]
+        unique: true
+      - name: inbound_endpoints_registration_key_uidx
+        columns: [tenant_id, registration_key]
+        unique: true
+        where: registration_key IS NOT NULL
+      - name: inbound_endpoints_tenant_key_idx
+        columns: [tenant_id, endpoint_key, status]
+
+  # One row per admitted delivery — the receipt, and the dispatch work's own
+  # bookkeeping. Written in the SAME transaction as the platform.jobs row that
+  # will dispatch it, which is what makes a lost acknowledgement safe: the
+  # provider retries, the unique delivery key matches, and nothing is dispatched
+  # a second time.
+  #
+  # `idempotency_key` is derived by the host from SIGNED material only — the
+  # digest of the verified bytes, or declared paths inside the verified body,
+  # domain-separated so the two can never collide. Never from a header: a
+  # header is outside a provider's HMAC. It is both the duplicate key here and
+  # the key the dispatched Operation is executed under, so a retry at either
+  # level means the same command.
+  #
+  # `body_ciphertext` is the exact verified bytes, sealed — core neither parses
+  # nor interprets a provider payload beyond the declared identity paths, so a
+  # retry dispatches the identical message. Retained rather than hashed-only for
+  # exactly that reason, encrypted because it is tenant data (often personal)
+  # that a database reader must not be able to read, and removed on a bounded
+  # schedule once the delivery has settled.
+  #
+  # workerAccess, the same axis as the queue it rides on: the `job-worker` role
+  # resolves durable work across tenants and pins the Operation contract here
+  # (`jobs/inbound/`), while a tenant session sees only its own rows. The
+  # status machine, the dispatch-state vocabulary and the hash shapes are checks
+  # in db/migrations/inbound.ts.
+  - schema: platform
+    name: inbound_deliveries
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    workerAccess: job-worker
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - name: endpoint_id
+        type: uuid
+        required: true
+        references:
+          schema: platform
+          table: inbound_endpoints
+          column: id
+          onDelete: CASCADE
+          localColumns: [tenant_id, endpoint_id]
+          targetColumns: [tenant_id, id]
+      # Copied from the registration at admission, so the worker resolves work
+      # without reading the credential table at all.
+      - { name: endpoint_key, type: text, required: true }
+      - { name: service_identity_id, type: text, required: true }
+      - { name: operation_id, type: text, required: true }
+      - { name: operation_input_field, type: text, required: true }
+      - { name: idempotency_key, type: text, required: true }
+      # Read from inside the signature, when the registration declared a path.
+      - { name: event_type, type: text }
+      # Read from headers the provider did not sign. Correlation only.
+      - { name: unsigned_provider_delivery_id, type: text }
+      - { name: unsigned_event_type, type: text }
+      - { name: body_sha256, type: text, required: true }
+      - { name: body_bytes, type: integer, required: true }
+      # The verified bytes, SEALED with the same AES-256-GCM keyring as elicited
+      # Connection secrets and bound to tenant + endpoint + this receipt, so a
+      # ciphertext lifted out of this row opens nowhere else. Base64 would have
+      # been storage, not protection: a provider payload is tenant data a
+      # database reader must not be able to read, and some of it is personal.
+      # Nullable because it is REMOVED on a bounded schedule
+      # (jobs/inbound/retention.ts): `body_purged_at` records that, and
+      # `body_sha256` outlives it as the durable evidence of what was accepted.
+      - { name: body_ciphertext, type: text }
+      - { name: body_key_id, type: text }
+      - { name: body_algorithm, type: text }
+      - { name: body_purged_at, type: timestamptz }
+      - { name: received_at, type: timestamptz, required: true, default: now() }
+      # pending | dispatching | delivered | failed | outcome_unknown
+      - { name: status, type: text, required: true, default: "'pending'::text" }
+      # Pinned once, under the exact live claim, before the first dispatch: a
+      # changed Operation contract can never reopen an unsafe retry.
+      - { name: contract_fingerprint, type: text }
+      # The claim attempt that last STARTED a dispatch, and whether it did.
+      # Without these a reclaim could not tell a transient failure from an
+      # uncertain repeat (operations/durable-worker.ts).
+      - { name: dispatch_attempt, type: integer }
+      - { name: dispatch_state, type: text, required: true, default: "'none'::text" }
+      - { name: dispatch_job_id, type: uuid }
+      - { name: last_error, type: jsonb }
+      - { name: completed_at, type: timestamptz }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: inbound_deliveries_key_uidx
+        columns: [tenant_id, endpoint_id, idempotency_key]
+        unique: true
+      - name: inbound_deliveries_endpoint_idx
+        columns: [tenant_id, endpoint_id, received_at]
+      - name: inbound_deliveries_status_idx
+        columns: [status, received_at]
+      # The retention sweep's own index: it only ever looks at rows that still
+      # hold a payload, and there are far fewer of those than receipts.
+      - name: inbound_deliveries_retained_body_idx
+        columns: [received_at]
+        where: body_ciphertext IS NOT NULL
+
   # Durable receipts for canonical keyed Operation execution — the actor-
   # scoped idempotency ledger. The raw key and request are deliberately
   # absent: only namespaced hashes are retained. A caller can only see or
@@ -1246,3 +1467,15 @@ tables:
       - { name: blueprint_tenant_id, type: uuid, required: true }
       - { name: blueprint_id, type: text, required: true }
       - { name: source_version, type: integer, required: true }
+  - schema: platform
+    name: authorization_operation_inventory
+    tenantScoped: false
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: text, primaryKey: true }
+      - { name: entity_name, type: text, required: true }
+      - { name: roles, type: 'text[]', required: true }
+      - { name: grantable, type: boolean, required: true }
+      - { name: fields, type: jsonb, required: true }
+      - { name: checksum, type: text, required: true }

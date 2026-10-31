@@ -8,7 +8,7 @@ import { operationFailure } from "@openshapeforge/operations";
 import { actingRelationId } from "../db/acting-relation.js";
 import { configurationOwnerPatch } from "./configuration-ownership.js";
 import { getEntityOperationContracts, getGeneratedEntity } from "../operations/entity/index.js";
-import { assertEntityValuesValid } from "../operations/entity/input-validation.js";
+import { assertEntityValuesValid, valuesSchemaOf } from "../operations/entity/input-validation.js";
 import { collectElicitedValues } from "./elicitation.js";
 import { mintConfiguration } from "./configuration-handoff.js";
 import { handoffModelValues } from "./configuration-submission.js";
@@ -43,7 +43,7 @@ import {
 } from "./handoff-config.js";
 import { configurationAppResult, configurationHandoffResult } from "./handoff-results.js";
 import { failed } from "./tool-results.js";
-import { ENVELOPE_KEYS, assertSchemaValid, envelopeSchema } from "./tool-schema.js";
+import { withoutEnvelopeKeys, assertSchemaValid, envelopeSchema } from "./tool-schema.js";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
 /**
@@ -94,9 +94,7 @@ export async function crudToolCall(
           ? getEntityOperationContracts().find((operation) => operation.id === match.operationId)
           : undefined;
         if (contract && table) {
-          const modelFields = Object.fromEntries(
-            Object.entries(modelArguments).filter(([key]) => !ENVELOPE_KEYS.has(key)),
-          );
+          const modelFields = withoutEnvelopeKeys(modelArguments);
           assertOperationWrittenFields(
             modelFields,
             table,
@@ -118,7 +116,7 @@ export async function crudToolCall(
       }
       const admission = await executeEntityOperation(db, session, {
         operation: entityOperationRef(table, "create"),
-        input: { values: Object.fromEntries(Object.entries(modelArguments).filter(([key]) => !ENVELOPE_KEYS.has(key))),
+        input: { values: withoutEnvelopeKeys(modelArguments),
           ...(modelArguments.confirmed === true ? { confirmed: true } : {}) },
       });
       if (!("error" in admission) || admission.error.code !== "INTERACTION_REQUIRED") {
@@ -218,8 +216,9 @@ export async function crudToolCall(
           elicit,
           modelValues: handoffModelValues({
             required,
+            accepted: Object.keys(valuesSchemaOf(secureContract)?.properties ?? {}),
             elicit,
-            modelValues: modelArguments,
+            modelValues: withoutEnvelopeKeys(modelArguments),
             sourceRow,
           }),
           definitions,

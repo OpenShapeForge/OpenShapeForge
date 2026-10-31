@@ -2,7 +2,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { SessionCredential } from "../auth/trusted-context.js";
 type ActorKind = "person" | "system" | "integration" | "unknown";
-export type AuditContext = { operationId: string; correlationId: string; actorKind: ActorKind };
+export type AuditContext = { operationId: string; correlationId: string; actorKind: ActorKind; readOperations?: readonly string[] };
 const credentialActors = { none: "system", bearer: "unknown", "api-key": "integration", "trusted-context": "unknown", "control-bearer": "person", grant: "integration" } satisfies Record<SessionCredential, ActorKind>;
 const contexts = new AsyncLocalStorage<AuditContext>();
 export function auditContext(): AuditContext | undefined { return contexts.getStore(); }

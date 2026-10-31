@@ -381,6 +381,8 @@ export type VersioningStorageBinding = {
 };
 
 export type TableSourceDefinition = {
+  /** Server-owned grouped total definition; never supplied by a query caller. */
+  boardAggregate?: { groupBy: string; sum: string; currency: string };
   blueprint?: import("./authoring/types/compiled.js").CompiledBlueprint;
   /** Status state machines the core transition runtime executes for this table. */
   transitions?: import("./authoring/types/compiled.js").CompiledTransitionField[];
@@ -424,10 +426,10 @@ export type TableSourceDefinition = {
    */
   displayTemplate?: string;
   /** Interface-neutral values computed by the operation runtime after reading a row. */
-  computedFields?: Array<{
-    field: string;
-    resolver: "labelRules";
-  }>;
+  computedFields?: Array<
+    | { field: string; resolver: "labelRules" }
+    | { field: string; resolver: "temporalThreshold"; trackedField: string; thresholdDays: string }
+  >;
   graphql?: {
     typeName: string;
     singleQueryName: string;

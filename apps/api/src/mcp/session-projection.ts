@@ -14,6 +14,7 @@
  * ADVERTISE. It deliberately never throws: a tool the caller cannot use is
  * omitted from the listing, not surfaced as an error.
  */
+import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
 import { collectionMutationError } from "../operations/entity/collection-policy.js";
 import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
 import type { DbSessionInput } from "../db/session.js";
@@ -53,7 +54,7 @@ export function sessionMayInvoke(
     table?.source?.authorization?.roles?.[OPERATION_ROLE[operation]];
   if (!required || required.length === 0) return false;
   const granted = new Set(session.roles ?? []);
-  if (!required.some((role) => granted.has(role))) return false;
+  if (!(authorizationProfileDecision(session, `${table.source?.authoringEntityName}.${operation}`, table.source?.authoringEntityName) ?? required.some((role) => granted.has(role)))) return false;
   // The entity's principal-class policy, mirrored from requireEntityOperation
   // for the same reason the role check is: a tool this session could not call
   // belongs out of the listing rather than in it as a later refusal.

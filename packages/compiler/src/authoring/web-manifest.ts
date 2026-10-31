@@ -54,6 +54,7 @@ import type {
   WebRelationshipProjection,
   WebStandaloneOperationRef,
   WebViewMode,
+  WebValuePath,
 } from "@openshapeforge/interface-web";
 export type * from "@openshapeforge/interface-web";
 
@@ -476,6 +477,31 @@ type ProjectableEntity = {
   collection: WebCollectionView;
 };
 
+/** Resolve canonical relationship steps once for every web presentation that uses a path. */
+function compileRelationshipPath(
+  entityName: string,
+  source: ProjectableEntity,
+  all: ReadonlyMap<string, ProjectableEntity>,
+  keys: readonly string[],
+  kind = "context record",
+): { path: Array<{ entityId: string; relationshipId: string }>; target: ProjectableEntity; many: boolean } {
+  if (!keys.length || keys.length > 4) throw new Error(`${entityName}: ${kind} path requires one to four relationships.`);
+  let owner = source;
+  let many = false;
+  const path = keys.map(key => {
+    const relation = owner.contract.model.relationships.find(item => item.key === key);
+    const target = relation && all.get(relation.target);
+    if (!relation || !target || !target.operations[relation.kind === "hasMany" ? "list" : "get"]) {
+      throw new Error(`${entityName}: ${kind} path ${key} requires a canonical readable relationship.`);
+    }
+    const step = { entityId: owner.contract.entity.name, relationshipId: `${owner.contract.entity.name}.${key}` };
+    many ||= relation.kind === "hasMany";
+    owner = target;
+    return step;
+  });
+  return { path, target: owner, many };
+}
+
 function projectableEntities(
   entities: readonly Pick<CompiledEntityInfo, "slug" | "contract">[],
   options: Required<WebManifestOptions>,
@@ -559,10 +585,14 @@ function projectField(
   }
   const optionSource = fieldOptionSource(field);
   const fieldPolicy = compileFieldValuePolicy(field);
+  // Presentation props are applied after the semantic unit by field renderers.
+  // Project the same effective unit for compact renderers and summaries.
+  const unit = typeof presentation?.props?.unit === "string" ? presentation.props.unit : field.unit;
   return {
     id: `${parent}.${field.key}`, key: field.key,
     label: localized(field.label, field.key), description: localized(field.description, ""),
     osfType: field.osfType,
+    ...(unit ? { unit } : {}),
     ...(field.document ? { document: structuredClone(field.document) } : {}),
     baseType: field.baseType,
     cardinality: field.cardinality === "collection" ? "many" : "one",
@@ -865,6 +895,118 @@ function projectEntity(
   // Every single entity reference is an authored field, so its writability and
   // presentation are projected above; relationships add no implicit fields.
   const fields = Object.fromEntries(explicitFields);
+  const authoredBoard = contract.interfaces?.web?.collectionBoard;
+  let board: WebCollectionView["board"];
+  if (authoredBoard) {
+    const group = fields[authoredBoard.groupBy];
+    if (!group || group.cardinality !== "one" || (!group.relationship && !group.optionSource && !group.options?.length)) {
+      throw new Error(`${entityName}: board grouping requires a single relationship or choice field.`);
+    }
+    if (group.relationship && !group.optionSource && !group.options?.length && !all.get(group.relationship.targetEntityId)?.operations.list) {
+      throw new Error(`${entityName}: board grouping requires a readable collection of choices.`);
+    }
+    if (authoredBoard.scopeBy) {
+      const target = group.relationship && all.get(group.relationship.targetEntityId);
+      const scope = target?.contract.model.fields.find(field => field.key === authoredBoard.scopeBy);
+      const providerField = target?.contract.model.relationships.some(item => item.provider && item.fieldKey === authoredBoard.scopeBy);
+      const input = target?.collection.operations.read.input;
+      if (!scope || scope.cardinality === "collection" || scope.baseType !== "string" || scope.computed || providerField
+        || !target?.contract.storage.columns.some(column => column.field === scope.key)
+        || (input?.kind === "collection-query" && !input.filterFields.includes(scope.key))) {
+        throw new Error(`${entityName}: board scope must name a persisted filterable single scalar field on the grouping entity.`);
+      }
+    }
+    if (authoredBoard.groupSummary) {
+      const target = group.relationship && all.get(group.relationship.targetEntityId);
+      if (!group.relationship) {
+        throw new Error(`${entityName}: board group summary requires an entity relationship for grouping.`);
+      }
+      // The header is populated from the same authorized collection that supplies
+      // the lanes; a get-only or unrelated option source cannot provide it.
+      if (!target || target.contract.source || !target.operations.list
+        || (group.optionSource && (group.optionSource.type !== "entity" || group.optionSource.source !== group.relationship.targetEntityId))
+        || (!group.optionSource && group.options?.length)) {
+        throw new Error(`${entityName}: board group summary requires a readable grouping entity collection.`);
+      }
+      const summary = target?.contract.model.fields.find(field => field.key === authoredBoard.groupSummary);
+      const provider = target?.contract.model.relationships.some(item => item.fieldKey === authoredBoard.groupSummary);
+      if (!summary || summary.cardinality === "collection" || summary.baseType === "object" || summary.relationship?.target || provider) {
+        throw new Error(`${entityName}: board group summary must name a scalar field on the grouping entity.`);
+      }
+    }
+    const valuePath = (expression: string): WebValuePath => {
+      const parts = expression.split(".");
+      if (parts.length > 5 || parts.some(part => !part)) throw new Error(`${entityName}: invalid board path ${expression}.`);
+      let owner = source;
+      let many = false;
+      const path: WebValuePath["path"] = [];
+      for (let i = 0; i < parts.length; i++) {
+        const key = parts[i]!;
+        const relation = owner.contract.model.relationships.find(item => item.key === key);
+        if (relation) {
+          if (path.length >= 4) throw new Error(`${entityName}: board path ${expression} requires at most four relationships.`);
+          const resolved = compileRelationshipPath(entityName, owner, all, [key], "board");
+          if (!resolved.target.operations.list) throw new Error(`${entityName}: board path ${expression} requires a readable collection.`);
+          path.push(...resolved.path);
+          many ||= resolved.many;
+          owner = resolved.target;
+          if (i === parts.length - 1) return { path, targetEntityId: owner.contract.entity.name, osfType: owner.contract.entity.name, cardinality: many ? "many" : "one" };
+        } else {
+          const field = owner.contract.model.fields.find(item => item.key === key);
+          const providerField = owner.contract.model.relationships.some(item => item.provider && item.fieldKey === key);
+          if (!field || field.baseType === "object" || field.relationship?.target || providerField || i !== parts.length - 1) throw new Error(`${entityName}: invalid board path ${expression}.`);
+          return { path, targetEntityId: owner.contract.entity.name, field: key, osfType: field.osfType, cardinality: many || field.cardinality === "collection" ? "many" : "one" };
+        }
+      }
+      throw new Error(`${entityName}: invalid board path ${expression}.`);
+    };
+    const title = (Array.isArray(authoredBoard.card.title) ? authoredBoard.card.title : [authoredBoard.card.title]).map(valuePath);
+    if (!title.length) throw new Error(`${entityName}: board card title requires at least one path.`);
+    if (title.some(part => part.cardinality !== "one")) throw new Error(`${entityName}: board card title must be single-valued.`);
+    const timestamp = authoredBoard.card.timestamp && valuePath(authoredBoard.card.timestamp);
+    if (timestamp && (!timestamp.field || timestamp.cardinality !== "one" || all.get(timestamp.targetEntityId)?.contract.model.fields.find(field => field.key === timestamp.field)?.baseType !== "datetime")) {
+      throw new Error(`${entityName}: board card timestamp must be a single datetime field.`);
+    }
+    const indicator = authoredBoard.card.indicator ? contract.model.fields.find(field => field.key === authoredBoard.card.indicator) : undefined;
+    if (authoredBoard.card.indicator && (!indicator?.computed || !("kind" in indicator.computed) || indicator.computed.kind !== "temporalThreshold")) {
+      throw new Error(`${entityName}: board indicator must reference a temporal threshold field.`);
+    }
+    const money = (amountExpression: string, currencyExpression: string, persisted: boolean) => {
+      const amount = valuePath(amountExpression);
+      const currency = valuePath(currencyExpression);
+      const target = all.get(amount.targetEntityId);
+      const amountField = target?.contract.model.fields.find(item => item.key === amount.field);
+      const currencyField = target?.contract.model.fields.find(item => item.key === currency.field);
+      if (!amount.field || !currency.field || amount.cardinality !== "one" || currency.cardinality !== "one"
+        || amount.targetEntityId !== currency.targetEntityId || JSON.stringify(amount.path) !== JSON.stringify(currency.path)
+        || !amountField || !["number", "integer"].includes(amountField.baseType) || currencyField?.baseType !== "string") {
+        throw new Error(`${entityName}: board amount and currency must be single scalar fields on the same record reached by the same path.`);
+      }
+      if (persisted) {
+        const groupColumn = source.contract.storage.columns.find(column => column.field === authoredBoard.groupBy);
+        if (!groupColumn) throw new Error(`${entityName}: board aggregate requires a persisted grouping field.`);
+        let owner = source;
+        for (const step of amount.path) {
+          const relationship = owner.contract.model.relationships.find(item => `${owner.contract.entity.name}.${item.key}` === step.relationshipId);
+          const next = relationship && all.get(relationship.target);
+          if (!relationship || relationship.kind !== "belongsTo" || !relationship.foreignKey || relationship.provider || (relationship.constraints && Object.keys(relationship.constraints).length > 0) || !next || next.contract.source) {
+            throw new Error(`${entityName}: board aggregate requires persisted belongs-to relationships.`);
+          }
+          owner = next;
+        }
+        const stored = (field: typeof amountField) => !field.computed && !field.typedBy && (!field.variables || field.variables === "none") && owner.contract.storage.columns.some(column => column.field === field.key);
+        const amountColumn = owner.contract.storage.columns.find(column => column.field === amountField.key);
+        const currencyColumn = owner.contract.storage.columns.find(column => column.field === currencyField!.key);
+        if (!stored(amountField) || !stored(currencyField!) || !amountColumn || !["numeric", "integer", "bigint"].includes(amountColumn.type) || currencyColumn?.type !== "text") {
+          throw new Error(`${entityName}: board aggregate requires persisted scalar fields and an exact numeric amount.`);
+        }
+      }
+      return { amount, currency };
+    };
+    const cardAmount = authoredBoard.card.amount && money(authoredBoard.card.amount.value, authoredBoard.card.amount.currency, false);
+    const aggregate = authoredBoard.aggregate && money(authoredBoard.aggregate.sum, authoredBoard.aggregate.currency, true);
+    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), ...(authoredBoard.groupSummary ? { groupSummary: authoredBoard.groupSummary } : {}), ...(aggregate ? { aggregate: { sum: aggregate.amount, currency: aggregate.currency } } : {}), card: { title, ...(timestamp ? { timestamp } : {}), ...(indicator ? { indicator: indicator.key } : {}), ...(authoredBoard.card.subtitle ? { subtitle: authoredBoard.card.subtitle.map(valuePath) } : {}), ...(cardAmount ? { amount: { value: cardAmount.amount, currency: cardAmount.currency } } : {}), body: (authoredBoard.card.body ?? []).map(valuePath) } };
+  }
   for (const groups of [authoredCreateGroups, updateGroups]) assertVisibilityFields(entityName, "form group", groups, fields);
 
   let relationships = Object.fromEntries(contract.model.relationships.flatMap((relationship) => {
@@ -997,16 +1139,7 @@ function projectEntity(
   const contextRecords = authoredContext?.records?.map(definition => {
     if (contextRecordKeys.has(definition.key)) throw new Error(`${entityName}: duplicate context record ${definition.key}.`);
     contextRecordKeys.add(definition.key);
-    if (!definition.path.length || definition.path.length > 4) throw new Error(`${entityName}: context record path requires one to four relationships.`);
-    let owner = source;
-    const path = definition.path.map(key => {
-      const relation = owner.contract.model.relationships.find(item => item.key === key);
-      const target = relation && all.get(relation.target);
-      if (!relation || !target || !target.operations[relation.kind === "hasMany" ? "list" : "get"]) throw new Error(`${entityName}: context record path ${key} requires a canonical readable relationship.`);
-      const step = { entityId: owner.contract.entity.name, relationshipId: `${owner.contract.entity.name}.${key}` };
-      owner = target;
-      return step;
-    });
+    const { path, target: owner } = compileRelationshipPath(entityName, source, all, definition.path);
     const displayField = definition.displayField ?? owner.collection.displayField;
     const display = owner.contract.model.fields.find(field => field.key === displayField);
     if (!display || display.baseType !== "string" || display.cardinality === "collection") throw new Error(`${entityName}: context record display field ${displayField} must be a single string.`);
@@ -1218,7 +1351,7 @@ function projectEntity(
       message: "Generic create requires an atomic collection Operation and is currently unsupported.",
     } } } : {}),
     views: {
-      collection: createUnsupported ? { ...source.collection, operations: withoutCreate(source.collection.operations) } : source.collection,
+      collection: { ...source.collection, ...(board ? { board } : {}), ...(createUnsupported ? { operations: withoutCreate(source.collection.operations) } : {}) },
       ...(record ? { record } : {}),
       ...(Object.keys(named).length ? { named } : {}),
     },
@@ -1931,6 +2064,7 @@ export function buildWebManifest(
 ): WebManifestV1 {
   materializeCollectionOperations(entities, referentiedata);
   const resolved: Required<WebManifestOptions> = {
+    authorizationOperations: options.authorizationOperations ?? [],
     requireTranslations: options.requireTranslations ?? false,
     locale: options.locale ?? "en",
     context: options.context ?? "core",
@@ -1994,6 +2128,7 @@ export function buildWebManifest(
   }
   if (missing.length) throw new Error(`Missing required UI translations: ${missing.join(", ")}`);
   return {
+    ...(resolved.authorizationOperations.length ? { authorizationOperations: resolved.authorizationOperations.map(({fields,...operation})=>({...operation,fields:Object.fromEntries(Object.entries(fields).map(([key,{type,display}])=>[key,{type,display:!!display}]))})) } : {}),
     contract: "openshapeforge.web-manifest",
     version: 1,
     locale: resolved.locale,

@@ -648,7 +648,10 @@ What the loader does with it (`authoring/entity-subtype.ts`):
   the subtype's contract and absent from its inputs.
 - **`hidden: true` is contract-level.** The field leaves the subtype's
   `model`, `storage`, GraphQL type, REST/MCP schemas, web fields, columns,
-  groups, context and inherited placements; reads never return it and a write
+  groups, context and inherited placements. In inherited boards, hidden title,
+  subtitle and body parts are removed, as are affected timestamps, indicators,
+  amounts and aggregates. The board is removed if its grouping field or every
+  title part is hidden. Reads never return it and a write
   naming it is refused. The base keeps it. A hidden required column must have
   a server-owned value (the scope, a `defaultValue`, `defaultTemplate`,
   `writtenBy` or derivation), otherwise compilation fails. A hidden field the
@@ -1223,3 +1226,106 @@ existing local overlay without preserving its contents. CI opts into the test
 layer explicitly; `.dockerignore` keeps local overlays out of production
 images. `bun scripts/check-test-fixture-composition.ts production` (or `test`)
 checks the currently generated database, REST, GraphQL, MCP and web artifacts.
+
+### Collection boards
+
+An entity can also define a read-only temporal threshold over a stored
+single-valued relationship. The target entity owns the numeric threshold, so
+administrators can change it without changing authoring configuration:
+
+```yaml
+fields:
+  - key: waitingTooLong
+    osfType: object
+    readOnly: true
+    computed: { kind: temporalThreshold, field: statusId, thresholdDays: statusId.limitDays }
+    children:
+      - { key: status, osfType: string, required: true }
+      - { key: since, osfType: datetime }
+      - { key: thresholdDays, osfType: number }
+```
+
+The typed result has status `within`, `exceeded`, `unknown` or `notApplicable`,
+plus `since` and `thresholdDays`. An empty relationship or threshold is not
+applicable; missing tracking coverage or an unreadable dependency is unknown.
+A read that joins a transaction weaker than repeatable read also returns unknown.
+The evaluator uses elapsed 24-hour intervals and exceeds the threshold only
+after the configured interval. It is evaluated on read and follows the source
+and target field and row permissions. Configuring the field activates
+transactional tracking on the next migration. Existing values remain unknown
+until they actually change; the migration does not invent their start time.
+Changing the tracked column, relationship target, or entity identity resets its
+previously tracked ages to unknown.
+
+In a board card, `indicator: waitingTooLong` selects this field. The indicator
+uses the field's label and appears when the returned status is `exceeded`.
+
+A web collection can declare a board over an existing single-valued choice or
+entity reference. The grouping reference's collection supplies the columns,
+including columns with no records. Cards project existing typed fields and
+relationship paths; a path ending in an entity returns entity instances and a
+path traversing a collection returns multiple values. A card path can traverse
+up to four relationships.
+
+```yaml
+interfaces:
+  web:
+    views:
+      collection:
+        route: /deals
+        columns: [{ key: name }]
+        board:
+          groupBy: salesStageId
+          scopeBy: salesProcessId
+          groupSummary: defaultProbabilityPercent
+          aggregate: { sum: quoteId.amountBase, currency: quoteId.currencyCode }
+          card:
+            title: [relationId, name]
+            subtitle: [dealProducts.productId]
+            amount: { value: quoteId.amountBase, currency: quoteId.currencyCode }
+            timestamp: updatedAt
+```
+
+`scopeBy` is optional and names a persisted, filterable single string or
+reference field on the grouping entity. The board permits a move only when the
+source and destination columns have the same nonempty scope. If either scope
+is unavailable or the current group is unset, it refuses the move. This is a
+board interaction rule; it does not add a domain invariant to the generic
+entity update Operation. Domain-wide restrictions need their own server-side
+contract. Drag starts acquisition of the normal edit lease in parallel; drop is
+optimistic, and a failed lease or update restores the card.
+
+`groupSummary` optionally names a scalar field on the grouping entity. The
+grouping choices must come from that entity's readable collection. Its value
+uses the normal typed field renderer, including its effective unit. A unit in
+presentation props overrides a field-authored unit; the web projection exposes
+the effective unit to compact renderers as well.
+`title` accepts one single-valued path or a nonempty list of single-valued paths,
+displayed together in authored order. A renderer omits empty and unreadable
+parts and supplies an unavailable label if no part is readable; it must never
+substitute an identifier. `subtitle` is an optional list
+of typed paths displayed directly beneath the card title; `body` remains
+available for other card fields.
+
+`amount` pairs a single numeric field with a currency string from the same
+record and relationship path. `timestamp` is a single datetime path. The
+optional `aggregate` uses an exact stored numeric field and currency from that
+same record, reached only via stored, unconstrained belongs-to relationships.
+The list Operation accepts `includeBoardTotals` when configured and returns
+per-group totals as decimal strings, separated by currency. A group whose
+amount, currency or relationship is unavailable, or whose currency is not a
+three-letter uppercase code, is marked unavailable rather than returning a
+partial total. The aggregate uses the list's filter and its authorized rows,
+and is independent of the page size. At most 1,000 group-and-currency pairs
+are accepted; a larger result refuses the entire list request that asked for
+totals. A host can retry the list without totals.
+
+The `groupTargetField` choice marker identifies fields on the selected grouping
+entity. Schema-driven editors that do not yet follow the selected `groupBy`
+show this setting as text; compiler validation remains authoritative.
+
+The runtime resolves relationship steps through authorized canonical list
+Operations in bounded batches. Paths needing provider or association-backed
+reads are reported unavailable by this initial implementation. If a field or
+related instance is not readable, the board does not substitute an identifier
+for its display value. Each card title path must be single-valued.

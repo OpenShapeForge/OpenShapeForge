@@ -34,7 +34,8 @@
  * which reads the Adapter's `egressHosts` again. So a connection's credentials
  * and the hosts it may be used against travel together and cannot be mixed.
  */
-import { sql } from "kysely";
+import { sql, type Transaction } from "kysely";
+import type { DB } from "../generated/db/types.js";
 import manifest from "../generated/db/manifest.json" with { type: "json" };
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -153,6 +154,10 @@ export type ResolveConnectionInput = {
   db: OpenShapeForgeDatabase;
   session: TrustedSessionContext;
   selector: ModuleConnectionSelector;
+  /** Internal use only: read and share-lock the exact row in the active Operation transaction. */
+  transaction?: Transaction<DB>;
+  /** Read stored configuration without refreshing unrelated OAuth tokens. */
+  skipTokenRefresh?: boolean;
   keyring?: SecretKeyring | undefined;
   /** Test seam for the token endpoint an expired OAuth sign-in is renewed at. */
   fetchImpl?: typeof fetch | undefined;
@@ -241,7 +246,10 @@ export async function resolveConnectionValues(
   };
 
   const selector = input.selector;
-  const row = await withDbSession(input.db, input.session, async (trx) => {
+  if (input.transaction && !("connectionId" in selector)) {
+    throw new Error("Transaction-scoped Connection resolution requires an exact Connection id.");
+  }
+  const readRow = async (trx: Transaction<DB>) => {
     // Read under the caller's own session: row-level security decides which
     // rows exist before any of this code sees one.
     const connections = tableRef(execution.connectionTable);
@@ -264,7 +272,7 @@ export async function resolveConnectionValues(
           from ${connections} c
           join ${providers} a on a.id = c.${providerRef}
          where c.id = ${selector.connectionId}::uuid
-         limit 1
+         limit 1 ${input.transaction ? sql`for share of c` : sql``}
       `.execute(trx);
       return result.rows[0];
     }
@@ -283,7 +291,8 @@ export async function resolveConnectionValues(
       result.rows.find((candidate) => candidate.owner === input.session.userId) ??
       result.rows[0]
     );
-  });
+  };
+  const row = input.transaction ? await readRow(input.transaction) : await withDbSession(input.db, input.session, readRow);
 
   if (!row) {
     return refuse(
@@ -333,7 +342,7 @@ export async function resolveConnectionValues(
 
   // An OAuth access token is renewed BEFORE it is handed over, by the same
   // code the HTTP path refreshes with; every other Adapter passes through.
-  const live = await liveConnectionValues({
+  const live = input.skipTokenRefresh ? { ok: true as const, values: (row.values ?? {}) as JsonRecord } : await liveConnectionValues({
     db: input.db,
     session: input.session,
     keyring,

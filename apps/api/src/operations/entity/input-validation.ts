@@ -32,7 +32,7 @@ type ValuesSchema = Record<string, unknown> & {
   required?: string[];
 };
 
-function valuesSchemaOf(operation: EntityOperationContract): ValuesSchema | undefined {
+export function valuesSchemaOf(operation: EntityOperationContract): ValuesSchema | undefined {
   const properties = operation.inputSchema?.properties as Record<string, unknown> | undefined;
   const values = properties?.values;
   if (!values || typeof values !== "object" || Array.isArray(values)) return undefined;

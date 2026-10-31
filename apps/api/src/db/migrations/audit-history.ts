@@ -241,12 +241,12 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
           else observed_subjects=platform.audit_recorded_subjects(cfg,NEW.aggregate_id,NEW.tenant_id); end if;
         end if;
       end if;
-      identity=coalesce(nullif(current_setting('app.audit_identity_id',true),''),nullif(current_setting('app.user_id',true),''));
+      identity=coalesce(nullif(current_setting('app.audit_identity_id',true),''),nullif(current_setting('app.audit_actor_subject',true),''),nullif(current_setting('app.user_id',true),''));
       correlation=coalesce(nullif(current_setting('app.audit_correlation',true),''),pg_current_xact_id()::text);
       NEW.payload=platform.audit_redact(coalesce(NEW.payload,'{}'::jsonb)) || jsonb_build_object('audit',platform.audit_redact(envelope) || jsonb_build_object(
         'version',2,'entityType',entity,
         'actorIdentityId',nullif(current_setting('app.audit_identity_id',true),''),
-        'actorSubject',nullif(current_setting('app.user_id',true),''),'actorIssuer',nullif(current_setting('app.audit_actor_issuer',true),''),
+        'actorSubject',coalesce(nullif(current_setting('app.audit_actor_subject',true),''),nullif(current_setting('app.user_id',true),'')),'actorIssuer',nullif(current_setting('app.audit_actor_issuer',true),''),
         'actorId',identity,'actorKind',coalesce(nullif(current_setting('app.audit_actor_kind',true),''),'system'),
         'operationId',nullif(current_setting('app.audit_operation',true),''),'correlationId',correlation,
         'changedFields',changes,

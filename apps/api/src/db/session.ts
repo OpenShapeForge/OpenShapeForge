@@ -908,11 +908,11 @@ export async function withSystemSession<TDatabase, TResult>(
         assertUuid(input.tenantId, "tenantId");
         await sql`select set_config('app.tenant_id', ${input.tenantId}, true)`.execute(trx);
       }
-      await sql`select set_config('app.user_id', ${databaseActorId}, true)`.execute(trx);
-      const audit = auditContext();
-      const appliedAudit = await applyAuditSession(trx, audit ? { ...audit, actorKind: "system" } : null);
+      await sql`select set_config('app.user_id', ${databaseActorId}, true), set_config('app.audit_actor_subject', ${input.actorSubject}, true)`.execute(trx);
       await sql`select set_config('app.roles', ${input.roles.join(",")}, true)`.execute(trx);
       await sql`select set_config('app.bypass_rls', 'true', true), set_config('app.shared_read_barrier', '', true)`.execute(trx);
+      const audit = auditContext();
+      const appliedAudit = await applyAuditSession(trx, audit ? { ...audit, actorKind: "system" } : null);
 
       await sql`
         insert into platform.system_bypass_audit

@@ -724,9 +724,9 @@ export async function withDbSession<TDatabase, TResult>(
     // Stable snapshots must start after any in-flight policy writer commits.
     // The lock is held on the same backend before the transaction begins.
     const locked = async (connection: Kysely<TDatabase>) => {
-      await sql`select pg_advisory_lock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::text, 0))`.execute(connection);
+      await sql`select pg_advisory_lock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0))`.execute(connection);
       try { return await runTransaction(connection); }
-      finally { await sql`select pg_advisory_unlock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::text, 0))`.execute(connection); }
+      finally { await sql`select pg_advisory_unlock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0))`.execute(connection); }
     };
     return barrier ? locked(database) : database.connection().execute(locked);
   })));

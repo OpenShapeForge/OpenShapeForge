@@ -199,7 +199,7 @@ test('a stable read takes its snapshot after an in-flight policy change', async 
   });
   await writerReady;
   let completed = false;
-  const reader = withDbSession(restricted!.db, session, async trx =>
+  const reader = withDbSession(restricted!.db, { ...session, tenantId: tenant.toUpperCase() }, async trx =>
     (await sql<{value: number}>`select value from public.policy_snapshot_probe`.execute(trx)).rows[0]!.value,
     { isolationLevel: 'repeatable read' }).then(value => { completed = true; return value; });
   try {

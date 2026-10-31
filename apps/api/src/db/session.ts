@@ -846,6 +846,15 @@ export type SystemSessionInput = {
   tenantId?: string | null;
 };
 
+/** SQL policies accept UUIDs only; audit retains the original subject independently. */
+export function systemDatabaseActorId(input: Pick<SystemSessionInput, "actorSubject" | "databaseActorId">): string {
+  if (input.databaseActorId !== undefined) {
+    assertUuid(input.databaseActorId, "databaseActorId");
+    return input.databaseActorId;
+  }
+  return UUID_PATTERN.test(input.actorSubject) ? input.actorSubject : "";
+}
+
 export type SystemSessionAuditContext = {
   /** The row written for this invocation; useful when an audit read must omit itself. */
   auditId: string;
@@ -881,8 +890,7 @@ export async function withSystemSession<TDatabase, TResult>(
   if (!input.reason || input.reason.trim().length === 0) {
     throw new Error("withSystemSession requires a non-empty reason for audit logging.");
   }
-  if (input.databaseActorId !== undefined)
-    assertUuid(input.databaseActorId, "databaseActorId");
+  const databaseActorId = systemDatabaseActorId(input);
 
   // A per-invocation audit id. Keying start/end on this uuid (the table PK)
   // instead of (actor_subject, started_at) keeps two concurrent same-actor
@@ -900,7 +908,7 @@ export async function withSystemSession<TDatabase, TResult>(
         assertUuid(input.tenantId, "tenantId");
         await sql`select set_config('app.tenant_id', ${input.tenantId}, true)`.execute(trx);
       }
-      await sql`select set_config('app.user_id', ${input.databaseActorId ?? input.actorSubject}, true)`.execute(trx);
+      await sql`select set_config('app.user_id', ${databaseActorId}, true)`.execute(trx);
       const audit = auditContext();
       const appliedAudit = await applyAuditSession(trx, audit ? { ...audit, actorKind: "system" } : null);
       await sql`select set_config('app.roles', ${input.roles.join(",")}, true)`.execute(trx);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { createDbSessionContext, withSystemSession, SYSTEM_BYPASS_ROLE } from "./session.js";
+import { createDbSessionContext, withSystemSession, systemDatabaseActorId, SYSTEM_BYPASS_ROLE } from "./session.js";
 
 const tenantId = "11111111-1111-4111-8111-111111111111";
 const userId = "22222222-2222-4222-8222-222222222222";
@@ -35,4 +35,11 @@ describe("RelationGroup database session context", () => {
       })
     ).toThrow("relationGroupId must be a UUID");
   });
+});
+
+
+test("system subjects remain audit subjects without becoming invalid SQL actor ids", () => {
+  expect(systemDatabaseActorId({ actorSubject: "e2e-seed" })).toBe("");
+  expect(systemDatabaseActorId({ actorSubject: userId })).toBe(userId);
+  expect(systemDatabaseActorId({ actorSubject: "service", databaseActorId: userId })).toBe(userId);
 });

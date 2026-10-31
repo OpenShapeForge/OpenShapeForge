@@ -302,7 +302,11 @@ function pruneInheritedInterfaces(interfaces: Record<string, unknown>, hidden: R
         else {
           const nextCard: Record<string, unknown> = { ...card, ...(Array.isArray(card.body) ? { body: card.body.filter(path => !hiddenPath(path)) } : {}) };
           nextCard.title = Array.isArray(card.title) ? visibleTitle : visibleTitle[0];
-          if (Array.isArray(card.subtitle)) nextCard.subtitle = card.subtitle.filter(value => !hiddenPath(value));
+          if (Array.isArray(card.subtitle)) {
+            const subtitle = card.subtitle.filter(value => !hiddenPath(value));
+            if (subtitle.length) nextCard.subtitle = subtitle;
+            else delete nextCard.subtitle;
+          }
           if (hiddenPath(card.timestamp)) delete nextCard.timestamp;
           if (hiddenPath(nextCard.indicator)) delete nextCard.indicator;
           if (isPlainObject(card.amount) && (hiddenPath(card.amount.value) || hiddenPath(card.amount.currency))) delete nextCard.amount;

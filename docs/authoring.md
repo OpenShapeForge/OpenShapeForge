@@ -648,8 +648,10 @@ What the loader does with it (`authoring/entity-subtype.ts`):
   the subtype's contract and absent from its inputs.
 - **`hidden: true` is contract-level.** The field leaves the subtype's
   `model`, `storage`, GraphQL type, REST/MCP schemas, web fields, columns,
-  groups, context and inherited placements; hidden parts are removed from inherited
-  board titles, and the board is removed if no title part remains. Reads never return it and a write
+  groups, context and inherited placements. In inherited boards, hidden title,
+  subtitle and body parts are removed, as are affected timestamps, indicators,
+  amounts and aggregates. The board is removed if its grouping field or every
+  title part is hidden. Reads never return it and a write
   naming it is refused. The base keeps it. A hidden required column must have
   a server-owned value (the scope, a `defaultValue`, `defaultTemplate`,
   `writtenBy` or derivation), otherwise compilation fails. A hidden field the
@@ -1299,8 +1301,9 @@ uses the normal typed field renderer, including its effective unit. A unit in
 presentation props overrides a field-authored unit; the web projection exposes
 the effective unit to compact renderers as well.
 `title` accepts one single-valued path or a nonempty list of single-valued paths,
-displayed together in authored order. An unreadable part must not be replaced
-with an identifier. `subtitle` is an optional list
+displayed together in authored order. A renderer omits empty and unreadable
+parts and supplies an unavailable label if no part is readable; it must never
+substitute an identifier. `subtitle` is an optional list
 of typed paths displayed directly beneath the card title; `body` remains
 available for other card fields.
 

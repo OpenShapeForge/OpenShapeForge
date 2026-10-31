@@ -43,7 +43,7 @@ test("tenant sessions batch setup without retaining pooled tenant, role, relatio
     }));
     // Empty direct groups require no closure reads: clear every group GUC
     // in the initial authority batch instead of another round trip.
-    expect(statements.filter(statement => statement.includes("set_config('app.user_groups'"))).toHaveLength(1);
+    expect(statements.filter(statement => /set_config\('app\.user_groups(?:_exact|_ancestors)?'/.test(statement))).toHaveLength(1);
 
     const second = { tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [], groups: [] };
     await withDbSession(db, second, async trx => {
@@ -77,7 +77,7 @@ test("tenant sessions batch setup without retaining pooled tenant, role, relatio
       expect(result.exact).toBe(child);
       expect(result.ancestors.split(',').sort()).toEqual([parent, child].sort());
     });
-    expect(statements.filter(statement => statement.includes("set_config('app.user_groups'"))).toHaveLength(2);
+    expect(statements.filter(statement => /set_config\('app\.user_groups(?:_exact|_ancestors)?'/.test(statement))).toHaveLength(2);
     expect((await sql<{ tenant: string }>`select current_setting('app.tenant_id', true) as tenant`.execute(db)).rows[0]!.tenant).toBe("");
   } finally {
     await runtime?.close();

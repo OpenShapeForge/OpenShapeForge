@@ -704,8 +704,8 @@ describe("worker-role RLS axis", () => {
             // The other policies are untouched. Spot-checked on the business
             // tables the old blanket bypass exposed. An INSERT-only policy
             // (the tenant registry's) has no USING, only WITH CHECK.
-            const untouched = await sql<{ qual: string; permissive: string; roles: string[]; cmd: string; policyname: string; check_expr: string | null }>`
-              select coalesce(qual, with_check, '') as qual, permissive, roles, cmd, policyname, with_check as check_expr
+            const untouched = await sql<{ tablename: string; qual: string; permissive: string; roles: string[]; cmd: string; policyname: string; check_expr: string | null }>`
+              select tablename, coalesce(qual, with_check, '') as qual, permissive, roles, cmd, policyname, with_check as check_expr
               from pg_policies
               where schemaname = 'erp'
             `.execute(conn);
@@ -717,9 +717,23 @@ describe("worker-role RLS axis", () => {
               expect(row.qual).not.toContain("current_worker_role");
               expect(row.roles).not.toContain(WORKER_ROLE);
               if (row.roles.length === 1 && row.roles[0] === databaseRole("identityResolver").name && row.policyname === "authorization_group_subject_lookup") {
+                expect(row.permissive).toBe("PERMISSIVE");
                 expect(row.cmd).toBe("SELECT");
                 expect(row.qual).toMatch(/^\(tenant_id = app\.current_tenant\(\)\)$/);
                 expect(row.check_expr).toBeNull();
+              } else if (row.roles.length === 1 && row.roles[0] === databaseRole("identityResolver").name && row.policyname === "authorization_worker_managed_lookup") {
+                expect(row.permissive).toBe("RESTRICTIVE");
+                expect(row.cmd).toBe("SELECT");
+                expect(row.qual).toMatch(/^\(tenant_id = app\.current_tenant\(\)\)$/);
+                expect(row.check_expr).toBeNull();
+              } else if (row.policyname === "authorization_profile_scope" && row.tablename === "relation_groups") {
+                expect(row.permissive).toBe("RESTRICTIVE");
+                expect(row.qual).toContain(`CURRENT_USER = '${databaseRole("identityResolver").name}'`);
+                expect(row.qual).toContain("Organization.Security.Manage");
+                expect(row.qual).toContain("app.bypass_rls()");
+                expect(row.qual).toContain("app.authorization_entity_managed");
+                expect(row.qual).toContain("app.authorization_allows");
+                expect(row.check_expr).toBe(row.qual);
               } else if (row.roles.length === 1 && row.roles[0] === resolver) {
                 expect(row.policyname).toMatch(/_record_action_(read|lock|fence|delete_fence)$/);
                 expect(row.qual).not.toContain("bypass_rls");

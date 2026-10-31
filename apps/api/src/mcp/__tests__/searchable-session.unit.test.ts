@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { emptyCatalogDatabase } from "./empty-catalog-db.js";
 import { describe, expect, test } from "bun:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
@@ -24,7 +25,7 @@ function providerDefinition(index: number): RuntimeOperationDefinition {
   };
 }
 async function fixture(count: number, roles: string[], run: (client: Client) => Promise<void>, tenantId = tenant, secure = false) {
-  const db = {} as never;
+  const db = emptyCatalogDatabase();
   const platform = new ModulePlatformRuntime(db);
   const definitions = Array.from({ length: count }, (_, index) => providerDefinition(index));
   if (secure) definitions[0] = { ...definitions[0]!, interaction: { secureInput: { type: "secureInput", sourceEntity: "Adapter", sourceField: "adapterId", definitionsField: "fields", into: "configurationValues" } } } as RuntimeOperationDefinition;

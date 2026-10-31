@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { emptyCatalogDatabase } from "./empty-catalog-db.js";
 /**
  * Listing, osf_describe and the call path share one availability rule
  * (crudToolAvailable). The case that told them apart: a delete of an owned
@@ -14,7 +15,6 @@ import { describe, expect, it } from "bun:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
-import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { getGeneratedCrudTables } from "../../operations/entity/index.js";
 import type { RuntimeModule } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
@@ -87,7 +87,7 @@ function tablesWithRequiredOwnerKey() {
 }
 
 async function withServer<T>(roles: string[], tables: Map<string, unknown>, run: (client: Client) => Promise<T>): Promise<T> {
-  const db = {} as OpenShapeForgeDatabase;
+  const db = emptyCatalogDatabase();
   const platform = new ModulePlatformRuntime(db);
   const server = __buildGeneratedMcpServerForTests({
     db,

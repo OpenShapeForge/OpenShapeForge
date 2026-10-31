@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { emptyCatalogDatabase } from "./empty-catalog-db.js";
 import {expect,test} from "bun:test";
 import {Client,InMemoryTransport} from "@modelcontextprotocol/client";
 import documents from "@openshapeforge/documents/runtime";
 import versioning from "@openshapeforge/versioning/runtime";
 import accounts from "../../accounts/runtime.js";
-import type {OpenShapeForgeDatabase} from "../../db/connection.js";
 import type {RuntimeModule} from "../../modules/contract.js";
 import {ModulePlatformRuntime} from "../../modules/platform.js";
 import {__buildGeneratedMcpServerForTests} from "../generated-mcp-server.js";
@@ -12,7 +12,7 @@ import {READ_PROGRESS_META_KEY as KEY} from "@openshapeforge/plugin-runtime/read
 
 test("generated MCP bridge delivers opt-in read snapshots on the original request only",async()=>{
   for(const optIn of [true,false]){
-    const db={} as OpenShapeForgeDatabase,platform=new ModulePlatformRuntime(db);
+    const db=emptyCatalogDatabase(),platform=new ModulePlatformRuntime(db);
     const server=__buildGeneratedMcpServerForTests({db,modulePlatform:platform,session:{tenantId:"11111111-1111-4111-8111-111111111111",userId:"22222222-2222-4222-8222-222222222222",roles:["General.All.Read"],groups:[],scope:"self",credential:"bearer"},modules:[accounts,documents as unknown as RuntimeModule,versioning as unknown as RuntimeModule,{name:"notebook",operationHandlers:{importNotebook:async()=>({value:undefined}),deliverToNotebook:()=>{throw new Error("This test does not exercise Notebook.deliver.")}}}],operationToolProjection:{mode:"searchable",search:"osf_search_operations",execute:"osf_execute_operation"}});
     let calls=0,release!:()=>void;const wait=new Promise<void>(resolve=>release=resolve),updates:unknown[]=[];
     platform.registerStaticOperations([{
@@ -32,7 +32,7 @@ test("generated MCP bridge delivers opt-in read snapshots on the original reques
 
 test("authored dedicated MCP tools report on the same request without changing their final projection",async()=>{
   for(const optIn of [true,false]){
-    const db={} as OpenShapeForgeDatabase,platform=new ModulePlatformRuntime(db),updates:unknown[]=[];
+    const db=emptyCatalogDatabase(),platform=new ModulePlatformRuntime(db),updates:unknown[]=[];
     let calls=0;
     const fixture={...documents,operationHandlers:{...documents.operationHandlers,materializeTemplate:async(_input:unknown,context:any)=>{
       calls++;

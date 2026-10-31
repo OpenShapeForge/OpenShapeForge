@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { emptyCatalogDatabase } from "./empty-catalog-db.js";
 import { expect, test } from "bun:test";
 import Fastify from "fastify";
 import { Client, InMemoryTransport, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -14,7 +15,7 @@ import { catalogDerivedTools } from "../catalog.js";
 import { moduleTools } from "../../modules/mcp-hooks.js";
 
 function fixture(name = "reports.summary") {
-  const db = {} as never;
+  const db = emptyCatalogDatabase();
   const platform = new ModulePlatformRuntime(db);
   const session = { tenantId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222",
     roles: ["Organization.All.ReadWrite"], groups: [], scope: "self" as const, credential: "trusted-context" as const };

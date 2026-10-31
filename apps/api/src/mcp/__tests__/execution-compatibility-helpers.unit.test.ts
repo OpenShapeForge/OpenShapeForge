@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { emptyCatalogDatabase } from "./empty-catalog-db.js";
 /**
  * The helpers of a derived tool a plugin registers through execution
  * compatibility (connect, dry run) are listed under their public names for
@@ -13,7 +14,6 @@ import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
-import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { RuntimeModule } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { __registerExecutionCompatibilityForTests, __withDerivedToolEntriesForTests } from "../catalog.js";
@@ -101,7 +101,7 @@ afterAll(() => {
 });
 
 async function withServer<T>(roles: string[], run: (client: Client, server: ReturnType<typeof __buildGeneratedMcpServerForTests>) => Promise<T>): Promise<T> {
-  const db = {} as OpenShapeForgeDatabase;
+  const db = emptyCatalogDatabase();
   const platform = new ModulePlatformRuntime(db);
   const server = __buildGeneratedMcpServerForTests({
     db,

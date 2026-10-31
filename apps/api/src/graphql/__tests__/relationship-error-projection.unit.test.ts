@@ -5,12 +5,12 @@
  * GraphQLError carrying its code; the relationship edges (`parent.child`,
  * `parent.childAggregate`) did not, so a FORBIDDEN on the target reached the
  * client masked as "Unexpected error." — indistinguishable from a crash. The
- * target-read gate throws before any transaction opens, so a stub database is
- * enough to exercise the edge.
+ * target-read gate resolves its profile against an empty test catalogue before
+ * returning the canonical refusal; no external database is needed.
  */
+import { emptyCatalogDatabase } from "../../mcp/__tests__/empty-catalog-db.js";
 import { describe, expect, test } from "bun:test";
 import { GraphQLError } from "graphql";
-import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { GraphqlContext } from "../context.js";
 import { getGeneratedCrudTables } from "../generated-crud.js";
 import { generatedEntityResolvers } from "../generated-entity-schema.js";
@@ -25,8 +25,8 @@ const parent = tables.find((table) =>
 const relationship = parent.source!.graphql!.relationships!.find((candidate) => typeNames.has(candidate.target))!;
 const typeResolvers = (generatedEntityResolvers as Record<string, Record<string, Resolver>>)[parent.source!.graphql!.typeName]!;
 const context: GraphqlContext = {
-  session: { tenantId: "tenant", userId: "user", roles: [], groups: [], scope: "tenant", credential: "bearer" },
-  db: {} as OpenShapeForgeDatabase,
+  session: { tenantId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222", roles: [], groups: [], scope: "tenant", credential: "bearer" },
+  db: emptyCatalogDatabase(),
 };
 
 async function captureRejection(run: () => Promise<unknown>): Promise<GraphQLError> {

@@ -19,7 +19,7 @@ import {
   getGeneratedCrudTables,
   requireEntityOperation,
 } from "./catalog.js";
-import { fieldColumnMap, tableColumnMap } from "./columns.js";
+import { fieldColumnMap, primaryKeyEquals, tableColumnMap } from "./columns.js";
 import { resolveComputedEntityRows } from "./computed-fields.js";
 import { temporalReadOperations } from "./temporal-threshold-resolver.js";
 import { assertBoundFieldQueryAllowed, resolveBoundEntityRows } from "./field-bindings.js";
@@ -475,7 +475,7 @@ export async function fetchGeneratedEntityRow(
     const result = await sql<{ row: GeneratedEntityRow }>`
       select to_jsonb(row_source.*) as row
       from ${sql.id(table.schema, table.table)} as row_source
-      where ${sql.id("row_source", table.primaryKey!)}::text = ${id}
+      where ${primaryKeyEquals(table, id, "row_source")}
         ${tenantWhere}
         ${subtypeScopeWhere(table, "row_source")}
       limit 1

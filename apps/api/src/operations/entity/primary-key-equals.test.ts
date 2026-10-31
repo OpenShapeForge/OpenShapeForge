@@ -106,17 +106,17 @@ describe("primary-key lookups use the uncast key", () => {
     const target = tables.find((candidate) => candidate.name === "erp.assets")!;
     const relationship = parent.source!.graphql!.relationships!.find((entry) => entry.name === "assets")!;
     const role = parent.source!.authorization!.roles.read[0]!;
-    await listGeneratedEntityRelation(scriptedDatabase(statements), session([role]), {
+    await listGeneratedEntityRelation(scriptedDatabase(statements, query => query.includes('as row_source') ? [{ row: { [parent.primaryKey!]: id } }] : []), session([role]), {
       parent: { [parent.primaryKey!]: id },
       parentTable: parent,
       relationship,
       targetTable: target,
     });
-    const lookups = primaryKeyLookups(statements, `"relation_parent"."${parent.primaryKey}"`);
+    const lookups = primaryKeyLookups(statements, `"row_source"."${parent.primaryKey}"`);
     expect(lookups.length).toBeGreaterThan(0);
     for (const statement of lookups) {
-      expect(statement).toMatch(new RegExp(`"relation_parent"\\."${parent.primaryKey}" = \\$\\d+::uuid`));
-      expect(statement).not.toContain(`"relation_parent"."${parent.primaryKey}"::text`);
+      expect(statement).toMatch(new RegExp(`"row_source"\\."${parent.primaryKey}" = \\$\\d+::uuid`));
+      expect(statement).not.toContain(`"row_source"."${parent.primaryKey}"::text`);
     }
   });
 

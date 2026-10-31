@@ -8,7 +8,7 @@ import { registerOperationExecutionPolicies } from "../execution-policy.js";
 import { completeEntitySecureInput, getEntityOperationContracts } from "./runtime.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 
-const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL!;
+const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 const name = `security_${crypto.randomUUID().replaceAll("-", "")}`;
 let admin: SQL, privileged: DatabaseRuntime, runtime: DatabaseRuntime;
 const table = getGeneratedCrudTables().find(t => t.source?.authoringEntityName === "Task")!;

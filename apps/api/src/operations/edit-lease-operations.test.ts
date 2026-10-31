@@ -15,6 +15,7 @@ import {
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { httpStatusForCode } from "../connectors/provider-outcome.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import { emptyCatalogDatabase } from "../db/__tests__/empty-catalog-db.js";
 import { editLeaseOperationIdsForSession } from "../mcp/edit-lease-tools.js";
 import type { ModuleOperationContext } from "../modules/contract.js";
 import {
@@ -41,8 +42,8 @@ const sessionWith = (roles: readonly string[]): TrustedSessionContext =>
     credential: "bearer",
   }) as unknown as TrustedSessionContext;
 
-/** Any database access in these cases is itself the failure, so there is none to use. */
-const unusableDb = {} as OpenShapeForgeDatabase;
+/** Authorization may read the empty policy catalogue before refusing a lease. */
+const unusableDb = emptyCatalogDatabase();
 
 function contextFor(
   session: TrustedSessionContext | undefined,

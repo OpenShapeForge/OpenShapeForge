@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
+import { emptyCatalogDatabase } from "../../db/__tests__/empty-catalog-db.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import {
   entityOperationRef,
@@ -364,7 +365,7 @@ describe("entity operation runtime", () => {
 
   test("refuses an unauthorized mutation before inspecting its controls", async () => {
     const result = await executeEntityOperation(
-      {} as never,
+      emptyCatalogDatabase(),
       {
         tenantId: "11111111-1111-4111-8111-111111111111",
         userId: "22222222-2222-4222-8222-222222222222",
@@ -449,7 +450,7 @@ describe("entity operation runtime", () => {
 });
 
 test.each(['create', 'delete'] as const)('rejects relatedChanges on %s before opening a mutation', async (intent) => {
-  const result = await executeEntityOperation({} as never, {
+  const result = await executeEntityOperation(emptyCatalogDatabase(), {
     tenantId: '11111111-1111-4111-8111-111111111111',
     userId: '22222222-2222-4222-8222-222222222222',
     roles: ['Relations.All.ReadWrite', 'Relations.All.Delete'], groups: [], scope: 'tenant',
@@ -464,7 +465,7 @@ test.each(['create', 'delete'] as const)('rejects relatedChanges on %s before op
 
 // MCP is a projection of these same canonical authorization rules.
 test.each(["list", "get", "create", "update", "delete"] as const)("Employee.%s refuses a caller without organization roles", async intent => {
-  const result = await executeEntityOperation({} as never, {
+  const result = await executeEntityOperation(emptyCatalogDatabase(), {
     tenantId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222",
     roles: [], groups: [], scope: "tenant",
   }, { operation: { id: `Employee.${intent}`, intent }, input: {} });

@@ -49,7 +49,8 @@ test("canonical non-write handlers cannot use or promote the owned-field capabil
         },
       })).resolves.toEqual({ value: {} });
       expect(handlerCalls).toBe(1);
-      expect(statements).toEqual([]);
+      // Session and authorization setup may run, but no entity write may occur.
+      expect(statements.every(statement => /^\s*(?:select\s+(?:set_config|nullif\(current_setting\('app\.authorization_rules')|do\s+\$authorization\$)/i.test(statement))).toBe(true);
     } finally { await db.destroy(); }
   }
 });

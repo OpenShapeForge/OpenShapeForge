@@ -164,6 +164,8 @@ test("temporal result uses current target threshold and respects target row and 
     generatedCrudTables.set(target.name, { ...target, generatedCrudEligible: false });
     values = new Map((await read()).rows.map(row => [row.id, (row.stagnation as { status: string }).status]));
     expect(values.get(record)).toBe("unknown");
+    generatedCrudTables.set(target.name, target);
+    await expect(withDbSession(restricted!.db, session, () => read())).rejects.toThrow("requires a repeatable read transaction");
   } finally {
     generatedCrudTables.set(root.name, oldRoot); generatedCrudTables.set(target.name, oldTarget);
   }

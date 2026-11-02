@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
-import { withDbSession } from "../../db/session.js";
+import { registerDbSessionAfterCommit, withDbSession } from "../../db/session.js";
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { aggregateBoardGroupsForTable } from "./board-aggregate.js";
@@ -271,4 +271,17 @@ test('a waiting policy writer is admitted before a new stable reader', async () 
       expect(readerStarted).toBe(true);
     } finally { releaseFirst(); releaseWriter(); await first.catch(() => {}); await writer.catch(() => {}); await second?.catch(() => {}); await another.close(); }
   } finally { releaseFirst(); releaseWriter(); }
+});
+
+
+test('committed work retains its result and hooks when release discovers a lost session lock', async () => {
+  let committed = false;
+  const result = await withDbSession(restricted!.db, session, async trx => {
+    registerDbSessionAfterCommit(() => { committed = true; });
+    const row = await sql<{ unlocked: boolean }>`select pg_advisory_unlock_shared(hashtextextended('osf.authorization:' || ${tenant}::uuid::text, 0)) as unlocked`.execute(trx);
+    expect(row.rows[0]?.unlocked).toBe(true);
+    return 'committed';
+  }, { isolationLevel: 'repeatable read' });
+  expect(result).toBe('committed');
+  expect(committed).toBe(true);
 });

@@ -76,6 +76,22 @@ async function hostRoot(options: { web?: boolean; plugin?: string; minimalAuthor
 }
 
 describe("compiler host artifact assembly", () => {
+  test("compiles authored event contracts into a deterministic host catalog", async () => {
+    const root = await hostRoot({ minimalAuthoring: true });
+    const dir = join(root, "path-fixture", "event-contracts");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "ticket-created.yaml"), [
+      "schemaVersion: 1", "kind: eventContract", "event: ticket.created", "version: 1", "fields:",
+      "  - key: externalId", "    osfType: string", "    required: true", "",
+    ].join("\n"));
+    const first = await collectAllArtifacts(root);
+    const second = await collectAllArtifacts(root);
+    const catalog = first.all.find(a => a.path === "apps/api/src/generated/compiler/event-contracts.json");
+    expect(catalog).toBeDefined();
+    expect(JSON.parse(catalog!.contents)).toMatchObject({ version: 1, contracts: [{ event: "ticket.created", version: 1, schema: { required: ["externalId"] } }] });
+    expect(second.all.find(a => a.path === catalog!.path)).toEqual(catalog);
+  }, 60_000);
+
   test("rejects traversal and aliased artifact paths before writing any output", async () => {
     const plugin = "path-plugin.ts";
     // Artifact assembly security does not depend on the full entity corpus.

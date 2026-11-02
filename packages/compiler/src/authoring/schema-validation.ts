@@ -55,6 +55,7 @@ export const SCHEMA_BY_KIND: Readonly<Record<string, string>> = Object.freeze({
   coreEntity: "core-entity.schema.json",
   operationCatalog: "operation-catalog.schema.json",
   connector: "connector.schema.json",
+  eventContract: "event-contract.schema.json",
   authorizationConfig: "authorization-config.schema.json",
   retentionPolicyCatalog: "retention-policy-catalog.schema.json",
   osfTypeCatalog: "osf-type-catalog.schema.json",

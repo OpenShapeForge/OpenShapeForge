@@ -1329,3 +1329,28 @@ Operations in bounded batches. Paths needing provider or association-backed
 reads are reported unavailable by this initial implementation. If a field or
 related instance is not readable, the board does not substitute an identifier
 for its display value. Each card title path must be single-valued.
+
+### Event value contracts
+
+`event-contracts/*.yaml` in an authoring layer can declare a named, versioned
+payload value. The compiler uses the same `FieldDefinition` and semantic type
+catalog as entities and Operations. For example:
+
+```yaml
+schemaVersion: 1
+kind: eventContract
+event: ticket.created
+version: 1
+fields:
+  - key: externalId
+    osfType: string
+    required: true
+```
+
+An active compile emits `apps/api/src/generated/compiler/event-contracts.json`
+when contracts exist. Each entry includes its authored fields, resolved JSON
+Schema, version and a content checksum. Names and versions are unique within a
+composition. The checksum identifies compiled content; it does not establish
+version compatibility or retain an earlier version across deployments. Event
+contract authoring does not enable connector event capabilities, establish
+runtime validation, subscriptions, storage, provider mappings or delivery.

@@ -154,7 +154,7 @@ test("operations-backed entity reference compiles to display-only relationship w
   expect(field.relationship?.target).toBe("Relation");
   expect(field.relationship?.foreignKey).toBeUndefined();
   expect(field.relationship?.ownership).toBe("reference");
-  expect(field.persisted).toBeUndefined();
+  expect(compiled.storage.columns.some(c => c.field === "relationId")).toBe(false);
   expect(field.readOnly).toBe(true);
 
   // Build a minimal Relation entity to enable the web relationship projection.

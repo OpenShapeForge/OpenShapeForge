@@ -12,6 +12,24 @@ import type { RuntimeWebhookSecretServices } from "./webhook-secrets.js";
 import type { RuntimeInboundEndpointServices } from "./inbound.js";
 import type { RuntimeReadProgressServices } from "./read-progress.js";
 export type { RuntimeReadProgress, RuntimeReadProgressSnapshot, RuntimeReadProgressServices } from "./read-progress.js";
+import type {
+  RuntimeDeclarativeServiceCapabilities,
+  RuntimeDeclarativeServiceConnectionExpectation,
+  RuntimeDeclarativeServiceConnectionUse,
+} from "./declarative-service.js";
+export {
+  RUNTIME_EXPECTED_CONNECTION_UNAVAILABLE_CODE,
+  RUNTIME_PROVIDER_RESOURCE_ABSENT_CODE,
+} from "./declarative-service.js";
+export type {
+  RuntimeDeclarativeServiceCapabilities,
+  RuntimeDeclarativeServiceConnectionExpectation,
+  RuntimeDeclarativeServiceConnectionExpectationById,
+  RuntimeDeclarativeServiceConnectionExpectationByReference,
+  RuntimeDeclarativeServiceConnectionExpectationScope,
+  RuntimeDeclarativeServiceConnectionUse,
+  RuntimeDeclarativeServiceFailureCode,
+} from "./declarative-service.js";
 export type { RuntimeWebhookSecretServices, RuntimeWebhookSignatureInput } from "./webhook-secrets.js";
 export {
   RUNTIME_INBOUND_HASH_ALGORITHMS, RUNTIME_INBOUND_IDENTITY_SOURCES,
@@ -338,6 +356,14 @@ export type RuntimeDeclarativeServiceRequest = {
   idempotencyKey?: string;
   /** Durable reference only; core re-authorizes the referenced source live. */
   sourceReference?: string;
+  /**
+   * Opt-in: refuse this invocation unless every provider call obtains its
+   * credentials from exactly the Connection this names — a core-minted
+   * `sourceReference` for a run's later pages, or the Connection's own
+   * `connectionId` for its first. Absent, the selection and authorization of
+   * Connections is unchanged.
+   */
+  expectedConnection?: RuntimeDeclarativeServiceConnectionExpectation;
 };
 
 /**
@@ -355,10 +381,34 @@ export type RuntimeOperationExecutionResult =
   & { intent?: string }
   & OperationResult<unknown>;
 
+/**
+ * The canonical Operation envelope of a declarative Service invocation, plus
+ * the one thing only the engine can tell its caller: which Connection the
+ * invocation actually obtained provider credentials from.
+ *
+ * `connectionUse` is a core-owned envelope key on this path, like `data` and
+ * `operations`, and is present only on a SUCCESSFUL invocation — a failure has
+ * no identity to hand out, including a composition that stopped part-way.
+ * Ignoring it leaves behaviour exactly as it was.
+ */
+export type RuntimeDeclarativeServiceExecutionResult =
+  & RuntimeOperationExecutionResult
+  & { connectionUse?: RuntimeDeclarativeServiceConnectionUse };
+
 export type RuntimeOperationExecutionContext = {
   /** Exact, host-minted live capability for this invocation. */
   session: PluginSessionContext;
   signal?: AbortSignal;
+  /**
+   * What this host enforces for the declarative controls below, published by
+   * the engine `invokeDeclarativeService` reaches and by nothing else. Read it
+   * BEFORE setting `expectedConnection`; absent means this host does not
+   * enforce the control, and a plugin that needs it must refuse here rather
+   * than invoke the Service. The same advertisement is on
+   * `PluginPlatformServices.declarativeServiceCapabilities` for a canonical
+   * Operation handler, which holds `platform` rather than this context.
+   */
+  readonly declarativeServiceCapabilities?: RuntimeDeclarativeServiceCapabilities;
   /** Nested canonical dispatch; it cannot widen or replace the live session. */
   execute(
     request: RuntimeOperationRequest,
@@ -367,12 +417,13 @@ export type RuntimeOperationExecutionContext = {
   /**
    * Invoke the core declarative Service engine without routing through an MCP
    * tool name. Core re-reads the named definition and every connection under
-   * this invocation's live session before any provider call.
+   * this invocation's live session before any provider call, and answers a
+   * success with the Connection that invocation used (`connectionUse`).
    */
   invokeDeclarativeService(
     request: RuntimeDeclarativeServiceRequest,
     options?: RuntimeOperationExecutionOptions,
-  ): Promise<RuntimeOperationExecutionResult>;
+  ): Promise<RuntimeDeclarativeServiceExecutionResult>;
   invokeHostOperation(
     request: RuntimeHostOperationRequest,
     options?: RuntimeOperationExecutionOptions,
@@ -465,6 +516,15 @@ export type RuntimeConnectionResolution =
 
 export type PluginPlatformServices = {
   readonly readProgress?: RuntimeReadProgressServices<PluginSessionContext>;
+  /**
+   * What the host's declarative Service engine enforces (see
+   * `RuntimeDeclarativeServiceCapabilities`). Published only by a runtime that
+   * has such an engine registered and checks `expectedConnection` at every
+   * credential boundary of every provider call; absent on every other host,
+   * including one that predates the control. Consumers must fail closed: check
+   * it BEFORE invoking a Service with the control, never after.
+   */
+  readonly declarativeServiceCapabilities?: RuntimeDeclarativeServiceCapabilities;
   /** Core alone opens Connection values; retained or foreign sessions are refused.
    * Absent on runtimes without this capability; consumers must fail closed. */
   readonly secrets?: {
@@ -828,11 +888,16 @@ export type ModuleOperationContextContract<
     request: RuntimeHostOperationRequest,
     options?: RuntimeOperationExecutionOptions,
   ): Promise<RuntimeOperationExecutionResult>;
-  /** Execute the core declarative Service engine under this live session. */
+  /**
+   * Execute the core declarative Service engine under this live session. A
+   * success also names the Connection the invocation obtained provider
+   * credentials from (`connectionUse`), which is the only way to obtain a
+   * reference for `expectedConnection` from inside a canonical Operation.
+   */
   invokeDeclarativeService(
     request: RuntimeDeclarativeServiceRequest,
     options?: RuntimeOperationExecutionOptions,
-  ): Promise<RuntimeOperationExecutionResult>;
+  ): Promise<RuntimeDeclarativeServiceExecutionResult>;
 };
 
 export type ModuleOperationHandlerContract<Context, Result> = (

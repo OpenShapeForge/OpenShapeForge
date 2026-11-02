@@ -34,6 +34,14 @@ export type ConnectorProviderOutcomeCode =
   | "CONNECTOR_PROVIDER_PERMISSION_DENIED"
   | "CONNECTOR_PROVIDER_RATE_LIMITED"
   | "CONNECTOR_PROVIDER_UNAVAILABLE"
+  /**
+   * ONE named resource does not exist at the provider. Never reachable from
+   * status classification and never nameable by a package hint: it is
+   * constructed only by {@link resourceAbsenceOutcome}, at a boundary that has
+   * established the call was authorized and addressed that one resource. See
+   * the comment on `codesForStatus`.
+   */
+  | "CONNECTOR_PROVIDER_RESOURCE_ABSENT"
   | "CONNECTOR_UPSTREAM_ERROR";
 
 export type ConnectorProviderOutcomeCategory =
@@ -43,6 +51,8 @@ export type ConnectorProviderOutcomeCategory =
   | "authorization"
   | "rate_limit"
   | "availability"
+  /** The request was answered, and what it addressed is not there. */
+  | "resource_absence"
   | "provider_contract";
 
 export type ConnectorProviderRequiredAction = "wait" | "change_input" | "contact_admin";
@@ -66,6 +76,7 @@ export const PROVIDER_OUTCOME_CODES: readonly ConnectorProviderOutcomeCode[] = [
   "CONNECTOR_PROVIDER_PERMISSION_DENIED",
   "CONNECTOR_PROVIDER_RATE_LIMITED",
   "CONNECTOR_PROVIDER_UNAVAILABLE",
+  "CONNECTOR_PROVIDER_RESOURCE_ABSENT",
   "CONNECTOR_UPSTREAM_ERROR",
 ];
 
@@ -76,6 +87,7 @@ const CATEGORIES: readonly ConnectorProviderOutcomeCategory[] = [
   "authorization",
   "rate_limit",
   "availability",
+  "resource_absence",
   "provider_contract",
 ];
 
@@ -216,7 +228,12 @@ export type ConnectorProviderFailureHint = {
   status: number;
   code?: Exclude<
     ConnectorProviderOutcomeCode,
-    "CONNECTOR_UPSTREAM_ERROR" | "CONNECTOR_EGRESS_DENIED" | "CONNECTOR_TIMEOUT"
+    | "CONNECTOR_UPSTREAM_ERROR"
+    | "CONNECTOR_EGRESS_DENIED"
+    | "CONNECTOR_TIMEOUT"
+    // Resource absence is a platform conclusion about an authorized,
+    // resource-specific request, never a package's claim about a response.
+    | "CONNECTOR_PROVIDER_RESOURCE_ABSENT"
   >;
   retryable?: false;
 };
@@ -270,6 +287,13 @@ const DISPOSITION_BY_CODE: Record<ConnectorProviderOutcomeCode, Disposition> = {
   },
   CONNECTOR_PROVIDER_RATE_LIMITED: { category: "rate_limit", requiredAction: "wait" },
   CONNECTOR_PROVIDER_UNAVAILABLE: { category: "availability", requiredAction: "wait" },
+  // The provider answered, and the resource the input named is not there:
+  // retrying sends the same request to the same absence, and no administrator
+  // can bring it back. What has to change is the identity in the input.
+  CONNECTOR_PROVIDER_RESOURCE_ABSENT: {
+    category: "resource_absence",
+    requiredAction: "change_input",
+  },
   CONNECTOR_UPSTREAM_ERROR: { category: "provider_contract", requiredAction: "contact_admin" },
 };
 
@@ -277,6 +301,16 @@ const DISPOSITION_BY_CODE: Record<ConnectorProviderOutcomeCode, Disposition> = {
  * The platform default for an observed status, first, followed by the codes a
  * package hint may narrow it to. A status not listed here — including `404`,
  * which must not become a resource-existence oracle — has no narrowing.
+ *
+ * `404` keeps that rule. A status alone does not say WHAT was not found: the
+ * same answer covers an unknown route, an endpoint the credentials do not
+ * reach, a provider that answers 404 instead of 403, and a resource that is
+ * genuinely gone. Nothing here may therefore conclude absence. The only
+ * absence this platform states is `CONNECTOR_PROVIDER_RESOURCE_ABSENT`, built
+ * by {@link resourceAbsenceOutcome} where the executing boundary knows more
+ * than the status: that the call was authorized, that the operation's stored
+ * definition declares this status as absence for itself, and that the request
+ * addressed one resource named by the caller's own input.
  */
 function codesForStatus(status: number): readonly ConnectorProviderOutcomeCode[] {
   switch (status) {
@@ -388,6 +422,32 @@ export function classifyProviderOutcome(
   };
 }
 
+/**
+ * The one constructor of a resource-absence outcome.
+ *
+ * Deliberately separate from {@link classifyProviderOutcome}: absence is not a
+ * reading of a status, it is a conclusion its caller must have earned. The
+ * declarative executor is the only caller today, and it calls this only when
+ * the invocation passed the canonical boundary (audience, Connection
+ * authorization and the operation's required scopes), the operation's stored
+ * definition declares the observed status as its own resource absence, and
+ * every identifying input that declaration names was interpolated into the
+ * request path. Never retryable: the answer will not change on its own.
+ */
+export function resourceAbsenceOutcome(input: {
+  correlationId: string;
+}): ConnectorProviderOutcome {
+  const code = "CONNECTOR_PROVIDER_RESOURCE_ABSENT" as const;
+  const disposition = DISPOSITION_BY_CODE[code];
+  return {
+    code,
+    category: disposition.category,
+    retryable: false,
+    requiredAction: disposition.requiredAction,
+    correlationId: input.correlationId,
+  };
+}
+
 /** Build a safe outcome from the unforgeable marker created at the egress hook. */
 export function classifyModuleEgressOutcome(input: {
   kind: ModuleEgressFailureKind;
@@ -432,6 +492,10 @@ export function providerOutcomeMessage(
       return `${subject} was rate limited by its provider.`;
     case "CONNECTOR_PROVIDER_UNAVAILABLE":
       return `${subject} could not be completed because its provider is unavailable.`;
+    case "CONNECTOR_PROVIDER_RESOURCE_ABSENT":
+      // Names the operation, not the resource: the subject is authored text,
+      // and the identity came from the caller's own input.
+      return `${subject} addressed a resource its provider does not have.`;
     case "CONNECTOR_UPSTREAM_ERROR":
       return `${subject} failed.`;
   }
@@ -605,6 +669,15 @@ export const HTTP_STATUS_BY_CODE = {
   CONNECTOR_PROVIDER_PERMISSION_DENIED: 403,
   CONNECTOR_PROVIDER_RATE_LIMITED: 429,
   CONNECTOR_PROVIDER_UNAVAILABLE: 503,
+  // 404, and distinguishable from every other 404 by its code: the request
+  // reached the provider and the resource it named is not there. The code is
+  // what a caller switches on; the status only keeps REST honest.
+  CONNECTOR_PROVIDER_RESOURCE_ABSENT: 404,
+  // A declarative invocation that demanded one exact Connection and would
+  // have run against another (mcp/connection-expectation.ts). A conflict, not
+  // a 404: the caller is authorized and its stored source identity is what
+  // has to be resolved.
+  EXPECTED_CONNECTION_UNAVAILABLE: 409,
 } as const satisfies Record<
   | ConnectorExecutionErrorCode
   | BoundaryErrorCode

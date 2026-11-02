@@ -28,6 +28,12 @@ import { withDbSession } from "../session.js";
 import { decryptSecret, encryptSecret, keyringFromEnv } from "../../connectors/secrets.js";
 import { connectionTokenSecretScope } from "../../connectors/secrets.js";
 import { resolveConnectionValues } from "../../modules/connection-secrets.js";
+import {
+  inheritConnectionControls,
+  parseConnectionExpectation,
+  withConnectionControls,
+} from "../../mcp/connection-expectation.js";
+import { mintInvocationSourceReference } from "../../modules/source-reference.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -367,6 +373,223 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
         expect(password.connection.values[field]).toBe("app-pw");
         expect(password.connection.values[field === "accessToken" ? "appPassword" : "accessToken"]).toBeUndefined();
         expect(endpoint.exchanges()).toBe(0);
+    },
+    TEST_TIMEOUT,
+  );
+});
+
+/**
+ * A module Operation reached through the NATIVE binding of a declarative
+ * Service is inside that Service's invocation, and this function is where it
+ * obtains provider credentials. So the invocation's expected-Connection
+ * control reaches here too: a Service bound to one account cannot open a
+ * second one through an Operation it composes, and the invocation's capture
+ * knows about every account it opened. Without this the `every-provider-call`
+ * scope would stop at the engine's own bindings and advertise more than the
+ * host keeps. The controls are core-owned and ambient; nothing a module
+ * passes in can set, relax or read them.
+ */
+describe("resolveConnectionValues inside a bound declarative invocation", () => {
+  const boundTo = (tenantId: string, connectionId: string, userId: string) =>
+    inheritConnectionControls(
+      parseConnectionExpectation(
+        {
+          sourceReference: mintInvocationSourceReference({
+            tenantId,
+            actorId: null,
+            scope: "tenant",
+            connectionTable: CONNECTION_TABLE,
+            connectionId,
+          }),
+          appliesTo: "every-provider-call",
+        },
+        sessionFor(tenantId, userId),
+      ),
+    );
+
+  /** The same binding, from the Connection id a caller holds on its first call. */
+  const boundToId = (tenantId: string, connectionId: string, userId: string) =>
+    inheritConnectionControls(
+      parseConnectionExpectation(
+        { connectionId, appliesTo: "every-provider-call" },
+        sessionFor(tenantId, userId),
+      ),
+    );
+
+  test(
+    "refuses another Connection before the token endpoint is reached",
+    async () => {
+      // The token is expired, so handing this row over means a live exchange
+      // with the provider. The refusal has to land first: a Service bound to
+      // one account must not renew, let alone use, another account's sign-in.
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
+      const session = sessionFor(seed.tenantId, seed.userId);
+      const endpoint = tokenEndpoint(() => {
+        throw new Error("no token endpoint may be called");
+      });
+      const controls = boundTo(seed.tenantId, randomUUID(), seed.userId);
+      await withConnectionControls(controls, async () => {
+        await expect(
+          resolveConnectionValues({
+            db: app,
+            session,
+            selector: { adapterKey: seed.adapterKey },
+            keyring: KEYRING,
+            fetchImpl: endpoint.fetchImpl,
+            artifacts: ARTIFACTS,
+          }),
+        ).rejects.toThrow(/expectation names/);
+      });
+      expect(endpoint.exchanges()).toBe(0);
+      // A refusal reached no account, so the invocation reports none.
+      expect(controls.connectionUse?.used()).toEqual({
+        outcome: "no-provider-call",
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "refuses another Connection when the invocation named one by id",
+    async () => {
+      // The same refusal at the same boundary for the other representation.
+      // A nested canonical Operation is where the demonstrated race landed: an
+      // invocation bound to the Connection its caller read must not open a
+      // replacement here, one call before any reference exists.
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
+      const session = sessionFor(seed.tenantId, seed.userId);
+      const endpoint = tokenEndpoint(() => {
+        throw new Error("no token endpoint may be called");
+      });
+      const controls = boundToId(seed.tenantId, randomUUID(), seed.userId);
+      await withConnectionControls(controls, async () => {
+        await expect(
+          resolveConnectionValues({
+            db: app,
+            session,
+            selector: { adapterKey: seed.adapterKey },
+            keyring: KEYRING,
+            fetchImpl: endpoint.fetchImpl,
+            artifacts: ARTIFACTS,
+          }),
+        ).rejects.toThrow(/expectation names/);
+      });
+      expect(endpoint.exchanges()).toBe(0);
+      expect(controls.connectionUse?.used()).toEqual({
+        outcome: "no-provider-call",
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "hands over the Connection named by id, and captures its reference",
+    async () => {
+      // And the round trip that makes the first call usable: the caller set an
+      // id, and what comes back is the core-minted reference every later page
+      // presents.
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
+      const session = sessionFor(seed.tenantId, seed.userId);
+      const endpoint = tokenEndpoint(() =>
+        Response.json({ access_token: "access-3", refresh_token: "refresh-3", expires_in: 3600 }),
+      );
+      const controls = boundToId(seed.tenantId, seed.personalId, seed.userId);
+      await withConnectionControls(controls, async () => {
+        const resolved = await resolveConnectionValues({
+          db: app,
+          session,
+          selector: { connectionId: seed.personalId },
+          keyring: KEYRING,
+          fetchImpl: endpoint.fetchImpl,
+          artifacts: ARTIFACTS,
+        });
+        if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+        expect(resolved.connection.values.accessToken).toBe("access-3");
+      });
+      expect(endpoint.exchanges()).toBe(1);
+      expect(controls.connectionUse?.used()).toEqual({
+        outcome: "one-connection",
+        sourceReference: mintInvocationSourceReference({
+          tenantId: seed.tenantId,
+          actorId: null,
+          scope: "tenant",
+          connectionTable: CONNECTION_TABLE,
+          connectionId: seed.personalId,
+        }),
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "hands over the Connection the invocation is bound to, and records it",
+    async () => {
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
+      const session = sessionFor(seed.tenantId, seed.userId);
+      const endpoint = tokenEndpoint(() =>
+        Response.json({ access_token: "access-2", refresh_token: "refresh-2", expires_in: 3600 }),
+      );
+      const controls = boundTo(seed.tenantId, seed.personalId, seed.userId);
+      await withConnectionControls(controls, async () => {
+        const resolved = await resolveConnectionValues({
+          db: app,
+          session,
+          selector: { connectionId: seed.personalId },
+          keyring: KEYRING,
+          fetchImpl: endpoint.fetchImpl,
+          artifacts: ARTIFACTS,
+        });
+        if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+        expect(resolved.connection.values.accessToken).toBe("access-2");
+      });
+      expect(endpoint.exchanges()).toBe(1);
+      // The reference the capture hands back is the one the check accepted, so
+      // a later invocation may present it verbatim.
+      expect(controls.connectionUse?.used()).toEqual({
+        outcome: "one-connection",
+        sourceReference: mintInvocationSourceReference({
+          tenantId: seed.tenantId,
+          actorId: null,
+          scope: "tenant",
+          connectionTable: CONNECTION_TABLE,
+          connectionId: seed.personalId,
+        }),
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "refuses nothing without an expectation, and still counts what was opened",
+    async () => {
+      // The opt-out: a Service that sets no expectation behaves exactly as
+      // before. What changes is only the honesty of the answer — an Operation
+      // that opened a second account makes the invocation unbindable instead
+      // of leaving it naming one.
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() + 30 * 60_000));
+      const second = await seedOAuthMailbox(admin, new Date(Date.now() + 30 * 60_000));
+      const endpoint = tokenEndpoint(() => {
+        throw new Error("no token endpoint may be called");
+      });
+      const controls = inheritConnectionControls(undefined);
+      expect(controls.expectedConnection).toBeUndefined();
+      await withConnectionControls(controls, async () => {
+        for (const owned of [seed, second]) {
+          const resolved = await resolveConnectionValues({
+            db: app,
+            session: sessionFor(owned.tenantId, owned.userId),
+            selector: { connectionId: owned.personalId },
+            keyring: KEYRING,
+            fetchImpl: endpoint.fetchImpl,
+            artifacts: ARTIFACTS,
+          });
+          expect(resolved.ok).toBe(true);
+        }
+      });
+      expect(endpoint.exchanges()).toBe(0);
+      expect(controls.connectionUse?.used()).toEqual({
+        outcome: "no-single-connection",
+      });
     },
     TEST_TIMEOUT,
   );

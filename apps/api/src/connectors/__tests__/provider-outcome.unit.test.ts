@@ -9,6 +9,7 @@ import { describe, expect, it } from "bun:test";
 import { operationFailure } from "@openshapeforge/operations";
 import {
   HTTP_STATUS_BY_CODE,
+  PROVIDER_FAILURE_HINT_SCHEMA,
   PROVIDER_FAILURE_METRIC_LABELS,
   PROVIDER_OUTCOME_CODES,
   ProviderObservations,
@@ -21,6 +22,7 @@ import {
   providerFailureAuditFields,
   providerFailureMetricLabels,
   providerOutcomeOf,
+  resourceAbsenceOutcome,
   retainableRetryAfter,
   retryAtFromRetryAfter,
   type ConnectorProviderOutcome,
@@ -74,6 +76,8 @@ describe("status dispositions", () => {
 
   // A distinct not-found outcome needs an authorization predicate first, or
   // the code becomes a way to enumerate what exists behind a connector.
+  // `resourceAbsenceOutcome` below is that predicate's answer, and it is NOT
+  // something a status can reach.
   it("keeps a provider 404 on the generic fallback", () => {
     expect(classify(404)).toEqual({
       code: "CONNECTOR_UPSTREAM_ERROR",
@@ -82,6 +86,37 @@ describe("status dispositions", () => {
       requiredAction: "contact_admin",
       correlationId: "c-1",
     });
+  });
+
+  it("never classifies any status as a resource absence", () => {
+    for (const status of [400, 401, 403, 404, 409, 410, 422, 429, 451, 500, 503]) {
+      expect(classify(status).code).not.toBe("CONNECTOR_PROVIDER_RESOURCE_ABSENT");
+      expect(
+        classify(status, {
+          // Not expressible in the hint type either; forced in the way a
+          // package could force it past the boundary schema.
+          hint: { status, code: "CONNECTOR_PROVIDER_RESOURCE_ABSENT" } as never,
+        }).code,
+      ).not.toBe("CONNECTOR_PROVIDER_RESOURCE_ABSENT");
+    }
+  });
+
+  it("builds the absence outcome only through its own constructor", () => {
+    expect(resourceAbsenceOutcome({ correlationId: "c-1" })).toEqual({
+      code: "CONNECTOR_PROVIDER_RESOURCE_ABSENT",
+      category: "resource_absence",
+      retryable: false,
+      requiredAction: "change_input",
+      correlationId: "c-1",
+    });
+    expect(
+      describeProviderOutcome(resourceAbsenceOutcome({ correlationId: "c-1" })),
+    ).toBe("Not retryable; change the input.");
+  });
+
+  it("excludes the absence code from the hint schema a package is validated against", () => {
+    const codes = PROVIDER_FAILURE_HINT_SCHEMA.properties.code.enum as readonly string[];
+    expect(codes).not.toContain("CONNECTOR_PROVIDER_RESOURCE_ABSENT");
   });
 
   it("keeps other unclassified statuses on the fallback, never retryable", () => {
@@ -381,6 +416,10 @@ describe("the one status table", () => {
     "CONNECTOR_PROVIDER_PERMISSION_DENIED",
     "CONNECTOR_PROVIDER_RATE_LIMITED",
     "CONNECTOR_PROVIDER_UNAVAILABLE",
+    "CONNECTOR_PROVIDER_RESOURCE_ABSENT",
+    // mcp/connection-expectation.ts: the declarative invocation would have run
+    // against a Connection other than the one the caller demanded.
+    "EXPECTED_CONNECTION_UNAVAILABLE",
   ].sort();
 
   it("covers every public code exactly once", () => {
@@ -405,6 +444,8 @@ describe("the one status table", () => {
       CONNECTOR_PROVIDER_PERMISSION_DENIED: 403,
       CONNECTOR_PROVIDER_RATE_LIMITED: 429,
       CONNECTOR_PROVIDER_UNAVAILABLE: 503,
+      CONNECTOR_PROVIDER_RESOURCE_ABSENT: 404,
+      EXPECTED_CONNECTION_UNAVAILABLE: 409,
     });
   });
 

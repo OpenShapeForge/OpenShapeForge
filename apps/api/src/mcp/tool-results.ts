@@ -8,6 +8,7 @@
  */
 import { OperationFailure } from "@openshapeforge/operations";
 import type {
+  RuntimeDeclarativeServiceExecutionResult,
   RuntimeDeclarativeServiceRequest,
   RuntimeHostOperationRequest,
   RuntimeOperationExecutionResult,
@@ -32,7 +33,7 @@ export type RuntimeDeclarativeServiceExecutor = (
   requestId: string | number,
   assertInvocationActive?: () => void,
   signal?: AbortSignal,
-) => Promise<RuntimeOperationExecutionResult>;
+) => Promise<RuntimeDeclarativeServiceExecutionResult>;
 
 export type RuntimeHostOperationExecutor = (
   request: RuntimeHostOperationRequest,

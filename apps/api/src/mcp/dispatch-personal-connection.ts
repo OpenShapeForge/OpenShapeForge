@@ -7,6 +7,7 @@
 import { actingRelationId } from "../db/acting-relation.js";
 import { randomUUID } from "node:crypto";
 import { resolveTemplate } from "./declarative-execution.js";
+import { assertConnectionControls } from "./connection-expectation.js";
 import { connectionTokenSecretScope } from "../connectors/secrets.js";
 import {
   accessTokenNeedsRefresh,
@@ -97,6 +98,17 @@ export async function resolvePersonalConnection(
       connectTool: entry?.connect?.name ?? null,
     });
   }
+  // The credential boundary. The tenant row below only carries the OAuth
+  // client and the organization's URL-safe configuration; the account this
+  // call acts in is this personal row, so it is the row the expectation is
+  // checked against and the row recorded as used — before any value of it is
+  // read or refreshed.
+  assertConnectionControls({
+    controls: input.controls,
+    session,
+    connectionTable: execution.connectionTable,
+    connection: personal,
+  });
   if (providerAuth?.profile !== "oauth2AuthorizationCode") {
     connectionValues =
       personal[execution.connectionValuesField];

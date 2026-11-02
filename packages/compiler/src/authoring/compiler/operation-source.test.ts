@@ -153,10 +153,50 @@ test("operations-backed entity reference compiles to display-only relationship w
   const field = compiled.model.fields.find(f => f.key === "relationId")!;
   expect(field.relationship?.target).toBe("Relation");
   expect(field.relationship?.foreignKey).toBeUndefined();
+  expect(field.relationship?.ownership).toBe("reference");
   expect(field.persisted).toBeUndefined();
   expect(field.readOnly).toBe(true);
-  const web = buildWebManifest([{ slug: "account", contract: compiled }], { requireTranslations: true });
+
+  // Build a minimal Relation entity to enable the web relationship projection.
+  const relationTarget = entity("Relation");
+  const relationArtifacts = {
+    coreEntity: relationTarget, profiles: [], mappings: [],
+    componentCatalog: { defaults: {}, viewDefaults: {}, components: {} },
+    osfTypes: { Relation: relationOsfType, relation: relationOsfType },
+    retentionPolicies: {}, referentiedata: {},
+  } as unknown as LoadedArtifacts;
+  const compiledRelation = compile(relationArtifacts);
+
+  const web = buildWebManifest(
+    [{ slug: "account", contract: compiled }, { slug: "relation", contract: compiledRelation }],
+    { requireTranslations: true },
+  );
+  // Field-level: typed reference metadata
   expect(web.entities.Account!.fields.relationId?.relationship?.targetEntityId).toBe("Relation");
+  // Relationship-level: display-only with recordField and target get Operation
+  const rel = web.entities.Account!.relationships.relationId;
+  expect(rel).toBeDefined();
+  expect(rel!.recordField).toBe("relationId");
+  expect(rel!.operations.get).toBeDefined();
+  expect(rel!.kind).toBe("belongsTo");
+
+  // When Relation is absent from the manifest, the relationship is silently omitted.
+  const webNoTarget = buildWebManifest([{ slug: "account", contract: compiled }], { requireTranslations: true });
+  expect(webNoTarget.entities.Account!.relationships.relationId).toBeUndefined();
+});
+
+test("operations-backed entity reference rejects unsupported owned and SQL authored metadata", () => {
+  const relationOsfType = { kind: "entity" as const, entity: "Relation", baseType: "string" as const, label: { en: "Relation", nl: "Relatie" }, validation: { format: "uuid" } };
+  const makeArtifacts = (fieldOverrides: Partial<CoreEntity["fields"][number]>) => {
+    const input = entity();
+    input.fields.push({ key: "relationId", osfType: "Relation", readOnly: true, label: { en: "Linked relation", nl: "Gekoppelde relatie" }, ...fieldOverrides });
+    return { coreEntity: input, profiles: [], mappings: [],
+      componentCatalog: { defaults: {}, viewDefaults: {}, components: {} },
+      osfTypes: { Relation: relationOsfType, relation: relationOsfType },
+      retentionPolicies: {}, referentiedata: {} } as unknown as LoadedArtifacts;
+  };
+  expect(() => compile(makeArtifacts({ relationship: { ownership: "owned" } as any }))).toThrow("owned relationships require SQL storage");
+  expect(() => compile(makeArtifacts({ relationship: { foreignKey: "relation_id" } as any }))).toThrow("explicit foreignKey is not supported");
 });
 
 test("source entities fail closed for SQL persistence and generic CRUD", () => {
@@ -216,6 +256,47 @@ test("query capabilities are bounded, explicit, and projected from the executabl
   expect(web.entities.Account!.operationSource!.collection.query!.input).toEqual({
     kind: "collection-query", filterFields: ["label"], sortFields: ["id", "label"], pagination: { kind: "cursor", defaultLimit: 50, maxLimit: 200 },
   });
+});
+
+test("provider entity shape carrying an entity reference does not propagate as nested inline shape", () => {
+  // Regression: deriveEntityOsfTypes stores entity.fields as semantic.shape.
+  // When a storage entity has a provider-backed collection whose provider entity
+  // has an entity-reference field (e.g. Account.relationId: Relation), the
+  // normalize loop must not recurse into semantic.shape for provider/entity
+  // kinds — those shapes are relationship metadata, not inline JSON values.
+  const targetEntity = entity("Relation");
+  delete targetEntity.source;
+  targetEntity.fields = [
+    { key: "id", osfType: "string", required: true, label: { en: "ID", nl: "ID" } },
+    { key: "label", osfType: "string", required: true, label: { en: "Name", nl: "Naam" } },
+  ];
+  const providerEntity = entity("Account");
+  providerEntity.fields.push({
+    key: "relationId", osfType: "Relation", readOnly: true, label: { en: "Relation", nl: "Relatie" },
+  });
+  const derived = deriveEntityOsfTypes([providerEntity, targetEntity], {});
+  // Account's shape now includes relationId with an entity osfType.
+  expect(derived.Account!.shape!.find(f => f.key === "relationId")!.osfType).toBe("Relation");
+  // A storage entity with a provider collection referencing Account must compile without error.
+  const owner = entity("Owner");
+  delete owner.source;
+  owner.fields = [
+    { key: "id", osfType: "string", required: true, label: { en: "ID", nl: "ID" } },
+    { key: "label", osfType: "string", required: true, label: { en: "Name", nl: "Naam" } },
+    { key: "accounts", osfType: "Account", cardinality: "collection",
+      label: { en: "Accounts", nl: "Accounts" }, provider: { bindings: { relationId: "id" } } },
+  ];
+  owner.interfaces = { rest: {}, mcp: {}, graphql: {}, web: { views: {
+    collection: { route: "/owner", columns: [{ key: "label" }] },
+    record: { title: "{{label}}", routes: { read: "/owner/:id" }, layout: { tabs: [{ id: "main", label: { en: "Details", nl: "Details" }, fields: ["label"] }] } },
+  } } };
+  const ownerArtifacts = {
+    coreEntity: owner, profiles: [], mappings: [],
+    componentCatalog: { defaults: {}, viewDefaults: {}, components: {} },
+    osfTypes: derived,
+    retentionPolicies: {}, referentiedata: {},
+  } as unknown as LoadedArtifacts;
+  expect(() => compile(ownerArtifacts)).not.toThrow();
 });
 
 test("structured source queries publish typed bounded predicates for a second entity without a Web route", () => {

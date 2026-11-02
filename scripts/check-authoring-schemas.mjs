@@ -74,6 +74,8 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // plus accounts, members, groups, permissions, roles, source-sync,
   // edit-lease, record-action and record-action-assignment catalogs.
   "operation-catalog.schema.json": 12,
+  // No event contracts are authored by the core repository yet.
+  "event-contract.schema.json": 0,
   "settings-definition.schema.json": 0,
   "settings-provider.schema.json": 0,
   "retention-policy-catalog.schema.json": 1,

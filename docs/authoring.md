@@ -1332,7 +1332,7 @@ for its display value. Each card title path must be single-valued.
 
 ### Event value contracts
 
-`event-contracts/*.yaml` in an authoring layer can declare a named, versioned
+YAML files recursively under `event-contracts/` in an authoring layer can declare a named, versioned
 payload value. The compiler uses the same `FieldDefinition` and semantic type
 catalog as entities and Operations. For example:
 
@@ -1351,6 +1351,9 @@ An active compile emits `apps/api/src/generated/compiler/event-contracts.json`
 when contracts exist. Each entry includes its authored fields, resolved JSON
 Schema, version and a content checksum. Names and versions are unique within a
 composition. The checksum identifies compiled content; it does not establish
-version compatibility or retain an earlier version across deployments. Event
+version compatibility or retain an earlier version across deployments. Symbolic
+links in that directory are refused. Object values must declare fields or a
+semantic value schema; document policies are not supported by event contracts
+yet. Event
 contract authoring does not enable connector event capabilities, establish
 runtime validation, subscriptions, storage, provider mappings or delivery.

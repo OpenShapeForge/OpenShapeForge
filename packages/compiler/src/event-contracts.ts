@@ -4,8 +4,9 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { authoringValidator } from "./authoring/schema-validation.js";
-import { createFieldSchemaCompiler } from "./field-json-schema.js";
-import type { ComponentCatalog, FieldDefinition, OsfTypeDefinition } from "./authoring/types.js";
+import { runtimeFieldSchemaRegistry } from "./field-json-schema.js";
+import { operationFieldObjectSchema, resolveFields, type OperationFieldDefinition, type ResolvedOperationField } from "@openshapeforge/operations";
+import type { FieldDefinition, OsfTypeDefinition } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 
 export type EventContractDefinition = {
@@ -37,34 +38,38 @@ function canonical(value: unknown): string {
   return encoded;
 }
 
-function assertUniqueFields(fields: readonly FieldDefinition[], origin: string): void {
-  const seen = new Set<string>();
+// A schema must not suggest that document policy or unspecified object content
+// is validated when the shared field projector does not enforce either.
+function assertSupported(fields: readonly ResolvedOperationField[], origin: string): void {
   for (const field of fields) {
-    if (seen.has(field.key)) throw new Error(`${origin}: duplicate event field ${field.key}.`);
-    seen.add(field.key);
-    if (field.children) assertUniqueFields(field.children, origin);
-    if (field.shape) assertUniqueFields(field.shape, origin);
-    if (field.item) assertUniqueFields([field.item], origin);
+    if (field.document) throw new Error(`${origin}: document policy on ${field.key} is not yet supported for event contracts.`);
+    if (field.baseType === "object" && !field.children?.length && !field.schema && !field.item) {
+      throw new Error(`${origin}: object field ${field.key} needs a declared shape or semantic schema.`);
+    }
+    if (field.children) assertSupported(field.children, origin);
+    if (field.item) assertSupported([field.item], origin);
   }
 }
 
 /** Validate, normalize and project with the same compiler as all other OSF fields. */
 export function compileEventContract(
   definition: EventContractDefinition,
-  input: { componentCatalog: ComponentCatalog; osfTypes?: Record<string, OsfTypeDefinition>; referentiedata?: CoreReferentiedataSnapshot },
+  input: { osfTypes?: Record<string, OsfTypeDefinition>; referentiedata?: CoreReferentiedataSnapshot },
   origin = "event contract",
 ): CompiledEventContract {
+  if (!definition || definition.kind !== "eventContract") throw new Error(`${origin}: expected kind eventContract.`);
   authoringValidator().validate(definition, origin);
-  assertUniqueFields(definition.fields, origin);
   const fields = structuredClone(definition.fields);
-  const schema = createFieldSchemaCompiler(input).object(fields);
+  const registry = runtimeFieldSchemaRegistry(input);
+  const operationFields = fields as unknown as readonly OperationFieldDefinition[];
+  assertSupported(resolveFields(operationFields, registry), origin);
+  const schema = operationFieldObjectSchema(operationFields, registry);
   const contract = { event: definition.event, version: definition.version, fields, schema };
   return { ...contract, checksum: createHash("sha256").update(canonical(contract)).digest("hex") };
 }
 
 /** Load all event contract documents from the resolved authoring layer. */
 export function loadEventContracts(authoringDir: string, input: {
-  componentCatalog: ComponentCatalog;
   osfTypes?: Record<string, OsfTypeDefinition>;
   referentiedata?: CoreReferentiedataSnapshot;
 }): CompiledEventContract[] {
@@ -73,6 +78,7 @@ export function loadEventContracts(authoringDir: string, input: {
   const files: string[] = [];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (entry.isSymbolicLink()) throw new Error(`${join(dir, entry.name)}: symbolic links are not supported in event contract authoring.`);
       if (entry.isDirectory()) walk(join(dir, entry.name));
       else if (entry.isFile() && /\.ya?ml$/.test(entry.name)) files.push(join(dir, entry.name));
     }

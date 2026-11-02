@@ -8,7 +8,7 @@ import {
 import { resolveAuthoringLayers } from "./authoring/layers.js";
 import { buildConnector } from "./authoring/compiler/connector.js";
 import { listConnectorFiles, loadConnector } from "./authoring/connector-loader.js";
-import { loadOsfTypes, loadFieldCompilationCatalogs } from "./authoring/loader.js";
+import { loadOsfTypes } from "./authoring/loader.js";
 import { loadEventContracts, type CompiledEventContract } from "./event-contracts.js";
 import type { CompiledConnectorContract } from "./authoring/types/connector.js";
 import { loadManifest } from "./load-manifest.js";
@@ -180,7 +180,7 @@ export function loadActivePlatformCompile(repoRoot: string): Promise<ActivePlatf
         referentiedata,
         entities,
         connectors: compileActiveConnectors(authoringDir, canonicalRepoRelativePath(repoRoot, authoringDir)),
-        eventContracts: loadEventContracts(authoringDir, { ...loadFieldCompilationCatalogs(authoringDir), referentiedata }),
+        eventContracts: loadEventContracts(authoringDir, { osfTypes: loadOsfTypes(authoringDir), referentiedata }),
         plugins,
         pluginEntries,
       };

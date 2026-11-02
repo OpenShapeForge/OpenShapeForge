@@ -233,3 +233,42 @@ test('authorization admission waits only for the configured database budget', as
   const available = await sql<{ acquired: boolean }>`select pg_try_advisory_xact_lock(hashtextextended('osf.authorization:' || ${tenant}::text, 0)) as acquired`.execute(privileged!.db);
   expect(available.rows[0]?.acquired).toBe(true);
 });
+
+test('a waiting policy writer is admitted before a new stable reader', async () => {
+  let releaseFirst!: () => void, firstReady!: () => void, releaseWriter!: () => void, writerReady!: () => void;
+  const firstHeld = new Promise<void>(resolve => { firstReady = resolve; });
+  const firstRelease = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const writerHeld = new Promise<void>(resolve => { writerReady = resolve; });
+  const writerRelease = new Promise<void>(resolve => { releaseWriter = resolve; });
+  const first = withDbSession(restricted!.db, session, async () => { firstReady(); await firstRelease; }, { isolationLevel: 'repeatable read' });
+  await firstHeld;
+  const writer = privileged!.db.transaction().execute(async trx => {
+    await sql`select pg_advisory_xact_lock(hashtextextended('osf.authorization:' || ${tenant}::uuid::text, 0))`.execute(trx);
+    writerReady(); await writerRelease;
+  });
+  let readerStarted = false;
+  let second: Promise<unknown> | undefined;
+  try {
+    const until = Date.now() + 3000;
+    let queued = false;
+    while (Date.now() < until) {
+      const row = await admin!`select exists(select 1 from pg_locks where locktype='advisory' and mode='ExclusiveLock' and not granted) as queued`;
+      if (row[0]?.queued) { queued = true; break; }
+      await Bun.sleep(10);
+    }
+    expect(queued).toBe(true);
+    // Use a separate backend: the first reader deliberately holds restricted's pool.
+    const another = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 1 });
+    try {
+      second = withDbSession(another.db, session, async () => { readerStarted = true; }, { isolationLevel: 'repeatable read' });
+      await Bun.sleep(75);
+      expect(readerStarted).toBe(false);
+      releaseFirst(); await first;
+      await writerHeld;
+      expect(readerStarted).toBe(false);
+      releaseWriter(); await writer;
+      await second;
+      expect(readerStarted).toBe(true);
+    } finally { releaseFirst(); releaseWriter(); await first.catch(() => {}); await writer.catch(() => {}); await second?.catch(() => {}); await another.close(); }
+  } finally { releaseFirst(); releaseWriter(); }
+});

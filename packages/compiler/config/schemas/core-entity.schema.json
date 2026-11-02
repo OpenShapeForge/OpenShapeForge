@@ -2099,11 +2099,6 @@
                 ]
               }
             },
-            "fields": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": { "$ref": "#/$defs/webFieldEntryV2" }
-            },
             "filters": {
               "type": "array",
               "uniqueItems": true,

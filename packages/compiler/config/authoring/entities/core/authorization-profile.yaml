@@ -242,9 +242,6 @@ interfaces:
                   columns:
                     - operationId
                     - condition
-                  fields:
-                    - operationId
-                    - condition
             - id: assignments
               label:
                 en: Assignments

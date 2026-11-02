@@ -683,6 +683,10 @@ describe("web manifest projection", () => {
     expect(web.entities.Relation!.relationships.comments).toMatchObject({ kind: "hasMany", recordField: "authorId" });
     expect(web.entities.Relation!.relationships.comments?.operations.create).toBeUndefined();
     expect(web.entities.Relation!.relationships.comments?.collection?.operations.create).toBeUndefined();
+    // The real authored Account→Relation typed reference.
+    expect(web.entities.Account!.fields.relationId!.relationship!.targetEntityId).toBe("Relation");
+    expect(web.entities.Account!.relationships.relationId).toMatchObject({ kind: "belongsTo", recordField: "relationId" });
+    expect(web.entities.Account!.relationships.relationId!.operations.get).toMatchObject({ id: "Relation.get", intent: "get" });
     // The invariant over every projected entity: a readOnly model field is
     // never create-writable, and no collection offers create on such a key.
     for (const entry of entries) {

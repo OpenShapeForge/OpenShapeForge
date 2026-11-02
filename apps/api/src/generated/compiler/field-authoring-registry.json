@@ -1522,14 +1522,11 @@
         },
         {
           "key": "relationId",
-          "osfType": "string",
+          "osfType": "Relation",
           "readOnly": true,
-          "validation": {
-            "format": "uuid"
-          },
           "label": {
-            "en": "Linked relation ID",
-            "nl": "Gekoppelde relatie-ID"
+            "en": "Linked relation",
+            "nl": "Gekoppelde relatie"
           }
         },
         {

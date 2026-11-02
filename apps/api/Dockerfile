@@ -33,8 +33,7 @@ ENV NODE_ENV=production \
     PORT=3001 \
     HOST=0.0.0.0
 WORKDIR /app
-COPY --from=builder /app /app
-RUN chown -R bun:bun /app
+COPY --from=builder --chown=bun:bun /app /app
 USER bun
 EXPOSE 3001
 

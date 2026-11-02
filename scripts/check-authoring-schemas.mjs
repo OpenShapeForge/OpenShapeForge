@@ -67,7 +67,7 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // excluding `_base.yaml` — a baseEntity, and so unschemad by design — plus
   // the two entities of the notebook example plugin's authoring layer.
   // Five authorization profile and operation-policy entities are included.
-  // The record-action fixtures are not configured as an authoring layer.
+  // The optional CI record-action layer adds two more (accounted for below).
   "core-entity.schema.json": 163,
   // The platform's own administration (operations/control.yaml): the 23
   // control-realm Operations behind /api/control/v1 and the control MCP —
@@ -161,7 +161,9 @@ const actualCoverage = new Map();
 for (const { schema } of validated) {
   actualCoverage.set(schema, (actualCoverage.get(schema) ?? 0) + 1);
 }
-for (const [schema, expected] of Object.entries(EXPECTED_SCHEMA_COVERAGE).sort()) {
+const fixtureLayerActive = scanRoots.some(root => relative(repoRoot, root) === join("test", "fixtures", "authoring", "record-actions"));
+const expectedCoverage = Object.fromEntries(Object.entries(EXPECTED_SCHEMA_COVERAGE).map(([schema, count]) => [schema, count + (schema === "core-entity.schema.json" && fixtureLayerActive ? 2 : 0)]));
+for (const [schema, expected] of Object.entries(expectedCoverage).sort()) {
   const actual = actualCoverage.get(schema) ?? 0;
   if (actual !== expected) {
     coverageFailures.push(`${schema} validated ${actual} file(s), expected ${expected}`);
@@ -192,7 +194,7 @@ console.log(
     `${scanRoots.map((root) => relative(repoRoot, root)).join(", ")}.`,
 );
 console.log(
-  `Per schema: ${Object.entries(EXPECTED_SCHEMA_COVERAGE)
+    `Per schema: ${Object.entries(expectedCoverage)
     .sort()
     .map(([schema, count]) => `${schema.replace(/\.schema\.json$/, "")} (${count})`)
     .join(", ")}.`,

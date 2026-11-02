@@ -40,9 +40,13 @@ function canonical(value: unknown): string {
 
 // Entity write-path behavior has no event execution semantics. Walk semantic
 // shapes too: they may contribute fields that were not authored inline.
+const EVENT_FIELD_KEYS = new Set([
+  "key", "osfType", "cardinality", "required", "label", "description", "help", "unit",
+  "defaultValue", "validation", "options", "shape", "children", "item", "document",
+]);
 function assertEventFields(fields: readonly FieldDefinition[], osfTypes: Record<string, OsfTypeDefinition>, origin: string, active = new Set<string>()): void {
   for (const field of fields) {
-    if (field.transform || field.entityValue || field.typedBy || field.computed || field.render || field.osfType === "typedValue") {
+    if (Object.keys(field).some(key => !EVENT_FIELD_KEYS.has(key)) || field.osfType === "typedValue") {
       throw new Error(`${origin}: event field ${field.key} uses unsupported entity or presentation behavior.`);
     }
     if (field.children) assertEventFields(field.children, osfTypes, origin, active);

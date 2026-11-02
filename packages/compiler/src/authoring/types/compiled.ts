@@ -444,7 +444,7 @@ export type CompiledEntityWebNamedViewDefinition =
       title?: string;
       layout: { tabs: CompiledViewGroup[] };
     }
-  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string }
+  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
   | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 export interface CompiledViewAction extends ViewAction {}

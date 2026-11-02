@@ -376,7 +376,7 @@ export type WebNamedView =
       titleTemplate?: string;
       layout: { tabs: WebRecordTab[] };
     }
-  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string }
+  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
   | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 export type WebEntityView = WebCollectionView | WebRecordView | WebNamedView;

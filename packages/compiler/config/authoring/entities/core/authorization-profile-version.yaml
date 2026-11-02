@@ -172,6 +172,7 @@ interfaces:
       assignmentVersions:
         kind: collection
         collectionLayout: stack
+        showItemTitle: false
         itemView: assignmentDetail
       assignmentDetail:
         kind: record

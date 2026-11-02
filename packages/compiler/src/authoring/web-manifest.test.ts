@@ -497,11 +497,13 @@ describe("web manifest projection", () => {
     const target = entity("Target", "target", [field("displayName"), field("body")], coreView());
     target.contract.interfaces!.web!.namedViews = {
       tabbed: { kind: "collection", collectionLayout: "tabs", itemView: "preview", tabLabel: "displayName" },
+      hiddenStack: { kind: "collection", collectionLayout: "stack", itemView: "preview", showItemTitle: false },
       preview: { kind: "record", fields: ["body"] },
     };
     const manifest = buildWebManifest([source, target]);
     expect(manifest.entities.Source?.views.record?.layout.tabs[1]?.targetView).toBe("tabbed");
     expect(manifest.entities.Target?.views.named?.tabbed).toEqual({ kind: "collection", collectionLayout: "tabs", itemView: "preview", tabLabel: "displayName" });
+    expect(manifest.entities.Target?.views.named?.hiddenStack).toEqual({ kind: "collection", collectionLayout: "stack", itemView: "preview", showItemTitle: false });
     expect(manifest.entities.Target?.views.named?.preview).toEqual({ kind: "record", fields: ["body"] });
   });
   test("named layouts compile and project through the default record layout path", () => {

@@ -171,9 +171,8 @@ interfaces:
     views:
       assignmentVersions:
         kind: collection
-        collectionLayout: tabs
+        collectionLayout: stack
         itemView: assignmentDetail
-        tabLabel: versionNumber
       assignmentDetail:
         kind: record
         layout:

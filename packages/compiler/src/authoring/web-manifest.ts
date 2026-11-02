@@ -1012,6 +1012,26 @@ function projectEntity(
   let relationships = Object.fromEntries(contract.model.relationships.flatMap((relationship) => {
     if (relationship.provider) return projectProviderRelationship(entityName, relationship, providers, fields);
     const target = all.get(relationship.target);
+    if (contract.source && !relationship.foreignKey && !relationship.via) {
+      // Operations-backed entity: project display-only belongsTo reference using the
+      // source field as recordField. Requires a target get Operation to resolve the record.
+      if (!target || relationship.kind !== "belongsTo" || !relationship.fieldKey) return [];
+      const get = target.operations.get;
+      if (!get) return [];
+      const projected: WebRelationshipProjection = {
+        id: `${entityName}.${relationship.key}`,
+        key: relationship.key,
+        label: localized(relationship.label, relationship.key),
+        kind: "belongsTo",
+        targetEntityId: target.contract.entity.name,
+        targetRoute: target.route,
+        recordField: relationship.fieldKey,
+        fieldKey: relationship.fieldKey,
+        ...(relationship.ownership ? { ownership: relationship.ownership } : {}),
+        operations: { get },
+      };
+      return [[relationship.key, projected]];
+    }
     if (!target || (!relationship.foreignKey && !relationship.via)) return [];
     const list = target.operations.list;
     const get = target.operations.get;

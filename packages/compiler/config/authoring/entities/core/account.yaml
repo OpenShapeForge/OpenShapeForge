@@ -34,7 +34,7 @@ fields:
         - { value: linked, label: { en: Active, nl: Actief } }
         - { value: blocked, label: { en: Blocked, nl: Geblokkeerd } }
         - { value: pending_confirmation, label: { en: Awaiting confirmation, nl: Wacht op bevestiging } }
-  - { key: relationId, osfType: string, readOnly: true, validation: { format: uuid }, label: { en: Linked relation ID, nl: Gekoppelde relatie-ID } }
+  - { key: relationId, osfType: Relation, readOnly: true, label: { en: Linked relation, nl: Gekoppelde relatie } }
   - { key: linkedAt, osfType: datetime, readOnly: true, label: { en: Linked at, nl: Gekoppeld op } }
   - { key: revision, osfType: string, required: true, readOnly: true, label: { en: Account revision, nl: Accountrevisie } }
   - { key: directRoles, osfType: string, cardinality: collection, required: true, readOnly: true, label: { en: Direct role keys, nl: Directe rolkeys } }

@@ -250,7 +250,10 @@ export function normalizeEntityFields(
     }
     const result: Field = { ...field, baseType };
     if (semantic?.validation || field.validation) result.validation = { ...semantic?.validation, ...field.validation };
-    const inlineShape = field.shape ?? field.children ?? (semantic?.kind !== "entity" ? semantic?.shape ?? semantic?.children : undefined);
+    // Entity and provider semantics carry shape as relationship metadata, not
+    // as an inline JSON value definition. Only non-relationship semantics
+    // (composite value types) should contribute their shape as nested children.
+    const inlineShape = field.shape ?? field.children ?? (semantic?.kind !== "entity" && semantic?.kind !== "provider" ? semantic?.shape ?? semantic?.children : undefined);
     const item = field.item ?? semantic?.item;
     if (inlineShape || item) {
       if (semantic && ancestry.includes(field.osfType)) throw new Error(`${path}: cyclic inline osf type ${field.osfType}.`);
@@ -346,6 +349,25 @@ export function normalizeEntityFields(
     }
     if (semantic.entityIdentity === false) throw new Error(`${path}: identity-less entity ${semantic.entity} is a value definition, not a relationship target.`);
     if (nested) throw new Error(`${path}: entity references must be relational fields, not IDs inside JSON values.`);
+    if (entity.source) {
+      // Operations-backed entity: display-only reference, no SQL storage or FK.
+      const authored = field.relationship;
+      if (authored?.ownership === "owned") throw new Error(`${path}: owned relationships require SQL storage and are not supported on an Operation-backed entity.`);
+      if (authored?.foreignKey) throw new Error(`${path}: explicit foreignKey is not supported on an Operation-backed entity.`);
+      if (collection) throw new Error(`${path}: collection references are not supported on an Operation-backed entity; implement collection resolution semantics first.`);
+      if (authored?.version) throw new Error(`${path}: version metadata is not supported on an Operation-backed entity reference.`);
+      if (authored?.displayField) throw new Error(`${path}: displayField is not supported on an Operation-backed entity reference.`);
+      if (authored?.constraints) throw new Error(`${path}: constraints are not supported on an Operation-backed entity reference.`);
+      result.readOnly = true;
+      result.relationship = {
+        kind: "belongsTo",
+        entity: slug(semantic.entity!),
+        target: semantic.entity!,
+        fieldKey: field.key,
+        ownership: "reference",
+      };
+      return result;
+    }
     result.relationship = relationshipOf(entity, field, result, semantic, catalog, collection);
     return result;
   };

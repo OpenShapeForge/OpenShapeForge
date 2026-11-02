@@ -241,6 +241,9 @@ test("operations-backed entity reference rejects unsupported owned and SQL autho
     .toThrow("version metadata is not supported");
   expect(() => compile(makeArtifacts({ relationship: { displayField: "label" } as any }))).toThrow("displayField is not supported");
   expect(() => compile(makeArtifacts({ relationship: { constraints: { status: { eq: "active" } } } as any }))).toThrow("constraints are not supported");
+  for (const relationship of [{ inverse: false }, { via: "owner" }, { unique: true }, { provider: { bindings: {} } }, { foreignKey: "" }]) {
+    expect(() => compile(makeArtifacts({ relationship: relationship as any }))).toThrow("unsupported relationship metadata");
+  }
 });
 
 test("source entities fail closed for SQL persistence and generic CRUD", () => {

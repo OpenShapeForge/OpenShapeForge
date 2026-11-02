@@ -358,6 +358,11 @@ export function normalizeEntityFields(
       if (authored?.version) throw new Error(`${path}: version metadata is not supported on an Operation-backed entity reference.`);
       if (authored?.displayField) throw new Error(`${path}: displayField is not supported on an Operation-backed entity reference.`);
       if (authored?.constraints) throw new Error(`${path}: constraints are not supported on an Operation-backed entity reference.`);
+      // Normalization may run twice: accept only the exact metadata we derive
+      // ourselves, while refusing authored traversal or storage settings.
+      const derived: Record<string, unknown> = { kind: "belongsTo", entity: slug(semantic.entity!), target: semantic.entity!, fieldKey: field.key, ownership: "reference" };
+      const unsupported = Object.entries(authored ?? {}).filter(([key, value]) => !(key in derived) || derived[key] !== value).map(([key]) => key);
+      if (unsupported.length) throw new Error(`${path}: unsupported relationship metadata on an Operation-backed entity reference: ${unsupported.join(", ")}.`);
       result.readOnly = true;
       result.relationship = {
         kind: "belongsTo",

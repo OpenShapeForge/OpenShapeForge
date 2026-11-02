@@ -354,9 +354,13 @@ export function normalizeEntityFields(
       const authored = field.relationship;
       if (authored?.ownership === "owned") throw new Error(`${path}: owned relationships require SQL storage and are not supported on an Operation-backed entity.`);
       if (authored?.foreignKey) throw new Error(`${path}: explicit foreignKey is not supported on an Operation-backed entity.`);
+      if (collection) throw new Error(`${path}: collection references are not supported on an Operation-backed entity; implement collection resolution semantics first.`);
+      if (authored?.version) throw new Error(`${path}: version metadata is not supported on an Operation-backed entity reference.`);
+      if (authored?.displayField) throw new Error(`${path}: displayField is not supported on an Operation-backed entity reference.`);
+      if (authored?.constraints) throw new Error(`${path}: constraints are not supported on an Operation-backed entity reference.`);
       result.readOnly = true;
       result.relationship = {
-        kind: collection ? "hasMany" : "belongsTo",
+        kind: "belongsTo",
         entity: slug(semantic.entity!),
         target: semantic.entity!,
         fieldKey: field.key,

@@ -138,6 +138,27 @@ test("record input bindings copy required scalar fields without expressions or t
   }
 });
 
+test("operations-backed entity reference compiles to display-only relationship without SQL storage", () => {
+  const input = entity();
+  input.fields.push({ key: "relationId", osfType: "Relation", readOnly: true, label: { en: "Linked relation", nl: "Gekoppelde relatie" } });
+  input.interfaces!.web!.views!.record!.layout!.tabs![0]!.fields!.push("relationId");
+  const relationOsfType = { kind: "entity" as const, entity: "Relation", baseType: "string" as const, label: { en: "Relation", nl: "Relatie" }, validation: { format: "uuid" } };
+  const artifacts = {
+    coreEntity: input, profiles: [], mappings: [],
+    componentCatalog: { defaults: {}, viewDefaults: {}, components: {} },
+    osfTypes: { Relation: relationOsfType, relation: relationOsfType },
+    retentionPolicies: {}, referentiedata: {},
+  } as unknown as LoadedArtifacts;
+  const compiled = compile(artifacts);
+  const field = compiled.model.fields.find(f => f.key === "relationId")!;
+  expect(field.relationship?.target).toBe("Relation");
+  expect(field.relationship?.foreignKey).toBeUndefined();
+  expect(field.persisted).toBeUndefined();
+  expect(field.readOnly).toBe(true);
+  const web = buildWebManifest([{ slug: "account", contract: compiled }], { requireTranslations: true });
+  expect(web.entities.Account!.fields.relationId?.relationship?.targetEntityId).toBe("Relation");
+});
+
 test("source entities fail closed for SQL persistence and generic CRUD", () => {
   const persisted = entity(); persisted.fields[1]!.persisted = { column: "label", storageClass: "core" }; persisted.fields[1]!.writeSource = "caller";
   expect(() => contract(persisted)).toThrow("no persisted fields");

@@ -22,7 +22,7 @@ function assertSourceFieldPolicies(field: object, path: string): void {
 
 export function operationSourceEntity(entity: CoreEntity, fields: CompiledField[], hasProfiles: boolean): CoreEntity {
   if (!entity.source) return entity;
-  if (hasProfiles || entity.fields.some(field => field.persisted || field.relationship) ||
+  if (hasProfiles || entity.fields.some(field => field.persisted || (field.relationship && field.relationship.foreignKey !== undefined)) ||
       entity.indexes?.length || entity.versioning || entity.blueprint || entity.workerAccess ||
       entity.authorization?.rowAccess || entity.audit) {
     throw new Error(`${entity.entity}: an Operation-backed source has no persisted fields, SQL relationships, profiles, indexes, versioning or storage policies.`);

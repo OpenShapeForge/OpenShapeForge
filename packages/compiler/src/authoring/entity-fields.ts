@@ -346,6 +346,18 @@ export function normalizeEntityFields(
     }
     if (semantic.entityIdentity === false) throw new Error(`${path}: identity-less entity ${semantic.entity} is a value definition, not a relationship target.`);
     if (nested) throw new Error(`${path}: entity references must be relational fields, not IDs inside JSON values.`);
+    if (entity.source) {
+      // Operations-backed entity: display-only reference, no SQL storage or FK.
+      result.readOnly = true;
+      result.relationship = {
+        kind: collection ? "hasMany" : "belongsTo",
+        entity: slug(semantic.entity!),
+        target: semantic.entity!,
+        fieldKey: field.key,
+        ownership: field.relationship?.ownership ?? "reference",
+      };
+      return result;
+    }
     result.relationship = relationshipOf(entity, field, result, semantic, catalog, collection);
     return result;
   };

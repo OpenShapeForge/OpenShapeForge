@@ -108,7 +108,7 @@ describe("durable jobs end to end", () => {
     const sent: MailMessage[] = [];
     const module = createJobsRuntimeModule({ modules: () => [], mailProvider: createNullMailProvider({ sent, log: () => {} }) });
     const handlers = composeJobHandlers([module]);
-    expect([...handlers.keys()]).toEqual([kind]);
+    expect([...handlers.keys()].sort()).toEqual([kind, "osf-inbound.dispatch"].sort());
 
     const key = `e2e-${randomUUID()}`;
     const good = await enqueue({ to: "someone@example.test", subject: "Your link", text: "Follow the link." }, key);

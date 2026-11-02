@@ -16,7 +16,7 @@ async function scratch(run:(db:Kysely<any>)=>Promise<void>){
  await sql`create schema erp`.execute(runtime.db);
  await sql`create table erp.tenant_settings(id uuid primary key,tenant_id uuid not null,value_type text not null default 'string',value_text text,value_json jsonb,is_secret boolean not null default false,namespace text not null default 'fixture',key text not null default 'secret')`.execute(runtime.db);
  await sql`alter table erp.tenant_settings enable row level security`.execute(runtime.db);await sql`alter table erp.tenant_settings force row level security`.execute(runtime.db);
- await run(runtime.db);
+ await runtime.db.connection().execute(run);
  }finally{await runtime?.close();await admin.unsafe(`drop database if exists "${name}" with (force)`);await admin.close();}
 }
 test('released settings retain identities and values, seal secrets and restore RLS',async()=>scratch(async db=>{

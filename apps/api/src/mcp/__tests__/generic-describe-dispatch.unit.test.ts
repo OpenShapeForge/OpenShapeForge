@@ -5,7 +5,7 @@ import { describe, expect, it } from "bun:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import documentsPluginRuntime from "@openshapeforge/documents/runtime";
 import versioningPluginRuntime from "@openshapeforge/versioning/runtime";
-import type { OpenShapeForgeDatabase } from "../../db/connection.js";
+import { emptyCatalogDatabase } from "../../db/__tests__/empty-catalog-db.js";
 import rawCatalog from "../../generated/mcp/tools.json" with { type: "json" };
 import type { RuntimeModule } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
@@ -29,7 +29,7 @@ async function withServer<T>(
   run: (client: Client, platform: ModulePlatformRuntime) => Promise<T>,
   module?: RuntimeModule,
 ): Promise<T> {
-  const db = {} as OpenShapeForgeDatabase;
+  const db = emptyCatalogDatabase();
   const platform = new ModulePlatformRuntime(db);
   const server = __buildGeneratedMcpServerForTests({
     db,

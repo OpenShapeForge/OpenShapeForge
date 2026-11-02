@@ -6,7 +6,7 @@ export function resolveComputedRendererFieldValue(
   field: Field,
   rootValues: Record<string, unknown>,
 ): unknown {
-  if (!field.computed?.expression) {
+  if (!field.computed || !("expression" in field.computed) || !field.computed.expression) {
     return undefined;
   }
 

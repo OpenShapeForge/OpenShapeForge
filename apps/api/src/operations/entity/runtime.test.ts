@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
+import { emptyCatalogDatabase } from "../../db/__tests__/empty-catalog-db.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import {
   entityOperationRef,
@@ -363,8 +364,9 @@ describe("entity operation runtime", () => {
   });
 
   test("refuses an unauthorized mutation before inspecting its controls", async () => {
+    const statements: string[] = [];
     const result = await executeEntityOperation(
-      {} as never,
+      emptyCatalogDatabase(statements),
       {
         tenantId: "11111111-1111-4111-8111-111111111111",
         userId: "22222222-2222-4222-8222-222222222222",
@@ -382,6 +384,7 @@ describe("entity operation runtime", () => {
       },
     );
 
+    expect(statements.some(statement => /(?:from|into|update|delete\s+from)\s+"?erp"?\./i.test(statement))).toBe(false);
     expect(result).toEqual({
       intent: "delete",
       error: expect.objectContaining({ code: "FORBIDDEN", retryable: false }),
@@ -449,7 +452,8 @@ describe("entity operation runtime", () => {
 });
 
 test.each(['create', 'delete'] as const)('rejects relatedChanges on %s before opening a mutation', async (intent) => {
-  const result = await executeEntityOperation({} as never, {
+  const statements: string[] = [];
+  const result = await executeEntityOperation(emptyCatalogDatabase(statements), {
     tenantId: '11111111-1111-4111-8111-111111111111',
     userId: '22222222-2222-4222-8222-222222222222',
     roles: ['Relations.All.ReadWrite', 'Relations.All.Delete'], groups: [], scope: 'tenant',
@@ -457,6 +461,7 @@ test.each(['create', 'delete'] as const)('rejects relatedChanges on %s before op
     operation: {id: `Relation.${intent}`, intent},
     input: {id: '00000000-0000-4000-8000-000000000001', values: {}, relatedChanges: []},
   });
+  expect(statements.some(statement => /(?:from|into|update|delete\s+from)\s+"?erp"?\./i.test(statement))).toBe(false);
   expect(result.intent).toBe(intent);
   expect('error' in result).toBe(true);
   if ('error' in result) expect(result.error).toMatchObject({code:'VALIDATION',message:'relatedChanges is only supported when updating a record.',retryable:false});
@@ -464,7 +469,7 @@ test.each(['create', 'delete'] as const)('rejects relatedChanges on %s before op
 
 // MCP is a projection of these same canonical authorization rules.
 test.each(["list", "get", "create", "update", "delete"] as const)("Employee.%s refuses a caller without organization roles", async intent => {
-  const result = await executeEntityOperation({} as never, {
+  const result = await executeEntityOperation(emptyCatalogDatabase(), {
     tenantId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222",
     roles: [], groups: [], scope: "tenant",
   }, { operation: { id: `Employee.${intent}`, intent }, input: {} });

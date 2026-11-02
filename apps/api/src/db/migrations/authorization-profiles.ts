@@ -156,6 +156,7 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
   await sql`drop policy if exists authorization_group_subject_lookup on ${table('RelationGroup')}`.execute(db);
   await sql`create policy authorization_group_subject_lookup on ${table('RelationGroup')} for select to ${sql.id(resolver)} using(tenant_id=app.current_tenant())`.execute(db);
   await sql`
+    grant create on schema app to ${sql.id(resolver)};
     create or replace function app.authorization_group_exists(group_key text) returns boolean
     language plpgsql stable security definer set search_path=pg_catalog,pg_temp as $function$
     begin
@@ -166,6 +167,7 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
     revoke all on function app.authorization_group_exists(text) from public;
     grant execute on function app.authorization_group_exists(text) to ${sql.id(APP_ROLE)};
     alter function app.authorization_group_exists(text) owner to ${sql.id(resolver)};
+    revoke create on schema app from ${sql.id(resolver)};
   `.execute(db);
   const policies=table('AuthorizationOperationPolicy'),assignments=table('AuthorizationProfileAssignment'),profiles=table('AuthorizationProfile'),versions=table('AuthorizationProfileVersion');
   // A worker needs to fail closed for managed entities while handling a

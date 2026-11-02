@@ -307,6 +307,7 @@ describe("the search derived from generated CRUD", () => {
         platform: {
           operations: {
             list: async () => offered.map((id) => ({ id })),
+            get: async (_session: unknown, id: string) => offered.includes(id) ? { id } : undefined,
             execute: () => {
               throw new Error("An empty query must read no records.");
             },

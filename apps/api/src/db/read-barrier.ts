@@ -29,7 +29,7 @@ export function hasSharedReadBarrier(db: OpenShapeForgeDatabase): boolean {
 /** Reader metadata must remain able to finish even when every ordinary pool
  * slot is occupied by writers waiting on the read fence. Prefer free pool
  * slots for parallel metadata; use the reserved backend when admission fails. */
-export type ReadBarrierDatabaseContext = { marker: string; budgetMs: number; isActive: () => boolean; retain: (pending: Promise<unknown>) => void };
+export type ReadBarrierDatabaseContext = { marker: string; budgetMs: number; isActive: () => boolean; retain: (pending: Promise<unknown>) => void; invalidate: (error: unknown) => void };
 export function withReadBarrierDatabase<Database, Result>(db: Kysely<Database>, tenantId: string, work: (database: Kysely<Database>, context?: ReadBarrierDatabaseContext) => Promise<Result>): Promise<Result> {
   const manager = managers.get(db as unknown as OpenShapeForgeDatabase);
   return manager?.hasScope()
@@ -148,6 +148,7 @@ export class SharedReadBarriers {
       try { result = await run(connection => this.#databaseScope.run(true, () => work(connection, {
         marker: JSON.stringify({ namespace: current.namespace, tenantId: current.tenantId }),
         budgetMs: readSharedReadTransactionTimeoutMs(), isActive: () => current.active, retain,
+        invalidate: error => { if (!serializeChecks) current.reservation.failure = error; },
       }))); }
       catch (error) {
         try { await held(); }

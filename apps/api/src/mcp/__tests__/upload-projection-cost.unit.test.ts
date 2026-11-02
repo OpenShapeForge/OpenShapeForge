@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { emptyCatalogDatabase } from "../../db/__tests__/empty-catalog-db.js";
 import { expect, test } from "bun:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import documents from "@openshapeforge/documents/runtime";
@@ -6,7 +7,6 @@ import versioning from "@openshapeforge/versioning/runtime";
 import accounts from "../../accounts/runtime.js";
 import type { RuntimeModule } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
-import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { catalog, tablesByName } from "../catalog.js";
 import { __buildGeneratedMcpServerForTests } from "../generated-mcp-server.js";
 import { toolsForSession } from "../session-projection.js";
@@ -25,7 +25,7 @@ test("MCP server construction does not project unrelated output schemas to disco
   Object.defineProperty(tool, "outputSchema", { configurable: true, enumerable: true,
     get() { outputReads++; return descriptor.value; },
   });
-  const db = {} as OpenShapeForgeDatabase;
+  const db = emptyCatalogDatabase();
   const platform = new ModulePlatformRuntime(db);
   let server: ReturnType<typeof __buildGeneratedMcpServerForTests> | undefined;
   try {
@@ -46,7 +46,7 @@ test("MCP server construction does not project unrelated output schemas to disco
 });
 
 test("an upload-capable session still receives the private upload tool through MCP", async () => {
-  const db = {} as OpenShapeForgeDatabase;
+  const db = emptyCatalogDatabase();
   const platform = new ModulePlatformRuntime(db);
   const server = __buildGeneratedMcpServerForTests({ db, modulePlatform: platform,
     session: { tenantId: "11111111-1111-4111-8111-111111111111", userId: "22222222-2222-4222-8222-222222222222",

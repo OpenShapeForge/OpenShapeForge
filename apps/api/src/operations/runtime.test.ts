@@ -1826,7 +1826,7 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
       },
     ]);
 
-    const deniedSession = { ...session, userId: "user-denied", roles: [] };
+    const deniedSession = { ...session, userId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", roles: [] };
     const deniedServer = __buildGeneratedMcpServerForTests({
       db,
       session: deniedSession,

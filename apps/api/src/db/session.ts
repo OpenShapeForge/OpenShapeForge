@@ -769,10 +769,7 @@ export async function withDbSession<TDatabase, TResult>(
           // A pooled backend with uncertain session-lock ownership is unsafe.
           await discard(error);
           if (failure !== undefined) throw new AggregateError([failure, error], "Database work and authorization lock release both failed.");
-          // The transaction already committed. Discard the uncertain backend,
-          // but preserve success so callers do not retry a committed mutation
-          // and after-commit hooks still run.
-          console.error("Authorization admission lock release failed after commit; database connection discarded.");
+          throw error;
         }
       }
     };

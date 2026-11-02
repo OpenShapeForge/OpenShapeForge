@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
-import { registerDbSessionAfterCommit, withDbSession } from "../../db/session.js";
+import { withDbSession } from "../../db/session.js";
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { aggregateBoardGroupsForTable } from "./board-aggregate.js";
@@ -252,7 +252,7 @@ test('a waiting policy writer is admitted before a new stable reader', async () 
     const until = Date.now() + 3000;
     let queued = false;
     while (Date.now() < until) {
-      const row = await admin!`select exists(select 1 from pg_locks where locktype='advisory' and mode='ExclusiveLock' and not granted) as queued`;
+      const row = await admin!`select exists(select 1 from pg_locks where locktype='advisory' and database=(select oid from pg_database where datname=${scratchName}) and classid=((hashtextextended('osf.authorization:' || ${tenant}::uuid::text,0) >> 32) & 4294967295)::oid and objid=(hashtextextended('osf.authorization:' || ${tenant}::uuid::text,0) & 4294967295)::oid and objsubid=1 and mode='ExclusiveLock' and not granted) as queued`;
       if (row[0]?.queued) { queued = true; break; }
       await Bun.sleep(10);
     }
@@ -274,14 +274,27 @@ test('a waiting policy writer is admitted before a new stable reader', async () 
 });
 
 
-test('committed work retains its result and hooks when release discovers a lost session lock', async () => {
-  let committed = false;
-  const result = await withDbSession(restricted!.db, session, async trx => {
-    registerDbSessionAfterCommit(() => { committed = true; });
-    const row = await sql<{ unlocked: boolean }>`select pg_advisory_unlock_shared(hashtextextended('osf.authorization:' || ${tenant}::uuid::text, 0)) as unlocked`.execute(trx);
-    expect(row.rows[0]?.unlocked).toBe(true);
-    return 'committed';
-  }, { isolationLevel: 'repeatable read' });
-  expect(result).toBe('committed');
-  expect(committed).toBe(true);
+test('a queued policy writer for another tenant does not block admission', async () => {
+  let releaseReader!: () => void, readerReady!: () => void, releaseWriter!: () => void;
+  const held = new Promise<void>(resolve => { readerReady = resolve; });
+  const readerRelease = new Promise<void>(resolve => { releaseReader = resolve; });
+  const writerRelease = new Promise<void>(resolve => { releaseWriter = resolve; });
+  const first = withDbSession(restricted!.db, {...session,tenantId:foreignTenant}, async () => { readerReady(); await readerRelease; }, { isolationLevel:'repeatable read' });
+  await held;
+  const writer = privileged!.db.transaction().execute(async trx => {
+    await sql`select pg_advisory_xact_lock(hashtextextended('osf.authorization:' || ${foreignTenant}::uuid::text,0))`.execute(trx);
+    await writerRelease;
+  });
+  const another = createDatabaseRuntime({ databaseUrl:databaseUrl(true),maxConnections:1 });
+  try {
+    const until = Date.now()+3000; let queued = false;
+    while (Date.now()<until) {
+      const row = await admin!`select exists(select 1 from pg_locks where locktype='advisory' and database=(select oid from pg_database where datname=${scratchName}) and classid=((hashtextextended('osf.authorization:' || ${foreignTenant}::uuid::text,0) >> 32) & 4294967295)::oid and objid=(hashtextextended('osf.authorization:' || ${foreignTenant}::uuid::text,0) & 4294967295)::oid and objsubid=1 and mode='ExclusiveLock' and not granted) as queued`;
+      if (row[0]?.queued) { queued=true; break; }
+      await Bun.sleep(10);
+    }
+    expect(queued).toBe(true);
+    const read = withDbSession(another.db,session,async ()=>'admitted',{ isolationLevel:'repeatable read' });
+    expect(await Promise.race([read,Bun.sleep(1000).then(()=> 'timeout')])).toBe('admitted');
+  } finally { releaseReader(); releaseWriter(); await first.catch(()=>{}); await writer.catch(()=>{}); await another.close(); }
 });

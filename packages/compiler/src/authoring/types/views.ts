@@ -66,7 +66,6 @@ export interface RelationshipOverrides {
   filters?: string[];
   /** Sort fields exposed by this placement; must narrow the target list Operation. */
   sortFields?: string[];
-  fields?: FieldEntry[];
   pageSize?: number;
   sort?: { key: string; direction: "asc" | "desc" };
   /** Relationship mutations exposed here; omission inherits every supported action. */

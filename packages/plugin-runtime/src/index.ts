@@ -17,10 +17,7 @@ import type {
   RuntimeDeclarativeServiceConnectionExpectation,
   RuntimeDeclarativeServiceConnectionUse,
 } from "./declarative-service.js";
-export {
-  RUNTIME_EXPECTED_CONNECTION_UNAVAILABLE_CODE,
-  RUNTIME_PROVIDER_RESOURCE_ABSENT_CODE,
-} from "./declarative-service.js";
+export { RUNTIME_EXPECTED_CONNECTION_UNAVAILABLE_CODE } from "./declarative-service.js";
 export type {
   RuntimeDeclarativeServiceCapabilities,
   RuntimeDeclarativeServiceConnectionExpectation,

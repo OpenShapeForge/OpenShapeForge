@@ -195,7 +195,7 @@ and in the MCP failure envelope:
 ```ts
 type ConnectorProviderOutcome = {
   code: /* one of the codes above */;
-  category: "input" | "authorization" | "rate_limit" | "availability" | "resource_absence" | "provider_contract";
+  category: "input" | "authorization" | "rate_limit" | "availability" | "provider_contract";
   retryable: boolean;
   retryAt?: string;          // RFC 3339 UTC instant, server-minted
   requiredAction: "wait" | "change_input" | "contact_admin";
@@ -229,27 +229,6 @@ when the policy says so, which is what the governor already did.
 A provider `404` stays on the fallback deliberately. A distinct not-found
 outcome needs an authorization predicate first; without one the code becomes a
 way to enumerate what exists behind a connector.
-
-There is exactly one outcome that states an absence, and **no connector
-package can reach it**: `CONNECTOR_PROVIDER_RESOURCE_ABSENT`
-(`resource_absence`, not retryable, `change_input`, REST `404`). It is not a
-reading of a status — no status classifies to it, and the package hint schema
-does not list it. It is produced only by the declarative Service engine, for a
-request where the platform itself knows three further things: the invocation
-passed the canonical boundary (the Service's audience, the Connection's
-authorization for the live session and the operation's required scopes), the
-operation's own stored definition declares that status as its resource absence
-(`resourceAbsence { status, resourceInputs }`), and the request addressed one
-resource the caller named — every declared identifying input was interpolated
-into the operation's path, which is what rules out a route, a collection
-endpoint and a path built only from stored configuration. Because a successful
-call would have returned that resource to the same caller, the absence
-discloses nothing the success would not have.
-
-Everything else keeps its own code: a missing Service, Adapter or Connection,
-an authorization or permission failure, a rate limit, an outage and a transport
-failure are never reported as an absence, and an operation that declares
-nothing keeps `CONNECTOR_UPSTREAM_ERROR` on its `404`.
 
 A resource `401` is **not** proof that consent was revoked, and does not touch
 the installation. `CONNECTOR_REAUTHORIZATION_REQUIRED` still comes only from a

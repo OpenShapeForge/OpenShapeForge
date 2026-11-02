@@ -219,6 +219,23 @@ export function expectedConnectionUnavailable(): HttpError {
 }
 
 /**
+ * Whether a failure IS that refusal, for the one caller that must not treat it
+ * as an ordinary step failure: a binding declared `optional` absorbs an
+ * unavailable source, and this is not one (dispatch-derived-binding.ts).
+ *
+ * Narrow on purpose. Only `expectedConnectionUnavailable` builds this error, so
+ * matching the core error type with the core code recognises exactly what core
+ * threw — a module that returns or rethrows something of its own carrying the
+ * same code is not it, and is handled like any other failure.
+ */
+export function isExpectedConnectionUnavailable(error: unknown): boolean {
+  return (
+    error instanceof HttpError &&
+    error.code === EXPECTED_CONNECTION_UNAVAILABLE_CODE
+  );
+}
+
+/**
  * Read the caller's `expectedConnection` as core's own control, or refuse.
  *
  * Closed on purpose: an unknown scope value, an unknown key, a missing one, or

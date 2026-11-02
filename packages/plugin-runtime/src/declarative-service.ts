@@ -230,19 +230,6 @@ export type RuntimeDeclarativeServiceConnectionUse =
 export const RUNTIME_EXPECTED_CONNECTION_UNAVAILABLE_CODE =
   "EXPECTED_CONNECTION_UNAVAILABLE" as const;
 
-/**
- * The provider answered that ONE named resource does not exist, for an
- * operation whose stored definition declares that meaning for that status and
- * whose request addressed that resource by the caller's own input. It is a
- * proven, resource-specific absence through an authorized Connection — never a
- * missing Service, Adapter or Connection, an authorization or permission
- * failure, a network failure or any other upstream error, each of which keeps
- * its own code.
- */
-export const RUNTIME_PROVIDER_RESOURCE_ABSENT_CODE =
-  "CONNECTOR_PROVIDER_RESOURCE_ABSENT" as const;
-
-/** The codes above, for a caller that switches on a declarative failure. */
+/** The code above, for a caller that switches on a declarative failure. */
 export type RuntimeDeclarativeServiceFailureCode =
-  | typeof RUNTIME_EXPECTED_CONNECTION_UNAVAILABLE_CODE
-  | typeof RUNTIME_PROVIDER_RESOURCE_ABSENT_CODE;
+  typeof RUNTIME_EXPECTED_CONNECTION_UNAVAILABLE_CODE;

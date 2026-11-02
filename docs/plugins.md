@@ -232,10 +232,14 @@ Two halves of one contract close that, and neither selects a Connection:
   Connections exactly as it would without it, then compares. It is verified per
   binding where the credentials are read, so a replacement that lands mid-call
   fails closed rather than reaching the new account, and a composed call is
-  checked over all its captured steps before the first binding runs. The one
-  answer is `EXPECTED_CONNECTION_UNAVAILABLE` (409), deliberately the same
-  whether the Connection was retired, replaced, never this session's to use, or
-  named by a value this session cannot resolve at all.
+  checked over all its captured steps before the first binding runs. A binding
+  the Service declares `optional` does not absorb it either: `optional` means a
+  source may be unavailable, and this says the step would have run in another
+  account — so it fails the invocation rather than being reported as a skipped
+  step. The one answer is `EXPECTED_CONNECTION_UNAVAILABLE` (409), deliberately
+  the same whether the Connection was retired, replaced, deleted with nothing
+  in its place, never this session's to use, or named by a value this session
+  cannot resolve at all.
 
 The reference is core-minted, opaque and not constructible: it commits the
 tenant, the scope, the acting person for a personal scope, the connection table

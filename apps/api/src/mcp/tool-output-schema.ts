@@ -18,7 +18,7 @@ const failureSchema = {
         retryAt: { type: "string", format: "date-time" },
         hint: { type: "string" },
         data: { type: "object", additionalProperties: true },
-        category: { enum: ["policy_blocked", "timeout", "input", "authorization", "rate_limit", "availability", "resource_absence", "provider_contract"] },
+        category: { enum: ["policy_blocked", "timeout", "input", "authorization", "rate_limit", "availability", "provider_contract"] },
         requiredAction: { enum: ["wait", "change_input", "contact_admin"] },
         correlationId: { type: "string" },
         violations: { type: "array", items: {

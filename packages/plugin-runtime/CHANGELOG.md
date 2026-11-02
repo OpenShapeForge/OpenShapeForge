@@ -54,6 +54,19 @@
   instead of naming one of them. Work a nested Operation *defers* — a durable
   job, a queued outbox entry — runs later under its own invocation and carries
   no expectation from this one.
+- **The refusal fails the invocation whatever the Service declares, and says
+  the same thing in every case.** A binding a Service declares `optional` does
+  not absorb `EXPECTED_CONNECTION_UNAVAILABLE`: `optional` covers an
+  unavailable source, not a wrong account, so a Service cannot answer success
+  — with `connectionUse` naming the account its other bindings used — after a
+  step was refused for leaving that account. This holds for a Service's own
+  bindings and for those of any Service nested inside it, and every other
+  optional failure is still reported as an unavailable source. And with an
+  expectation in force, a Connection that is simply gone answers that same
+  refusal rather than the connection-setup failure a caller without an
+  expectation gets (`CONNECTION_MISSING`, `CONNECTION_REQUIRED`), in the
+  organization and personal scopes alike — so "replaced" and "gone, with
+  nothing in its place" stay indistinguishable.
 
 ### Package compatibility
 

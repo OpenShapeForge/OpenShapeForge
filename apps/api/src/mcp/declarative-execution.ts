@@ -20,10 +20,7 @@ import { readBoundedResponse } from "../modules/outbound-response.js";
  *                     sessionTtlSeconds }, egressHosts
  *   operation row:  kind, operation { method, pathTemplate },
  *                   inputFields, responseMapping { format: json|xml,
- *                   xml { arrays }, rootPath, fieldPaths, transforms },
- *                   optional resourceAbsence { status, resourceInputs } —
- *                   this operation's own declaration of which status means
- *                   "the resource these inputs name is not there"
+ *                   xml { arrays }, rootPath, fieldPaths, transforms }
  *   binding:        <operationRef>, order, inputMapping [{from,to}],
  *                   outputMapping [{from,to}], optional
  *                   forEach {from,as} for bounded query fan-out
@@ -41,9 +38,6 @@ import { readBoundedResponse } from "../modules/outbound-response.js";
  *     core as one named query parameter, never by an operation.
  *   - Template placeholders form a closed vocabulary: connection value keys
  *     and operation inputs. An unresolved placeholder fails the call.
- *   - A provider status is never read as a statement about a RESOURCE unless
- *     the operation declared that meaning for itself and the request provably
- *     addressed one resource the caller named (`resourceAbsenceDeclaration`).
  */
 import { createHash, randomUUID } from "node:crypto";
 import { allPagesPlan, collectMappedPages } from "./declarative-pagination.js";
@@ -64,7 +58,6 @@ import {
   classifyModuleEgressOutcome,
   classifyProviderOutcome,
   providerOutcomeMessage,
-  resourceAbsenceOutcome,
 } from "../connectors/provider-outcome.js";
 import {
   decryptSecret,
@@ -104,96 +97,6 @@ export type DeclarativeAdapterUrls = {
 export type DeclarativeOperationUrl = {
   baseUrlKey?: string;
 };
-
-/**
- * The canonical resource-absence declaration an operation row may carry.
- *
- * A provider status does not say WHAT was not found (see the comment on
- * `codesForStatus` in connectors/provider-outcome.ts): the same 404 covers an
- * unknown route, an endpoint these credentials do not reach, a provider that
- * answers 404 where it means 403, and a resource that is genuinely gone. Core
- * cannot tell them apart, so it does not guess — the stored definition of ONE
- * operation declares that for ITSELF, naming the status it means and the
- * inputs that identify the resource.
- *
- * Core verifies the rest for every call: the declared identifying inputs must
- * actually be the caller's own inputs AND interpolated into the request path,
- * so the request provably addressed one named resource rather than a route or
- * a collection. Without that, the declaration refuses the operation as
- * misconfigured rather than quietly meaning something weaker.
- *
- * Who may learn the answer is therefore the set of callers authorized to run
- * this operation against this Connection — exactly the set a SUCCESSFUL call
- * would have returned the resource to. The absence discloses nothing the
- * success would not have.
- */
-export type DeclarativeResourceAbsence = {
-  /** The one status this operation means a resource absence by. */
-  status: number;
-  /** Operation inputs that identify the resource; all must reach the path. */
-  resourceInputs: readonly string[];
-};
-
-/**
- * The statuses an operation may declare as absence. Both say "not here" about
- * a thing rather than about the request: no 4xx that means authorization,
- * input or quota can be redefined into absence.
- */
-const RESOURCE_ABSENCE_STATUSES = new Set([404, 410]);
-
-function resourceAbsenceError(message: string): HttpError {
-  return new HttpError(400, "OPERATION_MISCONFIGURED", message);
-}
-
-/**
- * Read an operation row's absence declaration, or refuse it. An absent
- * declaration is the default and keeps the generic upstream-error answer.
- */
-export function resourceAbsenceDeclaration(
-  operationRow: JsonRecord,
-): DeclarativeResourceAbsence | undefined {
-  const raw = operationRow.resourceAbsence;
-  if (raw === undefined || raw === null) return undefined;
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    throw resourceAbsenceError(
-      "Operation resourceAbsence must be an object with status and resourceInputs.",
-    );
-  }
-  const candidate = raw as JsonRecord;
-  const keys = Object.keys(candidate).sort();
-  if (
-    keys.length !== 2 ||
-    keys[0] !== "resourceInputs" ||
-    keys[1] !== "status"
-  ) {
-    throw resourceAbsenceError(
-      "Operation resourceAbsence declares exactly status and resourceInputs.",
-    );
-  }
-  const { status, resourceInputs } = candidate;
-  if (
-    typeof status !== "number" ||
-    !Number.isInteger(status) ||
-    !RESOURCE_ABSENCE_STATUSES.has(status)
-  ) {
-    throw resourceAbsenceError(
-      `Operation resourceAbsence.status must be one of ${[...RESOURCE_ABSENCE_STATUSES].join(", ")}.`,
-    );
-  }
-  if (
-    !Array.isArray(resourceInputs) ||
-    resourceInputs.length === 0 ||
-    !resourceInputs.every(
-      (field): field is string => typeof field === "string" && field.length > 0,
-    ) ||
-    new Set(resourceInputs).size !== resourceInputs.length
-  ) {
-    throw resourceAbsenceError(
-      "Operation resourceAbsence.resourceInputs must name at least one input, without repeats.",
-    );
-  }
-  return { status, resourceInputs: [...resourceInputs] };
-}
 
 const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
 const REQUEST_TIMEOUT_MS = 15_000;
@@ -1497,13 +1400,6 @@ export type ComposedRequest = {
   body?: string;
   /** The cached provider session this request carries, when its scheme is `session`. */
   sessionKey?: string;
-  /**
-   * Present only when this request provably addressed one resource the caller
-   * named, and the operation declares the status that means that resource is
-   * absent. Composition is where both facts are known, so the conclusion is
-   * reached there rather than re-derived from a status later.
-   */
-  resourceAbsence?: { status: number };
 };
 
 const XML_ACCEPT = "application/xml, text/xml;q=0.9";
@@ -1539,12 +1435,6 @@ export async function composeBindingRequest(
     // The native provider has no URL, credentials or egress: the "request" is
     // a descriptor naming the generated operation and the mapped inputs, so a
     // dry run shows exactly what would execute in-process.
-    if (resourceAbsenceDeclaration(operationRow)) {
-      throw resourceAbsenceError(
-        "Operation resourceAbsence applies to a provider call; a native operation " +
-          "answers through the canonical Operation contract instead.",
-      );
-    }
     const operationKey = nativeOperationKey(operationRow);
     const operationInputs = applyMapping(serviceInputs, binding.inputMapping);
     return {
@@ -1627,13 +1517,13 @@ export async function composeBindingRequest(
   }
 
   // URL positions resolve from PLAIN values and inputs only — never secrets.
-  const urlInputs = Object.entries(operationInputs).filter(
-    ([, value]) => value !== null && typeof value !== "object",
-  );
-  const urlInputKeys = new Set(urlInputs.map(([key]) => key));
   const urlSources: Record<string, string> = {
     ...plain,
-    ...Object.fromEntries(urlInputs.map(([key, value]) => [key, String(value)])),
+    ...Object.fromEntries(
+      Object.entries(operationInputs)
+        .filter(([, value]) => value !== null && typeof value !== "object")
+        .map(([key, value]) => [key, String(value)]),
+    ),
   };
   const selectedBaseUrl = operationBaseUrlTemplate(providerRow, operation);
   const baseUrl = resolveTemplate(
@@ -1694,29 +1584,6 @@ export async function composeBindingRequest(
       "EGRESS_DENIED",
       `Provider host ${url.hostname} is not in the provider's egress allow-list.`,
     );
-  }
-
-  // The absence declaration is verified against THIS request, not against the
-  // definition alone: every identifying input it names must be an input of
-  // this call and must have been interpolated into the path. A declaration
-  // that cannot hold refuses the operation rather than silently meaning less.
-  const declaredAbsence = resourceAbsenceDeclaration(operationRow);
-  if (declaredAbsence) {
-    if (isGraphql) {
-      throw resourceAbsenceError(
-        "Operation resourceAbsence applies to a REST operation; a GraphQL endpoint " +
-          "answers one status for every query.",
-      );
-    }
-    for (const field of declaredAbsence.resourceInputs) {
-      if (!urlInputKeys.has(field) || !usedInPath.has(field)) {
-        throw resourceAbsenceError(
-          `Operation resourceAbsence names input ${JSON.stringify(field)}, which this ` +
-            "call does not place in the operation pathTemplate; absence can only be " +
-            "concluded for a request that addressed one named resource.",
-        );
-      }
-    }
   }
 
   const remaining = Object.fromEntries(
@@ -1858,9 +1725,6 @@ export async function composeBindingRequest(
     headers,
     ...(body !== undefined ? { body } : {}),
     ...(auth.sessionKey !== undefined ? { sessionKey: auth.sessionKey } : {}),
-    ...(declaredAbsence
-      ? { resourceAbsence: { status: declaredAbsence.status } }
-      : {}),
   };
 }
 
@@ -1890,30 +1754,6 @@ function providerFailure(
     outcome,
     message ?? providerOutcomeMessage(outcome.code, operationSubject(operationRow)),
     observation?.status,
-  );
-}
-
-/**
- * The resource this request named is not at the provider.
- *
- * Reached only for a request composition proved resource-specific, whose
- * operation declares this exact status as its own absence, and whose
- * invocation already passed the canonical boundary: the Service's audience,
- * the Connection's authorization for this session and the operation's
- * required scopes are all checked before a binding executes. It is therefore
- * an authorized, resource-specific absence rather than a status reading, and
- * it stays distinct from a missing Service, Adapter or Connection, from every
- * authorization and permission failure, and from every other upstream error.
- */
-function resourceAbsenceFailure(
-  operationRow: JsonRecord,
-  status: number,
-): ProviderOutcomeError {
-  const outcome = resourceAbsenceOutcome({ correlationId: randomUUID() });
-  return new ProviderOutcomeError(
-    outcome,
-    providerOutcomeMessage(outcome.code, operationSubject(operationRow)),
-    status,
   );
 }
 
@@ -1963,16 +1803,6 @@ export async function executeBinding(
         501,
         "NOT_IMPLEMENTED",
         "Native execution is not available on this transport.",
-      );
-    }
-    // Native execution composes no request and observes no provider status,
-    // so an absence declaration could never be verified here. Refuse rather
-    // than ignore it: a definition that believes it declares absence must not
-    // run as if it never did.
-    if (resourceAbsenceDeclaration(operationRow)) {
-      throw resourceAbsenceError(
-        "Operation resourceAbsence applies to a provider call; a native operation " +
-          "answers through the canonical Operation contract instead.",
       );
     }
     const operationKey = nativeOperationKey(operationRow);
@@ -2036,12 +1866,6 @@ export async function executeBinding(
       // A provider that refuses a call may have ended the session; the next
       // call logs in again rather than replaying a dead token until expiry.
       if (request.sessionKey !== undefined) forgetSession(request.sessionKey);
-      if (
-        request.resourceAbsence !== undefined &&
-        response.status === request.resourceAbsence.status
-      ) {
-        throw resourceAbsenceFailure(operationRow, response.status);
-      }
       throw providerFailure(operationRow, response);
     }
     try {

@@ -13,6 +13,7 @@ import { recordConnectionTokenAudit } from "./connection-token-refresh.js";
 import { SecretError } from "../connectors/secrets.js";
 import { HttpError } from "../rest/http-error.js";
 import { connectionProblemError } from "./connection-guidance.js";
+import { isExpectedConnectionUnavailable } from "./connection-expectation.js";
 import { egressSourceFromResolvedInvocation } from "../modules/invocation-sources.js";
 import { mintInvocationSourceReference, sameInvocationSourceReference } from "../modules/source-reference.js";
 import { type CapturedDerivedExecution, entityForTable } from "./catalog.js";
@@ -314,7 +315,18 @@ export async function runDerivedBinding(
       outputs,
     });
   } catch (error) {
-    if (binding.optional === true) {
+    // `optional` says a SOURCE may be unavailable: a binding whose Adapter
+    // nobody configured, whose provider is down, whose scopes fall short. The
+    // expected-Connection refusal is not that. It says this step would have
+    // run against an account other than the one the caller demanded, and the
+    // invocation's answer — including the Connection its capture names — is
+    // only meaningful if nothing in it ever reached another account. Absorbing
+    // it would turn the refusal into a report that the step was merely
+    // skipped, and let the Service answer success while naming the account the
+    // OTHER bindings used. So it propagates whatever the binding declares, for
+    // this Service's bindings and for those of any Service nested inside it,
+    // and every other optional failure is absorbed exactly as before.
+    if (binding.optional === true && !isExpectedConnectionUnavailable(error)) {
       unavailable.push({
         binding: order,
         outcome: unavailableOutcome(error),

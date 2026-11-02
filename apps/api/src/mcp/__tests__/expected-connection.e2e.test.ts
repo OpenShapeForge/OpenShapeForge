@@ -22,9 +22,10 @@
  *     refuses a malformed id or an expectation naming a Connection both ways;
  *   - the expectation grants nothing: a session that may not reach the Service
  *     is refused as before;
- *   - a caller that sets no expectation is unaffected;
- *   - a declared, resource-specific provider absence arrives as its own code,
- *     distinct from the missing-Connection answer.
+ *   - a Connection that is gone, with nothing in its place, answers that same
+ *     refusal rather than the connection-setup failure a caller without an
+ *     expectation still gets;
+ *   - a caller that sets no expectation is unaffected.
  *
  * And the capture that makes the control usable from a canonical Operation,
  * which has no MCP invocation context and must not run a precheck:
@@ -199,8 +200,7 @@ describe("an expected Connection through the declarative Service engine", () => 
               provider_id uuid not null,
               operation jsonb not null,
               response_mapping jsonb not null,
-              required_scopes jsonb not null,
-              resource_absence jsonb
+              required_scopes jsonb not null
             )
           `.execute(trx);
           await sql`
@@ -309,16 +309,14 @@ describe("an expected Connection through the declarative Service engine", () => 
             [{ from: "updated", to: "updated" }],
           );
           await sql`insert into public.expected_capability_test
-            (id, tenant_id, key, kind, provider_id, operation, response_mapping, required_scopes, resource_absence)
+            (id, tenant_id, key, kind, provider_id, operation, response_mapping, required_scopes)
           values
             (${readCapabilityId}::uuid, ${tenantId}::uuid, 'get-contact', 'query', ${adapterId}::uuid,
              '{"method":"GET","pathTemplate":"/contacts/{contactId}"}'::jsonb,
-             '{"fieldPaths":[{"field":"id","path":"id"}]}'::jsonb, '[]'::jsonb,
-             '{"status":404,"resourceInputs":["contactId"]}'::jsonb),
+             '{"fieldPaths":[{"field":"id","path":"id"}]}'::jsonb, '[]'::jsonb),
             (${writeCapabilityId}::uuid, ${tenantId}::uuid, 'update-contact', 'mutation', ${adapterId}::uuid,
              '{"method":"PATCH","pathTemplate":"/contacts/{contactId}"}'::jsonb,
-             '{"fieldPaths":[{"field":"updated","path":"updated"}]}'::jsonb, '[]'::jsonb,
-             null)
+             '{"fieldPaths":[{"field":"updated","path":"updated"}]}'::jsonb, '[]'::jsonb)
           `.execute(trx);
           await sql`insert into public.expected_adapter_test
             (id, tenant_id, key, name, transport, base_url_template, auth, egress_hosts)
@@ -385,7 +383,6 @@ describe("an expected Connection through the declarative Service engine", () => 
             column("operation", "operation", "jsonb"),
             column("response_mapping", "responseMapping", "jsonb"),
             column("required_scopes", "requiredScopes", "jsonb"),
-            column("resource_absence", "resourceAbsence", "jsonb"),
           ]),
           table("expected_adapter_test", [
             column("id", "id", "uuid"),
@@ -824,20 +821,6 @@ describe("an expected Connection through the declarative Service engine", () => 
             expect(useOf(refused)).toBeUndefined();
           }
 
-          // --- a declared, resource-specific absence keeps its own code ---
-          respond = async (request) =>
-            request.init.method === "GET"
-              ? new Response("{}", { status: 404, headers: { "content-type": "application/json" } })
-              : new Response(JSON.stringify({ updated: true }), {
-                  status: 200,
-                  headers: { "content-type": "application/json" },
-                });
-          const absent = await invoke({ sourceReference: reference(connectionA) });
-          expect(errorOf(absent)?.code).toBe("CONNECTOR_PROVIDER_RESOURCE_ABSENT");
-          // The read failed, so the write never ran.
-          expect(served.map((call) => call.method)).toEqual(["GET"]);
-          expect(useOf(absent)).toBeUndefined();
-
           // --- replaced DURING the call: refused at the second binding ---
           let replaced = false;
           respond = async (request) => {
@@ -959,11 +942,22 @@ describe("an expected Connection through the declarative Service engine", () => 
               where id = ${writeCapabilityId}::uuid`.execute(trx),
           );
 
-          // --- no Connection at all is its own answer, never an absence ---
+          // --- the expected Connection is gone, with nothing in its place ---
+          // The same refusal a replacement gets, deliberately: which of the two
+          // happened is exactly what an expectation must not be able to ask.
           await admin.connection().execute((trx) =>
             sql`delete from public.expected_connection_test`.execute(trx),
           );
-          const missing = await invoke({ sourceReference: reference(connectionA) });
+          const gone = await invoke({ sourceReference: reference(connectionA) });
+          expect(errorOf(gone)?.code).toBe("EXPECTED_CONNECTION_UNAVAILABLE");
+          expect(served).toEqual([]);
+          expect(useOf(gone)).toBeUndefined();
+          const goneById = await invoke({ connectionId: connectionA });
+          expect(errorOf(goneById)?.code).toBe("EXPECTED_CONNECTION_UNAVAILABLE");
+          expect(served).toEqual([]);
+          // And a caller that demanded nothing still gets the actionable
+          // connection-setup failure, unchanged by the control.
+          const missing = await invoke();
           expect(errorOf(missing)?.code).toBe("CONNECTION_MISSING");
           expect(served).toEqual([]);
         } finally {

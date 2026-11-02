@@ -1353,7 +1353,8 @@ Schema, version and a content checksum. Names and versions are unique within a
 composition. The checksum identifies compiled content; it does not establish
 version compatibility or retain an earlier version across deployments. Symbolic
 links in that directory are refused. Object values must declare fields or a
-semantic value schema; document policies are not supported by event contracts
-yet. Event
+semantic value schema; document policies, entity write-path transforms, computed
+fields, typed values and presentation configuration are not supported by event
+contracts yet. Event
 contract authoring does not enable connector event capabilities, establish
 runtime validation, subscriptions, storage, provider mappings or delivery.

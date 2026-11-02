@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Compiled event value contracts. This describes payloads, not event delivery. */
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync } from "node:fs";
+import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { authoringValidator } from "./authoring/schema-validation.js";
 import { runtimeFieldSchemaRegistry } from "./field-json-schema.js";
@@ -38,6 +38,26 @@ function canonical(value: unknown): string {
   return encoded;
 }
 
+// Entity write-path behavior has no event execution semantics. Walk semantic
+// shapes too: they may contribute fields that were not authored inline.
+function assertEventFields(fields: readonly FieldDefinition[], osfTypes: Record<string, OsfTypeDefinition>, origin: string, active = new Set<string>()): void {
+  for (const field of fields) {
+    if (field.transform || field.entityValue || field.typedBy || field.computed || field.render || field.osfType === "typedValue") {
+      throw new Error(`${origin}: event field ${field.key} uses unsupported entity or presentation behavior.`);
+    }
+    if (field.children) assertEventFields(field.children, osfTypes, origin, active);
+    if (field.shape) assertEventFields(field.shape, osfTypes, origin, active);
+    if (field.item) assertEventFields([field.item], osfTypes, origin, active);
+    const semantic = osfTypes[field.osfType];
+    if (semantic && !active.has(field.osfType)) {
+      const next = new Set(active).add(field.osfType);
+      if (semantic.children) assertEventFields(semantic.children, osfTypes, origin, next);
+      if (semantic.shape) assertEventFields(semantic.shape, osfTypes, origin, next);
+      if (semantic.item) assertEventFields([semantic.item], osfTypes, origin, next);
+    }
+  }
+}
+
 // A schema must not suggest that document policy or unspecified object content
 // is validated when the shared field projector does not enforce either.
 function assertSupported(fields: readonly ResolvedOperationField[], origin: string): void {
@@ -60,7 +80,13 @@ export function compileEventContract(
   if (!definition || definition.kind !== "eventContract") throw new Error(`${origin}: expected kind eventContract.`);
   authoringValidator().validate(definition, origin);
   const fields = structuredClone(definition.fields);
-  const registry = runtimeFieldSchemaRegistry(input);
+  assertEventFields(fields, input.osfTypes ?? {}, origin);
+  // UI renderer selection is not part of an event value contract.
+  const osfTypes = Object.fromEntries(Object.entries(input.osfTypes ?? {}).map(([key, value]) => {
+    const { render: _render, ...semantic } = value;
+    return [key, semantic];
+  }));
+  const registry = runtimeFieldSchemaRegistry({ ...input, osfTypes });
   const operationFields = fields as unknown as readonly OperationFieldDefinition[];
   assertSupported(resolveFields(operationFields, registry), origin);
   const schema = operationFieldObjectSchema(operationFields, registry);
@@ -74,7 +100,12 @@ export function loadEventContracts(authoringDir: string, input: {
   referentiedata?: CoreReferentiedataSnapshot;
 }): CompiledEventContract[] {
   const root = join(authoringDir, "event-contracts");
-  if (!existsSync(root)) return [];
+  try {
+    if (lstatSync(root).isSymbolicLink()) throw new Error(`${root}: symbolic links are not supported in event contract authoring.`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
   const files: string[] = [];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {

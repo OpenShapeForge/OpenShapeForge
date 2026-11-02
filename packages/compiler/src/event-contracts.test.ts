@@ -46,6 +46,8 @@ describe("event value contracts", () => {
     const validate = new Ajv2020.default({ strict: false }).compile(result.schema);
     expect(validate({ description: "# Notes" })).toBe(true);
     expect(validate({ description: { text: "Notes" } })).toBe(false);
+    const altered = { ...catalog, markdown: { ...catalog.markdown!, render: { input: "AnotherRenderer", display: "OtherDisplay" } } };
+    expect(compileEventContract({ ...ticket, fields: [{ key: "description", osfType: "markdown" }] }, { osfTypes: altered }).checksum).toBe(result.checksum);
   });
   it("identifies exactly the content and version deterministically", () => {
     const a = compileEventContract(ticket, input);
@@ -58,11 +60,21 @@ describe("event value contracts", () => {
     expect(() => compileEventContract({ ...ticket, kind: "componentCatalog" } as never, input, "fixture.yaml")).toThrow(/fixture.yaml.*eventContract/);
     expect(() => compileEventContract({ ...ticket, fields: [{ key: "unknown", osfType: "object" }] }, input)).toThrow(/shape or semantic schema/);
     expect(() => compileEventContract({ ...ticket, fields: [{ key: "doc", osfType: "object", document: { content: "blocks" } }] }, input)).toThrow(/document policy/);
+    expect(() => compileEventContract({ ...ticket, fields: [{ key: "x", osfType: "string", transform: [{ use: "trim" }] }] }, input)).toThrow(/unsupported/);
+    expect(() => compileEventContract({ ...ticket, fields: [{ key: "x", osfType: "typedValue" }] }, input)).toThrow(/unsupported/);
+    expect(() => compileEventContract({ ...ticket, fields: [{ key: "x", osfType: "string", render: { component: "Input" } }] }, input)).toThrow(/unsupported/);
     expect(() => compileEventContract({ ...ticket, event: "ticket" }, input)).toThrow();
     expect(() => compileEventContract({ ...ticket, version: 0 }, input)).toThrow();
     expect(() => compileEventContract({ ...ticket, extra: true } as EventContractDefinition, input)).toThrow();
     expect(() => compileEventContract({ ...ticket, fields: [{ key: "__proto__", osfType: "string" }] }, input)).toThrow();
     expect(() => compileEventContract({ ...ticket, fields: [{ key: "x", osfType: "object", children: [{ key: "id", osfType: "string" }, { key: "id", osfType: "string" }] }] }, input)).toThrow(/duplicate/);
+  });
+  it("rejects a symlinked authoring root, including a dangling link", () => {
+    const dir = mkdtempSync(join(tmpdir(), "osf-event-contract-root-"));
+    try {
+      symlinkSync(join(dir, "missing"), join(dir, "event-contracts"));
+      expect(() => loadEventContracts(dir, input)).toThrow(/symbolic links/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
   it("loads resolved authoring deterministically and rejects duplicate identity/version", () => {
     const dir = mkdtempSync(join(tmpdir(), "osf-event-contract-"));

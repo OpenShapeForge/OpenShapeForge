@@ -155,7 +155,7 @@ interfaces:
         layout:
           preset: main-context
           tabs:
-            - id: details
+            - id: main
               label:
                 en: Details
                 nl: Details

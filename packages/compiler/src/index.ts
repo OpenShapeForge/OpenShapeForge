@@ -170,6 +170,8 @@ export {
   renderFieldAuthoringRegistry,
 } from "./field-authoring-registry.js";
 export type { FieldAuthoringRegistry } from "./field-authoring-registry.js";
+export { compileEventContract, loadEventContracts } from "./event-contracts.js";
+export type { EventContractDefinition, CompiledEventContract } from "./event-contracts.js";
 export type { FieldAuthoringProfile } from "./authoring/loader.js";
 export {
   compileSettingsPolicy,
@@ -243,6 +245,7 @@ export type ArtifactCollection = {
     graphql: GeneratedArtifact[];
     mcp: GeneratedArtifact[];
     connectors: GeneratedArtifact[];
+    eventContracts: GeneratedArtifact[];
     modules: GeneratedArtifact[];
     pluginMigrations: GeneratedArtifact[];
     settings: GeneratedArtifact[];
@@ -365,7 +368,7 @@ export async function collectAllArtifacts(
   // Capture/validate before the first async compile/plugin boundary.
   const databaseRoleNames = resolveDatabaseRoleNames(options.databaseRoleNames);
   const authoringConfig = loadAuthoringConfig(repoRoot);
-  const { manifest, entities, connectors, plugins, pluginEntries, referentiedataCatalog, referentiedata } =
+  const { manifest, entities, connectors, eventContracts, plugins, pluginEntries, referentiedataCatalog, referentiedata } =
     await loadActivePlatformCompile(repoRoot);
   const settingsPolicy = loadSettingsPolicy(repoRoot, authoringConfig, pluginEntries);
   validateRelationshipConstraints(entities);
@@ -568,6 +571,10 @@ export async function collectAllArtifacts(
         contents: renderConnectorCatalog(connectors, manifest),
       },
     ],
+    eventContracts: eventContracts.length ? [{
+      path: "apps/api/src/generated/compiler/event-contracts.json",
+      contents: `${JSON.stringify({ version: 1, contracts: eventContracts }, null, 2)}\n`,
+    }] : [],
     // Which plugins ship a runtime half. Always emitted so the API's boot-time
     // import is unconditional; see generate-modules.ts for why the API is told
     // rather than reading authoring.config.yaml itself.
@@ -672,6 +679,7 @@ export async function collectAllArtifacts(
     ...groups.mcp,
     ...groups.operations,
     ...groups.connectors,
+    ...groups.eventContracts,
     ...groups.modules,
     ...groups.pluginMigrations,
     ...groups.settings,

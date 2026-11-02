@@ -431,7 +431,7 @@ export interface EntityWebRecordLayout {
 export type EntityWebNamedViewDefinition =
     | { kind: "record"; title?: string; fields: string[] }
     | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
-    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string }
+    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
     | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 export interface EntityWebViewDefinition {

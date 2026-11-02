@@ -172,7 +172,7 @@ interfaces:
         title: "{{operationId}}"
         layout:
           tabs:
-            - id: details
+            - id: main
               label:
                 en: Details
                 nl: Details

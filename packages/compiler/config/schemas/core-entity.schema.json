@@ -1256,7 +1256,8 @@
             "kind": { "const": "collection", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
             "collectionLayout": { "enum": ["table", "tabs", "stack"], "x-osf-i18n": { "title": { "en": "Collection layout", "nl": "Collectie-indeling" }, "enum": { "table": { "en": "Table", "nl": "Tabel" }, "tabs": { "en": "Tabs", "nl": "Tabbladen" }, "stack": { "en": "Stack", "nl": "Onder elkaar" } } } },
             "itemView": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$", "x-osf-i18n": { "title": { "en": "Item view", "nl": "Itemweergave" } } },
-            "tabLabel": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Tab label field", "nl": "Tabbladlabelveld" } } }
+            "tabLabel": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Tab label field", "nl": "Tabbladlabelveld" } } },
+            "showItemTitle": { "type": "boolean", "default": true, "x-osf-i18n": { "title": { "en": "Show item title", "nl": "Itemtitel tonen" } } }
           }
         }
       ]

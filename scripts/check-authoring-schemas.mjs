@@ -65,16 +65,18 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   "connector.schema.json": 5,
   // The core ERP catalog under packages/compiler/config/authoring/entities/,
   // excluding `_base.yaml` — a baseEntity, and so unschemad by design — plus
-  // the two entities of the notebook example plugin's authoring layer, plus
-  // the two the repository's own record-action layer declares an action on.
-  // Five authorization profile and operation-policy entities are now included.
-  "core-entity.schema.json": 165,
+  // the two entities of the notebook example plugin's authoring layer.
+  // Five authorization profile and operation-policy entities are included.
+  // The optional CI record-action layer adds two more (accounted for below).
+  "core-entity.schema.json": 163,
   // The platform's own administration (operations/control.yaml): the 23
   // control-realm Operations behind /api/control/v1 and the control MCP —
   // and the operator side of capability grants (operations/grants.yaml),
   // plus accounts, members, groups, permissions, roles, source-sync,
   // edit-lease, record-action and record-action-assignment catalogs.
   "operation-catalog.schema.json": 12,
+  // No event contracts are authored by the core repository yet.
+  "event-contract.schema.json": 0,
   "settings-definition.schema.json": 0,
   "settings-provider.schema.json": 0,
   "retention-policy-catalog.schema.json": 1,
@@ -159,7 +161,9 @@ const actualCoverage = new Map();
 for (const { schema } of validated) {
   actualCoverage.set(schema, (actualCoverage.get(schema) ?? 0) + 1);
 }
-for (const [schema, expected] of Object.entries(EXPECTED_SCHEMA_COVERAGE).sort()) {
+const fixtureLayerActive = scanRoots.some(root => relative(repoRoot, root) === join("test", "fixtures", "authoring", "record-actions"));
+const expectedCoverage = Object.fromEntries(Object.entries(EXPECTED_SCHEMA_COVERAGE).map(([schema, count]) => [schema, count + (schema === "core-entity.schema.json" && fixtureLayerActive ? 2 : 0)]));
+for (const [schema, expected] of Object.entries(expectedCoverage).sort()) {
   const actual = actualCoverage.get(schema) ?? 0;
   if (actual !== expected) {
     coverageFailures.push(`${schema} validated ${actual} file(s), expected ${expected}`);
@@ -190,7 +194,7 @@ console.log(
     `${scanRoots.map((root) => relative(repoRoot, root)).join(", ")}.`,
 );
 console.log(
-  `Per schema: ${Object.entries(EXPECTED_SCHEMA_COVERAGE)
+    `Per schema: ${Object.entries(expectedCoverage)
     .sort()
     .map(([schema, count]) => `${schema.replace(/\.schema\.json$/, "")} (${count})`)
     .join(", ")}.`,

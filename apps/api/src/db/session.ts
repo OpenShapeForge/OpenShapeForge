@@ -736,7 +736,16 @@ export async function withDbSession<TDatabase, TResult>(
       for (;;) {
         if (barrier && !barrier.isActive()) throw new Error("Shared read metadata transaction has expired.");
         let attempt;
-        try { attempt = await sql<{ acquired: boolean }>`select pg_try_advisory_lock_shared(hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0)) as acquired`.execute(connection); }
+        try { attempt = await sql<{ acquired: boolean }>`
+          with key as (select hashtextextended('osf.authorization:' || ${session.tenantId}::uuid::text, 0) as value)
+          select case when exists (
+            select 1 from pg_locks, key where locktype = 'advisory'
+              and database = (select oid from pg_database where datname = current_database())
+              and classid = ((key.value >> 32) & 4294967295)::oid
+              and objid = (key.value & 4294967295)::oid and objsubid = 1
+              and mode = 'ExclusiveLock' and not granted
+          ) then false else pg_try_advisory_lock_shared((select value from key)) end as acquired
+        `.execute(connection); }
         catch (error) { await discard(error); throw error; }
         if (attempt.rows[0]?.acquired) break;
         const remaining = deadline - Date.now();

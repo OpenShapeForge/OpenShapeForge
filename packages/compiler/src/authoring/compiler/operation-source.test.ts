@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import { compile } from "./index.js";
+import { operationSourceEntity } from "./operation-source.js";
 import { buildWebManifest, hasWebRestCollection } from "../web-manifest.js";
 import { assertEntityAuthoring } from "../entity-authoring.js";
 import { deriveEntityOsfTypes } from "../entity-fields.js";
@@ -253,6 +254,18 @@ test("source entities fail closed for SQL persistence and generic CRUD", () => {
   expect(() => contract(sql)).toThrow("never generated SQL CRUD");
   const unprotected = entity(); unprotected.authorization!.roles.read = [];
   expect(() => contract(unprotected)).toThrow("authorization.roles.read must be present");
+});
+
+test("source entities reject provider and traversal relationships", () => {
+  for (const relationship of [
+    { kind: "belongsTo", provider: { bindings: { id: "id" } } },
+    { kind: "belongsTo", via: "owner" },
+    { kind: "hasMany" },
+  ]) {
+    const input = entity();
+    input.fields.push({ key: "related", osfType: "string", relationship: relationship as any });
+    expect(() => operationSourceEntity(input, [], false)).toThrow("SQL relationships");
+  }
 });
 
 test("read contracts cannot override the entity's fields, tenant or roles", () => {

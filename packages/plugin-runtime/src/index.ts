@@ -50,6 +50,7 @@ export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js"
 export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwner, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
   RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type {
+  OperationAcceptance,
   OperationConfirmation,
   OperationError,
   OperationPrerequisite,
@@ -443,6 +444,82 @@ export type RuntimeOperationProvider = {
     context: RuntimeOperationExecutionContext,
     request: RuntimeOperationRequest,
   ): Promise<RuntimeOperationExecutionResult>;
+};
+
+/**
+ * The reserved Operation input member that names a core takeover record. Core
+ * strips it from the input before validation and hashing. Only the tenant's
+ * organization service identity may present it, and only for the exact
+ * operation, record and input the takeover was opened for.
+ */
+export const OPERATION_TAKEOVER_INPUT_MEMBER = "osfTakeover";
+
+/** What an override is asked about: one record-scoped canonical write. */
+export type RuntimeOperationOverrideRequest = {
+  operation: { id: string; intent: "update" | "delete" };
+  /** The caller's business input, without `osfTakeover`. */
+  input: Readonly<Record<string, unknown>>;
+  recordId: string;
+};
+
+export type RuntimeOperationOverrideResolution = { overrideId: string };
+
+export type RuntimeOperationOverrideExecuteRequest = RuntimeOperationOverrideRequest & {
+  /** The resolution's own id, as `resolve` returned it. */
+  overrideId: string;
+  /**
+   * Core's takeover record. The plugin attaches it, as the reserved input
+   * member `osfTakeover`, only to its own run's step for the same operation,
+   * record and input; it is not a secret and grants nothing to anyone else.
+   */
+  takeoverId: string;
+  /** Stable for this tenant, override, operation, record and input. */
+  idempotencyKey: string;
+};
+
+export type RuntimeOperationOverrideExecutionContext = {
+  /** The caller's live session; the override acts as the caller. */
+  session: PluginSessionContext;
+  signal?: AbortSignal;
+  /** Nested canonical dispatch; it cannot widen or replace the live session. */
+  execute(
+    request: RuntimeOperationRequest,
+    options?: RuntimeOperationExecutionOptions,
+  ): Promise<RuntimeOperationExecutionResult>;
+};
+
+/**
+ * `completed`: the original effect has happened; core answers the original's
+ * own result. `accepted`: the takeover answered before the original effect
+ * happened. `error`: the call is refused with this error; core never falls
+ * through to the original.
+ */
+export type RuntimeOperationOverrideResult =
+  | { completed: Readonly<Record<string, unknown>> }
+  | { accepted: OperationAcceptance }
+  | { error: OperationError };
+
+/**
+ * Takes a generated record-scoped `update` or `delete` in place of the
+ * original, under the same id and input. Core asks only after the caller's
+ * authorization, admission, record permissions, input validation and a ready
+ * confirmation, so an override never widens who may perform the original.
+ */
+export type RuntimeOperationOverride = {
+  id: string;
+  /**
+   * Which override takes this operation for this record, or none. May read
+   * the record (canonical get) to evaluate conditions; hidden answers
+   * `undefined`, and the original runs. Must have no side effects.
+   */
+  resolve(
+    session: PluginSessionContext,
+    request: RuntimeOperationOverrideRequest,
+  ): Promise<RuntimeOperationOverrideResolution | undefined>;
+  execute(
+    context: RuntimeOperationOverrideExecutionContext,
+    request: RuntimeOperationOverrideExecuteRequest,
+  ): Promise<RuntimeOperationOverrideResult>;
 };
 
 /** The database capabilities exposed by the host to a runtime plugin. */
@@ -1010,6 +1087,11 @@ export type RuntimeModuleContract<
   /** At most one configured module supplies the internal provider-neutral storage port. */
   artifactStorage?: ArtifactStorage;
   operationProviders?: readonly OperationProvider[];
+  /**
+   * Takeovers of generated record-scoped `update` and `delete` Operations. At
+   * most one override may answer for one call; two answering is refused.
+   */
+  operationOverrides?: readonly RuntimeOperationOverride[];
   workers?: Record<string, Worker>;
   /**
    * Handlers for durable job kinds, keyed by kind. A kind two active modules

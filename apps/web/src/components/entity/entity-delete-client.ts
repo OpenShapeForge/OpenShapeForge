@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { isOperationAcceptance, type OperationAcceptance } from "@/lib/operation-acceptance";
+
 const ENTITY_DELETE_ENDPOINT = "/api/entity/delete";
 
 type EntityDeletePayload = {
+  accepted?: unknown;
   errors?: { message?: string }[];
   message?: string;
 };
@@ -23,7 +26,7 @@ export async function deleteEntity(options: {
   entityId: string;
   expectedVersion: string;
   confirmed: true;
-}): Promise<void> {
+}): Promise<{ deleted: true } | { accepted: OperationAcceptance }> {
   const response = await fetch(ENTITY_DELETE_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -36,7 +39,12 @@ export async function deleteEntity(options: {
   });
 
   const payload = await response.json().catch(() => null) as EntityDeletePayload | null;
+  // 202: an operation override took the delete; the record still exists.
+  if (response.status === 202 && isOperationAcceptance(payload?.accepted)) {
+    return { accepted: payload.accepted };
+  }
   if (!response.ok || payload?.errors?.length) {
     throw new Error(extractDeleteError(payload, "Delete failed."));
   }
+  return { deleted: true };
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { executeGraphqlRequest } from "@/lib/server/graphql-client";
+import { executeGraphqlRequest, isGraphqlProxyError } from "@/lib/server/graphql-client";
+import { acceptanceFromGraphqlPayload } from "@/lib/operation-acceptance";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DELETE_MUTATION = /^delete([A-Z][_0-9A-Za-z]*)$/;
@@ -40,10 +41,12 @@ export async function POST(request: Request): Promise<Response> {
       error { code message retryable }
     }
   }`;
-  const result = await executeGraphqlRequest<Record<string, {
+  let result: Record<string, {
     data?: { deleted?: boolean } | null;
     error?: { code?: string; message?: string } | null;
-  } | null>>({
+  } | null>;
+  try {
+    result = await executeGraphqlRequest<typeof result>({
     query,
     // The mutation name and input type are selected from the compiler naming
     // convention after the strict shape check above, so this deliberately uses
@@ -57,6 +60,13 @@ export async function POST(request: Request): Promise<Response> {
       },
     },
   });
+  } catch (error) {
+    // Taken over by an operation override: the record is not deleted yet and
+    // the takeover is committed, so this is neither a failure nor a deletion.
+    const accepted = isGraphqlProxyError(error) ? acceptanceFromGraphqlPayload(error.payload) : undefined;
+    if (accepted) return Response.json({ accepted }, { status: 202 });
+    throw error;
+  }
   const deletion = result[body.mutationName];
   if (deletion?.error) {
     return Response.json({

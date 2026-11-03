@@ -24,9 +24,9 @@ export type {
   FormulaRecord,
   FormulaType,
   FormulaValue,
-} from "./types.ts";
-export { parseFormula, tokenize, MAX_FORMULA_LENGTH, MAX_NESTING, MAX_NODES } from "./syntax.ts";
-export type { BinaryOperator, ParseResult, SyntaxNode, Token, TokenType } from "./syntax.ts";
+} from "./types.js";
+export { parseFormula, tokenize, MAX_FORMULA_LENGTH, MAX_NESTING, MAX_NODES } from "./syntax.js";
+export type { BinaryOperator, ParseResult, SyntaxNode, Token, TokenType } from "./syntax.js";
 export {
   checkFormula,
   DEFAULT_FORMULA_DEPTH,
@@ -34,17 +34,17 @@ export {
   FORMULA_TYPES,
   isComputedField,
   isFormulaType,
-} from "./check.ts";
-export type { CheckOptions, CheckResult } from "./check.ts";
-export { DATE_UNITS, dateUnit, FORMULA_FUNCTIONS, formulaFunction, TIME_FUNCTIONS } from "./functions.ts";
-export type { FormulaFunction, FunctionCategory } from "./functions.ts";
-export { formatFormula, FormulaFormatError } from "./format.ts";
-export { childExpressions, dependencies, dependencyNodes } from "./dependencies.ts";
-export { buildDependencyGraph, dependencyNodeKey } from "./graph.ts";
-export type { DependencyDefinition, DependencyGraph, DependencyNode } from "./graph.ts";
-export { evaluate } from "./evaluate.ts";
-export type { EvaluateOptions } from "./evaluate.ts";
-export { analyze, applySuggestion, formulaTokens, suggest } from "./editor.ts";
+} from "./check.js";
+export type { CheckOptions, CheckResult } from "./check.js";
+export { DATE_UNITS, dateUnit, FORMULA_FUNCTIONS, formulaFunction, TIME_FUNCTIONS } from "./functions.js";
+export type { FormulaFunction, FunctionCategory } from "./functions.js";
+export { formatFormula, FormulaFormatError } from "./format.js";
+export { childExpressions, dependencies, dependencyNodes } from "./dependencies.js";
+export { buildDependencyGraph, dependencyNodeKey } from "./graph.js";
+export type { DependencyDefinition, DependencyGraph, DependencyNode } from "./graph.js";
+export { evaluate } from "./evaluate.js";
+export type { EvaluateOptions } from "./evaluate.js";
+export { analyze, applySuggestion, formulaTokens, suggest } from "./editor.js";
 export type {
   AnalyzeOptions,
   FormulaAnalysis,
@@ -53,5 +53,5 @@ export type {
   FormulaToken,
   FormulaTokenType,
   SuggestOptions,
-} from "./editor.ts";
-export { formulaTypeForBaseType } from "./base-types.ts";
+} from "./editor.js";
+export { formulaTypeForBaseType } from "./base-types.js";

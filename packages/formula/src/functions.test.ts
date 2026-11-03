@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 
-import { env, record } from "./__fixtures__/env.ts";
-import { analyze } from "./editor.ts";
-import { evaluate } from "./evaluate.ts";
-import { formatFormula } from "./format.ts";
-import { dateUnit, FORMULA_FUNCTIONS } from "./functions.ts";
-import type { FormulaEvaluation, FormulaRecord, FormulaType } from "./types.ts";
+import { env, record } from "./__fixtures__/env.js";
+import { analyze } from "./editor.js";
+import { evaluate } from "./evaluate.js";
+import { formatFormula } from "./format.js";
+import { dateUnit, FORMULA_FUNCTIONS } from "./functions.js";
+import type { FormulaEvaluation, FormulaRecord, FormulaType } from "./types.js";
 
 /** Analyses, checks the type, evaluates against the record and checks the round trip. */
 function run(text: string, type: FormulaType, sample: FormulaRecord = record): FormulaEvaluation {

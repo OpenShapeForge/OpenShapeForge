@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 
-import { env, spanOf } from "./__fixtures__/env.ts";
-import { analyze } from "./editor.ts";
-import type { FormulaDiagnosticCode, FormulaEnvironment, FormulaField } from "./types.ts";
+import { env, spanOf } from "./__fixtures__/env.js";
+import { analyze } from "./editor.js";
+import type { FormulaDiagnosticCode, FormulaEnvironment, FormulaField } from "./types.js";
 
 function accepted(text: string, environment: FormulaEnvironment = env) {
   const result = analyze(text, environment);

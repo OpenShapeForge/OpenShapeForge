@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 
-import { env } from "./__fixtures__/env.ts";
-import { analyze } from "./editor.ts";
-import { formatFormula, FormulaFormatError } from "./format.ts";
-import type { FormulaAst, FormulaEnvironment } from "./types.ts";
+import { env } from "./__fixtures__/env.js";
+import { analyze } from "./editor.js";
+import { formatFormula, FormulaFormatError } from "./format.js";
+import type { FormulaAst, FormulaEnvironment } from "./types.js";
 
 function astOf(text: string, environment: FormulaEnvironment = env): FormulaAst {
   const analysis = analyze(text, environment);

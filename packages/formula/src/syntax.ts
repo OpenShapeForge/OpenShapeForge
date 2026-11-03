@@ -10,7 +10,7 @@
 //   unary       - +                 (highest)
 //
 // Every node keeps its source span; the binder reports refusals against it.
-import type { FormulaDiagnostic } from "./types.ts";
+import type { FormulaDiagnostic } from "./types.js";
 
 export type TokenType =
   | "number"

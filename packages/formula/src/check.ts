@@ -2,7 +2,7 @@
 // Syntax tree → canonical AST: binds every field reference to a stable id,
 // derives the result type statically and refuses what may not be saved, each
 // refusal with the stretch of text it is about.
-import type { CompilerConditionOperator, CompilerDateUnit } from "./canonical/canonical-condition.ts";
+import type { CompilerConditionOperator, CompilerDateUnit } from "./canonical/canonical-condition.js";
 import {
   comparable,
   dateUnit,
@@ -13,9 +13,9 @@ import {
   type CallSyntax,
   type Checked,
   type ValueType,
-} from "./functions.ts";
-import { buildDependencyGraph, type DependencyDefinition } from "./graph.ts";
-import type { SyntaxNode } from "./syntax.ts";
+} from "./functions.js";
+import { buildDependencyGraph, type DependencyDefinition } from "./graph.js";
+import type { SyntaxNode } from "./syntax.js";
 import type {
   FormulaAst,
   FormulaDiagnostic,
@@ -24,7 +24,7 @@ import type {
   FormulaField,
   FormulaFieldRef,
   FormulaType,
-} from "./types.ts";
+} from "./types.js";
 
 export const FORMULA_TYPES: readonly FormulaType[] = ["text", "number", "boolean", "date", "timestamp"];
 

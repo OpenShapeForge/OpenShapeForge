@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { FormulaType } from "./types.ts";
+import type { FormulaType } from "./types.js";
 
 const BY_BASE_TYPE: Readonly<Record<string, FormulaType>> = {
   string: "text",

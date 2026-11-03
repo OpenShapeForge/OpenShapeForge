@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 
-import { env, record } from "./__fixtures__/env.ts";
-import { analyze, applySuggestion, formulaTokens, suggest } from "./editor.ts";
+import { env, record } from "./__fixtures__/env.js";
+import { analyze, applySuggestion, formulaTokens, suggest } from "./editor.js";
 
 /** `|` marks the caret. */
 function at(textWithCaret: string) {

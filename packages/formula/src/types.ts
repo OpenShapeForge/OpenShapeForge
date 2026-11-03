@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { CompilerExpressionInput } from "./canonical/canonical-condition.ts";
+import type { CompilerExpressionInput } from "./canonical/canonical-condition.js";
 
 /** A formula compiles to the canonical expression AST the evaluator runs. */
 export type FormulaAst = CompilerExpressionInput;

@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 
-import { evaluateExpression } from "./canonical/expression-evaluator.ts";
-import { env, record } from "./__fixtures__/env.ts";
-import { dependencies } from "./dependencies.ts";
-import { analyze } from "./editor.ts";
-import { evaluate } from "./evaluate.ts";
-import type { FormulaAst, FormulaRecord } from "./types.ts";
+import { evaluateExpression } from "./canonical/expression-evaluator.js";
+import { env, record } from "./__fixtures__/env.js";
+import { dependencies } from "./dependencies.js";
+import { analyze } from "./editor.js";
+import { evaluate } from "./evaluate.js";
+import type { FormulaAst, FormulaRecord } from "./types.js";
 
 function compiled(text: string) {
   const analysis = analyze(text, env);

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
-import type { CompilerExpressionInput } from "./canonical/canonical-condition.ts";
-import type { DependencyNode } from "./graph.ts";
-import type { FormulaAst, FormulaFieldRef } from "./types.ts";
+import type { CompilerExpressionInput } from "./canonical/canonical-condition.js";
+import type { DependencyNode } from "./graph.js";
+import type { FormulaAst, FormulaFieldRef } from "./types.js";
 
 /** The direct sub-expressions of a canonical AST node, of any kind, in the order formula text writes them. */
 export function childExpressions(node: CompilerExpressionInput): CompilerExpressionInput[] {

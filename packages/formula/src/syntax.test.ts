@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 
-import { MAX_FORMULA_LENGTH, MAX_NESTING, MAX_NODES, parseFormula, tokenize, type SyntaxNode } from "./syntax.ts";
+import { MAX_FORMULA_LENGTH, MAX_NESTING, MAX_NODES, parseFormula, tokenize, type SyntaxNode } from "./syntax.js";
 
 /** A compact rendering of the tree: fields in braces, calls by name, binaries in parentheses. */
 function shape(node: SyntaxNode): string {

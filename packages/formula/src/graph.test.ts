@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 
-import { env } from "./__fixtures__/env.ts";
-import { dependencies, dependencyNodes } from "./dependencies.ts";
-import { analyze } from "./editor.ts";
-import { buildDependencyGraph, type DependencyDefinition, type DependencyNode } from "./graph.ts";
+import { env } from "./__fixtures__/env.js";
+import { dependencies, dependencyNodes } from "./dependencies.js";
+import { analyze } from "./editor.js";
+import { buildDependencyGraph, type DependencyDefinition, type DependencyNode } from "./graph.js";
 
 const P = (field: string): DependencyNode => ({ entity: "Product", field });
 const define = (field: string, ...reads: DependencyNode[]): DependencyDefinition => ({ node: P(field), dependsOn: reads });

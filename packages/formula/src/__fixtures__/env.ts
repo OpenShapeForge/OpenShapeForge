@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // A product with authored fields, customer fields and an owned single child
 // (`pricing`, a ProductPricing), as the tests bind formulas against it.
-import type { FormulaEnvironment, FormulaRecord } from "../types.ts";
+import type { FormulaEnvironment, FormulaRecord } from "../types.js";
 
 export const env: FormulaEnvironment = [
   { id: "title", label: "Title", key: "title", type: "text", scope: "self" },

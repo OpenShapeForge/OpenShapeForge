@@ -6,10 +6,10 @@
 // Spellings with the same meaning print one way: `CONCATENATE(a, b)` prints as
 // `a & b`, `IF(c, x, BLANK())` as `IF(c, x)`, `BLANK() = x` as `x = BLANK()`,
 // `<>` as `!=`, and function names in capitals.
-import type { CompilerExpressionInput } from "./canonical/canonical-condition.ts";
-import { fieldPath } from "./check.ts";
-import { isIdentifier } from "./syntax.ts";
-import type { FormulaAst, FormulaEnvironment } from "./types.ts";
+import type { CompilerExpressionInput } from "./canonical/canonical-condition.js";
+import { fieldPath } from "./check.js";
+import { isIdentifier } from "./syntax.js";
+import type { FormulaAst, FormulaEnvironment } from "./types.js";
 
 const enum Precedence {
   Comparison = 1,

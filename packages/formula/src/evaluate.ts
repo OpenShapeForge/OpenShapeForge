@@ -9,9 +9,9 @@
 // IF, SWITCH, AND, OR and ISERROR are walked lazily, so `IF({b} = 0, 0, {a} / {b})`
 // never divides by zero and `ISERROR(...)` catches an error instead of
 // propagating it. Nothing throws.
-import type { CompilerExpressionInput } from "./canonical/canonical-condition.ts";
-import { evaluateExpression, isErrorValue } from "./canonical/expression-evaluator.ts";
-import { fieldPath } from "./check.ts";
+import type { CompilerExpressionInput } from "./canonical/canonical-condition.js";
+import { evaluateExpression, isErrorValue } from "./canonical/expression-evaluator.js";
+import { fieldPath } from "./check.js";
 import type {
   FormulaAst,
   FormulaEnvironment,
@@ -20,7 +20,7 @@ import type {
   FormulaRecord,
   FormulaType,
   FormulaValue,
-} from "./types.ts";
+} from "./types.js";
 
 export type EvaluateOptions = {
   /**

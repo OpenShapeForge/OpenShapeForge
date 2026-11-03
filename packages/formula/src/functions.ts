@@ -4,9 +4,9 @@
 import type {
   CompilerDateUnit,
   CompilerFormulaOperator,
-} from "./canonical/canonical-condition.ts";
-import type { SyntaxNode } from "./syntax.ts";
-import type { FormulaAst, FormulaDiagnosticCode, FormulaType } from "./types.ts";
+} from "./canonical/canonical-condition.js";
+import type { SyntaxNode } from "./syntax.js";
+import type { FormulaAst, FormulaDiagnosticCode, FormulaType } from "./types.js";
 
 /** A checked expression's type: `blank` is BLANK(), `invalid` already has a diagnostic. */
 export type ValueType = FormulaType | "blank" | "invalid";

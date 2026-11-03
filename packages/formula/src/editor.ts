@@ -4,11 +4,11 @@
 // tokens to colour. Shaped for Battery's FieldFormula (`suggestions` of
 // `{ value, label, context, kind }`, `onSuggestionSelect(value)`) and
 // FormulaToken (`field | operator | number | function | parenthesis`).
-import { checkFormula, isFormulaType, type CheckOptions } from "./check.ts";
-import { evaluate } from "./evaluate.ts";
-import { braceFieldName } from "./format.ts";
-import { FORMULA_FUNCTIONS, TIME_FUNCTIONS } from "./functions.ts";
-import { isIdentifier, parseFormula, tokenize, type Token } from "./syntax.ts";
+import { checkFormula, isFormulaType, type CheckOptions } from "./check.js";
+import { evaluate } from "./evaluate.js";
+import { braceFieldName } from "./format.js";
+import { FORMULA_FUNCTIONS, TIME_FUNCTIONS } from "./functions.js";
+import { isIdentifier, parseFormula, tokenize, type Token } from "./syntax.js";
 import type {
   FormulaAst,
   FormulaDiagnostic,
@@ -18,7 +18,7 @@ import type {
   FormulaFieldRef,
   FormulaRecord,
   FormulaType,
-} from "./types.ts";
+} from "./types.js";
 
 /**
  * A token to colour. The first five types are Battery's FormulaTokenType;

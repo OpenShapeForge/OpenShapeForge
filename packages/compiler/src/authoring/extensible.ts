@@ -71,16 +71,35 @@ export const EXTENSION_INDEX_COLUMNS: Record<ExtensionIndexColumn, { column: str
  * The partial indexes of every `<table>_field_values` table, in one list so
  * the measured index shape can change in one place. Each is narrowed to the
  * rows that hold a value in its column; without that, the indexes are mostly
- * NULL. Renaming or reshaping an entry is not additive: an index under an
- * existing name needs a versioned migration.
+ * NULL, and every query on them states the matching `IS NOT NULL` (a
+ * comparison implies it).
+ *
+ * The shape is the one the phase-0 measurement chose (#372): `record_id` last
+ * in every value index, so a filter's semi-join and a sort page are read from
+ * the index alone, in `(value, record_id)` order with the tiebreaker included;
+ * the reference index leads with the referenced id, so "referenced by" and the
+ * fan-out walk find a target's referrers without a heap visit.
+ *
+ * Renaming or reshaping an entry is not additive: an index under an existing
+ * name needs a versioned migration. A reshaped entry therefore gets a new
+ * name, and the roll-forward adds it. The first shape, `(tenant_id, field_id,
+ * <column>)` and `(tenant_id, value_ref_id)` as `<table>_<column>_idx`, is no
+ * longer declared; a database built with it keeps those indexes (a prefix of
+ * the new ones, so harmless and unused) until it is rebuilt or they are
+ * dropped by hand. No persistent database carries them: they never left an
+ * unreleased branch.
  */
 export const EXTENSION_VALUE_INDEXES: ReadonlyArray<{ suffix: string; columns: readonly string[]; where: string }> = [
   ...Object.values(EXTENSION_INDEX_COLUMNS).map(({ column }) => ({
-    suffix: column,
-    columns: ["tenant_id", "field_id", column],
+    suffix: `${column}_record`,
+    columns: ["tenant_id", "field_id", column, "record_id"],
     where: `${column} IS NOT NULL`,
   })),
-  { suffix: "value_ref_id", columns: ["tenant_id", "value_ref_id"], where: "value_ref_id IS NOT NULL" },
+  {
+    suffix: "value_ref_id_record",
+    columns: ["tenant_id", "value_ref_id", "field_id", "record_id"],
+    where: "value_ref_id IS NOT NULL",
+  },
 ];
 
 const POSTGRES_IDENTIFIER_BYTES = 63;

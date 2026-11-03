@@ -1477,6 +1477,29 @@ describe("tenant fields on a carried-forward database", () => {
     "platform.extension_field_definitions",
     "platform.extension_field_dependencies",
   ];
+  const valueColumns = ["value_boolean", "value_date", "value_number", "value_text", "value_timestamp"];
+  /** The measured index shape (#372), as pg_indexes reports it: record_id last, the reference index led by the target. */
+  const measuredIndexes = (valuesTable: string) => {
+    const [, name] = valuesTable.split(".");
+    return [
+      ...valueColumns.map((column) => ({
+        name: `${name}_${column}_record_idx`,
+        definition: `CREATE INDEX ${name}_${column}_record_idx ON ${valuesTable} USING btree (tenant_id, field_id, ${column}, record_id) WHERE (${column} IS NOT NULL)`,
+      })),
+      {
+        name: `${name}_value_ref_id_record_idx`,
+        definition: `CREATE INDEX ${name}_value_ref_id_record_idx ON ${valuesTable} USING btree (tenant_id, value_ref_id, field_id, record_id) WHERE (value_ref_id IS NOT NULL)`,
+      },
+    ].toSorted((left, right) => left.name.localeCompare(right.name));
+  };
+  const valueIndexes = async (db: Kysely<DB>, valuesTable: string) => {
+    const [schema, name] = valuesTable.split(".");
+    return (await sql<{ name: string; definition: string }>`
+      select indexname as name, indexdef as definition from pg_indexes
+      where schemaname = ${schema} and tablename = ${name} and indexname <> ${`${name}_pkey`}
+      order by indexname
+    `.execute(db)).rows;
+  };
 
   // Needs the extensible acceptance layer (test/fixtures/authoring/extensible);
   // the production composition declares no extensible entity.
@@ -1530,8 +1553,49 @@ describe("tenant fields on a carried-forward database", () => {
             expect(flags.rows).toEqual([{ rls: true, forced: true, worker: true, app: true }]);
           }
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);
+          expect(await valueIndexes(db, entity.valuesTable)).toEqual(measuredIndexes(entity.valuesTable));
         });
 
+        expect((await runChain(url)).applied).toBe(false);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test.skipIf(extensible === undefined)(
+    "a database built with the first index shape rolls forward to the measured one",
+    async () => {
+      const entity = extensible!;
+      const [, name] = entity.valuesTable.split(".");
+      await withScratchDb(async (url) => {
+        await runChain(url);
+        await withDb(url, async (db) => {
+          // Rewind to the first shape: (tenant_id, field_id, <column>) and
+          // (tenant_id, value_ref_id) under their old names.
+          for (const { name: index } of measuredIndexes(entity.valuesTable)) {
+            await sql.raw(`drop index ${entity.valuesTable.split(".")[0]}.${index}`).execute(db);
+          }
+          for (const column of valueColumns) {
+            await sql.raw(`create index ${name}_${column}_idx on ${entity.valuesTable} (tenant_id, field_id, ${column}) where ${column} is not null`).execute(db);
+          }
+          await sql.raw(`create index ${name}_value_ref_id_idx on ${entity.valuesTable} (tenant_id, value_ref_id) where value_ref_id is not null`).execute(db);
+          await staleChecksum(db);
+        });
+
+        const result = await runChain(url);
+        expect(result.applied).toBe(true);
+        expect(result.rollForward).toEqual({ addedTables: [], addedColumns: [] });
+        await withDb(url, async (db) => {
+          const indexes = await valueIndexes(db, entity.valuesTable);
+          // The measured indexes are added; the first ones are no longer
+          // declared and stay behind, a harmless prefix, until a rebuild.
+          expect(indexes.filter((index) => index.name.endsWith("_record_idx"))).toEqual(measuredIndexes(entity.valuesTable));
+          expect(indexes.filter((index) => !index.name.endsWith("_record_idx")).map((index) => index.name)).toEqual(
+            [...valueColumns, "value_ref_id"].map((column) => `${name}_${column}_idx`).toSorted(),
+          );
+          expect((await diffManifestAgainstDatabase(db)).nonAdditive).toEqual([]);
+          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);
+        });
         expect((await runChain(url)).applied).toBe(false);
       });
     },

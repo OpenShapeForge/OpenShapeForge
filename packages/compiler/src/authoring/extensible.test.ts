@@ -197,10 +197,13 @@ describe("extensible: storage", () => {
     expect(sql).toContain(`CREATE TABLE IF NOT EXISTS "parts"."extensible_parts_field_values" (`);
     expect(sql).toContain(`PRIMARY KEY ("tenant_id", "record_id", "field_id", "ordinal")`);
     expect(sql).toContain(`"ordinal" integer NOT NULL DEFAULT 0`);
+    // The measured shape (#372): record_id last, the reference index led by the target id.
     for (const column of ["value_text", "value_number", "value_boolean", "value_date", "value_timestamp"]) {
-      expect(sql).toContain(`CREATE INDEX IF NOT EXISTS "extensible_parts_field_values_${column}_idx" ON "parts"."extensible_parts_field_values" ("tenant_id", "field_id", "${column}") WHERE ${column} IS NOT NULL;`);
+      expect(sql).toContain(`CREATE INDEX IF NOT EXISTS "extensible_parts_field_values_${column}_record_idx" ON "parts"."extensible_parts_field_values" ("tenant_id", "field_id", "${column}", "record_id") WHERE ${column} IS NOT NULL;`);
     }
-    expect(sql).toContain(`CREATE INDEX IF NOT EXISTS "extensible_parts_field_values_value_ref_id_idx" ON "parts"."extensible_parts_field_values" ("tenant_id", "value_ref_id") WHERE value_ref_id IS NOT NULL;`);
+    expect(sql).toContain(`CREATE INDEX IF NOT EXISTS "extensible_parts_field_values_value_ref_id_record_idx" ON "parts"."extensible_parts_field_values" ("tenant_id", "value_ref_id", "field_id", "record_id") WHERE value_ref_id IS NOT NULL;`);
+    // The first shape is no longer declared under its old names.
+    expect(sql).not.toMatch(/"extensible_parts_field_values_value_[a-z_]+?(?<!_record)_idx"/);
     expect(sql).toContain(`ADD CONSTRAINT "extensible_parts_field_values_record_id_fkey" FOREIGN KEY ("tenant_id", "record_id")\n      REFERENCES "parts"."extensible_parts"("tenant_id", "id") ON DELETE CASCADE;`);
   });
 

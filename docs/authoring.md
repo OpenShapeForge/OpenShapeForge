@@ -607,7 +607,11 @@ additive, so a built database rolls forward:
 - `<table>_field_values`: one typed row per record, field and collection
   element (`ordinal`), keyed `(tenant_id, record_id, field_id, ordinal)` with a
   composite reference to the record that cascades, and the partial indexes of
-  `EXTENSION_VALUE_INDEXES` (packages/compiler/src/authoring/extensible.ts).
+  `EXTENSION_VALUE_INDEXES` (packages/compiler/src/authoring/extensible.ts):
+  `(tenant_id, field_id, value_<type>, record_id) where value_<type> is not null`
+  per index column and `(tenant_id, value_ref_id, field_id, record_id) where
+  value_ref_id is not null`, so filters, sort pages and "referenced by" read
+  the index alone.
 - `<table>_field_unique_values`: the claimed values of `unique` fields, keyed
   `(tenant_id, field_id, value_text)`, released with the record.
 - Both side tables get the entity's tenant policy and worker surface, with

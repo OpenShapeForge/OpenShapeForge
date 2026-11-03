@@ -16,6 +16,7 @@ import { executeEntityOperation } from "../../runtime.js";
 import { serializeEntityRow } from "../../serialize-result.js";
 import { executeFieldDefinitionAction, executeReferencedBy, type FieldDefinitionAction } from "../definitions.js";
 import { findExtensionReferenceOrphans } from "../references.js";
+import { loadExtensionFields } from "../store.js";
 import { extensionFilterCondition, extensionPredicateRank } from "../query.js";
 import { EXTENSION_BACKFILL_KIND, EXTENSION_RETENTION_KIND, applyExtensionRetention, extensionBackfillJobHandler, extensionRetentionJobHandler, runBackfillBatch } from "../backfill.js";
 import { catalog } from "../../../../mcp/catalog.js";
@@ -212,7 +213,7 @@ describe("tenant fields on an extensible entity", () => {
     const moved = await update(writer, first.id, { extensions: { sku: "U-2" } });
     expect("error" in moved).toBe(false);
     expect((await sql`select value_text from erp.extensible_assets_field_unique_values where record_id = ${first.id}::uuid`.execute(fixture.privileged.db)).rows)
-      .toEqual([{ value_text: "U-2" }]);
+      .toEqual([{ value_text: "u-2" }]);
     const second = await created(writer, { sku: "U-1" });
     expect(await createAsset(writer, { sku: "U-2" })).toMatchObject({ error: { code: "CONFLICT" } });
     expect(await remove(writer, (moved as unknown as { data: { id: string; updated_at: unknown } }).data)).toMatchObject({ data: { deleted: true } });
@@ -240,7 +241,7 @@ describe("tenant fields on an extensible entity", () => {
     const scope = { name: `Q-${tag}` };
     expect(ids(await list(reader, { filter: { ...scope, extensions: { soort: { eq: "batterij" } } }, limit: 50 })).sort()).toEqual([a.id, b.id, d.id].sort());
     expect(ids(await list(reader, { filter: { ...scope, extensions: { accu: { gte: 10 } } } })).sort()).toEqual([b.id, d.id].sort());
-    expect(ids(await list(reader, { filter: { ...scope, extensions: { capaciteit: { gt: 1 } } } }))).toEqual([a.id]);
+    expect(ids(await list(reader, { filter: { ...scope, extensions: { capaciteit: { value: { gt: 1 }, unit: { eq: "kWh" } } } } }))).toEqual([a.id]);
     expect(ids(await list(reader, { filter: { ...scope, extensions: { accu: { isNull: true } } } }))).toEqual([c.id]);
     expect(ids(await list(reader, { filter: { ...scope, extensions: { links: { contains: c.id } } } }))).toEqual([d.id]);
     expect(ids(await list(reader, { filter: { ...scope, or: [{ extensions: { soort: { eq: "kit" } } }, { extensions: { accu: { lt: 6 } } }] } })).sort()).toEqual([a.id, c.id].sort());
@@ -257,13 +258,15 @@ describe("tenant fields on an extensible entity", () => {
     expect([["eq"], ["in"], ["gte", "lt"], ["startsWith"], ["gt"], ["contains"], ["ne"]].map((operators) => extensionPredicateRank(shapes.scalar, operators)))
       .toEqual([0, 0, 1, 1, 2, 3, 5]);
     expect([extensionPredicateRank(shapes.flag, ["eq"]), extensionPredicateRank(shapes.many, ["contains"])]).toEqual([4, 0]);
-    const order = (filter: Record<string, unknown>) => {
+    // Definitions are proven per transaction; the condition is built inside one.
+    const order = (filter: Record<string, unknown>) => withDbSession(fixture.app.db, reader, async (trx) => {
+      await loadExtensionFields(trx, reader, fixture.table);
       const compiled = extensionFilterCondition(fixture.table, reader, filter).compile(fixture.app.db);
       return compiled.parameters.filter((parameter) => Object.values(fields).includes(parameter as string));
-    };
+    });
     const mixed = { links: { isNull: true }, soort: { contains: "it" }, accu: { gte: 1 }, parent: { eq: a.id } };
-    expect(order(mixed)).toEqual([fields.parent, fields.accu, fields.soort, fields.links]);
-    expect(order(Object.fromEntries(Object.entries(mixed).reverse()))).toEqual(order(mixed));
+    expect(await order(mixed)).toEqual([fields.parent, fields.accu, fields.soort, fields.links]);
+    expect(await order(Object.fromEntries(Object.entries(mixed).reverse()))).toEqual(await order(mixed));
     // A classified key is never a filter or sort key, even for a writer who may read it.
     expect(await list(writer, { filter: { extensions: { bsn: { eq: "123456782" } } } })).toMatchObject({ error: { code: "FORBIDDEN" } });
     expect(await list(writer, { sort: { field: "extensions.bsn", direction: "asc" } })).toMatchObject({ error: { code: "FORBIDDEN" } });
@@ -430,15 +433,12 @@ describe("tenant fields on an extensible entity", () => {
     const after = await define(reader, "list") as { items: Array<{ fieldId: string; state: string; backfill?: { state: string; processed: number } }> };
     expect(after.items.find((item) => item.fieldId === fields.aantal)).toMatchObject({ state: "ready", backfill: { state: "done" } });
     expect((await created(writer, { stuks: 2.5 })).extensions.stuks).toBe(2.5);
-    // The finished backfill analyzed the index table as the worker: MAINTAIN
-    // on the index table only, and the field-and-value statistics are built.
-    const analyzed = await sql<{ index: boolean; entity: boolean; stats: string[] }>`select
+    // The worker holds no MAINTAIN: the planner statistics of the index
+    // follow autovacuum's ANALYZE, not the backfill.
+    const maintain = await sql<{ index: boolean; entity: boolean }>`select
         has_table_privilege('openshapeforge_worker', 'erp.extensible_assets_field_values', 'MAINTAIN') as index,
-        has_table_privilege('openshapeforge_worker', 'erp.extensible_assets', 'MAINTAIN') as entity,
-        array(select statistics_name::text from pg_stats_ext where schemaname = 'erp' and tablename = 'extensible_assets_field_values'
-          and most_common_vals is not null order by 1) as stats`.execute(fixture.privileged.db);
-    expect(analyzed.rows[0]).toMatchObject({ index: true, entity: false });
-    expect(analyzed.rows[0]!.stats).toContain("extensible_assets_field_values_value_number_stats");
+        has_table_privilege('openshapeforge_worker', 'erp.extensible_assets', 'MAINTAIN') as entity`.execute(fixture.privileged.db);
+    expect(maintain.rows[0]).toEqual({ index: false, entity: false });
 
     expect(await failure(define(manager, "update", { fieldId: fields.aantal, definition: { osfType: "date", classification: { sensitivity: "public" } } })))
       .toMatchObject({ message: expect.stringContaining("not a widening change") });
@@ -451,15 +451,19 @@ describe("tenant fields on an extensible entity", () => {
       osfType: "string", label: label("Soort"), unique: true, classification: { sensitivity: "public" },
       options: { type: "static", items: [{ value: "batterij", label: label("Batterij") }, { value: "kit", label: label("Kit") }] } } })) as { code: string; detail?: string };
     expect(duplicate).toMatchObject({ code: "CONFLICT" });
-    // Without duplicates, unique is switched on by a backfill that claims every value.
-    const claimed = await created(writer, { soort: "batterij", accu: 1, stuks: 77 });
-    const unique = await define(manager, "update", { fieldId: fields.aantal, definition: { osfType: "number", label: label("Stuks"),
-      defaultValue: 1, unique: true, classification: { sensitivity: "public" } } }) as { state: string; backfill?: { state: string } };
+    // Without duplicates, unique is switched on by a backfill that claims every
+    // value. (Not on stuks: a create stores its default, so 1 is everywhere.)
+    const claimed = (await sql<{ id: string }>`select record_id::text as id from erp.extensible_assets_field_values
+      where field_id = ${fields.plek!}::uuid`.execute(fixture.privileged.db)).rows;
+    expect(claimed).toHaveLength(1);
+    const unique = await define(manager, "update", { fieldId: fields.plek, definition: { osfType: TARGET_ENTITY, label: label("Plek"),
+      onDelete: "restrict", unique: true, classification: { sensitivity: "public" } } }) as { state: string; backfill?: { state: string } };
     expect(unique).toMatchObject({ state: "updating", backfill: { state: "queued" } });
     await drainJobs();
-    expect((await sql`select record_id from erp.extensible_assets_field_unique_values where field_id = ${fields.aantal!}::uuid and value_text = '77'`
-      .execute(fixture.privileged.db)).rows).toEqual([{ record_id: claimed.id }]);
-    expect(await createAsset(writer, { stuks: 77 })).toMatchObject({ error: { code: "CONFLICT" } });
+    const claims = await sql<{ record_id: string; value_text: string }>`select record_id::text, value_text from erp.extensible_assets_field_unique_values
+      where field_id = ${fields.plek!}::uuid`.execute(fixture.privileged.db);
+    expect(claims.rows.map((row) => row.record_id)).toEqual([claimed[0]!.id]);
+    expect(await createAsset(writer, { plek: claims.rows[0]!.value_text })).toMatchObject({ error: { code: "CONFLICT" } });
   });
 
   test("lifecycle: deprecate, restore and delete with a confirmed, resumable, idempotent backfill", async () => {
@@ -572,7 +576,7 @@ describe("tenant fields on an extensible entity", () => {
     const contract = (key: string) => compiled.find((operation) => operation.key === key)!;
     const own = compiled.filter((operation) => operation.plugin === "osf-extensions");
     expect(own.filter((operation) => operation.target?.entityName === ENTITY).map((operation) => operation.key).sort()).toEqual([
-      ...["affectedRecords", "create", "delete", "deprecate", "list", "reorder", "restore", "update"].map((action) => `${ENTITY}.fieldDefinitions.${action}`),
+      ...["affectedRecords", "create", "delete", "deprecate", "list", "rebuildIndex", "reorder", "restore", "update"].map((action) => `${ENTITY}.fieldDefinitions.${action}`),
       `${ENTITY}.referencedBy`,
     ]);
     expect(contract(`${TARGET_ENTITY}.referencedBy`)).toMatchObject({ handler: "referencedBy", target: { entityName: TARGET_ENTITY } });

@@ -13,7 +13,8 @@ import { withDbSession, type DbSessionInput } from "../db/session.js";
 import { getGeneratedCrudTables, isGeneratedCrudOperationEnabled, requireEntityOperation } from "../operations/entity/catalog.js";
 import { extensionPropertySchema, extensionShape } from "../operations/entity/extensions/model.js";
 import { extensionRegistry } from "../operations/entity/extensions/registry.js";
-import { extensibleEntityOf, loadExtensionFields, provenExtensionFields } from "../operations/entity/extensions/store.js";
+import { extensibleEntityOf, loadExtensionFields } from "../operations/entity/extensions/store.js";
+import type { ExtensionFieldSet } from "../operations/entity/extensions/model.js";
 import type { GeneratedCrudTable } from "../operations/entity/types.js";
 
 const object = (value: unknown): value is Record<string, unknown> =>
@@ -28,14 +29,27 @@ function readable(table: GeneratedCrudTable, session: DbSessionInput): boolean {
   }
 }
 
+/**
+ * The sets the last prime proved, per session object: a tool schema is built
+ * after the prime's transaction closed, so it reads them from here — never
+ * from a process-wide "latest" set another session or replica left behind.
+ * The runtime validates every value again inside its own transaction.
+ */
+const primed = new WeakMap<object, Map<string, ExtensionFieldSet>>();
+
 /** Prove the definitions of every extensible entity this session may read. */
 export async function primeSessionExtensions(db: OpenShapeForgeDatabase, session: DbSessionInput): Promise<void> {
   if (!session.tenantId || !extensionRegistry.entityNames().length) return;
   const tables = getGeneratedCrudTables().filter((table) => extensibleEntityOf(table) && readable(table, session));
   if (!tables.length) return;
+  const sets = new Map<string, ExtensionFieldSet>();
   await withDbSession(db, session, async (trx) => {
-    for (const table of tables) await loadExtensionFields(trx, session, table);
+    for (const table of tables) {
+      const set = await loadExtensionFields(trx, session, table);
+      if (set) sets.set(table.name, set);
+    }
   });
+  primed.set(session, sets);
 }
 
 /** Whether this host can change a session's tool list by a tenant definition. */
@@ -56,8 +70,8 @@ export function withExtensionInputSchema(
   session: DbSessionInput,
 ): Record<string, unknown> {
   if (!table || !extensibleEntityOf(table)) return schema;
-  const set = provenExtensionFields(session, table);
-  if (!set) return schema;
+  const set = primed.get(session)?.get(table.name);
+  if (!set || set.entry !== extensibleEntityOf(table)?.entry) return schema;
   const live = set.fields.filter((field) => field.state !== "deleted");
   if (operation === "create" || operation === "update") {
     const writable = live.filter((field) => field.kind === "stored" && field.state !== "deprecated");
@@ -89,7 +103,10 @@ export function withExtensionInputSchema(
       } } };
     }
     if (object(properties0.sortField) && Array.isArray(properties0.sortField.enum)) {
-      const sortable = queryable.filter((field) => !extensionShape(set.entry, field.definition).collection);
+      const sortable = queryable.filter((field) => {
+        const shape = extensionShape(set.entry, field.definition);
+        return !shape.collection && !shape.projection;
+      });
       next.sortField = { ...properties0.sortField, enum: [...properties0.sortField.enum as unknown[], ...sortable.map((field) => `extensions.${field.key}`)] };
     }
     return { ...schema, properties: next };

@@ -32,7 +32,10 @@ export function extensionFieldPolicy(field: ExtensionField): FieldValuePolicy {
   return isClassified(field.definition) ? { classification: sensitivity as "confidential" | "pii" | "bsn" } : {};
 }
 
-/** Value accessor for appliesWhen over one stored row and its source. */
+/**
+ * Value accessor for appliesWhen over one stored row and its source. A
+ * stored condition names a tenant field by id (`extensions.<fieldId>`).
+ */
 export function conditionValues(
   table: GeneratedCrudTable,
   row: Readonly<Record<string, unknown>>,
@@ -42,12 +45,23 @@ export function conditionValues(
   const columns = new Map(table.columns.map((column) => [fieldNameForColumn(column), column.name]));
   return (path) => {
     if (path.startsWith("extensions.")) {
-      const field = set.byKey.get(path.slice("extensions.".length));
+      const field = set.byId.get(path.slice("extensions.".length));
       return field ? source[field.fieldId] ?? field.definition.defaultValue ?? null : null;
     }
     const column = columns.get(path);
     return column ? row[column] ?? null : null;
   };
+}
+
+/**
+ * The value a reader sees: the stored one, else the default of a field that
+ * applies. A create (and an update that makes a field apply) stores the
+ * default (write.ts), so the read-time default is only for records written
+ * before the field existed (§5.3, no backfill).
+ */
+export function readValue(field: ExtensionField, source: Readonly<Record<string, unknown>>, applicable: boolean): unknown {
+  const stored = Object.hasOwn(source, field.fieldId) ? source[field.fieldId] : undefined;
+  return stored !== undefined ? stored : applicable ? field.definition.defaultValue ?? null : null;
 }
 
 /** The source map of a stored row, never anything but an object. */
@@ -81,8 +95,7 @@ export function projectExtensionRow(
   for (const field of set.fields) {
     if (field.state === "deleted") continue;
     const applicable = evaluateCondition(field.appliesWhen, values);
-    const stored = Object.hasOwn(source, field.fieldId) ? source[field.fieldId] : undefined;
-    const value = stored !== undefined ? stored : applicable ? field.definition.defaultValue ?? null : null;
+    const value = readValue(field, source, applicable);
     extensions[field.key] = redactFieldValue(value, extensionFieldPolicy(field), session ?? undefined, classified);
     const fieldMeta = record(meta[field.fieldId]) ? meta[field.fieldId] as Record<string, unknown> : {};
     extensionsMeta[field.key] = {

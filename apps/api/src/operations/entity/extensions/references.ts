@@ -9,14 +9,14 @@
 import { sql, type Transaction } from "kysely";
 import { operationFailure } from "@openshapeforge/operations";
 import type { DB } from "../../../generated/db/types.js";
-import { jsonbLiteral } from "../../../db/sql-helpers.js";
-import type { DbSessionInput } from "../../../db/session.js";
-import { getGeneratedCrudTables } from "../catalog.js";
+import { withTenantBypassInTransaction, type DbSessionInput } from "../../../db/session.js";
+import { getGeneratedCrudTables, isGeneratedCrudOperationEnabled, requireEntityOperation } from "../catalog.js";
+import { canReadClassifiedColumns } from "../classification.js";
 import type { GeneratedCrudTable } from "../types.js";
-import { extensionShape, isCollection, type ExtensionField } from "./model.js";
+import { extensionShape, isClassified, isCollection, type ExtensionField } from "./model.js";
 import { extensionRegistry } from "./registry.js";
-import { loadExtensionFieldsFor } from "./store.js";
-import { completeExtensionWrite, qualifiedTable } from "./write.js";
+import { loadExtensionFieldsFor, lockExtensionFields } from "./store.js";
+import { qualifiedTable, rewriteExtensionValues } from "./write.js";
 import { storedExtensionSource } from "./read.js";
 
 function sourceTable(entity: string): GeneratedCrudTable {
@@ -26,10 +26,45 @@ function sourceTable(entity: string): GeneratedCrudTable {
 }
 
 /**
+ * Share the tenant field lock of every entity that may reference this one,
+ * before the delete locks its row: a setNull below writes the referencing
+ * records, and a backfill batch of their entity takes the lock before the
+ * records it locks (store.ts), so the two never wait on each other crosswise.
+ */
+export async function lockExtensionReferenceSources(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+): Promise<void> {
+  const target = table.source?.authoringEntityName;
+  if (!target || !session.tenantId) return;
+  for (const entity of [...new Set(extensionRegistry.referencedBy(target).map((source) => source.sourceEntity))].sort()) {
+    await lockExtensionFields(trx, session.tenantId, entity, "shared");
+  }
+}
+
+/** Whether a refusal may name the referencing entity and field to this actor. */
+function mayName(session: DbSessionInput, source: GeneratedCrudTable, field: ExtensionField): boolean {
+  try {
+    requireEntityOperation(source, isGeneratedCrudOperationEnabled(source, "list") ? "list" : "get", session);
+  } catch {
+    return false;
+  }
+  return !isClassified(field.definition) || canReadClassifiedColumns(source.source?.authorization, session);
+}
+
+/**
  * The deletion guard of a reference target. Runs under the target row's
  * exclusive lock, so a concurrent writer referencing it either committed its
  * index row (and is seen here) or waits on its `for share` and then finds
  * the target gone.
+ *
+ * The referencing records are found, and a setNull unlinks them, under an
+ * audited tenant bypass (§11 besluit 28): the index inherits the entity's row
+ * policies, so the deleting actor's own session would miss references held by
+ * records it may not see — a `restrict` would let the delete through, and a
+ * setNull would leave those records pointing at nothing. The refusal names
+ * the referencing entity and field only to an actor who may read them.
  */
 export async function enforceExtensionReferencesOnDelete(
   trx: Transaction<DB>,
@@ -39,31 +74,39 @@ export async function enforceExtensionReferencesOnDelete(
 ): Promise<void> {
   const target = table.source?.authoringEntityName;
   if (!target || !session.tenantId) return;
-  for (const source of extensionRegistry.referencedBy(target)) {
-    const entry = extensionRegistry.entity(source.sourceEntity)!;
-    const referencing = await sql<{ field_id: string; record_id: string }>`
-      select distinct field_id, record_id from ${qualifiedTable(source.valuesTable)}
-      where tenant_id = ${session.tenantId}::uuid and value_ref_id = ${id}::uuid
-      order by field_id, record_id`.execute(trx);
-    if (!referencing.rows.length) continue;
-    const set = await loadExtensionFieldsFor(trx, session, source.sourceEntity, entry);
-    const byField = new Map<string, string[]>();
-    for (const row of referencing.rows) byField.set(row.field_id, [...byField.get(row.field_id) ?? [], row.record_id]);
-    for (const [fieldId, records] of byField) {
-      const field = set.byId.get(fieldId);
-      // A deleted field's index rows are its backfill's to remove; they hold
-      // nothing a reader can see and never restrict.
-      if (!field || field.state === "deleted") continue;
-      if ((field.definition.onDelete ?? "restrict") === "restrict") {
-        throw operationFailure({
-          code: "OPERATION_REFUSED",
-          message: `This record is still referenced by ${records.length} ${source.sourceEntity} record(s) through "${field.key}".`,
-          retryable: false,
-        });
+  const sources = extensionRegistry.referencedBy(target);
+  if (!sources.length) return;
+  await withTenantBypassInTransaction(trx, {
+    tenantId: session.tenantId, actorSubject: session.userId ?? "system", reason: `tenant reference guard on deleting ${target} ${id}`,
+  }, async () => {
+    for (const source of sources) {
+      const entry = extensionRegistry.entity(source.sourceEntity)!;
+      const referencing = await sql<{ field_id: string; record_id: string }>`
+        select distinct field_id, record_id from ${qualifiedTable(source.valuesTable)}
+        where tenant_id = ${session.tenantId}::uuid and value_ref_id = ${id}::uuid
+        order by field_id, record_id`.execute(trx);
+      if (!referencing.rows.length) continue;
+      const set = await loadExtensionFieldsFor(trx, session, source.sourceEntity, entry);
+      const byField = new Map<string, string[]>();
+      for (const row of referencing.rows) byField.set(row.field_id, [...byField.get(row.field_id) ?? [], row.record_id]);
+      for (const [fieldId, records] of byField) {
+        const field = set.byId.get(fieldId);
+        // A deleted field's index rows are its backfill's to remove; they hold
+        // nothing a reader can see and never restrict.
+        if (!field || field.state === "deleted") continue;
+        if ((field.definition.onDelete ?? "restrict") === "restrict") {
+          throw operationFailure({
+            code: "OPERATION_REFUSED",
+            message: mayName(session, sourceTable(source.sourceEntity), field)
+              ? `This record is still referenced by ${records.length} ${source.sourceEntity} record(s) through "${field.key}".`
+              : `This record is still referenced by ${records.length} record(s).`,
+            retryable: false,
+          });
+        }
+        await unlinkReferences(trx, session, source.sourceEntity, set, field, records, id);
       }
-      await unlinkReferences(trx, session, source.sourceEntity, set, field, records, id);
     }
-  }
+  });
 }
 
 /** `setNull`: remove the id from each referencing record's source and index. */
@@ -91,9 +134,7 @@ async function unlinkReferences(
     } else if (value === targetId) {
       delete after[field.fieldId];
     }
-    await sql`update ${sql.id(table.schema, table.table)} set extension_values = ${jsonbLiteral(after)}
-      where tenant_id = ${session.tenantId}::uuid and id = ${recordId}::uuid`.execute(trx);
-    await completeExtensionWrite(trx, session, { table, set, before, after, changed: [field] }, recordId);
+    await rewriteExtensionValues(trx, session, { table, set, recordId, before, after, fields: [field] });
   }
 }
 

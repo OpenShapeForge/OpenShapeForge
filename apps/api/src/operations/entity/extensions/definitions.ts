@@ -2,8 +2,8 @@
 /**
  * The definition Operations of an extensible entity E (contract fase 1a):
  * `E.fieldDefinitions.list/create/update/deprecate/restore/delete/reorder/
- * affectedRecords`, and `T.referencedBy` on every entity a tenant field may
- * point at. Definitions are append-only versions in
+ * affectedRecords/rebuildIndex`, and `T.referencedBy` on every entity a
+ * tenant field may point at. Definitions are append-only versions in
  * `platform.extension_field_definitions`; the lifecycle (§5.3) is a data
  * migration, so every change that touches records starts a backfill.
  */
@@ -14,9 +14,9 @@ import { operationFailure } from "@openshapeforge/operations";
 import type { RuntimeExtensibleEntity } from "@openshapeforge/plugin-runtime";
 import type { DB } from "../../../generated/db/types.js";
 import type { DbSessionInput } from "../../../db/session.js";
-import { jsonbLiteral } from "../../../db/sql-helpers.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../../../modules/field-schemas.js";
 import { getGeneratedCrudTables, isGeneratedCrudOperationEnabled, requireEntityOperation } from "../catalog.js";
+import { canReadClassifiedColumns } from "../classification.js";
 import { fieldColumnMap } from "../columns.js";
 import type { GeneratedCrudTable } from "../types.js";
 import {
@@ -25,7 +25,9 @@ import {
   extensionError,
   extensionShape,
   hasStaticOptions,
+  isClassified,
   isCollection,
+  mapConditionPaths,
   record,
   schemaFieldOf,
   SENSITIVITIES,
@@ -36,12 +38,27 @@ import {
   type ExtensionState,
 } from "./model.js";
 import { extensionRegistry } from "./registry.js";
-import { forgetExtensionFields, loadExtensionFieldsFor } from "./store.js";
+import {
+  announceFieldDefinitionChange,
+  FIELD_DEFINITION_RESOURCE_SUFFIX,
+  forgetExtensionFields,
+  insertFieldVersion,
+  loadExtensionFieldsFor,
+} from "./store.js";
 import { qualifiedTable } from "./write.js";
-import { latestBackfills, scheduleExtensionRetention, startBackfill, type BackfillOperation, type BackfillRow } from "./backfill.js";
+import {
+  acrossTenant,
+  duplicateValues,
+  latestBackfills,
+  recordsWithField,
+  scheduleExtensionRetention,
+  startBackfill,
+  type BackfillOperation,
+  type BackfillRow,
+} from "./backfill.js";
 
 export type FieldDefinitionAction =
-  | "list" | "create" | "update" | "deprecate" | "restore" | "delete" | "reorder" | "affectedRecords";
+  | "list" | "create" | "update" | "deprecate" | "restore" | "delete" | "reorder" | "affectedRecords" | "rebuildIndex";
 
 export type FieldDefinitionRecord = {
   fieldId: string;
@@ -90,10 +107,33 @@ export function assertMayRead(entity: string, session: DbSessionInput): void {
   requireEntityOperation(table, isGeneratedCrudOperationEnabled(table, "list") ? "list" : "get", session);
 }
 
-function toRecord(field: ExtensionField, backfill?: BackfillRow): FieldDefinitionRecord {
+function mayRead(entity: string, session: DbSessionInput): boolean {
+  try { assertMayRead(entity, session); return true; } catch { return false; }
+}
+
+/**
+ * The realtime resource `<Entity>FieldDefinition` (store.ts): an event is
+ * delivered only to a session that may list that entity's field
+ * definitions, re-decided by the change stream when it reads the event.
+ * There is no row to hide, so a deletion is delivered like any change.
+ */
+export function mayFollowFieldDefinitions(session: DbSessionInput, aggregateType: string): boolean | undefined {
+  if (!aggregateType.endsWith(FIELD_DEFINITION_RESOURCE_SUFFIX)) return undefined;
+  const entity = aggregateType.slice(0, -FIELD_DEFINITION_RESOURCE_SUFFIX.length);
+  if (!extensionRegistry.entity(entity)) return undefined;
+  return mayRead(entity, session);
+}
+
+/** A stored condition names tenant fields by id; a caller reads and writes keys (§11 besluit 33). */
+function appliesWhenForCaller(set: ExtensionFieldSet, appliesWhen: unknown): unknown {
+  return appliesWhen === null || appliesWhen === undefined ? null
+    : mapConditionPaths(appliesWhen, (fieldId) => set.byId.get(fieldId)?.key ?? fieldId);
+}
+
+function toRecord(set: ExtensionFieldSet, field: ExtensionField, backfill?: BackfillRow): FieldDefinitionRecord {
   return {
     fieldId: field.fieldId, key: field.key, version: field.version, kind: field.kind,
-    definition: field.definition, appliesWhen: field.appliesWhen, state: field.state, position: field.position,
+    definition: field.definition, appliesWhen: appliesWhenForCaller(set, field.appliesWhen), state: field.state, position: field.position,
     ...(backfill ? { backfill: { id: backfill.id, state: backfill.state, processed: Number(backfill.processed), total: Number(backfill.total) } } : {}),
   };
 }
@@ -114,7 +154,7 @@ export function validateFieldDefinition(
   table: GeneratedCrudTable,
   input: { key: string; kind?: unknown; definition: unknown; appliesWhen?: unknown },
   existing?: ExtensionField,
-): { kind: ExtensionKind; definition: ExtensionDefinition; appliesWhen: unknown } {
+): { kind: ExtensionKind; definition: ExtensionDefinition; appliesWhen: unknown; dependsOn: Array<{ field: string }> } {
   const kind = input.kind ?? "stored";
   if (typeof kind === "string" && UNAVAILABLE_KINDS.has(kind)) {
     extensionError(`Fields of kind ${kind} are not available yet (nog niet beschikbaar).`, "NOT_AVAILABLE");
@@ -177,43 +217,69 @@ export function validateFieldDefinition(
     if (!result.valid) extensionError("The default value does not fit the field's type.");
     if (shape.reference) extensionError("A reference field has no default value.");
   }
+  // The caller names tenant fields by key; the stored condition by field id,
+  // and so do the dependencies that keep a named field from going away.
   const appliesWhen = input.appliesWhen ?? null;
+  const dependsOn: Array<{ field: string }> = [];
+  let stored: unknown = null;
   if (appliesWhen !== null) {
     const authored = fieldColumnMap(table);
     for (const path of conditionPaths(appliesWhen)) {
       if (path.kind === "authored") {
         const column = authored.get(path.field);
         if (!column || column.classification || column.fieldPolicy) extensionError(`appliesWhen names ${path.field}, which is not a readable field of ${set.entity}.`);
+        dependsOn.push({ field: path.field });
       } else {
         const target = set.byKey.get(path.key);
         if (!target || target.fieldId === existing?.fieldId || !hasStaticOptions(target.definition)) {
           extensionError(`appliesWhen may name tenant fields with static options only; extensions.${path.key} is not one.`);
         }
+        // A condition over a classified field is an oracle for its value:
+        // whether the field applies tells a reader what the hidden one holds.
+        if (isClassified(target!.definition)) {
+          extensionError(`appliesWhen may not name extensions.${path.key}: it is classified.`);
+        }
+        dependsOn.push({ field: target!.fieldId });
       }
     }
+    stored = mapConditionPaths(appliesWhen, (key) => set.byKey.get(key)!.fieldId);
   }
-  return { kind: "stored", definition, appliesWhen };
+  return { kind: "stored", definition, appliesWhen: stored, dependsOn: [...new Map(dependsOn.map((item) => [item.field, item])).values()] };
 }
 
 // ---------------------------------------------------------------------------
 // Storage
 
-async function insertVersion(
-  trx: Transaction<DB>,
-  session: DbSessionInput,
-  entity: string,
-  field: { fieldId: string; key: string; version: number; kind: ExtensionKind; definition: ExtensionDefinition; appliesWhen: unknown; state: ExtensionState; position: number },
-): Promise<ExtensionField> {
-  await sql`update platform.extension_field_definitions set is_current = false
-    where tenant_id = ${session.tenantId}::uuid and field_id = ${field.fieldId}::uuid and is_current`.execute(trx);
-  const id = randomUUID();
-  await sql`insert into platform.extension_field_definitions
-      (tenant_id, id, field_id, entity, key, version, kind, definition, applies_when, state, position, is_current, created_at, created_by)
-    values (${session.tenantId}::uuid, ${id}::uuid, ${field.fieldId}::uuid, ${entity}, ${field.key}, ${field.version}, ${field.kind},
-      ${jsonbLiteral(field.definition)}, ${field.appliesWhen === null ? null : jsonbLiteral(field.appliesWhen)}, ${field.state}, ${field.position}, true,
-      now(), ${session.userId ?? null}::uuid)`.execute(trx);
-  forgetExtensionFields(session.tenantId!, entity);
-  return { rowId: id, ...field };
+const insertVersion = insertFieldVersion;
+
+/**
+ * The fields this one depends on (§11 besluit 33): rewritten with every
+ * version, in `platform.extension_field_dependencies` (1a: `appliesWhen`;
+ * formulas, lookups and rollups add theirs in 1b/1c).
+ */
+async function writeDependencies(trx: Transaction<DB>, session: DbSessionInput, entity: string, fieldId: string, dependsOn: readonly { field: string }[]): Promise<void> {
+  await sql`delete from platform.extension_field_dependencies
+    where tenant_id = ${session.tenantId}::uuid and field_id = ${fieldId}::uuid`.execute(trx);
+  for (const dependency of dependsOn) {
+    await sql`insert into platform.extension_field_dependencies (tenant_id, field_id, depends_on_entity, depends_on_field, via_field)
+      values (${session.tenantId}::uuid, ${fieldId}::uuid, ${entity}, ${dependency.field}, null)`.execute(trx);
+  }
+}
+
+/** Refuse taking away a field another (not deleted) field still depends on, naming those fields. */
+function assertNoDependents(set: ExtensionFieldSet, field: ExtensionField, dependents: readonly string[], action: string): void {
+  const names = dependents.map((id) => set.byId.get(id)).filter((candidate): candidate is ExtensionField =>
+    candidate !== undefined && candidate.state !== "deleted" && candidate.fieldId !== field.fieldId).map((candidate) => candidate.key).sort();
+  if (names.length) {
+    extensionError(`${field.key} cannot be ${action}: ${names.join(", ")} depend${names.length === 1 ? "s" : ""} on it (appliesWhen).`, "CONFLICT");
+  }
+}
+
+async function dependentsOf(trx: Transaction<DB>, session: DbSessionInput, entity: string, fieldId: string): Promise<string[]> {
+  const rows = await sql<{ field_id: string }>`select distinct field_id::text as field_id from platform.extension_field_dependencies
+    where tenant_id = ${session.tenantId}::uuid and depends_on_entity = ${entity} and depends_on_field = ${fieldId}
+    order by 1`.execute(trx);
+  return rows.rows.map((row) => row.field_id);
 }
 
 function requireField(set: ExtensionFieldSet, fieldId: unknown, allowDeleted = false): ExtensionField {
@@ -222,10 +288,52 @@ function requireField(set: ExtensionFieldSet, fieldId: unknown, allowDeleted = f
   return field!;
 }
 
-async function affectedRecordCount(trx: Transaction<DB>, session: DbSessionInput, entry: RuntimeExtensibleEntity, fieldId: string): Promise<number> {
-  const result = await sql<{ count: string }>`select count(*)::text as count from ${qualifiedTable(entry.table)}
-    where tenant_id = ${session.tenantId}::uuid and extension_values ? ${fieldId}`.execute(trx);
-  return Number(result.rows[0]?.count ?? 0);
+/**
+ * Records holding a value of the field: every record of the tenant, the set
+ * a delete erases (backfill.ts), not only those this actor may see — so the
+ * confirmed number is the number that will be erased.
+ */
+function affectedRecordCount(trx: Transaction<DB>, session: DbSessionInput, entity: string, fieldId: string): Promise<number> {
+  return recordsWithField(trx, session, entity, fieldId);
+}
+
+/**
+ * Whether a refusal may show this actor values of the field (§11 besluit
+ * 29): never for a classified field, and only to an actor who may read the
+ * entity. The values shown are only ever those of records the actor may see.
+ */
+function mayShowValues(set: ExtensionFieldSet, field: ExtensionField, session: DbSessionInput): boolean {
+  return !isClassified(field.definition) && mayRead(set.entity, session);
+}
+
+/** Strict-er validation, or a reinterpretation of stored values, is "new field + copy" (§11 besluit 30). */
+const LOWER_BOUNDS = ["min", "minLength", "minItems"];
+const UPPER_BOUNDS = ["max", "maxLength", "maxItems"];
+
+function narrowingChange(before: ExtensionDefinition, after: ExtensionDefinition): string | undefined {
+  if (!isDeepStrictEqual(before.classification, after.classification)) return "its classification never changes once the field exists";
+  const currency = (definition: ExtensionDefinition) => [definition.currency,
+    (definition.render as { props?: { currency?: unknown } } | undefined)?.props?.currency];
+  if (!isDeepStrictEqual(currency(before), currency(after))) return "changing the currency reinterprets every stored amount";
+  if (!isDeepStrictEqual(before.unit, after.unit)) return "changing the unit reinterprets every stored value";
+  const was = record(before.validation) ? before.validation : {};
+  const is = record(after.validation) ? after.validation : {};
+  for (const name of new Set([...Object.keys(was), ...Object.keys(is)])) {
+    const previous = was[name], next = is[name];
+    if (next === undefined || isDeepStrictEqual(previous, next)) continue;
+    const stricter = previous === undefined ||
+      (LOWER_BOUNDS.includes(name) ? !(Number(next) <= Number(previous))
+        : UPPER_BOUNDS.includes(name) ? !(Number(next) >= Number(previous))
+        : true);
+    if (stricter) return `validation.${name} becomes stricter`;
+  }
+  const max = (definition: ExtensionDefinition) => {
+    const cardinality = definition.cardinality;
+    if (!record(cardinality)) return cardinality === "collection" ? Infinity : 1;
+    return cardinality.max === "unbounded" ? Infinity : Number(cardinality.max ?? 1);
+  };
+  if (max(after) < max(before)) return "cardinality.max becomes lower";
+  return undefined;
 }
 
 /**
@@ -242,20 +350,31 @@ async function typeChange(
 ): Promise<BackfillOperation | undefined> {
   const options = (definition: ExtensionDefinition) => hasStaticOptions(definition)
     ? ((definition.options as { items?: Array<{ value: string }> }).items ?? []).map((item) => item.value) : undefined;
+  const narrowing = narrowingChange(before, after);
+  if (narrowing) extensionError(`${field.key}: ${narrowing}; create a new field, copy the values and delete this one.`);
   const sameType = before.osfType === after.osfType && isCollection(before) === isCollection(after);
+  /** Values in use outside the new options: counted across the tenant, shown only as mayShowValues allows. */
   const removedOptions = async (allowed: string[]) => {
-    const used = await sql<{ value_text: string }>`select distinct value_text from ${qualifiedTable(set.entry.valuesTable)}
-      where tenant_id = ${session.tenantId}::uuid and field_id = ${field.fieldId}::uuid and value_text is not null
-        and not (value_text = any(${`{${allowed.map((value) => `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`).join(",")}}`}::text[]))
-      order by value_text limit 20`.execute(trx);
-    return used.rows.map((row) => row.value_text);
+    const outside = (limit?: number) => sql<{ value_text: string; total: string }>`
+      select value_text, (count(*) over ())::text as total from (
+        select distinct value_text from ${qualifiedTable(set.entry.valuesTable)}
+        where tenant_id = ${session.tenantId}::uuid and field_id = ${field.fieldId}::uuid and value_text is not null
+          and not (value_text = any(${`{${allowed.map((value) => `"${value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`).join(",")}}`}::text[]))) as used
+      order by value_text ${limit ? sql`limit ${limit}` : sql``}`.execute(trx);
+    const count = await acrossTenant(trx, session, `check options of tenant field ${field.fieldId}`,
+      async () => Number((await outside(1)).rows[0]?.total ?? 0));
+    const examples = count && mayShowValues(set, field, session) ? (await outside(20)).rows.map((row) => row.value_text) : [];
+    return { count, examples };
   };
   if (sameType) {
     const was = options(before), is = options(after);
     if (!was && !is) return undefined;
     if (was && !is) extensionError(`${field.key}: removing the options of a field is not a widening change.`);
     const missing = await removedOptions(is!);
-    if (missing.length) extensionError(`${field.key}: existing values are not among the options: ${missing.join(", ")}.`);
+    if (missing.count) {
+      extensionError(`${field.key}: ${missing.count} existing value(s) are not among the options` +
+        (missing.examples.length ? `: ${missing.examples.join(", ")}.` : "."));
+    }
     // string → options with every existing value an option is the one
     // widening §5.3 names; the index already holds the same text.
     return was ? undefined : "retype";
@@ -287,7 +406,7 @@ export async function executeFieldDefinitionAction(
       const backfills = await latestBackfills(trx, session.tenantId!, entity);
       const items = set.fields
         .filter((field) => field.state !== "deleted" && (input.includeDeprecated === true || field.state !== "deprecated"))
-        .map((field) => toRecord(field, backfills.get(field.fieldId)));
+        .map((field) => toRecord(set, field, backfills.get(field.fieldId)));
       return { items };
     }
     case "create": {
@@ -298,31 +417,37 @@ export async function executeFieldDefinitionAction(
         fieldId: randomUUID(), key: input.key as string, version: 1, kind: valid.kind, definition: valid.definition,
         appliesWhen: valid.appliesWhen, state: "ready", position: Math.max(-1, ...set.fields.map((item) => item.position)) + 1,
       });
+      await writeDependencies(trx, session, entity, field.fieldId, valid.dependsOn);
       if (valid.definition.retention) await scheduleExtensionRetention(trx, session, entity);
-      return toRecord(field);
+      return toRecord(set, field);
     }
     case "update": {
       const field = requireField(set, input.fieldId);
       if (field.state === "updating") extensionError(`${field.key} is being updated; wait until its backfill is done.`, "CONFLICT");
+      // A deprecated field is changed only once it is back: a retype or
+      // unique would otherwise bring it back silently.
+      if (field.state === "deprecated") extensionError(`${field.key} is deprecated; restore it before changing it.`, "CONFLICT");
       const key = input.key === undefined ? field.key : input.key as string;
       const definition = input.definition === undefined ? field.definition : input.definition;
-      const appliesWhen = input.appliesWhen === undefined ? field.appliesWhen : input.appliesWhen;
+      const appliesWhen = input.appliesWhen === undefined ? appliesWhenForCaller(set, field.appliesWhen) : input.appliesWhen;
       const valid = validateFieldDefinition(set, table, { key, kind: field.kind, definition, appliesWhen }, field);
       if (key === field.key && isDeepStrictEqual(valid.definition, field.definition) && isDeepStrictEqual(valid.appliesWhen, field.appliesWhen)) {
-        return toRecord(field);
+        return toRecord(set, field);
       }
       let backfill = await typeChange(trx, session, set, field.definition, valid.definition, field);
       if (valid.definition.unique === true && field.definition.unique !== true) {
-        const duplicates = await sql<{ value: string; count: string }>`
-          select coalesce(value_text, value_number::text, value_ref_id::text, value_date::text, value_timestamp::text) as value, count(*)::text as count
-          from ${qualifiedTable(entry.valuesTable)}
-          where tenant_id = ${session.tenantId}::uuid and field_id = ${field.fieldId}::uuid and ordinal = 0
-          group by 1 having count(*) > 1 order by 1 limit 20`.execute(trx);
-        if (duplicates.rows.length) {
+        // Counted across the tenant, normalized as claims compare; the values
+        // are shown only as mayShowValues allows, and only those of records
+        // this actor may see. A duplicate written while the unique backfill
+        // runs turns unique off again (backfill.ts).
+        const duplicates = await acrossTenant(trx, session, `check duplicates of tenant field ${field.fieldId}`,
+          () => duplicateValues(trx, session.tenantId!, set, field, false));
+        if (duplicates.count) {
+          const shown = mayShowValues(set, field, session) ? (await duplicateValues(trx, session.tenantId!, set, field, true)).examples : [];
           throw operationFailure({
             code: "CONFLICT",
-            message: `${field.key} cannot become unique: ${duplicates.rows.length} value(s) are used more than once.`,
-            detail: duplicates.rows.map((row) => `${row.value} (${row.count}×)`).join(", "),
+            message: `${field.key} cannot become unique: ${duplicates.count} value(s) are used more than once.`,
+            ...(shown.length ? { detail: shown.map((row) => `${row.value} (${row.count}×)`).join(", ") } : {}),
             retryable: false,
           });
         }
@@ -336,28 +461,33 @@ export async function executeFieldDefinitionAction(
         fieldId: field.fieldId, key, version: field.version + 1, kind: field.kind, definition: valid.definition,
         appliesWhen: valid.appliesWhen, state: backfill ? "updating" : field.state, position: field.position,
       });
+      await writeDependencies(trx, session, entity, field.fieldId, valid.dependsOn);
       // A retype that also turns unique on claims as it rebuilds: the unique
       // backfill rewrites claims only, the retype the index only.
       const started = backfill ? await startBackfill(trx, session, { entity, field: next, operation: backfill === "retype" && valid.definition.unique === true && field.definition.unique !== true ? "unique" : backfill }) : undefined;
       if (valid.definition.retention && !field.definition.retention) await scheduleExtensionRetention(trx, session, entity);
-      return toRecord(next, started);
+      return toRecord(set, next, started);
     }
     case "deprecate":
     case "restore": {
       const field = requireField(set, input.fieldId);
-      const from = action === "deprecate" ? "ready" : "deprecated";
-      if (field.state !== from) extensionError(`${field.key} is ${field.state}; only a ${from} field can be ${action}d.`, "CONFLICT");
+      // A field in `updating` can always be deprecated, then deleted: a
+      // backfill that never finishes must not trap it (§11 besluit 33).
+      const from: ExtensionState[] = action === "deprecate" ? ["ready", "updating"] : ["deprecated"];
+      if (!from.includes(field.state)) extensionError(`${field.key} is ${field.state}; only a ${from.join(" or ")} field can be ${action}d.`, "CONFLICT");
+      if (action === "deprecate") assertNoDependents(set, field, await dependentsOf(trx, session, entity, field.fieldId), "deprecated");
       const next = await insertVersion(trx, session, entity, { ...field, version: field.version + 1, state: action === "deprecate" ? "deprecated" : "ready" });
-      return toRecord(next);
+      return toRecord(set, next);
     }
     case "affectedRecords": {
       const field = requireField(set, input.fieldId);
-      return { count: await affectedRecordCount(trx, session, entry, field.fieldId) };
+      return { count: await affectedRecordCount(trx, session, entity, field.fieldId) };
     }
     case "delete": {
       const field = requireField(set, input.fieldId);
       if (field.state !== "deprecated") extensionError(`${field.key} must be deprecated before it can be deleted.`, "CONFLICT");
-      const count = await affectedRecordCount(trx, session, entry, field.fieldId);
+      assertNoDependents(set, field, await dependentsOf(trx, session, entity, field.fieldId), "deleted");
+      const count = await affectedRecordCount(trx, session, entity, field.fieldId);
       if (input.confirmAffectedRecords !== count) {
         throw operationFailure({
           code: "CONFIRMATION_MISMATCH",
@@ -367,8 +497,22 @@ export async function executeFieldDefinitionAction(
         });
       }
       const next = await insertVersion(trx, session, entity, { ...field, version: field.version + 1, state: "deleted" });
+      await writeDependencies(trx, session, entity, field.fieldId, []);
       const backfill = await startBackfill(trx, session, { entity, field: next, operation: "delete" });
       return { backfillId: backfill.id };
+    }
+    case "rebuildIndex": {
+      // The index and the claims are derived (§3): rebuilt from the source,
+      // per field, as backfills over every record of the tenant.
+      const fields = input.fieldId === undefined
+        ? set.fields.filter((field) => field.state !== "deleted" && field.kind === "stored")
+        : [requireField(set, input.fieldId)];
+      const backfills: Array<{ fieldId: string; backfillId: string }> = [];
+      for (const field of fields) {
+        const started = await startBackfill(trx, session, { entity, field, operation: "rebuild" });
+        backfills.push({ fieldId: field.fieldId, backfillId: started.id });
+      }
+      return { backfills };
     }
     case "reorder": {
       const ids = input.fieldIds;
@@ -382,10 +526,11 @@ export async function executeFieldDefinitionAction(
       for (const [position, fieldId] of (ids as string[]).entries()) {
         await sql`update platform.extension_field_definitions set position = ${position}
           where tenant_id = ${session.tenantId}::uuid and field_id = ${fieldId}::uuid and is_current`.execute(trx);
+        await announceFieldDefinitionChange(trx, session.tenantId!, entity, fieldId, "updated");
       }
-      forgetExtensionFields(session.tenantId!, entity);
+      forgetExtensionFields(trx, session.tenantId!, entity);
       const reloaded = await loadExtensionFieldsFor(trx, session, entity, entry);
-      return { items: reloaded.fields.filter((field) => field.state !== "deleted").map((field) => toRecord(field)) };
+      return { items: reloaded.fields.filter((field) => field.state !== "deleted").map((field) => toRecord(reloaded, field)) };
     }
   }
 }
@@ -394,6 +539,9 @@ export async function executeFieldDefinitionAction(
  * `T.referencedBy`: per source entity and field, how many records point at
  * this one — counted from each extensible entity's `(tenant_id,
  * value_ref_id)` index, and only for source entities this reader may list.
+ * The index inherits the source entity's row policies, so only records this
+ * reader may see are counted; a classified reference field is listed only to
+ * a reader who may read the source's classified fields (§11 besluit 29).
  */
 export async function executeReferencedBy(
   trx: Transaction<DB>,
@@ -406,8 +554,9 @@ export async function executeReferencedBy(
   if (typeof input.id !== "string" || !/^[0-9a-f-]{36}$/i.test(input.id)) extensionError("referencedBy needs a record id.");
   const items: Array<{ entity: string; fieldId: string; fieldKey: string; label: unknown; count: number }> = [];
   for (const source of extensionRegistry.referencedBy(targetEntity)) {
-    try { assertMayRead(source.sourceEntity, session); } catch { continue; }
+    if (!mayRead(source.sourceEntity, session)) continue;
     const entry = extensionRegistry.entity(source.sourceEntity)!;
+    const classified = canReadClassifiedColumns(tableOf(source.sourceEntity).source?.authorization, session);
     const set = await loadExtensionFieldsFor(trx, session, source.sourceEntity, entry);
     const counts = await sql<{ field_id: string; count: string }>`
       select field_id, count(distinct record_id)::text as count from ${qualifiedTable(source.valuesTable)}
@@ -416,6 +565,7 @@ export async function executeReferencedBy(
     for (const row of counts.rows) {
       const field = set.byId.get(row.field_id);
       if (!field || field.state === "deleted" || extensionShape(entry, field.definition).reference?.entity !== targetEntity) continue;
+      if (isClassified(field.definition) && !classified) continue;
       items.push({ entity: source.sourceEntity, fieldId: field.fieldId, fieldKey: field.key, label: field.definition.label ?? field.key, count: Number(row.count) });
     }
   }

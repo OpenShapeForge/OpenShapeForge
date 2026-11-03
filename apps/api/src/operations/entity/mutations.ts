@@ -68,8 +68,8 @@ import {
   extensionValuesColumn,
   prepareExtensionWrite,
 } from "./extensions/write.js";
-import { loadExtensionFields } from "./extensions/store.js";
-import { enforceExtensionReferencesOnDelete } from "./extensions/references.js";
+import { extensibleEntityOf, loadExtensionFields } from "./extensions/store.js";
+import { enforceExtensionReferencesOnDelete, lockExtensionReferenceSources } from "./extensions/references.js";
 
 async function fetchGeneratedRowInTransaction(
   trx: Transaction<DB>,
@@ -410,7 +410,9 @@ async function insertGeneratedRowInTransaction(
       returning to_jsonb(${sql.id(table.table)}.*) as row`.execute(trx);
     row = result.rows[0]!.row;
   }
-  await completeExtensionWrite(trx, session, extensionWrite, String(row[table.primaryKey!]));
+  // Defaults and `required` are settled against the row as inserted.
+  const settledSource = await completeExtensionWrite(trx, session, extensionWrite, String(row[table.primaryKey!]), row);
+  if (settledSource) row = { ...row, [extensionValuesColumn(table).name]: settledSource };
   // A new row under a versioned head is a content change of that head. The
   // public create refuses an owned child (collectionMutationError), so this
   // covers the in-transaction create the collection insert runs.
@@ -483,12 +485,19 @@ async function applyGeneratedRowUpdate(
   ) {
     // Already authorized as an update above; an empty-body update must not
     // additionally require the read role, so fetch without re-gating and then
-    // apply the same output projection as every other return path.
-    const row = await fetchGeneratedEntityRow(db, session, table, id);
-    return row === null ? null : projectGeneratedEntityRow(table, session, row);
+    // apply the same output projection as every other return path — with
+    // tenant field definitions proven in this transaction.
+    return withDbSession(db, session, async (trx) => {
+      await loadExtensionFields(trx, session, table);
+      const row = await fetchGeneratedEntityRow(db, session, table, id);
+      return row === null ? null : projectGeneratedEntityRow(table, session, row);
+    });
   }
 
   return withDbSession(db, session, async (trx) => {
+    // Before the record lock: writers share the tenant field lock that a
+    // definition change and a backfill batch order against (extensions/store.ts).
+    if (extensibleEntityOf(table)) await loadExtensionFields(trx, session, table, { lock: "shared" });
     const current = await fetchGeneratedRowInTransaction(trx, session, table, id, true);
     if ((carriers.length || objectMergeColumn || extensions) && !current) return null;
     if (objectMergeColumn && current) {
@@ -575,9 +584,11 @@ async function applyGeneratedRowUpdate(
       });
     }
     // A change of tenant fields alone is a change of the row: its source
-    // column is compared like every other one below.
-    const extensionWrite = extensions !== undefined && current
-      ? await prepareExtensionWrite(trx, session, table, { operation: "update", current, row: { ...current, ...storageRow(prepared) }, extensions })
+    // column is compared like every other one below. Every update of an
+    // extensible record settles its fields, so one that makes a field apply
+    // stores that field's default.
+    const extensionWrite = current && extensibleEntityOf(table)
+      ? await prepareExtensionWrite(trx, session, table, { operation: "update", current, row: { ...current, ...storageRow(prepared) }, extensions: extensions ?? {} })
       : (await loadExtensionFields(trx, session, table), undefined);
     const extensionValue = extensionStorageValue(extensionWrite);
     if (extensionValue) prepared = new Map([...prepared, [extensionValuesColumn(table), extensionValue]]);
@@ -629,7 +640,7 @@ async function applyGeneratedRowUpdate(
 
     const row = result.rows[0]?.row ?? null;
     if (!row) return unchangedRow();
-    await completeExtensionWrite(trx, session, extensionWrite, String(row[table.primaryKey!]));
+    await completeExtensionWrite(trx, session, extensionWrite, String(row[table.primaryKey!]), row);
     await draftOwningHead(trx, entityValues.tables ?? getGeneratedCrudTables(), table, row);
     return projectGeneratedEntityRow(table, session, row, entityValues.registry);
   }).catch((error) => {
@@ -684,6 +695,8 @@ export async function deleteGeneratedEntity(
   if (unsupported) throw operationFailure(unsupported);
 
   return withDbSession(db, session, async (trx) => {
+    // Before the record lock: a setNull below writes the referencing records.
+    await lockExtensionReferenceSources(trx, session, table);
     if (table.source?.authorization?.recordPermissions) {
       await assertRecordPermissionInTransaction(trx, session, table, input.id, "delete");
     }

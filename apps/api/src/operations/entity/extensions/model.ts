@@ -4,6 +4,7 @@
  * pure functions: what a stored definition means for validation, the index,
  * redaction and `appliesWhen`. Database access lives in store.ts.
  */
+import { sql, type RawBuilder } from "kysely";
 import type { RuntimeExtensibleEntity, RuntimeExtensionIndexColumn } from "@openshapeforge/plugin-runtime";
 import { operationFailure, type OperationFieldBaseType } from "@openshapeforge/operations";
 import fieldSchemaRegistry from "../../../generated/operations/field-schema-registry.json" with { type: "json" };
@@ -160,12 +161,48 @@ export function indexRows(shape: ExtensionShape, value: unknown): ExtensionIndex
   });
 }
 
-/** The value a uniqueness claim compares: the single scalar as text. */
-export function uniqueText(shape: ExtensionShape, value: unknown): string | null {
+/** The index column and the raw scalar a uniqueness claim is taken on, or null without a value. */
+export function uniqueOperand(shape: ExtensionShape, value: unknown): { column: ExtensionShape["column"]; value: string } | null {
   const [row] = indexRows(shape, value);
   if (!row) return null;
-  return row.value_text ?? row.value_number ?? row.value_ref_id ?? row.value_date ?? row.value_timestamp ??
-    (row.value_boolean === null ? null : String(row.value_boolean));
+  const column = shape.column;
+  const raw = column === "ref" ? row.value_ref_id : row[`value_${column}` as keyof ExtensionIndexRow];
+  return raw === null || raw === undefined ? null : { column, value: String(raw) };
+}
+
+/**
+ * What uniqueness compares (§11 besluit 32), as SQL over a value of the
+ * index column's type: text trimmed and case-folded (stricter than exact,
+ * which is the conservative side), a timestamp as UTC ISO text, a number
+ * without trailing zeros, a date and an id as their canonical text. The
+ * claim a writer takes, the claim a backfill takes and the duplicate check
+ * before a field becomes unique all go through this one expression; the
+ * stored value itself stays as it was entered.
+ */
+export function normalizedUnique(column: ExtensionShape["column"], typed: RawBuilder<unknown>): RawBuilder<string> {
+  switch (column) {
+    case "text": return sql<string>`lower(btrim(${typed}))`;
+    case "number": return sql<string>`trim_scale(${typed})::text`;
+    case "timestamp": return sql<string>`to_char(${typed} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+    case "date": return sql<string>`(${typed})::text`;
+    case "boolean": return sql<string>`(${typed})::text`;
+    case "ref": return sql<string>`(${typed})::text`;
+  }
+}
+
+const COLUMN_TYPES: Record<ExtensionShape["column"], string> = {
+  text: "text", number: "numeric", boolean: "boolean", date: "date", timestamp: "timestamptz", ref: "uuid",
+};
+
+/** A raw scalar as a value of its index column's type, for normalizedUnique. */
+export function typedOperand(column: ExtensionShape["column"], value: string): RawBuilder<unknown> {
+  return sql`cast(${value} as ${sql.raw(COLUMN_TYPES[column])})`;
+}
+
+/** The index column a shape's value lands in, under an alias. */
+export function indexColumnRef(column: ExtensionShape["column"], alias?: string): RawBuilder<unknown> {
+  const name = column === "ref" ? "value_ref_id" : `value_${column}`;
+  return alias ? sql.ref(`${alias}.${name}`) : sql.ref(name);
 }
 
 /**
@@ -221,7 +258,29 @@ const RULE_OPERATORS = new Set([
   "greaterThan", "greaterThanOrEquals", "lessThan", "lessThanOrEquals",
 ]);
 
+/**
+ * A path of an `appliesWhen` rule: an authored field by name, or a tenant
+ * field. Callers name a tenant field by key (`extensions.<key>`); the stored
+ * condition names it by field id (`extensions.<fieldId>`), so renaming a
+ * field never breaks a condition that depends on it (§11 besluit 33).
+ */
 export type ConditionPath = { kind: "authored"; field: string } | { kind: "extension"; key: string };
+export const EXTENSIONS_PATH_PREFIX = "extensions.";
+
+/** The condition with every tenant field path rewritten, e.g. key → field id. */
+export function mapConditionPaths(condition: unknown, rename: (name: string) => string): unknown {
+  if (Array.isArray(condition)) return condition.map((child) => mapConditionPaths(child, rename));
+  if (!record(condition)) return condition;
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(condition)) {
+    if (key === "left" && record(value) && value.kind === "path" && typeof value.path === "string" && value.path.startsWith(EXTENSIONS_PATH_PREFIX)) {
+      result[key] = { ...value, path: `${EXTENSIONS_PATH_PREFIX}${rename(value.path.slice(EXTENSIONS_PATH_PREFIX.length))}` };
+    } else {
+      result[key] = key === "all" || key === "any" || key === "conditions" ? mapConditionPaths(value, rename) : value;
+    }
+  }
+  return result;
+}
 
 export function conditionPaths(condition: unknown, depth = 0): ConditionPath[] {
   if (!record(condition) || depth > 8) extensionError("appliesWhen is not a supported condition.");

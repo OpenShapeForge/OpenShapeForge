@@ -230,6 +230,54 @@ export type RuntimeEntityValueRegistry = {
   }> | undefined;
 };
 
+/** The index column an extension value (or one component of it) lands in. */
+export type RuntimeExtensionIndexColumn = "text" | "number" | "boolean" | "date" | "timestamp";
+
+/**
+ * Compiler-owned binding of one `extensible` entity: its storage, who may
+ * design its tenant fields, the limits, and the field types and reference
+ * targets a tenant may choose from. Metadata only; possessing it grants no
+ * record or Operation access.
+ */
+export type RuntimeExtensibleEntity = {
+  /** `schema.table` of the entity, carrying `extension_values`. */
+  readonly table: string;
+  /** `schema.table` of the derived, rebuildable typed index. */
+  readonly valuesTable: string;
+  /** `schema.table` of the uniqueness claims. */
+  readonly uniqueTable: string;
+  readonly manageRoles: readonly string[];
+  readonly limits: {
+    readonly fields: number;
+    readonly filtersPerQuery: number;
+    readonly formulaDepth: number;
+    readonly syncFanOut: number;
+  };
+  readonly allowedOsfTypes: readonly string[];
+  readonly targets: readonly { readonly entity: string; readonly table: string }[];
+  readonly ownedSingleChildren: readonly {
+    readonly relation: string;
+    readonly entity: string;
+    readonly table: string;
+    readonly foreignKey: string;
+  }[];
+};
+
+/** The manifest's top-level `extensionRegistry`, as the compiler emits it. */
+export type RuntimeExtensionRegistryManifest = {
+  readonly entities: Readonly<Record<string, RuntimeExtensibleEntity>>;
+  readonly indexProjections: Readonly<Record<string, Partial<Record<RuntimeExtensionIndexColumn, string>>>>;
+  readonly referencedBy: Readonly<Record<string, readonly { readonly sourceEntity: string; readonly valuesTable: string }[]>>;
+};
+
+/** Read access to the validated registry. Absent entries mean "not extensible". */
+export type RuntimeExtensionRegistry = {
+  entity(entityName: string): RuntimeExtensibleEntity | undefined;
+  entityNames(): readonly string[];
+  indexProjection(osfType: string): Partial<Record<RuntimeExtensionIndexColumn, string>> | undefined;
+  referencedBy(entityName: string): readonly { readonly sourceEntity: string; readonly valuesTable: string }[];
+};
+
 /**
  * Compiler-bound storage of one published-snapshot pair: the editable head
  * and the immutable version table, with the version table's foreign key back

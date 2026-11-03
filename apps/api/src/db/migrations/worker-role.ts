@@ -2,6 +2,8 @@
 import { sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import type { RuntimeExtensionRegistry } from "@openshapeforge/plugin-runtime";
+import { extensionRegistry } from "../../operations/entity/extensions/registry.js";
 
 /**
  * Provisions the second restricted runtime role, `openshapeforge_worker`, and
@@ -339,6 +341,57 @@ export async function applyWorkerRoleGrants(db: OpenShapeForgeDatabase) {
             seq.schema_name, seq.sequence_name, ${sql.lit(WORKER_ROLE)}
           );
         end loop;
+      end
+      $$;
+    `.execute(db);
+  }
+
+  await applyExtensionWorkerGrants(db);
+}
+
+/**
+ * What a tenant field backfill (operations/entity/extensions/backfill.ts)
+ * needs, derived from the extension registry and nothing wider: DML on the
+ * entity's derived index and claim tables and on the two platform extension
+ * tables, and SELECT plus UPDATE of the single `extension_values` column of
+ * the entity table — the source it strips a deleted field from. Every other
+ * column of the entity, and every other generated business table, stays out
+ * of reach; the job runs under the replayed session, so RLS still scopes it
+ * to the tenant that started the change.
+ */
+export function extensionWorkerGrants(registry: RuntimeExtensionRegistry = extensionRegistry): {
+  dml: string[];
+  sourceColumns: string[];
+} {
+  const entities = registry.entityNames().map((name) => registry.entity(name)!);
+  if (!entities.length) return { dml: [], sourceColumns: [] };
+  return {
+    dml: [...new Set([
+      ...entities.flatMap((entry) => [entry.valuesTable, entry.uniqueTable]),
+      "platform.extension_field_definitions",
+      "platform.extension_field_backfills",
+    ])].sort(),
+    sourceColumns: [...new Set(entities.map((entry) => entry.table))].sort(),
+  };
+}
+
+async function applyExtensionWorkerGrants(db: OpenShapeForgeDatabase) {
+  const grants = extensionWorkerGrants();
+  for (const qualified of [...grants.dml, ...grants.sourceColumns]) {
+    const [schema, table] = qualified.split(".") as [string, string];
+    const dml = grants.dml.includes(qualified);
+    await sql`
+      do $$
+      begin
+        if to_regclass(${sql.lit(qualified)}) is not null then
+          execute format('grant usage on schema %I to %I', ${sql.lit(schema)}, ${sql.lit(WORKER_ROLE)});
+          if ${sql.lit(dml)} then
+            execute format('grant select, insert, update, delete on %I.%I to %I', ${sql.lit(schema)}, ${sql.lit(table)}, ${sql.lit(WORKER_ROLE)});
+          else
+            execute format('grant select (id, tenant_id, created_at, updated_at, extension_values), update (extension_values) on %I.%I to %I',
+              ${sql.lit(schema)}, ${sql.lit(table)}, ${sql.lit(WORKER_ROLE)});
+          end if;
+        end if;
       end
       $$;
     `.execute(db);

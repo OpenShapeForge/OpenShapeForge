@@ -515,6 +515,8 @@ export const HTTP_STATUS_BY_CODE = {
   LEASE_ACQUIRE_FAILED: 409,
   LEASE_EXPIRED: 409,
   LEASE_INVALID: 409,
+  // An operation override's replay that does not match an open takeover.
+  TAKEOVER_INVALID: 409,
   CONFIRMATION_NOT_SUPPORTED: 400,
   CONFIRMATION_VALUE_UNAVAILABLE: 409,
   CONFIRMATION_REQUIRED: 428,
@@ -605,6 +607,11 @@ export const HTTP_STATUS_BY_CODE = {
   CONNECTOR_PROVIDER_PERMISSION_DENIED: 403,
   CONNECTOR_PROVIDER_RATE_LIMITED: 429,
   CONNECTOR_PROVIDER_UNAVAILABLE: 503,
+  // A declarative invocation that demanded one exact Connection and would
+  // have run against another (mcp/connection-expectation.ts). A conflict, not
+  // a 404: the caller is authorized and its stored source identity is what
+  // has to be resolved.
+  EXPECTED_CONNECTION_UNAVAILABLE: 409,
 } as const satisfies Record<
   | ConnectorExecutionErrorCode
   | BoundaryErrorCode

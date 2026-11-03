@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  isOperationAccepted,
   isOperationFailure,
   operationErrorOf,
   operationFailure,
@@ -128,6 +129,23 @@ test("validation and temporary refusals use one canonical failure contract", () 
   };
 
   expect(isOperationFailure(result)).toBe(true);
+});
+
+test("an accepted takeover is a third arm, neither data nor failure", () => {
+  const accepted: OperationResult<{ deleted: boolean }, "delete"> = {
+    accepted: { by: { kind: "workflow", ref: "run-1" }, status: "waiting" },
+    operations: [],
+  };
+  const done: OperationResult<{ deleted: boolean }, "delete"> = { data: { deleted: true }, operations: [] };
+  const failed: OperationResult<{ deleted: boolean }, "delete"> = {
+    error: { code: "NOT_FOUND", message: "Gone.", retryable: false },
+  };
+
+  expect(isOperationAccepted(accepted)).toBe(true);
+  expect(isOperationFailure(accepted)).toBe(false);
+  expect(isOperationAccepted(done)).toBe(false);
+  expect(isOperationAccepted(failed)).toBe(false);
+  expect(isOperationFailure(failed)).toBe(true);
 });
 
 test("OperationFailure carries only interface-neutral failure meaning", () => {

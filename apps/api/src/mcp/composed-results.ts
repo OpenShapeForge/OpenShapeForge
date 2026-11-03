@@ -123,6 +123,14 @@ export function nativeToolOutput(result: ToolResult): Record<string, unknown> {
       text && "text" in text ? String(text.text) : "Native operation failed.",
     );
   }
+  // An operation override took the call: the change has not happened, and
+  // the text is a sentence for people, not the value. The Service gets the
+  // acceptance itself as the step's output, so it can tell the two apart
+  // instead of failing after the overriding work has already started.
+  const accepted = (result.structuredContent as { accepted?: unknown } | undefined)?.accepted;
+  if (accepted && typeof accepted === "object" && !Array.isArray(accepted)) {
+    return { accepted };
+  }
   const text = result.content.find((item) => item.type === "text");
   const parsed: unknown =
     text && "text" in text ? JSON.parse(String(text.text)) : null;

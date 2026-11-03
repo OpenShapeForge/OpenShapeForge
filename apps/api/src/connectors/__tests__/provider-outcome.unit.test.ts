@@ -336,6 +336,7 @@ describe("the one status table", () => {
     "DATABASE_NOT_CONFIGURED",
     "DATABASE_BUSY",
     "STORAGE_UNAVAILABLE",
+    "TAKEOVER_INVALID",
     "STORAGE_DISABLED",
     "STORAGE_SETTINGS_INVALID",
     "STORAGE_PROVIDER_FAILURE",
@@ -381,6 +382,9 @@ describe("the one status table", () => {
     "CONNECTOR_PROVIDER_PERMISSION_DENIED",
     "CONNECTOR_PROVIDER_RATE_LIMITED",
     "CONNECTOR_PROVIDER_UNAVAILABLE",
+    // mcp/connection-expectation.ts: the declarative invocation would have run
+    // against a Connection other than the one the caller demanded.
+    "EXPECTED_CONNECTION_UNAVAILABLE",
   ].sort();
 
   it("covers every public code exactly once", () => {
@@ -405,6 +409,7 @@ describe("the one status table", () => {
       CONNECTOR_PROVIDER_PERMISSION_DENIED: 403,
       CONNECTOR_PROVIDER_RATE_LIMITED: 429,
       CONNECTOR_PROVIDER_UNAVAILABLE: 503,
+      EXPECTED_CONNECTION_UNAVAILABLE: 409,
     });
   });
 

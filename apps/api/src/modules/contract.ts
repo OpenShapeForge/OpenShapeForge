@@ -48,6 +48,7 @@ import type {
   RuntimeConnectionValues,
   RuntimeConnectionResolution,
   RuntimeConnectionGrant,
+  RuntimeDeclarativeServiceCapabilities,
   RuntimeOperationExecutionOptions,
   RuntimeOperationExecutionResult,
   RuntimeOperationProvider,
@@ -270,6 +271,8 @@ export type ModuleConnectionValues = RuntimeConnectionValues;
 export type ModuleConnectionResolution = RuntimeConnectionResolution;
 
 export type ModulePlatformServices = {
+  /** Present only once an enforcing declarative engine is registered. */
+  readonly declarativeServiceCapabilities?: RuntimeDeclarativeServiceCapabilities;
   readonly readProgress?: RuntimeReadProgressServices<TrustedSessionContext>;
   readonly webhookSecrets?: RuntimeWebhookSecretServices<TrustedSessionContext>;
   readonly inboundEndpoints?: RuntimeInboundEndpointServices<TrustedSessionContext>;

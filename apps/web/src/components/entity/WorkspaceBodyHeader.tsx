@@ -20,9 +20,11 @@ export function WorkspaceBodyHeader({
   notice,
   extra,
 }: WorkspaceBodyHeaderProps) {
-  const { actionError, handleAction, isPending } = useEntityHeaderAction(
+  const { actionError, actionNotice, handleAction, isPending } = useEntityHeaderAction(
     header.actionsContext,
   );
+  // An operation override's acceptance is a status, shown with the page's own notice.
+  const shownNotice = actionNotice ?? notice;
 
   const hasBadges = (header.badges?.length ?? 0) > 0;
   const hasActions = (header.actions?.length ?? 0) > 0 || Boolean(extra);
@@ -64,19 +66,19 @@ export function WorkspaceBodyHeader({
         ) : null}
       </div>
 
-      {actionError || notice ? (
+      {actionError || shownNotice ? (
         <div className="shrink-0 space-y-2 border-b border-border/60 px-4 py-3">
           {actionError ? (
             <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               {actionError}
             </p>
           ) : null}
-          {notice ? (
+          {shownNotice ? (
             <p className={cn(
               "rounded-lg border px-3 py-2 text-sm",
               "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200",
             )}>
-              {notice}
+              {shownNotice}
             </p>
           ) : null}
         </div>

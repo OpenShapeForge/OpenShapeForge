@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { deriveToolName, inputSchemaFromStoredFields } from "./derived-tools.js";
 import { bindingSelected } from "./declarative-execution.js";
+import { assertExpectedConnection } from "./connection-expectation.js";
 import { loadOrderedBindings } from "./execution-bindings.js";
 import { HttpError } from "../rest/http-error.js";
 import { type CapturedDerivedExecution, catalogDerivedTools } from "./catalog.js";
@@ -34,6 +35,7 @@ export async function derivedToolCall(
   const {
     assertInterceptorActive,
     assertParentInvocationActive,
+    controls,
     db,
     egressOwner,
     egressSource,
@@ -202,6 +204,25 @@ export async function derivedToolCall(
               order,
               composition.unavailable.find((gap) => gap.binding === order),
             );
+          }
+        }
+        // A captured step already names the Connection it would run against.
+        // Check every one of them before the first binding executes, so a
+        // composed call under an expectation can never write one step in the
+        // expected account and the next somewhere else. This is in ADDITION
+        // to the check at each credential boundary, which is what catches a
+        // replacement landing after this point.
+        if (controls?.expectedConnection) {
+          for (const { capture } of stepCaptures.values()) {
+            if (capture.providerRow.transport === "native") continue;
+            assertExpectedConnection({
+              expectation: controls.expectedConnection,
+              session,
+              connectionTable: execution.connectionTable,
+              connection: capture.connectionRows.find(
+                (row) => row.id === capture.selectedConnectionId,
+              ),
+            });
           }
         }
         const completed: CompletedStep[] = [];

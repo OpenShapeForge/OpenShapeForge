@@ -7,6 +7,10 @@
 
 import { randomUUID } from "node:crypto";
 import { definitionFieldKeys, resolveTemplate } from "./declarative-execution.js";
+import {
+  assertConnectionControls,
+  assertExpectedConnection,
+} from "./connection-expectation.js";
 import { connectionTokenSecretScope } from "../connectors/secrets.js";
 import {
   accessTokenNeedsRefresh,
@@ -66,6 +70,19 @@ export async function resolveTenantConnection(
     session.userId,
   );
   if (!tenantConnection) {
+    // There is no row, so no row can be the expected one. A caller that
+    // demanded one exact Connection gets the one refusal it gets for a
+    // replaced or retired Connection — the answer must not depend on whether
+    // the expected Connection was replaced or merely deleted, or the
+    // expectation becomes a way to ask which Connections still exist. Without
+    // an expectation this is a no-op and the actionable connection guidance
+    // below is unchanged.
+    assertExpectedConnection({
+      expectation: input.controls?.expectedConnection,
+      session,
+      connectionTable: execution.connectionTable,
+      connection: undefined,
+    });
     throw await organizationConnectionProblem({
       db,
       session,
@@ -75,6 +92,18 @@ export async function resolveTenantConnection(
       providerRow,
     });
   }
+  // The credential boundary: this row is the one whose values are about to be
+  // read, refreshed and sent. A caller that demanded one exact Connection is
+  // refused HERE, so a Connection retired or replaced since the call was
+  // validated cannot be reached with the previous account's record ids — and
+  // the row that passes is recorded as one this invocation uses, which is the
+  // identity a caller binds its next page to.
+  assertConnectionControls({
+    controls: input.controls,
+    session,
+    connectionTable: execution.connectionTable,
+    connection: tenantConnection,
+  });
   oauthConnectionAudit = {
     sourceTable: execution.providerTable,
     connectionId: String(tenantConnection.id),

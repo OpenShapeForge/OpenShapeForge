@@ -32,11 +32,59 @@ export type CompilerFormulaOperator =
   | "lower"
   | "upper"
   | "substring"
-  | "matches";
+  | "matches"
+  // Spreadsheet vocabulary (customer formulas, Airtable grammar). Text:
+  | "left"
+  | "right"
+  | "mid"
+  | "len"
+  | "trim"
+  | "substitute"
+  // Logical and numeric:
+  | "not"
+  | "negate"
+  | "isError"
+  | "round"
+  | "roundUp"
+  | "roundDown"
+  | "abs"
+  | "value"
+  | "power"
+  | "sqrt"
+  | "ceiling"
+  | "floor"
+  | "min"
+  | "max"
+  | "sum"
+  | "average";
 
 export type CompilerAggregateOperator = "count" | "sum" | "avg" | "min" | "max";
 
-export type CompilerDateOperator = "now" | "dateDiff";
+export type CompilerDateOperator =
+  | "now"
+  | "dateDiff"
+  | "dateAdd"
+  | "datetimeFormat"
+  | "year"
+  | "month"
+  | "day";
+
+// Calendar unit of `dateAdd` and of a `dateDiff` that carries one. A `dateDiff`
+// without a unit keeps its original meaning: whole days, floored.
+export type CompilerDateUnit =
+  | "milliseconds"
+  | "seconds"
+  | "minutes"
+  | "hours"
+  | "days"
+  | "weeks"
+  | "months"
+  | "quarters"
+  | "years";
+
+// `today` is the date at 00:00 UTC; `recordId` and `createdTime` read the
+// payload's `id` and `createdAt`.
+export type CompilerFunctionName = "today" | "recordId" | "createdTime";
 
 // Leaf operand expressions (retained for backward compatibility with existing callers).
 export type CompilerConditionOperandInput =
@@ -66,7 +114,7 @@ export type CompilerExpressionInput =
     }
   | { kind: "path"; path: string; filter?: Record<string, unknown>; offset?: { days: number } }
   | { kind: "literal"; value: unknown }
-  | { kind: "function"; name: "today"; offset?: { days: number } }
+  | { kind: "function"; name: CompilerFunctionName; offset?: { days: number } }
   | {
       kind: "formula";
       id?: string;
@@ -99,6 +147,16 @@ export type CompilerExpressionInput =
       op: CompilerDateOperator;
       left?: CompilerExpressionInput;
       right?: CompilerExpressionInput;
+      unit?: CompilerDateUnit;
+    }
+  | {
+      // The first case whose `when` equals `subject` picks its `then`;
+      // otherwise `default` (absent: undefined).
+      kind: "switch";
+      id?: string;
+      subject: CompilerExpressionInput;
+      cases: Array<{ when: CompilerExpressionInput; then: CompilerExpressionInput }>;
+      default?: CompilerExpressionInput;
     };
 
 // Back-compat alias: workflow conditions are expressions that evaluate to boolean.

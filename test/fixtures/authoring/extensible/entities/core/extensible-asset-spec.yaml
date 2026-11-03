@@ -1,6 +1,8 @@
 # Test fixture — the owned single child of extensible-asset.yaml (one spec per
 # asset): what the extension registry lists as `ownedSingleChildren` for
-# formulas. Only in the test composition.
+# formulas. Only in the test composition. Read-only: the engine refuses a
+# generic create, update and delete of an owned child (it needs an atomic
+# collection Operation), so the generic CRUD sweeps must not see them offered.
 schemaVersion: 3
 kind: coreEntity
 module: core
@@ -49,28 +51,6 @@ operations:
     description: Read one accessible extensible asset spec.
     implementation: { type: entity, action: get }
     effects: { data: read, external: none }
-    reliability: { idempotency: { mode: natural } }
-    confirmation: { mode: none }
-  create:
-    name: Create extensible asset spec
-    description: Create extensible asset spec.
-    implementation: { type: entity, action: create }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    confirmation: { mode: none }
-  update:
-    name: Update extensible asset spec
-    description: Update extensible asset spec.
-    implementation: { type: entity, action: update }
-    effects: { data: write, external: none }
-    reliability: { idempotency: { mode: none } }
-    concurrency: { version: { mode: required, field: updatedAt } }
-    confirmation: { mode: none }
-  delete:
-    name: Delete extensible asset spec
-    description: Delete extensible asset spec.
-    implementation: { type: entity, action: delete }
-    effects: { data: delete, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
 interfaces:

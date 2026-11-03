@@ -268,7 +268,7 @@
     },
     "packages/plugin-runtime": {
       "name": "@openshapeforge/plugin-runtime",
-      "version": "0.1.23",
+      "version": "0.1.24",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "fastify": "^5.8.2",
@@ -304,7 +304,7 @@
     },
     "packages/versioning": {
       "name": "@openshapeforge/versioning",
-      "version": "0.1.13",
+      "version": "0.1.14",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
       },

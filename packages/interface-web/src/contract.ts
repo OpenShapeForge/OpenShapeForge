@@ -492,7 +492,11 @@ export type WebCustomFields = {
   allowedOsfTypes: string[];
   /** Entities a tenant reference field may point at. */
   targets: string[];
+  /** Field kinds this runtime accepts; computed kinds join as their engine work lands. */
+  kinds: WebCustomFieldKind[];
 };
+
+export type WebCustomFieldKind = "stored" | "formula" | "lookup" | "rollup";
 
 /**
  * A standalone Operation: authored in an operation catalog rather than on an

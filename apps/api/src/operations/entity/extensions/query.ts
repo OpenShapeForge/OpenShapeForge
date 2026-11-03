@@ -4,8 +4,9 @@
  * `{ extensions: { <key>: { <operator>: <value> } } }` becomes an EXISTS
  * semi-join on the typed index, one per predicate, with the operator
  * vocabulary of structuredFilter for the field's index column; a sort on
- * `extensions.<key>` a LEFT JOIN on that one index row, nulls last, with the
- * id as tiebreaker. A classified tenant field is never a filter or sort key —
+ * `extensions.<key>` a page read in two bounded parts (extensionSortedPage),
+ * nulls last, with the id as tiebreaker. A classified tenant field is never a
+ * filter or sort key —
  * the existing oracle guard ignores names it does not know, so this one
  * refuses them explicitly.
  */
@@ -137,24 +138,100 @@ export function extensionFilterCondition(
   return conditions.length ? sql`(${sql.join(conditions, sql` and `)})` : sql`true`;
 }
 
-/** The ORDER BY and the one-row join of a tenant field sort; undefined for any other sort. */
+/** A sort on one tenant field: which index rows order the page, and in which direction. */
+export type ExtensionSortPlan = {
+  readonly valuesTable: string;
+  readonly fieldId: string;
+  /** The index column the field's value lands in. */
+  readonly column: string;
+  readonly direction: "asc" | "desc";
+};
+
+/** The plan of a tenant field sort; undefined for any other sort. */
 export function extensionSort(
   table: GeneratedCrudTable,
   session: DbSessionInput,
   sort: { field?: string | null; direction?: string | null } | null | undefined,
-): { join: RawBuilder<unknown>; orderBy: RawBuilder<unknown> } | undefined {
+): ExtensionSortPlan | undefined {
   if (typeof sort?.field !== "string" || !sort.field.startsWith(EXTENSION_SORT_PREFIX) || !extensibleEntityOf(table)) return undefined;
   const set = provenSet(table, session);
   const { field, shape } = fieldFor(set, sort.field.slice(EXTENSION_SORT_PREFIX.length));
   if (shape.collection) extensionError(`extensions.${field.key} holds several values and cannot be sorted on.`, "BAD_USER_INPUT");
-  const column = valueColumn(shape, SORT_ALIAS).sql;
-  const direction = typeof sort.direction === "string" && sort.direction.toLowerCase() === "desc" ? sql`desc` : sql`asc`;
   return {
-    join: sql`left join ${qualifiedTable(set.entry.valuesTable)} as ${sql.id(SORT_ALIAS)}
-      on ${sql.id(SORT_ALIAS, "tenant_id")} = ${sql.id("row_source", "tenant_id")}
-      and ${sql.id(SORT_ALIAS, "record_id")} = ${sql.id("row_source", "id")}
-      and ${sql.id(SORT_ALIAS, "field_id")} = ${field.fieldId}::uuid
-      and ${sql.id(SORT_ALIAS, "ordinal")} = 0`,
-    orderBy: sql`${column} ${direction} nulls last, ${sql.id("row_source", "id")} asc`,
+    valuesTable: set.entry.valuesTable,
+    fieldId: field.fieldId,
+    column: shape.column === "ref" ? "value_ref_id" : `value_${shape.column}`,
+    direction: typeof sort.direction === "string" && sort.direction.toLowerCase() === "desc" ? "desc" : "asc",
   };
+}
+
+/**
+ * One page of a tenant field sort, in two bounded parts (§5.6, the phase-0
+ * measurement #372): `<value> <direction> nulls last, id <direction>`.
+ *
+ * A LEFT JOIN on the index row cannot use the partial value index (the
+ * planner cannot prove it holds the rows without a value), so it sorts every
+ * row of the tenant. Instead the rows WITH a value come straight from the
+ * index in (value, record_id) order, offset and limit applied there; only a
+ * page that runs past the last of them reads the rows WITHOUT one, in id
+ * order. `nulls last` is then the order of the two parts, not a sort key.
+ * The second part's offset is the page offset minus the number of valued
+ * rows, which is known without counting unless the page starts beyond all of
+ * them (then they are counted, once). The tiebreaker follows the direction,
+ * so a descending page is the same index read backwards.
+ *
+ * `where` is the list's whole predicate under the alias `row_source`, tenant
+ * predicate included, and applies to both parts; every index row read is
+ * pinned to the session's tenant as well. A single-valued field has only
+ * ordinal 0 (the cardinality of a field never changes, and a collection is
+ * refused above), so the index rows are not filtered on it: the index does
+ * not hold the ordinal, and the filter would cost a heap visit per row.
+ */
+export function extensionSortedPage(input: {
+  plan: ExtensionSortPlan;
+  entityTable: RawBuilder<unknown>;
+  tenantId: string;
+  where: RawBuilder<unknown>;
+  offset: number;
+  fetch: number;
+}): RawBuilder<{ row: Record<string, unknown> }> {
+  const { plan, entityTable, tenantId, where, offset, fetch } = input;
+  const values = qualifiedTable(plan.valuesTable);
+  const value = sql.id(SORT_ALIAS, plan.column);
+  const direction = sql.raw(plan.direction);
+  const valuedRows = sql`from ${values} as ${sql.id(SORT_ALIAS)}
+    join ${entityTable} as row_source
+      on row_source.tenant_id = ${sql.id(SORT_ALIAS, "tenant_id")} and row_source.id = ${sql.id(SORT_ALIAS, "record_id")}
+    where ${sql.id(SORT_ALIAS, "tenant_id")} = ${tenantId}::uuid
+      and ${sql.id(SORT_ALIAS, "field_id")} = ${plan.fieldId}::uuid
+      and ${value} is not null
+      and (${where})`;
+  return sql<{ row: Record<string, unknown> }>`
+    with valued as materialized (
+      select ${sql.id(SORT_ALIAS, "record_id")} as id, ${value} as sort_value
+      ${valuedRows}
+      order by ${value} ${direction}, ${sql.id(SORT_ALIAS, "record_id")} ${direction}
+      offset ${offset} limit ${fetch}
+    ), unvalued as (
+      select row_source.id
+      from ${entityTable} as row_source
+      where (${where})
+        and not exists (select 1 from ${values} as ${sql.id(SORT_ALIAS)}
+          where ${sql.id(SORT_ALIAS, "tenant_id")} = row_source.tenant_id
+            and ${sql.id(SORT_ALIAS, "record_id")} = row_source.id
+            and ${sql.id(SORT_ALIAS, "field_id")} = ${plan.fieldId}::uuid
+            and ${value} is not null)
+      order by row_source.id ${direction}
+      offset (case when (select count(*) from valued) > 0 then 0
+        else greatest(${offset}::bigint - (select count(*) ${valuedRows}), 0) end)
+      limit (${fetch}::bigint - (select count(*) from valued))
+    ), page as (
+      select 0 as part, id, sort_value from valued
+      union all
+      select 1, id, null from unvalued
+    )
+    select to_jsonb(row_source.*) as row
+    from page
+    join ${entityTable} as row_source on row_source.tenant_id = ${tenantId}::uuid and row_source.id = page.id
+    order by page.part, page.sort_value ${direction}, page.id ${direction}`;
 }

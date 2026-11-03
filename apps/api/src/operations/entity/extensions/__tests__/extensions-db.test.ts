@@ -256,9 +256,9 @@ describe("tenant fields on an extensible entity", () => {
     // limits.filtersPerQuery counts predicates over the whole tree (limit 3).
     expect(await list(reader, { filter: { extensions: { accu: { gte: 1, lte: 100 } }, and: [{ extensions: { soort: { eq: "kit" } } }, { extensions: { aantal: { eq: 1 } } }] } }))
       .toMatchObject({ error: { code: "BAD_USER_INPUT", message: expect.stringContaining("at most 3") } });
-    // Sort: nulls last, id as tiebreaker.
+    // Sort: nulls last, id as tiebreaker in the sort's direction.
     const sorted = ids(await list(reader, { filter: scope, sort: { field: "extensions.accu", direction: "desc" } }));
-    expect(sorted).toEqual([...[b.id, d.id].sort(), a.id, c.id]);
+    expect(sorted).toEqual([...[b.id, d.id].sort().reverse(), a.id, c.id]);
     expect(await list(reader, { sort: { field: "extensions.links" } })).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
     // Tenant B's query sees nothing of tenant A, by filter or by sort.
     expect(await list(writerB, { filter: { extensions: { soort: { eq: "batterij" } } } })).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
@@ -270,6 +270,60 @@ describe("tenant fields on an extensible entity", () => {
       definitions: (await sql<{ n: string }>`select count(*)::text as n from platform.extension_field_definitions`.execute(trx)).rows[0]!.n,
     }));
     expect(leaked).toEqual({ values: "0", claims: "0", definitions: "0" });
+  });
+
+  test("a tenant field sort pages in two bounded parts: valued rows from the index, then the rest", async () => {
+    const tag = randomUUID().slice(0, 8);
+    const one = await created(writer, { soort: "kit", accu: 1 }, `P-${tag}`);
+    const five = await created(writer, { soort: "batterij", accu: 5 }, `P-${tag}`);
+    const tied = [await created(writer, { soort: "batterij", accu: 20 }, `P-${tag}`), await created(writer, { soort: "kit", accu: 20 }, `P-${tag}`)];
+    const empty = [await created(writer, { soort: "kit" }, `P-${tag}`), await created(writer, {}, `P-${tag}`), await created(writer, undefined, `P-${tag}`)];
+    const scope = { name: `P-${tag}` };
+    const byId = (rows: Array<{ id: string }>) => rows.map((row) => row.id).sort();
+    const ascending = [one.id, five.id, ...byId(tied), ...byId(empty)];
+    const descending = [...byId(tied).reverse(), five.id, one.id, ...byId(empty).reverse()];
+    type Page = { items: Array<{ data: { id: string } }>; nextCursor: string | null; totalCount: number | null };
+    const page = async (input: Record<string, unknown>) => {
+      const result = await list(reader, { includeTotalCount: true, ...input });
+      if ("error" in result) throw new Error(JSON.stringify(result.error));
+      return result.data as Page;
+    };
+    /** Every page of one sort, following the cursor, with the page boundaries. */
+    const walk = async (direction: string, limit: number, filter: Record<string, unknown> = scope, total = 7) => {
+      const pages: string[][] = [];
+      let cursor: string | null = null;
+      do {
+        const current: Page = await page({ filter, sort: { field: "extensions.accu", direction }, limit, ...(cursor ? { cursor } : {}) });
+        pages.push(current.items.map((item) => item.data.id));
+        expect(current.totalCount).toBe(total);
+        cursor = current.nextCursor;
+      } while (cursor);
+      return pages;
+    };
+    // One page holds both parts.
+    expect((await walk("asc", 50)).flat()).toEqual(ascending);
+    expect((await walk("desc", 50)).flat()).toEqual(descending);
+    // Pages of three: the first is all valued, the second crosses the
+    // boundary (one valued row, two without), the third starts past every
+    // valued row, so its offset into the rest is counted.
+    expect(await walk("asc", 3)).toEqual([ascending.slice(0, 3), ascending.slice(3, 6), ascending.slice(6)]);
+    expect(await walk("desc", 3)).toEqual([descending.slice(0, 3), descending.slice(3, 6), descending.slice(6)]);
+    // A page that ends exactly on the boundary, and one that starts on it.
+    expect(await walk("asc", 4)).toEqual([ascending.slice(0, 4), ascending.slice(4)]);
+    expect(await walk("desc", 2)).toEqual([0, 2, 4, 6].map((start) => descending.slice(start, start + 2)));
+    // An offset beyond the last row is an empty last page.
+    const beyond = await page({ filter: scope, sort: { field: "extensions.accu" }, limit: 2, cursor: Buffer.from("40").toString("base64url") });
+    expect(beyond).toMatchObject({ items: [], nextCursor: null, totalCount: 7 });
+    // The list's filter applies to both parts: tenant field and column predicates alike.
+    const kits = [one, tied[1]!, empty[0]!].map((row) => row.id);
+    const filtered = await walk("asc", 2, { ...scope, extensions: { soort: { eq: "kit" } } }, 3);
+    expect(filtered.flat()).toEqual(ascending.filter((id) => kits.includes(id)));
+    // Another tenant's sorted page sees none of it.
+    const other = await list(writerB, { filter: scope, sort: { field: "extensions.accu", direction: "asc" } });
+    expect("error" in other ? other : ids(other)).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+    // The offset cap is the list's own.
+    expect(await list(reader, { filter: scope, sort: { field: "extensions.accu" }, cursor: Buffer.from("100001").toString("base64url") }))
+      .toMatchObject({ error: { code: "BAD_USER_INPUT" } });
   });
 
   test("audit is per key with definition versions, and classified keys never appear raw", async () => {

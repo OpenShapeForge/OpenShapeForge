@@ -24,7 +24,7 @@ import { resolveComputedEntityRows } from "./computed-fields.js";
 import { temporalReadOperations } from "./temporal-threshold-resolver.js";
 import { assertBoundFieldQueryAllowed, resolveBoundEntityRows } from "./field-bindings.js";
 import { subtypeScopeWhere } from "./subtype-scope.js";
-import { assertExtensionQueryAllowed, extensionFilterCondition, extensionSort } from "./extensions/query.js";
+import { assertExtensionQueryAllowed, extensionFilterCondition, extensionSort, extensionSortedPage } from "./extensions/query.js";
 import { extensibleEntityOf, loadExtensionFields } from "./extensions/store.js";
 import type {
   CountedEntityConnection,
@@ -348,12 +348,18 @@ async function listGeneratedEntityRowsForTable(
   const profileWhere=authorizationProfilePredicate(config?.states[auditContext()?.operationId ?? ""],config?.actor ?? {},"row_source");
   const where=sql`(${scopedWhere}) and (${profileWhere})`;
   const tenantSort = relationScope?.orderBy ? undefined : extensionSort(table, session, input.sort);
-  const orderBy = relationScope?.orderBy ?? tenantSort?.orderBy ?? buildSortExpression(table, input.sort);
+  const orderBy = relationScope?.orderBy ?? buildSortExpression(table, tenantSort ? undefined : input.sort);
 
-    const result = await sql<{ row: GeneratedEntityRow }>`
+    // A tenant field sort reads the page from its index (extensions/query.ts);
+    // the same predicate, offset and page size, so the cursor means the same.
+    const result = tenantSort
+      ? await extensionSortedPage({
+          plan: tenantSort, entityTable: sql.id(table.schema, table.table), tenantId: session.tenantId!,
+          where, offset, fetch: limit + 1,
+        }).execute(trx) as { rows: Array<{ row: GeneratedEntityRow }> }
+      : await sql<{ row: GeneratedEntityRow }>`
       select to_jsonb(row_source.*) as row
       from ${sql.id(table.schema, table.table)} as row_source
-      ${tenantSort?.join ?? sql``}
       where ${where}
       order by ${orderBy}
       limit ${limit + 1}

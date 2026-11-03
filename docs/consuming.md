@@ -62,9 +62,9 @@ npm install \
 For those three packages, CI checks the content before it ships: it installs
 the tarballs into a scratch project and regenerates this repository's
 committed artifacts from the packaged bin, byte-for-byte. The other published
-packages (`@openshapeforge/documents`, `plugin-runtime`, `versioning` and
-`workflow-layout`) get only a pack dry run in that workflow; no install or
-smoke test runs against their tarballs.
+packages (`@openshapeforge/documents`, `formula`, `plugin-runtime`,
+`versioning` and `workflow-layout`) get only a pack dry run in that workflow;
+no install or smoke test runs against their tarballs.
 
 ## Setup
 

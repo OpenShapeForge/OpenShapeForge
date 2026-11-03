@@ -13,7 +13,7 @@ import {
   type GraphQLResolveInfo,
   type SelectionSetNode,
 } from "graphql";
-import { isScalarType, operationErrorOf, SCALAR_PROJECTION } from "@openshapeforge/operations";
+import { isOperationAccepted, isScalarType, operationErrorOf, SCALAR_PROJECTION } from "@openshapeforge/operations";
 import graphqlDocumentation from "../generated/graphql/documentation.json" with { type: "json" };
 import {
   getGeneratedCrudTables,
@@ -38,6 +38,7 @@ import {
 } from "../operations/entity/index.js";
 import type {
   EntityOperationInput,
+  EntityOperationResult,
   GeneratedCrudExposureOperation,
 } from "../operations/entity/types.js";
 
@@ -738,6 +739,23 @@ export function executeCanonicalGraphqlOperation(
   });
 }
 
+/**
+ * A generated mutation taken over by an operation override has no record or
+ * deletion to answer with, and the schema has no field for it: it is a
+ * GraphQL error with code `OPERATION_ACCEPTED` and the acceptance in
+ * `extensions.accepted`. Every other result passes through unchanged.
+ */
+export function projectAcceptedGraphqlMutation<T extends EntityOperationResult>(result: T): T {
+  if (!isOperationAccepted(result)) return result;
+  const { by, status } = result.accepted;
+  throw new GraphQLError(
+    status === "completed"
+      ? `Handled by ${by.kind} ${by.ref}.`
+      : `Started ${by.kind} ${by.ref}; the change happens when it completes.`,
+    { extensions: { code: "OPERATION_ACCEPTED", accepted: result.accepted } },
+  );
+}
+
 const queryResolvers = Object.fromEntries(
   tables.flatMap((table) => {
     const graphql = assertGraphqlMetadata(table);
@@ -814,18 +832,18 @@ const mutationResolvers = Object.fromEntries(
         graphql.updateMutationName,
         async (_parent: unknown, args: { input: Record<string, unknown> & { id: string } }, context: GraphqlContext) => {
           if (entityOperationContract(entityOperationRef(table, "update").id).implementation?.type === "plugin") {
-            return executeCanonicalGraphqlOperation(table, "update", args.input, context);
+            return projectAcceptedGraphqlMutation(await executeCanonicalGraphqlOperation(table, "update", args.input, context));
           }
           const { id, values, controls } = splitCanonicalGraphqlMutationInput(
             args.input,
             true,
           );
-          return executeCanonicalGraphqlOperation(
+          return projectAcceptedGraphqlMutation(await executeCanonicalGraphqlOperation(
             table,
             "update",
             { ...(id === undefined ? {} : { id }), values, ...controls },
             context,
-          );
+          ));
         },
       ]] : []),
       ...(operationEnabled(table, "delete") ? [[
@@ -839,12 +857,12 @@ const mutationResolvers = Object.fromEntries(
             args.input,
             true,
           );
-          return executeCanonicalGraphqlOperation(
+          return projectAcceptedGraphqlMutation(await executeCanonicalGraphqlOperation(
             table,
             "delete",
             { ...(id === undefined ? {} : { id }), ...controls },
             context,
-          );
+          ));
         },
       ]] : []),
     ];

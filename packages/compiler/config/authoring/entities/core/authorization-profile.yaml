@@ -41,6 +41,7 @@ fields:
   - key: key
     osfType: string
     required: true
+    deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
     label:
       en: Code
       nl: Code

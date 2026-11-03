@@ -6,8 +6,9 @@
  *
  * Split out of generated-mcp-server.ts.
  */
-import { OperationFailure } from "@openshapeforge/operations";
+import { isOperationAccepted, OperationFailure, type OperationAccepted } from "@openshapeforge/operations";
 import type {
+  RuntimeDeclarativeServiceExecutionResult,
   RuntimeDeclarativeServiceRequest,
   RuntimeHostOperationRequest,
   RuntimeOperationExecutionResult,
@@ -32,7 +33,7 @@ export type RuntimeDeclarativeServiceExecutor = (
   requestId: string | number,
   assertInvocationActive?: () => void,
   signal?: AbortSignal,
-) => Promise<RuntimeOperationExecutionResult>;
+) => Promise<RuntimeDeclarativeServiceExecutionResult>;
 
 export type RuntimeHostOperationExecutor = (
   request: RuntimeHostOperationRequest,
@@ -62,6 +63,21 @@ export function ok(payload: unknown): ToolResult {
 }
 
 export const __okForTests = ok;
+
+/**
+ * An Operation taken over by an operation override: the envelope as
+ * structuredContent, and a text that says the change has not happened yet.
+ */
+export function acceptedToolResult(result: Pick<OperationAccepted, "accepted" | "operations">): ToolResult {
+  const { by } = result.accepted;
+  const text = result.accepted.status === "completed"
+    ? `Handled by ${by.kind} ${by.ref}; the original change was not performed directly.`
+    : `Started ${by.kind} ${by.ref}; the change happens when it completes.`;
+  return {
+    content: [{ type: "text", text }],
+    structuredContent: { accepted: result.accepted, operations: result.operations },
+  };
+}
 
 /**
  * An operation's MCP answer: the canonical JSON value as one text block, or —
@@ -204,6 +220,7 @@ export function runtimeOperationToolResult(
   result: RuntimeOperationExecutionResult,
 ): ToolResult {
   if ("error" in result) return failed(new OperationFailure(result.error));
+  if (isOperationAccepted(result)) return acceptedToolResult(result);
   const projected = ok(result);
   const resources = (result.resources ?? []).map((resource) => ({
     type: "resource_link" as const,

@@ -2,6 +2,72 @@
 
 ## Unreleased
 
+### Added
+
+- **`declarativeServiceCapabilities`**, the capability signal for the
+  declarative Service controls, with
+  `RuntimeDeclarativeServiceCapabilities = { expectedConnection: readonly
+  RuntimeDeclarativeServiceConnectionExpectationScope[] }`. It is on
+  `RuntimeOperationExecutionContext` (the context a record-derived Operation
+  provider is handed) and on `PluginPlatformServices` (for a canonical
+  Operation handler, which holds `platform`). Published only by a runtime whose
+  registered declarative engine enforces `expectedConnection` at every
+  credential boundary of every provider call; the whole property is absent on a
+  host that predates the control and reads `undefined` on a runtime with no
+  declarative engine. Check it BEFORE invoking a Service with
+  `expectedConnection` — a host that ignored the control would answer an
+  ordinary success from whichever Connection the live session is authorized for
+  — read it as a list, and fail closed. It advertises capability only: it says
+  nothing about what the caller may reach.
+- **`expectedConnection` may name the Connection by its own id**, for the one
+  call a core-minted reference cannot cover: the FIRST. A sync reads the
+  Connection it means to synchronize from, holds its id, and only then invokes
+  the Service — and an administrator may replace that Connection in between, so
+  the first page can execute against the replacement and store its records
+  under the id of the Connection the sync believed it read.
+  `RuntimeDeclarativeServiceConnectionExpectation` is now a union of
+  `RuntimeDeclarativeServiceConnectionExpectationByReference` (`sourceReference`,
+  unchanged) and `RuntimeDeclarativeServiceConnectionExpectationById`
+  (`connectionId`), each with the same `appliesTo: "every-provider-call"`. The
+  id is scoped to the tenant of the session presenting it and resolved against
+  the stored row at every credential boundary, nested ones included; it
+  authorizes and selects nothing, and a malformed id, an id of another tenant
+  or an id of a Connection this session may not use all answer
+  `EXPECTED_CONNECTION_UNAVAILABLE` exactly as a replaced Connection does. The
+  two are mutually exclusive by shape and a host refuses an expectation
+  carrying both; where both end up in force across a nesting, the invocation is
+  held to both and only the row each of them names passes. `connectionUse`
+  still answers with the reference form, whichever way the invocation named its
+  own expectation, so a run carries the stronger identity from its second page
+  onwards; its `one-connection` outcome is typed as that form specifically
+  rather than as the new union.
+- **`every-provider-call` covers nested invocations.** A binding on the
+  platform-owned native transport runs a canonical Operation in-process, and
+  that Operation may open a Connection's credentials
+  (`platform.secrets.resolveConnectionValues`) or invoke a further declarative
+  Service. Those are credential boundaries of the same invocation: each is held
+  to the invocation's `expectedConnection` and recorded into the same
+  `connectionUse`. A nested invocation may confirm the inherited expectation —
+  by presenting the same value, or by naming the same Connection the other way
+  — and may not replace it with another Connection. A Service that reaches two accounts
+  through an Operation it composes therefore answers `no-single-connection`
+  instead of naming one of them. Work a nested Operation *defers* — a durable
+  job, a queued outbox entry — runs later under its own invocation and carries
+  no expectation from this one.
+- **The refusal fails the invocation whatever the Service declares, and says
+  the same thing in every case.** A binding a Service declares `optional` does
+  not absorb `EXPECTED_CONNECTION_UNAVAILABLE`: `optional` covers an
+  unavailable source, not a wrong account, so a Service cannot answer success
+  — with `connectionUse` naming the account its other bindings used — after a
+  step was refused for leaving that account. This holds for a Service's own
+  bindings and for those of any Service nested inside it, and every other
+  optional failure is still reported as an unavailable source. And with an
+  expectation in force, a Connection that is simply gone answers that same
+  refusal rather than the connection-setup failure a caller without an
+  expectation gets (`CONNECTION_MISSING`, `CONNECTION_REQUIRED`), in the
+  organization and personal scopes alike — so "replaced" and "gone, with
+  nothing in its place" stay indistinguishable.
+
 ### Package compatibility
 
 - The reviewed compiler field-value policy release publishes operations,

@@ -11,6 +11,8 @@ export type RendererFieldState = {
 export type RendererFormUiState = {
   fields: Record<string, RendererFieldState>;
   formError?: string;
+  /** A status, not an error: e.g. the save was taken over and started a workflow. */
+  formNotice?: string;
   submitAttempted: boolean;
 };
 

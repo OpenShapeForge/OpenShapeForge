@@ -12,6 +12,21 @@ import type { RuntimeWebhookSecretServices } from "./webhook-secrets.js";
 import type { RuntimeInboundEndpointServices } from "./inbound.js";
 import type { RuntimeReadProgressServices } from "./read-progress.js";
 export type { RuntimeReadProgress, RuntimeReadProgressSnapshot, RuntimeReadProgressServices } from "./read-progress.js";
+import type {
+  RuntimeDeclarativeServiceCapabilities,
+  RuntimeDeclarativeServiceConnectionExpectation,
+  RuntimeDeclarativeServiceConnectionUse,
+} from "./declarative-service.js";
+export { RUNTIME_EXPECTED_CONNECTION_UNAVAILABLE_CODE } from "./declarative-service.js";
+export type {
+  RuntimeDeclarativeServiceCapabilities,
+  RuntimeDeclarativeServiceConnectionExpectation,
+  RuntimeDeclarativeServiceConnectionExpectationById,
+  RuntimeDeclarativeServiceConnectionExpectationByReference,
+  RuntimeDeclarativeServiceConnectionExpectationScope,
+  RuntimeDeclarativeServiceConnectionUse,
+  RuntimeDeclarativeServiceFailureCode,
+} from "./declarative-service.js";
 export type { RuntimeWebhookSecretServices, RuntimeWebhookSignatureInput } from "./webhook-secrets.js";
 export {
   RUNTIME_INBOUND_HASH_ALGORITHMS, RUNTIME_INBOUND_IDENTITY_SOURCES,
@@ -35,6 +50,7 @@ export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js"
 export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwner, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
   RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type {
+  OperationAcceptance,
   OperationConfirmation,
   OperationError,
   OperationPrerequisite,
@@ -338,6 +354,14 @@ export type RuntimeDeclarativeServiceRequest = {
   idempotencyKey?: string;
   /** Durable reference only; core re-authorizes the referenced source live. */
   sourceReference?: string;
+  /**
+   * Opt-in: refuse this invocation unless every provider call obtains its
+   * credentials from exactly the Connection this names — a core-minted
+   * `sourceReference` for a run's later pages, or the Connection's own
+   * `connectionId` for its first. Absent, the selection and authorization of
+   * Connections is unchanged.
+   */
+  expectedConnection?: RuntimeDeclarativeServiceConnectionExpectation;
 };
 
 /**
@@ -355,10 +379,34 @@ export type RuntimeOperationExecutionResult =
   & { intent?: string }
   & OperationResult<unknown>;
 
+/**
+ * The canonical Operation envelope of a declarative Service invocation, plus
+ * the one thing only the engine can tell its caller: which Connection the
+ * invocation actually obtained provider credentials from.
+ *
+ * `connectionUse` is a core-owned envelope key on this path, like `data` and
+ * `operations`, and is present only on a SUCCESSFUL invocation — a failure has
+ * no identity to hand out, including a composition that stopped part-way.
+ * Ignoring it leaves behaviour exactly as it was.
+ */
+export type RuntimeDeclarativeServiceExecutionResult =
+  & RuntimeOperationExecutionResult
+  & { connectionUse?: RuntimeDeclarativeServiceConnectionUse };
+
 export type RuntimeOperationExecutionContext = {
   /** Exact, host-minted live capability for this invocation. */
   session: PluginSessionContext;
   signal?: AbortSignal;
+  /**
+   * What this host enforces for the declarative controls below, published by
+   * the engine `invokeDeclarativeService` reaches and by nothing else. Read it
+   * BEFORE setting `expectedConnection`; absent means this host does not
+   * enforce the control, and a plugin that needs it must refuse here rather
+   * than invoke the Service. The same advertisement is on
+   * `PluginPlatformServices.declarativeServiceCapabilities` for a canonical
+   * Operation handler, which holds `platform` rather than this context.
+   */
+  readonly declarativeServiceCapabilities?: RuntimeDeclarativeServiceCapabilities;
   /** Nested canonical dispatch; it cannot widen or replace the live session. */
   execute(
     request: RuntimeOperationRequest,
@@ -367,12 +415,13 @@ export type RuntimeOperationExecutionContext = {
   /**
    * Invoke the core declarative Service engine without routing through an MCP
    * tool name. Core re-reads the named definition and every connection under
-   * this invocation's live session before any provider call.
+   * this invocation's live session before any provider call, and answers a
+   * success with the Connection that invocation used (`connectionUse`).
    */
   invokeDeclarativeService(
     request: RuntimeDeclarativeServiceRequest,
     options?: RuntimeOperationExecutionOptions,
-  ): Promise<RuntimeOperationExecutionResult>;
+  ): Promise<RuntimeDeclarativeServiceExecutionResult>;
   invokeHostOperation(
     request: RuntimeHostOperationRequest,
     options?: RuntimeOperationExecutionOptions,
@@ -395,6 +444,82 @@ export type RuntimeOperationProvider = {
     context: RuntimeOperationExecutionContext,
     request: RuntimeOperationRequest,
   ): Promise<RuntimeOperationExecutionResult>;
+};
+
+/**
+ * The reserved Operation input member that names a core takeover record. Core
+ * strips it from the input before validation and hashing. Only the tenant's
+ * organization service identity may present it, and only for the exact
+ * operation, record and input the takeover was opened for.
+ */
+export const OPERATION_TAKEOVER_INPUT_MEMBER = "osfTakeover";
+
+/** What an override is asked about: one record-scoped canonical write. */
+export type RuntimeOperationOverrideRequest = {
+  operation: { id: string; intent: "update" | "delete" };
+  /** The caller's business input, without `osfTakeover`. */
+  input: Readonly<Record<string, unknown>>;
+  recordId: string;
+};
+
+export type RuntimeOperationOverrideResolution = { overrideId: string };
+
+export type RuntimeOperationOverrideExecuteRequest = RuntimeOperationOverrideRequest & {
+  /** The resolution's own id, as `resolve` returned it. */
+  overrideId: string;
+  /**
+   * Core's takeover record. The plugin attaches it, as the reserved input
+   * member `osfTakeover`, only to its own run's step for the same operation,
+   * record and input; it is not a secret and grants nothing to anyone else.
+   */
+  takeoverId: string;
+  /** Stable for this tenant, override, operation, record and input. */
+  idempotencyKey: string;
+};
+
+export type RuntimeOperationOverrideExecutionContext = {
+  /** The caller's live session; the override acts as the caller. */
+  session: PluginSessionContext;
+  signal?: AbortSignal;
+  /** Nested canonical dispatch; it cannot widen or replace the live session. */
+  execute(
+    request: RuntimeOperationRequest,
+    options?: RuntimeOperationExecutionOptions,
+  ): Promise<RuntimeOperationExecutionResult>;
+};
+
+/**
+ * `completed`: the original effect has happened; core answers the original's
+ * own result. `accepted`: the takeover answered before the original effect
+ * happened. `error`: the call is refused with this error; core never falls
+ * through to the original.
+ */
+export type RuntimeOperationOverrideResult =
+  | { completed: Readonly<Record<string, unknown>> }
+  | { accepted: OperationAcceptance }
+  | { error: OperationError };
+
+/**
+ * Takes a generated record-scoped `update` or `delete` in place of the
+ * original, under the same id and input. Core asks only after the caller's
+ * authorization, admission, record permissions, input validation and a ready
+ * confirmation, so an override never widens who may perform the original.
+ */
+export type RuntimeOperationOverride = {
+  id: string;
+  /**
+   * Which override takes this operation for this record, or none. May read
+   * the record (canonical get) to evaluate conditions; hidden answers
+   * `undefined`, and the original runs. Must have no side effects.
+   */
+  resolve(
+    session: PluginSessionContext,
+    request: RuntimeOperationOverrideRequest,
+  ): Promise<RuntimeOperationOverrideResolution | undefined>;
+  execute(
+    context: RuntimeOperationOverrideExecutionContext,
+    request: RuntimeOperationOverrideExecuteRequest,
+  ): Promise<RuntimeOperationOverrideResult>;
 };
 
 /** The database capabilities exposed by the host to a runtime plugin. */
@@ -465,6 +590,15 @@ export type RuntimeConnectionResolution =
 
 export type PluginPlatformServices = {
   readonly readProgress?: RuntimeReadProgressServices<PluginSessionContext>;
+  /**
+   * What the host's declarative Service engine enforces (see
+   * `RuntimeDeclarativeServiceCapabilities`). Published only by a runtime that
+   * has such an engine registered and checks `expectedConnection` at every
+   * credential boundary of every provider call; absent on every other host,
+   * including one that predates the control. Consumers must fail closed: check
+   * it BEFORE invoking a Service with the control, never after.
+   */
+  readonly declarativeServiceCapabilities?: RuntimeDeclarativeServiceCapabilities;
   /** Core alone opens Connection values; retained or foreign sessions are refused.
    * Absent on runtimes without this capability; consumers must fail closed. */
   readonly secrets?: {
@@ -828,11 +962,16 @@ export type ModuleOperationContextContract<
     request: RuntimeHostOperationRequest,
     options?: RuntimeOperationExecutionOptions,
   ): Promise<RuntimeOperationExecutionResult>;
-  /** Execute the core declarative Service engine under this live session. */
+  /**
+   * Execute the core declarative Service engine under this live session. A
+   * success also names the Connection the invocation obtained provider
+   * credentials from (`connectionUse`), which is the only way to obtain a
+   * reference for `expectedConnection` from inside a canonical Operation.
+   */
   invokeDeclarativeService(
     request: RuntimeDeclarativeServiceRequest,
     options?: RuntimeOperationExecutionOptions,
-  ): Promise<RuntimeOperationExecutionResult>;
+  ): Promise<RuntimeDeclarativeServiceExecutionResult>;
 };
 
 export type ModuleOperationHandlerContract<Context, Result> = (
@@ -948,6 +1087,11 @@ export type RuntimeModuleContract<
   /** At most one configured module supplies the internal provider-neutral storage port. */
   artifactStorage?: ArtifactStorage;
   operationProviders?: readonly OperationProvider[];
+  /**
+   * Takeovers of generated record-scoped `update` and `delete` Operations. At
+   * most one override may answer for one call; two answering is refused.
+   */
+  operationOverrides?: readonly RuntimeOperationOverride[];
   workers?: Record<string, Worker>;
   /**
    * Handlers for durable job kinds, keyed by kind. A kind two active modules

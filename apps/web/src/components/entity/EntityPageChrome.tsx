@@ -60,6 +60,7 @@ export function EntityPageChrome({
   const resolvedHeader = header ?? { title, subtitle };
   const {
     actionError: headerError,
+    actionNotice: headerNotice,
     handleAction: handleHeaderAction,
     isPending,
   } = useEntityHeaderAction(resolvedHeader.actionsContext);
@@ -129,6 +130,11 @@ export function EntityPageChrome({
           </p>
         ) : null}
 
+        {headerNotice ? (
+          <p className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground" role="status">
+            {headerNotice}
+          </p>
+        ) : null}
         {notice ? (
           <p className={cn("rounded-lg border px-4 py-3 text-sm", noticeClasses)}>
             {notice.message}

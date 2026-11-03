@@ -30,10 +30,15 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+indexes:
+  - name: work_queues_tenant_key_uidx
+    fields: [tenantId, key]
+    unique: true
 fields:
   - key: key
     osfType: string
     required: true
+    deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
     label:
       en: Key
       nl: Sleutel

@@ -21,6 +21,8 @@ import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB, Json } from "../generated/db/types.js";
 import type {
   RuntimeOperationDefinition,
+  RuntimeDeclarativeServiceCapabilities,
+  RuntimeDeclarativeServiceExecutionResult,
   RuntimeDeclarativeServiceRequest,
   RuntimeOperationExecutionResult,
   RuntimeOperationExecutionOptions,
@@ -78,6 +80,7 @@ import {
 import { CapabilityGrantNotFoundError } from "../operations/grants-operations.js";
 import { actingRelationId } from "../db/acting-relation.js";
 import { generatedCrudTools, matchNativeCrudTool } from "../mcp/native-crud-tool.js";
+import { parseDeclarativeConnectionCapabilities } from "../mcp/connection-expectation.js";
 import { withAdmittedRecordAction } from "../operations/entity/record-action-admission.js";
 
 function contractPreconditionFailure(
@@ -174,11 +177,22 @@ export type ModuleMcpServerBinding = {
   endInvocation?(invocationToken: object): void;
 };
 
-export type ModuleDeclarativeServiceExecutor = (
+/**
+ * The one core-owned declarative engine, with the controls it enforces stated
+ * on itself.
+ *
+ * `capabilities` travels with the engine rather than beside it because it is
+ * what plugins read INSTEAD of a post-call confirmation: a host that could
+ * register engine A and publish engine B's capabilities would be advertising a
+ * refusal nothing performs.
+ */
+export type ModuleDeclarativeServiceExecutor = ((
   session: TrustedSessionContext,
   request: RuntimeDeclarativeServiceRequest,
   options?: RuntimeOperationExecutionOptions,
-) => Promise<RuntimeOperationExecutionResult>;
+) => Promise<RuntimeDeclarativeServiceExecutionResult>) & {
+  readonly capabilities: RuntimeDeclarativeServiceCapabilities;
+};
 
 export type ModuleHostOperationExecutor = (
   session: TrustedSessionContext,
@@ -403,6 +417,13 @@ export class ModulePlatformRuntime {
     return active.trx;
   }
   #declarativeServiceExecutor: ModuleDeclarativeServiceExecutor | undefined;
+  /**
+   * What the registered engine enforces, narrowed at registration. `undefined`
+   * until an engine is registered, which is exactly the answer a plugin needs:
+   * a runtime with no declarative engine refuses every invocation, so it
+   * enforces nothing and must advertise nothing.
+   */
+  #declarativeServiceCapabilities: RuntimeDeclarativeServiceCapabilities | undefined;
   #hostOperationExecutor: ModuleHostOperationExecutor | undefined;
 
   readonly #capabilityOperations: ReadonlySet<string> | undefined;
@@ -783,6 +804,19 @@ export class ModulePlatformRuntime {
       },
     };
     platformRuntimes.set(this.services, this);
+    // The declarative capability advertisement, on the shared services object
+    // every module reads. An accessor with no setter, defined once and
+    // non-configurable: a module cannot assign it, redefine it or delete it,
+    // so it can neither claim the control on a host that does not enforce it
+    // nor withdraw it from another module. The value is the registered
+    // engine's own narrowed claim, so the signal is absent — reads
+    // `undefined`, exactly as it is wholly absent on a host predating the
+    // control — until such an engine exists.
+    Object.defineProperty(this.services, "declarativeServiceCapabilities", {
+      enumerable: true,
+      configurable: false,
+      get: () => this.#declarativeServiceCapabilities,
+    });
     Object.defineProperty(this.services, "artifacts", { writable: false, configurable: false });
     Object.defineProperty(this.services, "settings", { writable: false, configurable: false });
     Object.defineProperty(this.services, "records", { writable: false, configurable: false });
@@ -930,6 +964,11 @@ export class ModulePlatformRuntime {
     if (this.#declarativeServiceExecutor) {
       throw new Error("The declarative Service executor is already registered.");
     }
+    // Narrowed before anything can read it, and the engine is only taken once
+    // the claim passed: a build whose engine advertises a control this core
+    // has no check for stops here instead of publishing it.
+    this.#declarativeServiceCapabilities =
+      parseDeclarativeConnectionCapabilities(executor.capabilities);
     this.#declarativeServiceExecutor = executor;
   }
 
@@ -1176,6 +1215,19 @@ export class ModulePlatformRuntime {
       () => this.#readProgress.operation(session, match.definition, options.signal, signal => match.provider.execute({
         session,
         ...(signal ? { signal } : {}),
+        // The same advertisement as `platform.declarativeServiceCapabilities`,
+        // from the same registered engine, on the context a record-derived
+        // provider actually holds: it has `invokeDeclarativeService` and no
+        // `platform`, so without this a provider could not ask the question
+        // before setting the control. Spread rather than always present, so
+        // the property really is absent on a runtime with no enforcing
+        // engine. The frozen value makes the claim unforgeable; a provider
+        // overwriting the field on its own context argument only misleads
+        // itself, which is why the comparison a plugin must make is against
+        // what it reads here, before the call.
+        ...(this.#declarativeServiceCapabilities
+          ? { declarativeServiceCapabilities: this.#declarativeServiceCapabilities }
+          : {}),
         execute: (nested, nestedOptions) => this.#executeOperation(
           session,
           nested,
@@ -1300,7 +1352,7 @@ export class ModulePlatformRuntime {
     session: TrustedSessionContext,
     request: RuntimeDeclarativeServiceRequest,
     options: RuntimeOperationExecutionOptions,
-  ): Promise<RuntimeOperationExecutionResult> {
+  ): Promise<RuntimeDeclarativeServiceExecutionResult> {
     options.signal?.throwIfAborted();
     if (!this.#acceptsScopedSession(session)) {
       throw new Error(
@@ -1639,7 +1691,7 @@ export async function invokeModuleDeclarativeService(
   session: TrustedSessionContext | undefined,
   request: RuntimeDeclarativeServiceRequest,
   options: RuntimeOperationExecutionOptions = {},
-): Promise<RuntimeOperationExecutionResult> {
+): Promise<RuntimeDeclarativeServiceExecutionResult> {
   const current = activeOperationSessionStorage.getStore();
   if (!current || !platform || !session) {
     return {

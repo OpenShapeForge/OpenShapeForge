@@ -37,6 +37,25 @@ export type IndexDefinition = {
 };
 
 /**
+ * An extended statistics object (`CREATE STATISTICS`) over columns whose
+ * values the planner must estimate together, such as a key and the value it
+ * selects in a key-value table. Emitted idempotently by name like an index:
+ * a changed column set under an existing name is not re-created.
+ */
+export type StatisticsDefinition = {
+  name: string;
+  kinds: Array<"mcv" | "ndistinct" | "dependencies">;
+  columns: string[];
+  /**
+   * Per-column statistics target (`ALTER COLUMN ... SET STATISTICS`) of every
+   * column in `columns`, which the object inherits as the largest of its
+   * columns' targets. Re-applied on every roll-forward, so a changed target
+   * takes effect in place. Absent keeps the server default.
+   */
+  target?: number;
+};
+
+/**
  * A table-level invariant contributed by a compiler plugin.
  *
  * Rendered as idempotent DDL (added when absent by name) that the migrate
@@ -628,6 +647,8 @@ export type TableDefinition = {
   generatedCrudEligible?: boolean;
   columns: ColumnDefinition[];
   indexes?: IndexDefinition[];
+  /** Extended planner statistics, emitted after the indexes. */
+  statistics?: StatisticsDefinition[];
   /** Compiler-owned storage for a field's collection references (never standalone CRUD). */
   relationStorage?: {
     sourceEntity: string;

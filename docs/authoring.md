@@ -611,7 +611,9 @@ additive, so a built database rolls forward:
   `(tenant_id, field_id, value_<type>, record_id) where value_<type> is not null`
   per index column and `(tenant_id, value_ref_id, field_id, record_id) where
   value_ref_id is not null`, so filters, sort pages and "referenced by" read
-  the index alone.
+  the index alone. Beside them, an mcv statistics object on `(field_id,
+  value_<type>)` per value column at statistics target 1000, since all fields
+  share one value column; a finished backfill runs `ANALYZE` on the table.
 - `<table>_field_unique_values`: the claimed values of `unique` fields, keyed
   `(tenant_id, field_id, value_text)`, released with the record.
 - Both side tables get the entity's tenant policy and worker surface, with

@@ -13,6 +13,7 @@ import { compileAuthoringBackendManifest } from "./backend-manifest.js";
 import {
   EXTENSION_TYPE_DENYLIST,
   EXTENSION_VALUE_INDEXES,
+  EXTENSION_VALUE_STATISTICS_TARGET,
   assertIndexProjection,
 } from "./extensible.js";
 import { loadOsfTypes } from "./loader.js";
@@ -202,6 +203,18 @@ describe("extensible: storage", () => {
       expect(sql).toContain(`CREATE INDEX IF NOT EXISTS "extensible_parts_field_values_${column}_record_idx" ON "parts"."extensible_parts_field_values" ("tenant_id", "field_id", "${column}", "record_id") WHERE ${column} IS NOT NULL;`);
     }
     expect(sql).toContain(`CREATE INDEX IF NOT EXISTS "extensible_parts_field_values_value_ref_id_record_idx" ON "parts"."extensible_parts_field_values" ("tenant_id", "value_ref_id", "field_id", "record_id") WHERE value_ref_id IS NOT NULL;`);
+    // Planner statistics over field and value, at a high target, per value column.
+    expect(values.statistics).toEqual(["value_text", "value_number", "value_boolean", "value_date", "value_timestamp"].map((column) => ({
+      name: `extensible_parts_field_values_${column}_stats`, kinds: ["mcv"], columns: ["field_id", column], target: EXTENSION_VALUE_STATISTICS_TARGET,
+    })));
+    expect(EXTENSION_VALUE_STATISTICS_TARGET).toBe(1000);
+    for (const column of ["field_id", "value_text", "value_number", "value_boolean", "value_date", "value_timestamp"]) {
+      expect(sql).toContain(`ALTER TABLE "parts"."extensible_parts_field_values" ALTER COLUMN "${column}" SET STATISTICS 1000;`);
+    }
+    expect(sql).not.toContain(`ALTER COLUMN "value_ref_id" SET STATISTICS`);
+    for (const column of ["value_text", "value_number", "value_boolean", "value_date", "value_timestamp"]) {
+      expect(sql).toContain(`CREATE STATISTICS IF NOT EXISTS "parts"."extensible_parts_field_values_${column}_stats" (mcv) ON "field_id", "${column}" FROM "parts"."extensible_parts_field_values";`);
+    }
     // The first shape is no longer declared under its old names.
     expect(sql).not.toMatch(/"extensible_parts_field_values_value_[a-z_]+?(?<!_record)_idx"/);
     expect(sql).toContain(`ADD CONSTRAINT "extensible_parts_field_values_record_id_fkey" FOREIGN KEY ("tenant_id", "record_id")\n      REFERENCES "parts"."extensible_parts"("tenant_id", "id") ON DELETE CASCADE;`);

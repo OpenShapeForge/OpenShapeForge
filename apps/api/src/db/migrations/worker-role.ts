@@ -358,13 +358,22 @@ export async function applyWorkerRoleGrants(db: OpenShapeForgeDatabase) {
  * column of the entity, and every other generated business table, stays out
  * of reach; the job runs under the replayed session, so RLS still scopes it
  * to the tenant that started the change.
+ *
+ * `analyze` are the index tables a finished backfill runs ANALYZE on, so the
+ * planner sees the rewritten field at once rather than at the next
+ * autovacuum. That needs MAINTAIN (PostgreSQL 17 and later), granted on those
+ * tables only; it adds VACUUM, REINDEX and CLUSTER of derived index rows to
+ * the DML the worker already holds there, and no read of anything else. On an
+ * older server the grant is skipped and ANALYZE skips the table with a
+ * warning, leaving it to autovacuum.
  */
 export function extensionWorkerGrants(registry: RuntimeExtensionRegistry = extensionRegistry): {
   dml: string[];
   sourceColumns: string[];
+  analyze: string[];
 } {
   const entities = registry.entityNames().map((name) => registry.entity(name)!);
-  if (!entities.length) return { dml: [], sourceColumns: [] };
+  if (!entities.length) return { dml: [], sourceColumns: [], analyze: [] };
   return {
     dml: [...new Set([
       ...entities.flatMap((entry) => [entry.valuesTable, entry.uniqueTable]),
@@ -372,6 +381,7 @@ export function extensionWorkerGrants(registry: RuntimeExtensionRegistry = exten
       "platform.extension_field_backfills",
     ])].sort(),
     sourceColumns: [...new Set(entities.map((entry) => entry.table))].sort(),
+    analyze: [...new Set(entities.map((entry) => entry.valuesTable))].sort(),
   };
 }
 
@@ -380,6 +390,7 @@ async function applyExtensionWorkerGrants(db: OpenShapeForgeDatabase) {
   for (const qualified of [...grants.dml, ...grants.sourceColumns]) {
     const [schema, table] = qualified.split(".") as [string, string];
     const dml = grants.dml.includes(qualified);
+    const analyze = grants.analyze.includes(qualified);
     await sql`
       do $$
       begin
@@ -387,6 +398,9 @@ async function applyExtensionWorkerGrants(db: OpenShapeForgeDatabase) {
           execute format('grant usage on schema %I to %I', ${sql.lit(schema)}, ${sql.lit(WORKER_ROLE)});
           if ${sql.lit(dml)} then
             execute format('grant select, insert, update, delete on %I.%I to %I', ${sql.lit(schema)}, ${sql.lit(table)}, ${sql.lit(WORKER_ROLE)});
+            if ${sql.lit(analyze)} and current_setting('server_version_num')::integer >= 170000 then
+              execute format('grant maintain on %I.%I to %I', ${sql.lit(schema)}, ${sql.lit(table)}, ${sql.lit(WORKER_ROLE)});
+            end if;
           else
             execute format('grant select (id, tenant_id, created_at, updated_at, extension_values), update (extension_values) on %I.%I to %I',
               ${sql.lit(schema)}, ${sql.lit(table)}, ${sql.lit(WORKER_ROLE)});

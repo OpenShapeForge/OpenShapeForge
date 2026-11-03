@@ -1492,6 +1492,27 @@ describe("tenant fields on a carried-forward database", () => {
       },
     ].toSorted((left, right) => left.name.localeCompare(right.name));
   };
+  /** The planner statistics the compiler declares beside them: mcv on (field_id, value) per value column, target 1000. */
+  const measuredStatistics = (valuesTable: string) => {
+    const [, name] = valuesTable.split(".");
+    return {
+      objects: valueColumns.map((column) => ({ name: `${name}_${column}_stats`, kinds: "{m}", columns: `field_id, ${column}` })),
+      targets: ["field_id", ...valueColumns].map((column) => ({ column, target: 1000 })).toSorted((left, right) => left.column.localeCompare(right.column)),
+    };
+  };
+  const valueStatistics = async (db: Kysely<DB>, valuesTable: string) => ({
+    objects: (await sql<{ name: string; kinds: string; columns: string }>`
+      select s.stxname as name, s.stxkind::text as kinds,
+        (select string_agg(a.attname, ', ' order by k.ordinality) from unnest(s.stxkeys) with ordinality k(attnum, ordinality)
+          join pg_attribute a on a.attrelid = s.stxrelid and a.attnum = k.attnum) as columns
+      from pg_statistic_ext s where s.stxrelid = ${valuesTable}::regclass order by s.stxname
+    `.execute(db)).rows,
+    targets: (await sql<{ column: string; target: number }>`
+      select attname as column, attstattarget::integer as target from pg_attribute
+      where attrelid = ${valuesTable}::regclass and attnum > 0 and not attisdropped and attstattarget > 0
+      order by attname
+    `.execute(db)).rows,
+  });
   const valueIndexes = async (db: Kysely<DB>, valuesTable: string) => {
     const [schema, name] = valuesTable.split(".");
     return (await sql<{ name: string; definition: string }>`
@@ -1554,6 +1575,7 @@ describe("tenant fields on a carried-forward database", () => {
           }
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);
           expect(await valueIndexes(db, entity.valuesTable)).toEqual(measuredIndexes(entity.valuesTable));
+          expect(await valueStatistics(db, entity.valuesTable)).toEqual(measuredStatistics(entity.valuesTable));
         });
 
         expect((await runChain(url)).applied).toBe(false);
@@ -1563,7 +1585,7 @@ describe("tenant fields on a carried-forward database", () => {
   );
 
   test.skipIf(extensible === undefined)(
-    "a database built with the first index shape rolls forward to the measured one",
+    "a database built with the first index shape and no statistics rolls forward to the measured ones",
     async () => {
       const entity = extensible!;
       const [, name] = entity.valuesTable.split(".");
@@ -1579,6 +1601,13 @@ describe("tenant fields on a carried-forward database", () => {
             await sql.raw(`create index ${name}_${column}_idx on ${entity.valuesTable} (tenant_id, field_id, ${column}) where ${column} is not null`).execute(db);
           }
           await sql.raw(`create index ${name}_value_ref_id_idx on ${entity.valuesTable} (tenant_id, value_ref_id) where value_ref_id is not null`).execute(db);
+          // ... and without the planner statistics, which came with it.
+          for (const column of valueColumns) {
+            await sql.raw(`drop statistics ${entity.valuesTable.split(".")[0]}.${name}_${column}_stats`).execute(db);
+            await sql.raw(`alter table ${entity.valuesTable} alter column ${column} set statistics -1`).execute(db);
+          }
+          await sql.raw(`alter table ${entity.valuesTable} alter column field_id set statistics -1`).execute(db);
+          expect(await valueStatistics(db, entity.valuesTable)).toEqual({ objects: [], targets: [] });
           await staleChecksum(db);
         });
 
@@ -1593,6 +1622,7 @@ describe("tenant fields on a carried-forward database", () => {
           expect(indexes.filter((index) => !index.name.endsWith("_record_idx")).map((index) => index.name)).toEqual(
             [...valueColumns, "value_ref_id"].map((column) => `${name}_${column}_idx`).toSorted(),
           );
+          expect(await valueStatistics(db, entity.valuesTable)).toEqual(measuredStatistics(entity.valuesTable));
           expect((await diffManifestAgainstDatabase(db)).nonAdditive).toEqual([]);
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);
         });

@@ -525,6 +525,46 @@ function renderIndexSql(
   return index.where ? `${head} WHERE ${index.where};` : `${head};`;
 }
 
+const STATISTICS_KINDS = new Set(["mcv", "ndistinct", "dependencies"]);
+
+function renderStatisticsSql(table: TableDefinition): string[] {
+  const lines: string[] = [];
+  const targets = new Map<string, number>();
+  for (const statistics of table.statistics ?? []) {
+    const label = `${table.schema}.${table.name} statistics ${statistics.name}`;
+    if (statistics.columns.length < 2 || new Set(statistics.columns).size !== statistics.columns.length ||
+      statistics.columns.some((name) => !table.columns.some((column) => column.name === name))) {
+      throw new Error(`${label} needs two or more distinct columns of the table.`);
+    }
+    if (!statistics.kinds.length || statistics.kinds.some((kind) => !STATISTICS_KINDS.has(kind))) {
+      throw new Error(`${label} has an unknown kind; use mcv, ndistinct or dependencies.`);
+    }
+    if (statistics.target !== undefined) {
+      if (!Number.isInteger(statistics.target) || statistics.target < 1 || statistics.target > 10_000) {
+        throw new Error(`${label} target must be an integer from 1 to 10000.`);
+      }
+      for (const column of statistics.columns) {
+        const previous = targets.get(column);
+        if (previous !== undefined && previous !== statistics.target) {
+          throw new Error(`${label} sets column ${column} to statistics target ${statistics.target}, another object to ${previous}.`);
+        }
+        targets.set(column, statistics.target);
+      }
+    }
+  }
+  for (const [column, target] of targets) {
+    lines.push("", `ALTER TABLE ${tableIdent(table)} ALTER COLUMN ${quoteIdent(column)} SET STATISTICS ${target};`);
+  }
+  for (const statistics of table.statistics ?? []) {
+    lines.push(
+      "",
+      `CREATE STATISTICS IF NOT EXISTS ${quoteIdent(table.schema)}.${quoteIdent(stableIdentifier(statistics.name))} ` +
+        `(${statistics.kinds.join(", ")}) ON ${statistics.columns.map(quoteIdent).join(", ")} FROM ${tableIdent(table)};`,
+    );
+  }
+  return lines;
+}
+
 function renderTableSql(table: TableDefinition, workerDatabaseRole: string): string {
   // Resolved before the tenantScoped branch below so a workerAccess on a global
   // table is REJECTED rather than silently dropped — the table emits no policy
@@ -597,6 +637,7 @@ function renderTableSql(table: TableDefinition, workerDatabaseRole: string): str
   for (const index of table.indexes ?? []) {
     lines.push("", renderIndexSql(table, index));
   }
+  lines.push(...renderStatisticsSql(table));
 
   return lines.join("\n");
 }

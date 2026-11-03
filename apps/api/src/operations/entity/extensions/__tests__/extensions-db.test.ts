@@ -356,6 +356,15 @@ describe("tenant fields on an extensible entity", () => {
     const after = await define(reader, "list") as { items: Array<{ fieldId: string; state: string; backfill?: { state: string; processed: number } }> };
     expect(after.items.find((item) => item.fieldId === fields.aantal)).toMatchObject({ state: "ready", backfill: { state: "done" } });
     expect((await created(writer, { stuks: 2.5 })).extensions.stuks).toBe(2.5);
+    // The finished backfill analyzed the index table as the worker: MAINTAIN
+    // on the index table only, and the field-and-value statistics are built.
+    const analyzed = await sql<{ index: boolean; entity: boolean; stats: string[] }>`select
+        has_table_privilege('openshapeforge_worker', 'erp.extensible_assets_field_values', 'MAINTAIN') as index,
+        has_table_privilege('openshapeforge_worker', 'erp.extensible_assets', 'MAINTAIN') as entity,
+        array(select statistics_name::text from pg_stats_ext where schemaname = 'erp' and tablename = 'extensible_assets_field_values'
+          and most_common_vals is not null order by 1) as stats`.execute(fixture.privileged.db);
+    expect(analyzed.rows[0]).toMatchObject({ index: true, entity: false });
+    expect(analyzed.rows[0]!.stats).toContain("extensible_assets_field_values_value_number_stats");
 
     expect(await failure(define(manager, "update", { fieldId: fields.aantal, definition: { osfType: "date", classification: { sensitivity: "public" } } })))
       .toMatchObject({ message: expect.stringContaining("not a widening change") });

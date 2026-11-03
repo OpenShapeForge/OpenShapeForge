@@ -13,7 +13,8 @@
  * that started the change. The worker holds DML on the side tables and the
  * two platform extension tables, and SELECT plus UPDATE of the one
  * `extension_values` column on the entity table (db/migrations/worker-role.ts,
- * `extensionWorkerGrants`) — nothing else of the entity.
+ * `extensionWorkerGrants`) — nothing else of the entity — plus MAINTAIN on
+ * the index table, for the ANALYZE a finished backfill ends with.
  */
 import { randomUUID } from "node:crypto";
 import { sql, type Transaction } from "kysely";
@@ -181,7 +182,21 @@ export async function runBackfillBatch(
   await sql`update platform.extension_field_backfills
     set state = ${more ? "running" : "done"}, processed = ${processed}, cursor = ${cursor}, updated_at = now()
     where tenant_id = ${tenantId}::uuid and id = ${row!.id}::uuid`.execute(trx);
+  // A backfill rewrites or removes a whole field's index rows; the planner's
+  // field-and-value statistics (the compiler declares them per value column)
+  // should see that now, not at the next autovacuum. ANALYZE counts this
+  // transaction's own changes as committed.
+  if (!more) await analyzeExtensionIndex(trx, entry!.valuesTable);
   return { state: more ? "running" : "done", processed, cursor, more };
+}
+
+/**
+ * Refresh the planner statistics of one index table. Without the MAINTAIN
+ * grant (a server before PostgreSQL 17) Postgres skips the table with a
+ * warning instead of failing, and autovacuum analyzes it later.
+ */
+export async function analyzeExtensionIndex(trx: Transaction<DB>, valuesTable: string): Promise<void> {
+  await sql`analyze ${qualifiedTable(valuesTable)}`.execute(trx);
 }
 
 /** The `extensions.backfill` job: one batch per run, the next run enqueued with it. */

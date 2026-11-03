@@ -24,7 +24,7 @@ import { BASE_TYPES } from "./entity-fields.js";
 import type { ExtensionRegistry, ExtensionRegistryEntity } from "./extension-registry-types.js";
 import type { CoreEntity, ExtensionIndexColumn, OsfTypeDefinition, OsfTypeIndexProjection } from "./types.js";
 import type { CompiledEntityContract, CompiledExtensible } from "./types/compiled.js";
-import { isGeneratedCrudEligible, type IndexDefinition, type ReferenceDefinition, type TableDefinition } from "../schema.js";
+import { isGeneratedCrudEligible, type IndexDefinition, type ReferenceDefinition, type StatisticsDefinition, type TableDefinition } from "../schema.js";
 
 /** The source column on the entity table. */
 export const EXTENSION_VALUES_COLUMN = "extension_values";
@@ -101,6 +101,17 @@ export const EXTENSION_VALUE_INDEXES: ReadonlyArray<{ suffix: string; columns: r
     where: "value_ref_id IS NOT NULL",
   },
 ];
+
+/**
+ * Planner statistics of every `<table>_field_values` table: a most-common-
+ * values list over `(field_id, <column>)` per index column, at a high target.
+ * All fields of all tenants share one value column, so without the pair the
+ * planner multiplies two independent estimates and misjudges a field plus
+ * value by an order of magnitude (617 estimated against 17,935 rows in the
+ * phase-0 measurement, #372). Whoever changes many rows at once (a backfill)
+ * runs ANALYZE on the table afterwards.
+ */
+export const EXTENSION_VALUE_STATISTICS_TARGET = 1000;
 
 const POSTGRES_IDENTIFIER_BYTES = 63;
 
@@ -292,6 +303,12 @@ function valuesTable(entity: string, table: TableDefinition): TableDefinition {
     columns: [...index.columns],
     where: index.where,
   }));
+  const statistics: StatisticsDefinition[] = Object.values(EXTENSION_INDEX_COLUMNS).map(({ column }) => ({
+    name: `${name}_${column}_stats`,
+    kinds: ["mcv"],
+    columns: ["field_id", column],
+    target: EXTENSION_VALUE_STATISTICS_TARGET,
+  }));
   return {
     schema: table.schema,
     name,
@@ -312,6 +329,7 @@ function valuesTable(entity: string, table: TableDefinition): TableDefinition {
       { name: "value_ref_id", type: "uuid" },
     ],
     indexes,
+    statistics,
   };
 }
 

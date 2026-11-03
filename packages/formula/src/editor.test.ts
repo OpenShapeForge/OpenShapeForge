@@ -106,6 +106,12 @@ describe("suggest", () => {
     expect(result.items[0]).toEqual({ kind: "field", label: "Amount", value: "pricing.amount", context: "pricing", type: "number" });
   });
 
+  test("typing the relation's name offers its fields", () => {
+    const { text, result } = suggestAt("{Capacity kWh} * prici|");
+    expect(labels(result)).toEqual(["Amount", "Currency"]);
+    expect(applySuggestion(text, result, result.items[0]!).text).toBe("{Capacity kWh} * pricing.amount");
+  });
+
   test("after relation. only that child's fields, inserted after the dot", () => {
     const { text, result } = suggestAt("{Capacity kWh} * pricing.|");
     expect(labels(result)).toEqual(["Amount", "Currency"]);

@@ -149,7 +149,12 @@ export function suggest(text: string, cursor: number, env: FormulaEnvironment, o
       : usable;
   const ranked: Array<{ tier: number; group: number; item: FormulaSuggestion }> = [];
   for (const field of fieldsInReach) {
-    const tier = matchTier(mode.prefix, [field.label, field.key]);
+    // A bare word may be the start of `relation.field`; inside braces it is a label.
+    const names =
+      field.scope !== "self" && mode.kind === "identifier"
+        ? [field.label, field.key, `${field.scope.relation}.${field.key}`]
+        : [field.label, field.key];
+    const tier = matchTier(mode.prefix, names);
     if (tier === undefined) continue;
     ranked.push({ tier, group: 0, item: fieldSuggestion(field, mode.kind === "member") });
   }

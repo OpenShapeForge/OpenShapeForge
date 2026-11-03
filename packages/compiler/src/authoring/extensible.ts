@@ -14,11 +14,17 @@
  *   - `<table>_field_unique_values`, the claimed values of `unique` fields.
  *
  * Both side tables reference the entity row through the composite tenant key
- * and cascade with it. They carry the entity's own tenant policy, which is the
- * entity's whole row policy only because an extensible entity may not declare
- * a row-scope axis, owner axis or record ACL: the side tables have none of the
- * columns such a policy reads. Every change here is additive, so a built
- * database rolls forward without a versioned migration.
+ * and cascade with it. They carry the entity's own tenant policy and, beside
+ * it, a restrictive policy that admits an index row or claim only while the
+ * session may see the entity row it describes (`recordAccessFrom`), so every
+ * row policy of the entity — authorization profiles included — holds for its
+ * index too (§11 besluit 28). An extensible entity still may not declare a
+ * row-scope axis, owner axis or record ACL (besluit 15): the inherited policy
+ * covers reads of the index, but that alone has not been shown to cover every
+ * path of such entities. Nor may an entity that is an owned child be
+ * extensible: the snapshot of its owner would freeze its raw source. Every
+ * change here is additive, so a built database rolls forward without a
+ * versioned migration.
  */
 import { BASE_TYPES } from "./entity-fields.js";
 import type { ExtensionRegistry, ExtensionRegistryEntity } from "./extension-registry-types.js";
@@ -109,8 +115,9 @@ export const EXTENSION_VALUE_INDEXES: ReadonlyArray<{ suffix: string; columns: r
  * All fields of all tenants share one value column, so without the pair the
  * planner multiplies two independent estimates and misjudges a field plus
  * value by an order of magnitude (617 estimated against 17,935 rows in the
- * phase-0 measurement, #372). Whoever changes many rows at once (a backfill)
- * runs ANALYZE on the table afterwards.
+ * phase-0 measurement, #372). A backfill that rewrites many rows does not
+ * run ANALYZE afterwards: the worker holds no MAINTAIN on the table, and
+ * autovacuum's ANALYZE refreshes these statistics once enough rows changed.
  */
 export const EXTENSION_VALUE_STATISTICS_TARGET = 1000;
 
@@ -207,7 +214,10 @@ export function compileExtensible(
   const authorization = entity.authorization;
   if (!authorization) fail(name, "requires a tenant-scoped entity with authorization roles.");
   const rowAccess = authorization.rowAccess?.enabled ? authorization.rowAccess : undefined;
-  const scopeReason = "the tenant-field tables carry only the tenant policy, so they would show values of rows the entity hides";
+  // The index tables inherit the entity's row policies (recordAccessFrom),
+  // but the rest of the tenant field paths has not been proven against
+  // these axes; refused until it is (decision 15, kept after review).
+  const scopeReason = "tenant fields are not yet proven for entities whose rows are visible to fewer than all tenant readers";
   if (rowAccess?.owner || rowAccess?.group) {
     fail(name, `is not available on an entity with a row-scope axis (authorization.rowAccess.${rowAccess.owner ? "owner" : "group"}): ${scopeReason}.`);
   }
@@ -332,6 +342,11 @@ function workerSurface(table: TableDefinition): Pick<TableDefinition, "workerAcc
   return { ...(table.workerAccess ? { workerAccess: table.workerAccess } : {}), workerDml: true };
 }
 
+/** A side-table row is visible only while its entity row is (see the module comment). */
+function recordAccess(table: TableDefinition): NonNullable<TableDefinition["recordAccessFrom"]> {
+  return { schema: table.schema, table: table.name, column: "record_id" };
+}
+
 function valuesTable(entity: string, table: TableDefinition): TableDefinition {
   const name = sideTableName(entity, table, "field_values");
   const indexes: IndexDefinition[] = EXTENSION_VALUE_INDEXES.map((index) => ({
@@ -352,6 +367,7 @@ function valuesTable(entity: string, table: TableDefinition): TableDefinition {
     domainInternal: true,
     generatedCrudEligible: false,
     ...workerSurface(table),
+    recordAccessFrom: recordAccess(table),
     columns: [
       { name: "tenant_id", type: "uuid", required: true, primaryKey: true },
       { name: "record_id", type: "uuid", required: true, primaryKey: true, references: recordReference(table) },
@@ -378,6 +394,7 @@ function uniqueValuesTable(entity: string, table: TableDefinition): TableDefinit
     domainInternal: true,
     generatedCrudEligible: false,
     ...workerSurface(table),
+    recordAccessFrom: recordAccess(table),
     columns: [
       { name: "tenant_id", type: "uuid", required: true, primaryKey: true },
       { name: "field_id", type: "uuid", required: true, primaryKey: true },
@@ -426,6 +443,13 @@ export function compileExtensionStorage(
   const extensible = entries.filter((entry) => entry.contract.extensible);
   if (extensible.length === 0) return undefined;
   const byEntity = new Map(entries.map((entry) => [entry.contract.entity.name, entry]));
+  // Owned children by entity name: their owner's snapshot freezes their rows.
+  const ownedBy = new Map<string, string>();
+  for (const { contract } of entries) {
+    for (const relationship of contract.model.relationships) {
+      if (relationship.kind === "hasMany" && relationship.ownership === "owned") ownedBy.set(relationship.target, contract.entity.name);
+    }
+  }
   const candidates = entries.filter((entry) => isExtensionTargetCandidate(entry.contract, entry.table));
   const registry: ExtensionRegistry = { entities: {}, indexProjections: {}, referencedBy: {} };
 
@@ -444,6 +468,10 @@ export function compileExtensionStorage(
     }
     if (table.columns.some((column) => column.name === EXTENSION_VALUES_COLUMN)) {
       fail(name, `reserves the column ${EXTENSION_VALUES_COLUMN}; it is already present on ${qualified(table)}.`);
+    }
+    const owner = ownedBy.get(name);
+    if (owner) {
+      fail(name, `is not available on an owned child (owned by ${owner}): the published snapshot of ${owner} would freeze its raw tenant values.`);
     }
     table.columns.push({ name: EXTENSION_VALUES_COLUMN, type: "jsonb", required: true, default: "'{}'::jsonb" });
     ensureTenantRecordKey(table);

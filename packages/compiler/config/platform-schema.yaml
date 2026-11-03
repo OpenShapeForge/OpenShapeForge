@@ -265,13 +265,15 @@ tables:
   # `is_current`, so a snapshot that names a field version can still read it
   # after the field changed or was deleted. Written only by the
   # `osf-extensions` field-definition Operations and the backfill worker,
-  # which marks a definition ready once its records are rewritten.
+  # which marks a definition ready once its records are rewritten (or turns
+  # unique off again as a new version). The worker's grants on this table
+  # are column-precise and come from db/migrations/worker-role.ts
+  # (`extensionWorkerGrants`), not from `workerDml`.
   - schema: platform
     name: extension_field_definitions
     tenantScoped: true
     domainInternal: true
     generatedCrudEligible: false
-    workerDml: true
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -302,6 +304,11 @@ tables:
       - name: extension_field_definitions_current_entity_idx
         columns: [tenant_id, entity]
         where: is_current
+      # One current version per field, whatever writes it.
+      - name: extension_field_definitions_current_field_uidx
+        columns: [tenant_id, field_id]
+        unique: true
+        where: is_current
     constraints:
       - compilerOwned: true
         version: 0001_extension-field-definitions-kind
@@ -320,12 +327,13 @@ tables:
   # detection, evaluation order and "which fields does this write touch".
   # `via_field` is null for a field of the same record, so uniqueness is two
   # partial indexes: a plain unique index would let null rows repeat.
+  # Written by the definition Operations (the runtime role); the worker has
+  # no grant on it.
   - schema: platform
     name: extension_field_dependencies
     tenantScoped: true
     domainInternal: true
     generatedCrudEligible: false
-    workerDml: true
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -349,12 +357,13 @@ tables:
   # Progress of the backfill jobs that rewrite records after a definition
   # change (retype, delete, unique, computed fields, rebuild). The job itself
   # runs from platform.jobs; this row is what the field shows as `updating`.
+  # The worker reads it and updates its progress columns only
+  # (db/migrations/worker-role.ts, `extensionWorkerGrants`).
   - schema: platform
     name: extension_field_backfills
     tenantScoped: true
     domainInternal: true
     generatedCrudEligible: false
-    workerDml: true
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }

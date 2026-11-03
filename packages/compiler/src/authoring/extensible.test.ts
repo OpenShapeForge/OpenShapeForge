@@ -104,7 +104,7 @@ describe("extensible: the resolved contract", () => {
     refuse((document) => {
       document.fields.push({ key: "ownerId", osfType: "string", validation: { format: "uuid" }, persisted: { column: "owner_id", storageClass: "core" } });
       document.authorization.rowAccess = { enabled: true, empty: "public", owner: { column: "owner_id", session: "app.current_user_id" } };
-    }, /\[ExtensiblePart\] extensible is not available on an entity with a row-scope axis \(authorization\.rowAccess\.owner\): the tenant-field tables carry only the tenant policy/);
+    }, /\[ExtensiblePart\] extensible is not available on an entity with a row-scope axis \(authorization\.rowAccess\.owner\): tenant fields are not yet proven for entities whose rows are visible to fewer than all tenant readers/);
     refuse((document) => {
       document.fields.push({ key: "orgUnit", osfType: "RestEnabled", persisted: { column: "org_unit_id", storageClass: "core" }, relationship: { inverse: false } });
       document.authorization.rowAccess = { enabled: true, empty: "public", group: { column: "org_unit_id" } };
@@ -137,6 +137,13 @@ describe("extensible: the resolved contract", () => {
     refuse((document) => {
       document.fields.push({ key: "legacy", osfType: "string", persisted: { column: "extension_values", storageClass: "core" } });
     }, /reserves the column extension_values/);
+  });
+
+  it("refuses an owned child: its owner's snapshot would freeze its raw tenant values", () => {
+    const dir = withDocument("extensible-part-spec", (document) => {
+      document.extensible = { authorization: { manage: ["General.All.ReadWrite"] } };
+    });
+    expect(() => compile(() => {}, { dir })).toThrow("[ExtensiblePartSpec] extensible is not available on an owned child (owned by ExtensiblePart)");
   });
 
   it("refuses an unknown excluded type or target", () => {
@@ -242,6 +249,21 @@ describe("extensible: storage", () => {
     const policy = (name: string) => sql.slice(sql.indexOf(`CREATE POLICY "${name}_tenant_isolation"`)).split(";")[0]!.replaceAll(name, "<table>");
     expect(policy("extensible_parts_field_values")).toBe(policy("extensible_parts"));
     expect(policy("extensible_parts_field_unique_values")).toBe(policy("extensible_parts"));
+  });
+
+  it("lets a side-table row through only while its entity row is visible to the same session", () => {
+    for (const name of ["extensible_parts_field_values", "extensible_parts_field_unique_values"]) {
+      const exists = `app.bypass_rls() OR EXISTS (SELECT 1 FROM "parts"."extensible_parts" AS described WHERE described.tenant_id = "${name}".tenant_id AND described.id = "${name}"."record_id")`;
+      expect(sql).toContain([
+        `DROP POLICY IF EXISTS "${name}_record_access" ON "parts"."${name}";`,
+        `CREATE POLICY "${name}_record_access" ON "parts"."${name}" AS RESTRICTIVE FOR ALL`,
+        `  USING (${exists})`,
+        `  WITH CHECK (${exists});`,
+      ].join("\n"));
+      expect(table(manifest, `parts.${name}`).recordAccessFrom).toEqual({ schema: "parts", table: "extensible_parts", column: "record_id" });
+    }
+    // The entity table itself inherits nothing.
+    expect(sql).not.toContain(`"extensible_parts_record_access"`);
   });
 
   it("gives the side tables the entity's cross-tenant worker policy too", () => {
@@ -383,7 +405,11 @@ describe("extensible: platform tables", () => {
 
   it("declares append-only definitions with one current key per entity", async () => {
     const definitions = await of("extension_field_definitions");
-    expect(definitions).toMatchObject({ tenantScoped: true, domainInternal: true, generatedCrudEligible: false, workerDml: true });
+    expect(definitions).toMatchObject({ tenantScoped: true, domainInternal: true, generatedCrudEligible: false });
+    // The worker's grants here are column-precise (apps/api worker-role.ts), never blanket DML.
+    for (const name of ["extension_field_definitions", "extension_field_dependencies", "extension_field_backfills"]) {
+      expect((await of(name)).workerDml).toBeUndefined();
+    }
     expect(definitions.columns.map((column) => `${column.name}:${column.type}${column.required ? "!" : ""}`)).toEqual([
       "id:uuid", "tenant_id:uuid!", "field_id:uuid!", "entity:text!", "key:text!", "version:integer!", "kind:text!",
       "definition:jsonb!", "applies_when:jsonb", "state:text!", "position:integer!", "is_current:boolean!",
@@ -393,6 +419,8 @@ describe("extensible: platform tables", () => {
       { name: "extension_field_definitions_version_uidx", columns: ["tenant_id", "field_id", "version"], unique: true },
       { name: "extension_field_definitions_current_key_uidx", columns: ["tenant_id", "entity", "key"], unique: true, where: "is_current AND state <> 'deleted'" },
       { name: "extension_field_definitions_current_entity_idx", columns: ["tenant_id", "entity"], where: "is_current" },
+      // One current version per field, whatever writes it.
+      { name: "extension_field_definitions_current_field_uidx", columns: ["tenant_id", "field_id"], unique: true, where: "is_current" },
     ]);
   });
 

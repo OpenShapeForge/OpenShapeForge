@@ -584,10 +584,12 @@ extensible:
 - `Organization.All.ReadWrite` may always manage the fields; the compiler adds
   it to the manage roles. The entity's own read roles list the definitions.
 - Only an entity without a row-scope axis (`rowAccess.owner`/`group`), owner
-  axis or record ACL may declare it, because the side tables below carry only
-  the tenant policy. Plain `rowAccess: { enabled: true, empty: public }` is
+  axis or record ACL may declare it: the side tables below inherit the
+  entity's row policies, but the other tenant field paths are not yet proven
+  for such entities. Plain `rowAccess: { enabled: true, empty: public }` is
   fine. A subtype never inherits it; an Operation-backed or identity-less
-  entity cannot declare it.
+  entity cannot declare it, and neither can an owned child (its owner's
+  snapshot would freeze its raw values).
 - A tenant field uses the same types as authored fields: the base types and
   every catalog type, minus `typedValue`, `fieldDefinition`, `entityValue`,
   `keyValueMap`, `variableTemplate`, `labelSet`, `condition`, `excludedTypes`
@@ -620,11 +622,15 @@ additive, so a built database rolls forward:
   value_ref_id is not null`, so filters, sort pages and "referenced by" read
   the index alone. Beside them, an mcv statistics object on `(field_id,
   value_<type>)` per value column at statistics target 1000, since all fields
-  share one value column; a finished backfill runs `ANALYZE` on the table.
+  share one value column. They follow autovacuum's `ANALYZE`; a backfill
+  does not run one (the worker holds no `MAINTAIN`).
 - `<table>_field_unique_values`: the claimed values of `unique` fields, keyed
   `(tenant_id, field_id, value_text)`, released with the record.
 - Both side tables get the entity's tenant policy and worker surface, with
-  worker DML for the backfill. The definitions themselves live in
+  worker DML for the backfill, and a restrictive `<table>_record_access`
+  policy that admits a row only while its entity row is visible to the
+  session: every row policy of the entity, authorization profiles included,
+  holds for its index too. The definitions themselves live in
   `platform.extension_field_definitions` (append-only versions),
   `platform.extension_field_dependencies` and `platform.extension_field_backfills`.
 - `extensionRegistry` in the backend `manifest.json`: per entity its tables,
@@ -632,7 +638,7 @@ additive, so a built database rolls forward:
   (owned children keyed unique per parent), the index projections, and per
   target entity the extensible entities that may reference it.
 - The `osf-extensions` Operations, on REST and GraphQL but not MCP:
-  `<Entity>.fieldDefinitions.{list,create,update,deprecate,restore,delete,reorder,affectedRecords}`
+  `<Entity>.fieldDefinitions.{list,create,update,deprecate,restore,delete,reorder,affectedRecords,rebuildIndex}`
   at `POST /api/rest/v1/<base>/field-definitions/<action>`, and on every target
   entity `<Entity>.referencedBy` at `POST /api/rest/v1/<base>/:id/referenced-by`.
 - `extensions` and `extensionsMeta` on the entity's records, `extensions` on

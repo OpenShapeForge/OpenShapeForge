@@ -27,7 +27,7 @@ import { executeFieldDefinitionAction, executeReferencedBy, type FieldDefinition
 export const EXTENSIONS_PLUGIN = "osf-extensions";
 export type ExtensionOperationAction = FieldDefinitionAction | "referencedBy";
 
-const FIELD_ACTIONS: readonly FieldDefinitionAction[] = ["list", "create", "update", "deprecate", "restore", "delete", "reorder", "affectedRecords"];
+const FIELD_ACTIONS: readonly FieldDefinitionAction[] = ["list", "create", "update", "deprecate", "restore", "delete", "reorder", "affectedRecords", "rebuildIndex"];
 const READS = new Set<ExtensionOperationAction>(["list", "affectedRecords", "referencedBy"]);
 
 /** Validate a compiler-owned binding once at boot; never chosen by input. */

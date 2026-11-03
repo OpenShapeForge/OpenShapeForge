@@ -484,6 +484,33 @@ function renderOwnerAxisPolicy(table: TableDefinition): string[] {
   ];
 }
 
+/**
+ * The restrictive `recordAccessFrom` policy: a row is visible, insertable
+ * and removable only while the row it describes is visible to the same
+ * session, through that table's own policies. Additive under its own name.
+ */
+function renderRecordAccessPolicy(table: TableDefinition): string[] {
+  const source = table.recordAccessFrom;
+  if (!source) return [];
+  if (!table.tenantScoped) {
+    throw new Error(`Table ${table.schema}.${table.name} declares recordAccessFrom but is not tenant-scoped.`);
+  }
+  if (!columnNames(table).has(source.column)) {
+    throw new Error(`Table ${table.schema}.${table.name} declares recordAccessFrom column "${source.column}" but the column is not defined.`);
+  }
+  const policyName = quoteIdent(`${table.name}_record_access`);
+  const self = quoteIdent(table.name);
+  const predicate = `app.bypass_rls() OR EXISTS (SELECT 1 FROM ${quoteIdent(source.schema)}.${quoteIdent(source.table)} AS described ` +
+    `WHERE described.tenant_id = ${self}.tenant_id AND described.id = ${self}.${quoteIdent(source.column)})`;
+  return [
+    "",
+    `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
+    `CREATE POLICY ${policyName} ON ${tableIdent(table)} AS RESTRICTIVE FOR ALL`,
+    `  USING (${predicate})`,
+    `  WITH CHECK (${predicate});`,
+  ];
+}
+
 function deriveRowScopeIndexes(table: TableDefinition): Array<{
   name: string;
   columns: string[];
@@ -629,6 +656,7 @@ function renderTableSql(table: TableDefinition, workerDatabaseRole: string): str
     lines.push(...tenantRegistryPolicy);
   }
   lines.push(...renderOwnerAxisPolicy(table));
+  lines.push(...renderRecordAccessPolicy(table));
   lines.push(...renderTenantRegistryWritePolicies(table));
 
   for (const index of deriveRowScopeIndexes(table)) {

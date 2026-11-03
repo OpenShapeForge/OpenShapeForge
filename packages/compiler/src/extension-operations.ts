@@ -24,7 +24,7 @@ export const EXTENSIONS_PLUGIN = "osf-extensions";
 
 /** Every field-definition action, in the order the catalog lists them. */
 export const FIELD_DEFINITION_ACTIONS = [
-  "list", "create", "update", "deprecate", "restore", "delete", "reorder", "affectedRecords",
+  "list", "create", "update", "deprecate", "restore", "delete", "reorder", "affectedRecords", "rebuildIndex",
 ] as const;
 export type FieldDefinitionAction = typeof FIELD_DEFINITION_ACTIONS[number];
 
@@ -135,6 +135,24 @@ const ACTIONS: Record<FieldDefinitionAction, ActionContract> = {
       required: ["fieldIds"],
     },
     output: fieldList,
+  },
+  rebuildIndex: {
+    title: "Rebuild field index",
+    description: "Rebuilds the typed index and uniqueness claims of one tenant-defined field, or of all of them, from the stored values, as backfills, on",
+    write: true, graphql: "FieldDefinitionRebuildIndex",
+    input: { properties: { fieldId: FIELD_ID }, required: [] },
+    output: {
+      type: "object", additionalProperties: false, required: ["backfills"],
+      properties: {
+        backfills: titled({
+          type: "array",
+          items: {
+            type: "object", additionalProperties: false, required: ["fieldId", "backfillId"],
+            properties: { fieldId: FIELD_ID, backfillId: titled(UUID, "Backfill", "Bijwerking") },
+          },
+        }, "Backfills", "Bijwerkingen"),
+      },
+    },
   },
   affectedRecords: {
     title: "Count affected records", description: "Counts the records holding a value for one tenant-defined field of", write: false, graphql: "FieldDefinitionAffectedRecords",

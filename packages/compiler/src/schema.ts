@@ -649,6 +649,16 @@ export type TableDefinition = {
   indexes?: IndexDefinition[];
   /** Extended planner statistics, emitted after the indexes. */
   statistics?: StatisticsDefinition[];
+  /**
+   * A table whose rows describe rows of another tenant table (a derived
+   * index keyed by `column`): beside its own tenant policy it gets a
+   * restrictive policy `<table>_record_access` that admits a row only while
+   * the described row is visible to the session, so every row policy of
+   * that table (row scope, owner axis, authorization profiles) holds here as
+   * well. Referential actions bypass row security, so a cascade still
+   * reaches every row.
+   */
+  recordAccessFrom?: { schema: string; table: string; column: string };
   /** Compiler-owned storage for a field's collection references (never standalone CRUD). */
   relationStorage?: {
     sourceEntity: string;

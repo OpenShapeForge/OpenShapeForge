@@ -37,6 +37,7 @@ describe("osf-extensions Operations", () => {
       "ExtensiblePart.fieldDefinitions.delete",
       "ExtensiblePart.fieldDefinitions.reorder",
       "ExtensiblePart.fieldDefinitions.affectedRecords",
+      "ExtensiblePart.fieldDefinitions.rebuildIndex",
       "ExtensiblePart.referencedBy",
       "ExtensiblePartSpec.referencedBy",
       "RestEnabled.referencedBy",
@@ -55,7 +56,7 @@ describe("osf-extensions Operations", () => {
   it("lets the entity's readers list definitions and only its manage roles change them", () => {
     const readRoles = contract("ExtensiblePart").authorization.roles.read;
     expect(operation("ExtensiblePart.fieldDefinitions.list").auth).toEqual({ mode: "session", roles: readRoles });
-    for (const action of ["create", "update", "deprecate", "restore", "delete", "reorder", "affectedRecords"]) {
+    for (const action of ["create", "update", "deprecate", "restore", "delete", "reorder", "affectedRecords", "rebuildIndex"]) {
       expect(operation(`ExtensiblePart.fieldDefinitions.${action}`).auth).toEqual({
         mode: "session", roles: ["General.All.ReadWrite", "Organization.All.ReadWrite"],
       });
@@ -74,6 +75,7 @@ describe("osf-extensions Operations", () => {
       "POST /api/rest/v1/extensible-parts/field-definitions/delete",
       "POST /api/rest/v1/extensible-parts/field-definitions/reorder",
       "POST /api/rest/v1/extensible-parts/field-definitions/affected-records",
+      "POST /api/rest/v1/extensible-parts/field-definitions/rebuild-index",
       "POST /api/rest/v1/extensible-parts/:id/referenced-by",
       "POST /api/rest/v1/extensible-part-specs/:id/referenced-by",
       "POST /api/rest/v1/rest-enableds/:id/referenced-by",
@@ -87,6 +89,7 @@ describe("osf-extensions Operations", () => {
       "mutation extensiblePartFieldDefinitionDelete",
       "mutation extensiblePartFieldDefinitionReorder",
       "query extensiblePartFieldDefinitionAffectedRecords",
+      "mutation extensiblePartFieldDefinitionRebuildIndex",
       "query extensiblePartReferencedBy",
       "query extensiblePartSpecReferencedBy",
       "query restEnabledReferencedBy",
@@ -94,6 +97,9 @@ describe("osf-extensions Operations", () => {
     for (const candidate of operations) expect(candidate.transports.mcp.enabled).toBe(false);
     expect(operation("ExtensiblePart.fieldDefinitions.delete").effects).toEqual({ data: "delete", external: "none" });
     expect(operation("ExtensiblePart.fieldDefinitions.list").effects).toEqual({ data: "read", external: "none" });
+    // The rebuild is a write that starts backfills; its field is optional.
+    expect(operation("ExtensiblePart.fieldDefinitions.rebuildIndex").effects).toEqual({ data: "write", external: "none" });
+    expect(operation("ExtensiblePart.fieldDefinitions.rebuildIndex").inputSchema).toMatchObject({ required: [], additionalProperties: false });
   });
 
   it("claims no route or root field another surface owns, and binds to a core runtime module", () => {

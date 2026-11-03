@@ -7,6 +7,8 @@
  * introspection in yoga.ts, so deployed anonymous clients cannot retrieve
  * them; keeping one schema in every environment avoids runtime schema drift.
  */
+import { EXTENSION_VALUES_COLUMN } from "../operations/entity/extensions/model.js";
+import { extensibleEntityOf } from "../operations/entity/extensions/store.js";
 import {
   GraphQLError,
   Kind,
@@ -314,11 +316,18 @@ export function renderTypeDefinition(
     (documentation?.fields ?? []).map((field) => [field.name, field]),
   );
   const queryableColumns = table.columns.filter(
-    (column) => !isElicitedOutputColumn(table, column),
+    (column) => !isElicitedOutputColumn(table, column) && column.name !== EXTENSION_VALUES_COLUMN,
   );
+  // Tenant fields (operations/entity/extensions): one JSON object each way,
+  // projected and redacted per key; the source column itself is never a field.
+  const extensible = extensibleEntityOf(table) !== undefined;
+  const extensionFields = extensible
+    ? ["      \"\"\"Tenant-defined fields by key.\"\"\"\n      extensions: JSON", "      \"\"\"Per tenant field: applicable, stale, error, suspended, deprecated.\"\"\"\n      extensionsMeta: JSON"]
+    : [];
+  const extensionInput = extensible ? ["      \"\"\"Tenant-defined fields by key; null clears one.\"\"\"\n      extensions: JSON"] : [];
   const filterFieldNames = new Set(queryableColumns.map(fieldNameForColumn));
   const relationNames = new Set((graphql.relationships ?? []).filter((relationship) => relationship.fieldKey).map((relationship) => relationship.name));
-  const columnFields = table.columns.filter((column) => !relationNames.has(fieldNameForColumn(column)))
+  const columnFields = table.columns.filter((column) => !relationNames.has(fieldNameForColumn(column)) && column.name !== EXTENSION_VALUES_COLUMN)
     .map((column) => {
       const field = fieldNameForColumn(column);
       return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
@@ -345,14 +354,14 @@ export function renderTypeDefinition(
   const updatableColumns = table.columns.filter((column) =>
     isCallerWritableColumn(table, column, "update"),
   );
-  const createInputBody = creatableColumns.length === 0
+  const createInputBody = creatableColumns.length === 0 && !extensible
     ? "      _empty: String"
-    : creatableColumns
+    : [...creatableColumns
         .map((column) => {
           const field = fieldNameForColumn(column);
           return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
             `      ${field}: ${graphqlScalarForColumn(column)}`;
-        })
+        }), ...extensionInput]
         .join("\n");
   const updateInputBody = [
     "      id: ID!",
@@ -361,6 +370,7 @@ export function renderTypeDefinition(
       return `${renderDescription(fieldDocumentation.get(field)?.description, "      ")}` +
         `      ${field}: ${graphqlScalarForColumn(column)}`;
     }),
+    ...extensionInput,
     ...operationControlFields(table, "update"),
   ].join("\n");
   const canonicalCreateInputBody = [
@@ -413,7 +423,7 @@ ${deleteInputBody}
   return `
 ${renderDescription(documentation?.description, "    ")}
     type ${graphql.typeName} {
-${[...columnFields, ...computedFields, ...relationshipFields].join("\n")}
+${[...columnFields, ...extensionFields, ...computedFields, ...relationshipFields].join("\n")}
     }
 
     input ${graphql.typeName}Filter {
@@ -455,6 +465,7 @@ ${queryableColumns
     }
     return definitions;
   })
+  .concat(extensible ? ["      \"\"\"Tenant field predicates: { <key>: { <operator>: <value> } }.\"\"\"\n      extensions: JSON"] : [])
   .join("\n")}
     }
 
@@ -857,7 +868,7 @@ const objectResolvers = Object.fromEntries(
     const relationNames = new Set((graphql.relationships ?? [])
       .filter((relationship) => relationship.fieldKey).map((relationship) => relationship.name));
     const fields = Object.fromEntries(
-      table.columns.filter((column) => !relationNames.has(fieldNameForColumn(column))).map((column) => [
+      table.columns.filter((column) => !relationNames.has(fieldNameForColumn(column)) && column.name !== EXTENSION_VALUES_COLUMN).map((column) => [
         fieldNameForColumn(column),
         (parent: Record<string, unknown>) => parent[column.name],
       ]),

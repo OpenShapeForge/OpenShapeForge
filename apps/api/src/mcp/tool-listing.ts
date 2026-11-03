@@ -34,6 +34,7 @@ import { derivedToolsForSession } from "./derived-session-tools.js";
 import { operationMayInvoke, projectCatalogOperationTool } from "./entity-tool-invocation.js";
 import { crudToolsForSession } from "./generic-tool-projection.js";
 import { publicOriginIsHttps, supportsMcpApp } from "./handoff-config.js";
+import { primeSessionExtensions } from "./extension-schemas.js";
 import type { ServerScope } from "./server-scope.js";
 import type { ListedTool } from "./session-surface.js";
 /**
@@ -252,9 +253,11 @@ export function createToolListing(scope: ServerScope) {
     return available.filter((entry) => !covered.has(entry.tool.name));
   };
 
-  server.setRequestHandler('tools/list', async () => ({
-    tools: (await listedTools()).map((entry) => toolWithFailureOutputSchema(entry.tool)),
-  }));
+  server.setRequestHandler('tools/list', async () => {
+    // The generic tools carry this tenant's fields; prove them first.
+    await primeSessionExtensions(db, session);
+    return { tools: (await listedTools()).map((entry) => toolWithFailureOutputSchema(entry.tool)) };
+  });
 
   const findTool = async (name: string): Promise<ListedTool | undefined> => {
     // Namespaced module tools cannot be named by stored Operation/Service

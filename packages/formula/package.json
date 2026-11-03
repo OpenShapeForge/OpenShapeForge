@@ -1,0 +1,39 @@
+{
+  "name": "@openshapeforge/formula",
+  "version": "0.1.0",
+  "description": "Customer formulas in spreadsheet (Airtable) grammar: parser, binder, static types, dependency graph, evaluation and editor help over the canonical expression AST. No dependencies; runs in a browser and under Bun.",
+  "license": "BUSL-1.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenShapeForge/OpenShapeForge.git",
+    "directory": "packages/formula"
+  },
+  "type": "module",
+  "module": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src",
+    "LICENSE",
+    "!src/**/*.test.ts",
+    "!src/__fixtures__"
+  ],
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "//sync:canonical": "src/canonical holds verbatim copies of the compiler's canonical expression types and evaluator, the same copies the compiler emits into consumer repos. canonical-copy.test.ts fails when they drift; this refreshes them.",
+    "sync:canonical": "cp ../compiler/src/authoring/canonical/canonical-condition.ts ../compiler/src/authoring/canonical/expression-evaluator.ts src/canonical/"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5",
+    "typescript": "^5.9.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  }
+}

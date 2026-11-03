@@ -4,7 +4,7 @@
  * the extensible fixture (__fixtures__/rowaccess/entities/extensible-part*.yaml).
  */
 import { describe, expect, it } from "bun:test";
-import Ajv2020 from "ajv/dist/2020.js";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { join } from "node:path";
 import { compileAuthoringBackendManifest } from "./authoring/backend-manifest.js";

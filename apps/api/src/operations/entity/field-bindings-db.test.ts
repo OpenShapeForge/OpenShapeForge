@@ -80,12 +80,12 @@ const text = (overrides: Record<string, unknown> = {}) =>
 /** A tenant global, created through Chip.create. */
 async function tenantGlobal(
   session: Session,
-  key: string,
+  name: string,
   definition: Record<string, unknown>,
   value: unknown,
 ): Promise<GeneratedEntityRow> {
   return record(await run(session, "Chip.create", {
-    values: { key, name: key, definition, value, isActive: true },
+    values: { name, definition, value, isActive: true },
   }));
 }
 
@@ -175,13 +175,13 @@ describe("a typed global value, stored and read back", () => {
     // A null is permitted only where the definition and the column permit it;
     // Chip.value is NOT NULL, so it is refused rather than stored.
     expect(failure(await run(editor, "Chip.create", {
-      values: { key: "note.null", name: "note.null", definition: text({ required: false }), value: null, isActive: true },
+      values: { name: "note.null", definition: text({ required: false }), value: null, isActive: true },
     }))).toMatchObject({ code: "VALIDATION", violations: [{ field: "value", code: "REQUIRED" }] });
   });
 
   test("a value or a definition the pair does not permit is refused, and nothing is stored", async () => {
     const refused = async (definition: unknown, value: unknown) => failure(await run(editor, "Chip.create", {
-      values: { key: `bad.${randomUUID().slice(0, 8)}`, name: "bad", definition, value, isActive: true },
+      values: { name: `bad ${randomUUID().slice(0, 8)}`, definition, value, isActive: true },
     }));
     expect(await refused(text(), 12)).toMatchObject({ code: "VALIDATION" });
     expect(await refused(text({ validation: { minLength: 1 } }), "")).toMatchObject({ code: "VALIDATION" });
@@ -223,7 +223,7 @@ describe("a typed global value, stored and read back", () => {
 
   test("writing a global needs the role its own Operation declares", async () => {
     expect(failure(await run(viewer, "Chip.create", {
-      values: { key: "denied.key", name: "denied", definition: text(), value: "x", isActive: true },
+      values: { name: "denied", definition: text(), value: "x", isActive: true },
     }))).toMatchObject({ code: "FORBIDDEN" });
     // The same actor reads it: the gate is the Operation's, not the entity's.
     const chip = await tenantGlobal(editor, "read.only", text(), "Readable");
@@ -236,7 +236,7 @@ describe("a typed global value, stored and read back", () => {
       where id = ${String(chip.id)}::uuid`.execute(privileged.db);
     for (const result of [
       await run(viewer, "Chip.get", { id: String(chip.id) }),
-      await run(viewer, "Chip.list", { filter: { key: "invalid.stored.type" } }),
+      await run(viewer, "Chip.list", { filter: { key: "invalid-stored-type" } }),
     ]) {
       expect(failure(result)).toMatchObject({ code: "INVALID_DEFINITION" });
       expect(JSON.stringify(result)).not.toContain("Secret fixture value");
@@ -249,14 +249,16 @@ describe("a typed global value, stored and read back", () => {
 describe("a binding, stored apart from the value it resolved to", () => {
   test("the binding and the resolved value are both persisted, and the source is live", async () => {
     const chip = await tenantGlobal(editor, "support.phone", text(), "020-1234567");
+    // The variable key is made from the name, not supplied.
+    expect(chip.key).toBe("support-phone");
     const created = record(await memo(editor, {
-      bindings: { descriptionTemplate: { template: "Bel {{chips.support.phone}} voor uitleg" } },
+      bindings: { descriptionTemplate: { template: "Bel {{chips.support-phone}} voor uitleg" } },
     }));
     const id = String(created.id);
     // The resolved value is in the column, the author's intent beside it.
     expect(created.description_template).toBe("Bel 020-1234567 voor uitleg");
     expect(created.field_bindings).toEqual({
-      descriptionTemplate: { kind: "template", source: "Bel {{chips.support.phone}} voor uitleg" },
+      descriptionTemplate: { kind: "template", source: "Bel {{chips.support-phone}} voor uitleg" },
     });
     // A later change of the source is visible on the next read, while the
     // binding itself is untouched.
@@ -286,7 +288,7 @@ describe("a binding, stored apart from the value it resolved to", () => {
   test("a literal clears the binding, and an unbind freezes the value the source has NOW", async () => {
     const chip = await tenantGlobal(editor, "office.hours", text(), "09:00-17:00");
     const bound = record(await memo(editor, {
-      bindings: { descriptionTemplate: { template: "Open {{chips.office.hours}}" } },
+      bindings: { descriptionTemplate: { template: "Open {{chips.office-hours}}" } },
     }));
     const id = String(bound.id);
     // A literal replaces the binding: the field stops following its source.
@@ -299,7 +301,7 @@ describe("a binding, stored apart from the value it resolved to", () => {
     // Bind again, change the source, then unbind: what is frozen is the
     // value the source has now, never the column's stale content.
     const rebound = record(await updateMemo(editor, id, {
-      bindings: { descriptionTemplate: { template: "Open {{chips.office.hours}}" } },
+      bindings: { descriptionTemplate: { template: "Open {{chips.office-hours}}" } },
     }));
     expect(rebound.description_template).toBe("Open 08:00-18:00");
     await run(editor, "Chip.update", { id: String(chip.id), values: { value: "10:00-16:00" } });
@@ -335,7 +337,7 @@ describe("a binding, stored apart from the value it resolved to", () => {
 describe("what a binding is refused for", () => {
   test("a later valid source update cannot violate the destination's bounds on a live read", async () => {
     const chip = await tenantGlobal(editor, "bounded.note", text(), "Small");
-    const bound = record(await memo(editor, { bindings: { descriptionTemplate: { template: "{{chips.bounded.note}}" } } }));
+    const bound = record(await memo(editor, { bindings: { descriptionTemplate: { template: "{{chips.bounded-note}}" } } }));
     await run(editor, "Chip.update", { id: String(chip.id), values: { value: "x".repeat(2500) } });
     expect(failure(await read(editor, String(bound.id)))).toMatchObject({ code: "DEPENDENCY_INVALID" });
     await run(editor, "Chip.update", { id: String(chip.id), values: { value: "Small again" } });
@@ -344,37 +346,37 @@ describe("what a binding is refused for", () => {
 
   test("a bounded token count cannot amplify source text into an oversized result", async () => {
     await tenantGlobal(editor, "large.note", text(), "x".repeat(8000));
-    const result = await memo(editor, { bindings: { descriptionTemplate: { template: "{{chips.large.note}}".repeat(26) } } });
+    const result = await memo(editor, { bindings: { descriptionTemplate: { template: "{{chips.large-note}}".repeat(26) } } });
     expect(failure(result)).toMatchObject({ code: "VALIDATION", violations: [{ code: "BINDING_TOO_LARGE" }] });
   });
   test("a source that does not exist, does not fit, or is a different tenant's", async () => {
     // Nothing of that name in this organization.
-    expect(failure(await memo(editor, { bindings: { descriptionTemplate: { template: "{{chips.absent.key}}" } } })))
+    expect(failure(await memo(editor, { bindings: { descriptionTemplate: { template: "{{chips.absent-key}}" } } })))
       .toMatchObject({ code: "VALIDATION", violations: [{ field: "descriptionTemplate", code: "UNKNOWN_VARIABLE" }] });
     // A collection and an object are not text a template can splice in.
     await tenantGlobal(editor, "team.members", { key: "value", osfType: "string", cardinality: { min: 0, max: 8 }, item: { key: "item", osfType: "string" } }, ["Ada", "Alan"]);
-    expect(failure(await memo(editor, { bindings: { descriptionTemplate: { template: "Team: {{chips.team.members}}" } } })))
+    expect(failure(await memo(editor, { bindings: { descriptionTemplate: { template: "Team: {{chips.team-members}}" } } })))
       .toMatchObject({ code: "VALIDATION", violations: [{ field: "descriptionTemplate", code: "INCOMPATIBLE_CARDINALITY" }] });
     await tenantGlobal(editor, "office.address",
       { key: "value", osfType: "object", required: true, children: [{ key: "street", osfType: "string", required: true }] },
       { street: "Dam 1" });
-    expect(failure(await memo(editor, { bindings: { descriptionTemplate: { template: "At {{chips.office.address}}" } } })))
+    expect(failure(await memo(editor, { bindings: { descriptionTemplate: { template: "At {{chips.office-address}}" } } })))
       .toMatchObject({ code: "VALIDATION", violations: [{ field: "descriptionTemplate" }] });
     // A field that accepts no variable, and a shape its mode does not admit.
-    expect(failure(await memo(editor, { bindings: { label: "chips.team.members" } })))
+    expect(failure(await memo(editor, { bindings: { label: "chips.team-members" } })))
       .toMatchObject({ code: "BAD_USER_INPUT" });
-    expect(failure(await memo(editor, { bindings: { descriptionTemplate: "chips.office.address" } })))
+    expect(failure(await memo(editor, { bindings: { descriptionTemplate: "chips.office-address" } })))
       .toMatchObject({ code: "BAD_USER_INPUT" });
     // A binding that resolves through itself.
     expect(failure(await memo(editor, { bindings: { descriptionTemplate: { template: "{{local.descriptionTemplate}}" } } })))
       .toMatchObject({ code: "VALIDATION", violations: [{ field: "descriptionTemplate", code: "BINDING_CYCLE" }] });
     // Another tenant's global is not available here, and the same key in two
     // organizations is two variables.
-    expect(failure(await memo(neighbour, { bindings: { descriptionTemplate: { template: "{{chips.support.phone}}" } } })))
+    expect(failure(await memo(neighbour, { bindings: { descriptionTemplate: { template: "{{chips.support-phone}}" } } })))
       .toMatchObject({ code: "VALIDATION", violations: [{ code: "UNKNOWN_VARIABLE" }] });
     await tenantGlobal(neighbour, "support.phone", text(), "030-0000000");
     const theirs = record(await memo(neighbour, {
-      bindings: { descriptionTemplate: { template: "Bel {{chips.support.phone}}" } },
+      bindings: { descriptionTemplate: { template: "Bel {{chips.support-phone}}" } },
     }));
     expect(theirs.description_template).toBe("Bel 030-0000000");
     // Their record is not this tenant's to read at all, bound field included:
@@ -386,7 +388,7 @@ describe("what a binding is refused for", () => {
   test("a source that stops fitting, or goes away, refuses the READ instead of answering stale", async () => {
     const chip = await tenantGlobal(editor, "closing.note", text(), "Tot ziens");
     const bound = record(await memo(editor, {
-      bindings: { descriptionTemplate: { template: "Slot: {{chips.closing.note}}" } },
+      bindings: { descriptionTemplate: { template: "Slot: {{chips.closing-note}}" } },
     }));
     const id = String(bound.id);
     expect(record(await read(editor, id)).description_template).toBe("Slot: Tot ziens");
@@ -412,7 +414,7 @@ describe("what a binding is refused for", () => {
       select field_bindings as bindings from erp.label_rules where id = ${id}::uuid
     `.execute(privileged.db);
     expect(row.rows[0]!.bindings).toEqual({
-      descriptionTemplate: { kind: "template", source: "Slot: {{chips.closing.note}}" },
+      descriptionTemplate: { kind: "template", source: "Slot: {{chips.closing-note}}" },
     });
   });
 });

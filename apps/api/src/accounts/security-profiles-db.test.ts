@@ -39,9 +39,9 @@ test('a tenant assignment stays inside the ceiling and a withdrawn profile stops
  await sql`insert into platform.identities(id,issuer,subject,display_name) values(${identity}::uuid,'https://identity.test/realms/openshapeforge',${editor.userId},'Reader')`.execute(privileged());
  await sql`insert into platform.identity_relations(tenant_id,identity_id,status,relation_id,linked_at,linked_by) values(${tenant}::uuid,${identity}::uuid,'linked',${customer}::uuid,now(),'fixture')`.execute(privileged());
 
- await expect(createGeneratedEntity(restricted(),dbInput(editor),{table:tableName('AuthorizationProfile'),values:{name:'No authority',key:'no-authority',targetEntity:'Relation',active:true}})).rejects.toBeDefined();
+ await expect(createGeneratedEntity(restricted(),dbInput(editor),{table:tableName('AuthorizationProfile'),values:{name:'No authority',targetEntity:'Relation',active:true}})).rejects.toBeDefined();
  await expect(withDbSession(restricted(),dbInput(editor),trx=>sql`insert into erp.authorization_profiles(tenant_id,name,key,target_entity,active) values(${tenant}::uuid,'No authority','raw-no-authority','Relation',true)`.execute(trx))).rejects.toBeDefined();
- const profile=await createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfile'),values:{name:'Customer access',key:'customer-'+randomUUID(),targetEntity:'Relation',active:true}});
+ const profile=await createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfile'),values:{name:'Customer access',targetEntity:'Relation',active:true}});
  const {executeCollectionMutation}=await import('../operations/entity/collection-mutations.js');
  const revision=(await sql<{version:string}>`select updated_at::text as version from erp.authorization_profiles where id=${profile.id}::uuid`.execute(privileged())).rows[0]!.version;
  await executeCollectionMutation(restricted(),dbInput(manager),{entityName:'AuthorizationProfile',field:'policies',action:'insert'},{id:String(profile.id),expectedVersion:revision,values:{operationId:'Relation.list',condition:rule('equals',literal('customer'))}});
@@ -87,7 +87,7 @@ test('a tenant assignment stays inside the ceiling and a withdrawn profile stops
  await sql`insert into erp.relation_groups(id,tenant_id,name,status,group_type) values(${group}::uuid,${tenant}::uuid,'Readers','active','team')`.execute(privileged());
  await sql`insert into erp.relation_group_memberships(tenant_id,relation_id,relation_group_id,status) values(${tenant}::uuid,${customer}::uuid,${group}::uuid,'active')`.execute(privileged());
  const addProfile=async(operationId:string,condition:CompilerConditionInput,subjectKind:string,subjectKey:string)=>{
-  const profile=await createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfile'),values:{name:operationId,key:'proof-'+randomUUID(),targetEntity:'Relation',active:true}});
+  const profile=await createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfile'),values:{name:operationId,targetEntity:'Relation',active:true}});
   const rev=(await sql<{version:string}>`select updated_at::text as version from erp.authorization_profiles where id=${profile.id}::uuid`.execute(privileged())).rows[0]!.version;
   await executeCollectionMutation(restricted(),dbInput(manager),{entityName:'AuthorizationProfile',field:'policies',action:'insert'},{id:String(profile.id),expectedVersion:rev,values:{operationId,condition}});
   const result=await versioning.operationHandlers.publishAuthorizationProfileToAuthorizationProfileVersion!({id:profile.id},platformFor(manager).context);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The tenant field model of an `extensible` entity (contract fase 1a), as
+ * The tenant field model of an `extensible` entity, as
  * pure functions: what a stored definition means for validation, the index,
  * redaction and `appliesWhen`. Database access lives in store.ts.
  */
@@ -171,7 +171,7 @@ export function uniqueOperand(shape: ExtensionShape, value: unknown): { column: 
 }
 
 /**
- * What uniqueness compares (§11 besluit 32), as SQL over a value of the
+ * What uniqueness compares, as SQL over a value of the
  * index column's type: text trimmed and case-folded (stricter than exact,
  * which is the conservative side), a timestamp as UTC ISO text, a number
  * without trailing zeros, a date and an id as their canonical text. The
@@ -262,7 +262,7 @@ const RULE_OPERATORS = new Set([
  * A path of an `appliesWhen` rule: an authored field by name, or a tenant
  * field. Callers name a tenant field by key (`extensions.<key>`); the stored
  * condition names it by field id (`extensions.<fieldId>`), so renaming a
- * field never breaks a condition that depends on it (§11 besluit 33).
+ * field never breaks a condition that depends on it.
  */
 export type ConditionPath = { kind: "authored"; field: string } | { kind: "extension"; key: string };
 export const EXTENSIONS_PATH_PREFIX = "extensions.";

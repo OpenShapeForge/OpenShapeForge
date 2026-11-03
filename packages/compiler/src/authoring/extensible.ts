@@ -18,8 +18,8 @@
  * it, a restrictive policy that admits an index row or claim only while the
  * session may see the entity row it describes (`recordAccessFrom`), so every
  * row policy of the entity — authorization profiles included — holds for its
- * index too (§11 besluit 28). An extensible entity still may not declare a
- * row-scope axis, owner axis or record ACL (besluit 15): the inherited policy
+ * index too. An extensible entity still may not declare a
+ * row-scope axis, owner axis or record ACL: the inherited policy
  * covers reads of the index, but that alone has not been shown to cover every
  * path of such entities. Nor may an entity that is an owned child be
  * extensible: the snapshot of its owner would freeze its raw source. Every
@@ -81,7 +81,7 @@ export const EXTENSION_INDEX_COLUMNS: Record<ExtensionIndexColumn, { column: str
  * NULL, and every query on them states the matching `IS NOT NULL` (a
  * comparison implies it).
  *
- * The shape is the one the phase-0 measurement chose (#372): `record_id` last
+ * The shape is the one a measurement of 200k records × 30 fields under RLS chose: `record_id` last
  * in every value index, so a filter's semi-join and a sort page are read from
  * the index alone, in `(value, record_id)` order with the tiebreaker included;
  * the reference index leads with the referenced id, so "referenced by" and the
@@ -115,7 +115,7 @@ export const EXTENSION_VALUE_INDEXES: ReadonlyArray<{ suffix: string; columns: r
  * All fields of all tenants share one value column, so without the pair the
  * planner multiplies two independent estimates and misjudges a field plus
  * value by an order of magnitude (617 estimated against 17,935 rows in the
- * phase-0 measurement, #372). A backfill that rewrites many rows does not
+ * the measurement above). A backfill that rewrites many rows does not
  * run ANALYZE afterwards: the worker holds no MAINTAIN on the table, and
  * autovacuum's ANALYZE refreshes these statistics once enough rows changed.
  */

@@ -2,7 +2,7 @@
 /**
  * The `extension_values` source column of an extensible entity is
  * server-owned storage: callers read and write `extensions` and
- * `extensionsMeta`, never the column (contract fase 1a, "Record-I/O"). The
+ * `extensionsMeta`, never the column (docs/authoring.md, "Extensible entities"). The
  * compiler binds it to the table as a jsonb column like any other, so every
  * surface that enumerates a table's columns must leave it out — for the
  * entity itself and for a subtype projection of the same physical table,

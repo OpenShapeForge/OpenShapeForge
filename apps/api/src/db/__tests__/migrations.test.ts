@@ -1478,7 +1478,7 @@ describe("tenant fields on a carried-forward database", () => {
     "platform.extension_field_dependencies",
   ];
   const valueColumns = ["value_boolean", "value_date", "value_number", "value_text", "value_timestamp"];
-  /** The measured index shape (#372), as pg_indexes reports it: record_id last, the reference index led by the target. */
+  /** The measured index shape, as pg_indexes reports it: record_id last, the reference index led by the target. */
   const measuredIndexes = (valuesTable: string) => {
     const [, name] = valuesTable.split(".");
     return [
@@ -1575,7 +1575,7 @@ describe("tenant fields on a carried-forward database", () => {
           }
           // Each side table also inherits the entity's row policies: a
           // restrictive policy that admits a row only while its entity row is
-          // visible (§11 besluit 28).
+          // visible.
           const inherited = await sql<{ table: string; permissive: string; command: string; qual: string }>`
             select tablename as table, permissive, cmd as command, qual from pg_policies
             where schemaname = ${entity.table.split(".")[0]} and policyname = tablename || '_record_access' order by tablename`.execute(db);

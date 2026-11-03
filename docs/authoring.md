@@ -575,7 +575,7 @@ to an entity from an earlier layer with `kind: entityPatch`.
 
 ```yaml
 extensible:
-  authorization: { manage: [CpqCatalog.Catalogue.ReadWrite] }   # required, one role or more
+  authorization: { manage: [Catalogue.Manage] }   # required, one role or more
   limits: { fields: 100, filtersPerQuery: 5, formulaDepth: 5, syncFanOut: 100 }  # optional; these are the defaults
   excludedTypes: []                 # osfTypes a tenant may not use here
   excludedTargets: [NaturalPerson]  # entities a tenant reference may not point at

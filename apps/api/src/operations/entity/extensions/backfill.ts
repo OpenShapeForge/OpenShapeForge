@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Backfills (§5.3): every definition change that touches records runs as a
+ * Backfills: every definition change that touches records runs as a
  * job in `platform.jobs`, one batch per job run. A run processes the next
  * batch after the cursor, records its progress in
  * `platform.extension_field_backfills` and enqueues the next run in the same
@@ -13,7 +13,7 @@
  * deprecated and deleted).
  *
  * Every batch reads and writes the records of the whole tenant under an
- * audited bypass (§11 besluit 28): the index inherits the entity's row
+ * audited bypass: the index inherits the entity's row
  * policies, and an erasure, a rebuild or a uniqueness claim that saw only the
  * rows its starter may see would leave the rest behind. Each statement still
  * names the tenant. A batch shares the tenant field lock before it locks a
@@ -197,7 +197,7 @@ export async function duplicateValues(
 }
 
 /**
- * A unique field whose values are not unique after all (§11 besluit 33):
+ * A unique field whose values are not unique after all:
  * unique goes off again as a new version, `ready`, and the claims of the
  * attempt are released. The backfill fails with the number of duplicates,
  * and, for a field that is not classified, which ones.
@@ -224,7 +224,7 @@ async function abandonUnique(
   });
 }
 
-/** Index rows and claims of records whose source no longer carries the field (§11, D4). */
+/** Index rows and claims of records whose source no longer carries the field. */
 async function removeOrphanIndexRows(trx: Transaction<DB>, tenantId: string, set: ExtensionFieldSet, fieldId: string): Promise<void> {
   for (const side of [set.entry.valuesTable, set.entry.uniqueTable]) {
     await sql`delete from ${qualifiedTable(side)} as side
@@ -344,7 +344,7 @@ export const extensionBackfillJobHandler: ModuleJobHandler = async (payload, con
 };
 
 /**
- * §6 retention, the minimal path: a field whose definition carries
+ * Retention, the minimal path: a field whose definition carries
  * `retention: { days, from?: "createdAt" | "updatedAt" }` loses its value
  * (source and index together, through the one internal write) on records
  * whose clock is older than that — every record of the tenant, under the

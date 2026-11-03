@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Tenant fields in a published snapshot (§5.8, §6, §11 besluit 31), as the
+ * Tenant fields in a published snapshot, as the
  * platform's `schemas.extensions.snapshot` service: the versioning runtime
  * freezes what this returns and never the raw `extension_values` source.
  *

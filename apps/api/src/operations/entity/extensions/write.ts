@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The write half of tenant fields (§5.4). `extensions` is split from the
+ * The write half of tenant fields. `extensions` is split from the
  * authored values before the static contract sees them, validated against
  * the tenant's current definitions inside the record's own transaction,
  * written into the `extension_values` source with the row, and mirrored into
@@ -121,12 +121,12 @@ async function assertReferencesReadable(
 }
 
 /**
- * Defaults and `required` (§11 besluit 31), against the record as it is
+ * Defaults and `required`, against the record as it is
  * stored. A create, and an update that makes a field apply, store the
  * default of an applicable field that got no value, so `required` is always
  * met by a stored value; an update checks the required fields it touches and
  * the ones it makes apply. Records written before a field existed keep no
- * value (no backfill, §5.3): an update that leaves their fields alone does
+ * value (no backfill): an update that leaves their fields alone does
  * not start enforcing them.
  */
 function settleExtensionValues(
@@ -286,7 +286,7 @@ export async function writeExtensionFieldIndex(
  * The index and the per-key audit entry of a write, after the row's own
  * `returning`: same transaction, so a refused claim takes the row with it.
  * A create settles its defaults and `required` once more against `row`, the
- * record as inserted (database defaults included, §11 besluit 31); a value
+ * record as inserted (database defaults included); a value
  * that only this settlement adds is written back to the source here, and
  * the source the record now holds is returned.
  */
@@ -326,7 +326,7 @@ export async function completeExtensionWrite(
 
 /**
  * The one internal write of tenant values outside the caller's own create or
- * update (§11, D9): setNull, retention, the delete and retype backfills. It
+ * update: setNull, retention, the delete and retype backfills. It
  * writes the source, bumps `updated_at`, puts a versioned head back to draft
  * (an extensible entity is never an owned child, so the record is its own
  * head), rewrites the index (and claims) of `fields`, and appends the per-key
@@ -370,7 +370,7 @@ export async function rewriteExtensionValues(
 const REDACTED = "[REDACTED]";
 
 /**
- * §5.7a: the audit trail of tenant fields is per key — "kWh: 10 → 13.5" with
+ * The audit trail of tenant fields is per key — "kWh: 10 → 13.5" with
  * the definition version that applied — and a classified key is redacted
  * there exactly as a classified column is. The row trigger never sees the
  * raw source: its audit config hides `extension_values`.

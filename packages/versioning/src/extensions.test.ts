@@ -19,8 +19,8 @@ function platform(source: Record<string, unknown>, options: { service?: boolean;
   const asked: Array<{ entityName: string; row: Record<string, unknown> }> = [];
   const executor = {
     async executeQuery(query: { sql: string; parameters: readonly unknown[] }) {
-      if (query.sql.includes("from \"cpq\".\"products\" source_row")) return { rows: [{ row: source }] };
-      if (query.sql.includes("from \"cpq\".\"product_pricings\" child_row")) return { rows: options.child ? [{ row: options.child }] : [] };
+      if (query.sql.includes("from \"catalog\".\"products\" source_row")) return { rows: [{ row: source }] };
+      if (query.sql.includes("from \"catalog\".\"product_pricings\" child_row")) return { rows: options.child ? [{ row: options.child }] : [] };
       if (query.sql.includes("insert into")) {
         stored.push({ canonical: String(query.parameters[1]), hash: String(query.parameters[2]) });
         return { rows: [{ row: { id: "v", version_number: 1 } }] };
@@ -29,7 +29,7 @@ function platform(source: Record<string, unknown>, options: { service?: boolean;
     },
   };
   const owned = options.child
-    ? [{ schema: "cpq", table: "product_pricings", childColumns: ["product_id"], parentColumns: ["id"], children: [] }]
+    ? [{ schema: "catalog", table: "product_pricings", childColumns: ["product_id"], parentColumns: ["id"], children: [] }]
     : [];
   return {
     stored,
@@ -40,7 +40,7 @@ function platform(source: Record<string, unknown>, options: { service?: boolean;
         db: { withSession: (_session: unknown, work: (trx: unknown) => Promise<unknown>) => work(executor) },
         schemas: {
           versioning: { get: () => ({ sourceEntity: "Product", versionEntity: "ProductVersion",
-            head: { schema: "cpq", table: "products" }, version: { schema: "cpq", table: "product_versions", headColumn: "product_id" }, owned }) },
+            head: { schema: "catalog", table: "products" }, version: { schema: "catalog", table: "product_versions", headColumn: "product_id" }, owned }) },
           ...(options.service === false ? {} : {
             extensions: { snapshot: async (_trx: unknown, _session: unknown, entityName: string, row: Record<string, unknown>) => {
               asked.push({ entityName, row });

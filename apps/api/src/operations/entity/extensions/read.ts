@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The read half of tenant fields (§5.5): `extensions` and `extensionsMeta`
+ * The read half of tenant fields: `extensions` and `extensionsMeta`
  * from the record's `extension_values` source, keyed by the readable key,
  * redacted per key exactly as a classified column is, with the definition's
  * `defaultValue` for a record that has no value yet. The raw source column
@@ -57,7 +57,7 @@ export function conditionValues(
  * The value a reader sees: the stored one, else the default of a field that
  * applies. A create (and an update that makes a field apply) stores the
  * default (write.ts), so the read-time default is only for records written
- * before the field existed (§5.3, no backfill).
+ * before the field existed (no backfill).
  */
 export function readValue(field: ExtensionField, source: Readonly<Record<string, unknown>>, applicable: boolean): unknown {
   const stored = Object.hasOwn(source, field.fieldId) ? source[field.fieldId] : undefined;

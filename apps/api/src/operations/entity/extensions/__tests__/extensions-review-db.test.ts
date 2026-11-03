@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Regression tests for the two adversarial reviews of fase 1a (#372): one on
+ * Regression tests for the two adversarial reviews of extensible entities: one on
  * security (S1–S7), one on lifecycle and data (D1–D15). Each test names its
  * finding. Every test runs in a tenant of its own, so the field limit of the
  * acceptance entity (10) holds per test and no test sees another's fields.
@@ -111,7 +111,7 @@ const listed = async (t: Tenant, key: string) => ((await define(t.manager, "list
   items: Array<{ key: string; state: string; version: number; definition: Record<string, unknown>; appliesWhen: any; backfill?: { state: string } }>;
 }).items.find((item) => item.key === key);
 
-describe("fase 1a review findings", () => {
+describe("extensible entity review findings", () => {
   beforeAll(async () => {
     fixture = await createExtensionFixture("review");
   }, 180_000);

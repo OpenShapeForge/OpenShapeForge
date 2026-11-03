@@ -193,7 +193,7 @@ export function forgetExtensionFields(trx: Transaction<DB>, tenantId: string, en
 }
 
 /**
- * The realtime resource of an entity's field definitions (§5.9): the web
+ * The realtime resource of an entity's field definitions: the web
  * designer and form refresh on `<Entity>FieldDefinition`. One event per
  * definition change and per backfill step, id = the field id, no payload;
  * the change stream lets it through only to sessions that may list the
@@ -213,7 +213,7 @@ export async function announceFieldDefinitionChange(
   });
 }
 
-/** Append one definition version and make it the current one (append-only, §4). */
+/** Append one definition version and make it the current one (append-only). */
 export async function insertFieldVersion(
   trx: Transaction<DB>,
   session: DbSessionInput,

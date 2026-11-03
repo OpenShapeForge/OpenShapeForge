@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The manifest's `extensionRegistry` (contract fase 1a): which entities are
+ * The manifest's `extensionRegistry`: which entities are
  * `extensible`, where their tenant field values live, who may design them and
  * which types and reference targets a tenant may choose. Read once from the
  * compiled manifest and validated by hand, like `entityValues`

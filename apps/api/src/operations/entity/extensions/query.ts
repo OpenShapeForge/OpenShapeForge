@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Structured query over tenant fields (§5.6). A filter
+ * Structured query over tenant fields. A filter
  * `{ extensions: { <key>: { <operator>: <value> } } }` becomes an EXISTS
  * semi-join on the typed index, one per predicate, with the operator
  * vocabulary of structuredFilter for the field's index column; a sort on
@@ -10,7 +10,7 @@
  * the existing oracle guard ignores names it does not know, so this one
  * refuses them explicitly.
  *
- * Defaults (§11 besluit 31): a create stores the default, so only records
+ * Defaults: a create stores the default, so only records
  * written before the field existed hold none. A filter is default-aware for
  * a field that applies to every record (no `appliesWhen`): when the default
  * satisfies the predicate, records without an index row for the field match
@@ -220,7 +220,7 @@ function filterableDefault(field: ExtensionField): { value: unknown } | undefine
  * The SQL of one `extensions` filter node, under the alias `row_source`: one
  * EXISTS per field (and one for its `isNull`), each answered from the index
  * alone, ordered by extensionPredicateRank so the most selective probe runs
- * first (the order of the "adaptive" shape of the phase-0 measurement, #372).
+ * first (the order that measured fastest for five filters on 200k records).
  * Postgres keeps the written order among filters of equal cost, so the rank
  * decides which probe a record meets first; where the planner turns the
  * EXISTS into semi-joins it orders them by its own estimates, which the
@@ -313,8 +313,8 @@ export function extensionSort(
 }
 
 /**
- * One page of a tenant field sort, in two bounded parts (§5.6, the phase-0
- * measurement #372): `<value> <direction> nulls last, id <direction>`.
+ * One page of a tenant field sort, in two bounded parts (a measurement of 200k records ×
+ * 30 fields under RLS chose this shape): `<value> <direction> nulls last, id <direction>`.
  *
  * A LEFT JOIN on the index row cannot use the partial value index (the
  * planner cannot prove it holds the rows without a value), so it sorts every

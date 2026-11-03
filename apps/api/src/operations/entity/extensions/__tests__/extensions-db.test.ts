@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Tenant fields end to end on a scratch database (contract fase 1a): the
+ * Tenant fields end to end on a scratch database: the
  * definition Operations and their validation, the write and read paths with
  * per-key redaction, uniqueness, reference authorization, RLS, structured
  * query, per-key audit, referencedBy, the deletion guard, orphans, and the

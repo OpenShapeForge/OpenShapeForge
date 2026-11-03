@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The definition Operations of an extensible entity E (contract fase 1a):
+ * The definition Operations of an extensible entity E:
  * `E.fieldDefinitions.list/create/update/deprecate/restore/delete/reorder/
  * affectedRecords/rebuildIndex`, and `T.referencedBy` on every entity a
  * tenant field may point at. Definitions are append-only versions in
- * `platform.extension_field_definitions`; the lifecycle (§5.3) is a data
+ * `platform.extension_field_definitions`; the lifecycle is a data
  * migration, so every change that touches records starts a backfill.
  */
 import { randomUUID } from "node:crypto";
@@ -124,7 +124,7 @@ export function mayFollowFieldDefinitions(session: DbSessionInput, aggregateType
   return mayRead(entity, session);
 }
 
-/** A stored condition names tenant fields by id; a caller reads and writes keys (§11 besluit 33). */
+/** A stored condition names tenant fields by id; a caller reads and writes keys. */
 function appliesWhenForCaller(set: ExtensionFieldSet, appliesWhen: unknown): unknown {
   return appliesWhen === null || appliesWhen === undefined ? null
     : mapConditionPaths(appliesWhen, (fieldId) => set.byId.get(fieldId)?.key ?? fieldId);
@@ -139,7 +139,7 @@ function toRecord(set: ExtensionFieldSet, field: ExtensionField, backfill?: Back
 }
 
 // ---------------------------------------------------------------------------
-// Validation (§5.2)
+// Validation
 
 function typeLabel(definition: ExtensionDefinition): string {
   return `${String(definition.osfType)}${isCollection(definition) ? "[]" : ""}${hasStaticOptions(definition) ? " (options)" : ""}`;
@@ -253,7 +253,7 @@ export function validateFieldDefinition(
 const insertVersion = insertFieldVersion;
 
 /**
- * The fields this one depends on (§11 besluit 33): rewritten with every
+ * The fields this one depends on: rewritten with every
  * version, in `platform.extension_field_dependencies` (1a: `appliesWhen`;
  * formulas, lookups and rollups add theirs in 1b/1c).
  */
@@ -298,15 +298,14 @@ function affectedRecordCount(trx: Transaction<DB>, session: DbSessionInput, enti
 }
 
 /**
- * Whether a refusal may show this actor values of the field (§11 besluit
- * 29): never for a classified field, and only to an actor who may read the
+ * Whether a refusal may show this actor values of the field: never for a classified field, and only to an actor who may read the
  * entity. The values shown are only ever those of records the actor may see.
  */
 function mayShowValues(set: ExtensionFieldSet, field: ExtensionField, session: DbSessionInput): boolean {
   return !isClassified(field.definition) && mayRead(set.entity, session);
 }
 
-/** Strict-er validation, or a reinterpretation of stored values, is "new field + copy" (§11 besluit 30). */
+/** Strict-er validation, or a reinterpretation of stored values, is "new field + copy". */
 const LOWER_BOUNDS = ["min", "minLength", "minItems"];
 const UPPER_BOUNDS = ["max", "maxLength", "maxItems"];
 
@@ -337,7 +336,7 @@ function narrowingChange(before: ExtensionDefinition, after: ExtensionDefinition
 }
 
 /**
- * §5.3 type changes: only widening ones, carried out as a backfill.
+ * Type changes: only widening ones, carried out as a backfill.
  * Returns the backfill operation, or refuses with the reason.
  */
 async function typeChange(
@@ -376,7 +375,7 @@ async function typeChange(
         (missing.examples.length ? `: ${missing.examples.join(", ")}.` : "."));
     }
     // string → options with every existing value an option is the one
-    // widening §5.3 names; the index already holds the same text.
+    // widening type changes name; the index already holds the same text.
     return was ? undefined : "retype";
   }
   if (isCollection(before) === isCollection(after) && before.osfType === "integer" && after.osfType === "number") return "retype";
@@ -472,7 +471,7 @@ export async function executeFieldDefinitionAction(
     case "restore": {
       const field = requireField(set, input.fieldId);
       // A field in `updating` can always be deprecated, then deleted: a
-      // backfill that never finishes must not trap it (§11 besluit 33).
+      // backfill that never finishes must not trap it.
       const from: ExtensionState[] = action === "deprecate" ? ["ready", "updating"] : ["deprecated"];
       if (!from.includes(field.state)) extensionError(`${field.key} is ${field.state}; only a ${from.join(" or ")} field can be ${action}d.`, "CONFLICT");
       if (action === "deprecate") assertNoDependents(set, field, await dependentsOf(trx, session, entity, field.fieldId), "deprecated");
@@ -502,7 +501,7 @@ export async function executeFieldDefinitionAction(
       return { backfillId: backfill.id };
     }
     case "rebuildIndex": {
-      // The index and the claims are derived (§3): rebuilt from the source,
+      // The index and the claims are derived: rebuilt from the source,
       // per field, as backfills over every record of the tenant.
       const fields = input.fieldId === undefined
         ? set.fields.filter((field) => field.state !== "deleted" && field.kind === "stored")
@@ -541,7 +540,7 @@ export async function executeFieldDefinitionAction(
  * value_ref_id)` index, and only for source entities this reader may list.
  * The index inherits the source entity's row policies, so only records this
  * reader may see are counted; a classified reference field is listed only to
- * a reader who may read the source's classified fields (§11 besluit 29).
+ * a reader who may read the source's classified fields.
  */
 export async function executeReferencedBy(
   trx: Transaction<DB>,

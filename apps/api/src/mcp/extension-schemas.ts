@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Tenant fields in the MCP tool schemas (§5.7, contract decision 16). The
+ * Tenant fields in the MCP tool schemas. The
  * static catalogue cannot know a tenant's fields, so every `tools/list` and
  * every `tools/call` first proves this session's definitions
  * (`primeSessionExtensions`), and the per-entity input schema — the one the

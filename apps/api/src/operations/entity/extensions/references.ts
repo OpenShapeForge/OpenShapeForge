@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * References without a foreign key (§4, "Link to another record"): a tenant
+ * References without a foreign key: a tenant
  * reference field stores only the target id, because its target differs per
  * field and is known at runtime only. What a foreign key would do is done
  * here: the deletion guard on the target (`onDelete: restrict | setNull`,
@@ -60,7 +60,7 @@ function mayName(session: DbSessionInput, source: GeneratedCrudTable, field: Ext
  * the target gone.
  *
  * The referencing records are found, and a setNull unlinks them, under an
- * audited tenant bypass (§11 besluit 28): the index inherits the entity's row
+ * audited tenant bypass: the index inherits the entity's row
  * policies, so the deleting actor's own session would miss references held by
  * records it may not see — a `restrict` would let the delete through, and a
  * setNull would leave those records pointing at nothing. The refusal names

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Tenant fields over HTTP (contract fase 1a, #372): the acceptance entity
+ * Tenant fields over HTTP (docs/authoring.md, "Extensible entities"): the acceptance entity
  * `ExtensibleAsset` of the test composition through the in-process API, on
  * all three interfaces. A field is defined over REST, records carry it,
  * filters and sorts reach it on REST and GraphQL, the location it points at

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Scratch-database fixture for tenant field tests (contract fase 1a).
+ * Scratch-database fixture for tenant field tests.
  *
  * Runs against what the compiler actually emits: the acceptance entity
  * `ExtensibleAsset` of the test composition

@@ -11,10 +11,12 @@ import { join } from "node:path";
 import YAML from "yaml";
 import { compileAuthoringBackendManifest } from "./backend-manifest.js";
 import {
+  EXTENSION_TARGET_DENYLIST,
   EXTENSION_TYPE_DENYLIST,
   EXTENSION_VALUE_INDEXES,
   EXTENSION_VALUE_STATISTICS_TARGET,
   assertIndexProjection,
+  isExtensionTargetCandidate,
 } from "./extensible.js";
 import { loadOsfTypes } from "./loader.js";
 import { generateArtifacts } from "../generate.js";
@@ -292,6 +294,31 @@ describe("extensible: the manifest registry", () => {
     const manifest = compile((contract) => { if (contract.entity.name === "RestEnabled") delete contract.entityOperations.get; });
     expect(manifest.extensionRegistry!.entities.ExtensiblePart!.targets.map((target) => target.entity)).toEqual(["ExtensiblePart", "ExtensiblePartSpec"]);
     expect(manifest.extensionRegistry!.referencedBy.RestEnabled).toBeUndefined();
+  });
+
+  it("never lists a tenant registry, an entity without writes of its own or the access-control model as a target", () => {
+    // No generated create, update or delete: kept by the platform, a plugin or a parent.
+    const readOnly = compile((contract) => {
+      if (contract.entity.name !== "RestEnabled") return;
+      delete contract.entityOperations.create; delete contract.entityOperations.update; delete contract.entityOperations.delete;
+    });
+    expect(readOnly.extensionRegistry!.entities.ExtensiblePart!.targets.map((target) => target.entity)).toEqual(["ExtensiblePart", "ExtensiblePartSpec"]);
+    expect(readOnly.extensionRegistry!.referencedBy.RestEnabled).toBeUndefined();
+
+    let contract: CompiledEntityContract | undefined;
+    const manifest = compile((candidate) => { if (candidate.entity.name === "RestEnabled") contract = candidate; });
+    const target = table(manifest, "erp.rest_enableds");
+    expect(isExtensionTargetCandidate(contract!, target)).toBe(true);
+    // A tenant registry: the row is its tenant.
+    expect(isExtensionTargetCandidate(contract!, { ...target, constraints: [{ compilerOwned: true, version: "0001_tenant-identity-rest-enableds",
+      name: "rest_enableds_tenant_identity_check", kind: "check", expression: "id = tenant_id" }] })).toBe(false);
+    expect(isExtensionTargetCandidate(contract!, { ...target, tenantScoped: false, tenantIdentityColumn: "id" })).toBe(false);
+    expect(isExtensionTargetCandidate(contract!, { ...target, schema: "platform" })).toBe(false);
+    // The access-control model, by name.
+    for (const name of EXTENSION_TARGET_DENYLIST) {
+      expect(isExtensionTargetCandidate({ ...contract!, entity: { ...contract!.entity, name } }, target)).toBe(false);
+    }
+    expect(EXTENSION_TARGET_DENYLIST).toEqual(expect.arrayContaining(["AuthorizationProfile", "OrganizationPermission", "UserOrganizationPermission"]));
   });
 
   it("renders the registry top-level in manifest.json, byte-identically on every run", () => {

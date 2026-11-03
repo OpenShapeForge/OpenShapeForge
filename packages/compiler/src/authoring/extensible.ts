@@ -24,6 +24,7 @@ import { BASE_TYPES } from "./entity-fields.js";
 import type { ExtensionRegistry, ExtensionRegistryEntity } from "./extension-registry-types.js";
 import type { CoreEntity, ExtensionIndexColumn, OsfTypeDefinition, OsfTypeIndexProjection } from "./types.js";
 import type { CompiledEntityContract, CompiledExtensible } from "./types/compiled.js";
+import { hasTenantIdentityCheck } from "../tenant-bound-references.js";
 import { isGeneratedCrudEligible, type IndexDefinition, type ReferenceDefinition, type StatisticsDefinition, type TableDefinition } from "../schema.js";
 
 /** The source column on the entity table. */
@@ -248,18 +249,53 @@ export function compileExtensible(
 }
 
 /**
- * Whether a tenant reference field may point at this entity at all: a stored,
- * tenant-scoped record a reader can resolve through its own `get`, outside
- * the platform schema. A host narrows the set per entity with
- * `excludedTargets`.
+ * The platform's access-control model: who may do what in a tenant. A tenant
+ * reference to one of these rows would let any writer of the extensible
+ * entity hold a grant or policy in place (`onDelete: restrict` refuses its
+ * revocation) and count who points at it, so none of them is ever a target,
+ * whatever a host composes. Named, because nothing in their contract sets
+ * them apart from business records.
+ */
+export const EXTENSION_TARGET_DENYLIST: readonly string[] = [
+  "AuthorizationOperationPolicy",
+  "AuthorizationProfile",
+  "AuthorizationProfileAssignment",
+  "AuthorizationProfilePolicy",
+  "AuthorizationProfileVersion",
+  "OrganizationPermission",
+  "UserOrganizationPermission",
+];
+
+/**
+ * Whether a tenant reference field may point at this entity at all, and so
+ * whether it carries `referencedBy`: a stored, tenant-scoped record a reader
+ * can resolve through its own `get`. Never, by rule:
+ *
+ *   - a table in the `platform` schema;
+ *   - a tenant registry, whose row IS its tenant (`CHECK (id = tenant_id)`,
+ *     or a global registry's `tenantIdentityColumn`): `Tenant`. A field
+ *     pointing at it says nothing, and the registry stays read-only;
+ *   - an entity with no generated create, update or delete of its own. Its
+ *     rows are kept by the platform, a plugin Operation or the parent that
+ *     owns them (`Tenant`, version snapshots, runs, sequences, renditions,
+ *     owned children), and the deletion guard of a tenant reference runs only
+ *     on the entity's own delete, so a reference could not hold or follow
+ *     them;
+ *   - the access-control model (EXTENSION_TARGET_DENYLIST).
+ *
+ * A host narrows the set further per entity with `excludedTargets`.
  */
 export function isExtensionTargetCandidate(
   contract: CompiledEntityContract,
-  table?: Pick<TableDefinition, "schema" | "tenantScoped" | "domainInternal" | "generatedCrudEligible">,
+  table?: Pick<TableDefinition, "schema" | "tenantScoped" | "domainInternal" | "generatedCrudEligible" | "constraints" | "tenantIdentityColumn">,
 ): boolean {
   if (!contract.authorization || contract.source || contract.subtype || contract.entity.valueDefinition) return false;
   if (!contract.entityOperations.get) return false;
+  if (EXTENSION_TARGET_DENYLIST.includes(contract.entity.name)) return false;
+  const operations = contract.entityOperations;
+  if (!operations.create && !operations.update && !operations.delete) return false;
   if (!table) return true;
+  if (table.tenantIdentityColumn || hasTenantIdentityCheck(table)) return false;
   return table.tenantScoped && table.schema !== "platform" && isGeneratedCrudEligible(table);
 }
 

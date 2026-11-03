@@ -593,7 +593,14 @@ extensible:
   `keyValueMap`, `variableTemplate`, `labelSet`, `condition`, `excludedTypes`
   and every object type without an `indexProjection`. A reference names a
   target entity: any tenant-scoped, generated-CRUD entity with a `get`, outside
-  `excludedTargets` and the `platform` schema.
+  `excludedTargets` and the `platform` schema. Never a target, whatever the
+  host: a tenant registry (`Tenant`, whose row is its tenant), an entity with
+  no generated create, update or delete of its own (version snapshots, runs,
+  sequences, renditions, owned children: the deletion guard of a reference
+  would not run where their rows go), and the access-control model
+  (`AuthorizationProfile*`, `AuthorizationOperationPolicy`,
+  `OrganizationPermission`, `UserOrganizationPermission`;
+  `EXTENSION_TARGET_DENYLIST`). Such an entity carries no `referencedBy`.
 - `indexProjection` on an object type in `osf-types.yaml` says which child
   lands in which index column (`text`, `number`, `boolean`, `date`,
   `timestamp`); `measurement` has `{ number: value, text: unit }`. An object

@@ -63,7 +63,7 @@ export function tenantIdentityCheckName(table: Pick<TableDefinition, "name">): s
  * check the single-column key would accept any tenant-scoped row, because a
  * foreign-key check bypasses row-level security.
  */
-export function hasTenantIdentityCheck(table: TableDefinition): boolean {
+export function hasTenantIdentityCheck(table: Pick<TableDefinition, "constraints">): boolean {
   return (table.constraints ?? []).some((constraint) =>
     constraint.kind === "check" &&
     constraint.expression.replace(/\s+/g, " ").trim() === TENANT_IDENTITY_CHECK_EXPRESSION);

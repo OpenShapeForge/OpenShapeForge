@@ -307,6 +307,20 @@ describe("extensible: the manifest registry", () => {
     });
   });
 
+  it("lists an owned child only when it is authorized through its owner", () => {
+    const children = (transform: (document: Record<string, any>) => void) =>
+      compile(() => {}, { dir: withDocument("extensible-part-spec", transform) }).extensionRegistry!.entities.ExtensiblePart!.ownedSingleChildren;
+    // A reader of the part who may not read the spec would see its weight through a formula.
+    expect(children((document) => { document.authorization.roles.read = ["General.All.ReadWrite"]; })).toEqual([]);
+    expect(children((document) => { document.authorization.roles.update = ["General.All.ReadWrite", "Organization.All.ReadWrite"]; })).toEqual([]);
+    // A classified column has reading rules of its own.
+    expect(children((document) => {
+      document.fields.push({ key: "cost", osfType: "number", label: { en: "Cost" }, classification: { sensitivity: "confidential" },
+        persisted: { column: "cost", storageClass: "core" } });
+    })).toEqual([]);
+    expect(children(() => {}).map((child) => child.relation)).toEqual(["spec"]);
+  });
+
   it("does not list an owned child without a one-per-parent key", () => {
     const dir = withDocument("extensible-part-spec", (document) => { delete document.indexes; });
     expect(compile(() => {}, { dir }).extensionRegistry!.entities.ExtensiblePart!.ownedSingleChildren).toEqual([]);

@@ -410,13 +410,19 @@ function uniqueValuesTable(entity: string, table: TableDefinition): TableDefinit
  * Owned children of which a record has at most one: an owned inverse
  * collection whose foreign key the child table holds unique per tenant (an
  * authored unique index, the shape a one-per-parent child takes today).
+ *
+ * This list is what a tenant formula may read beside its own record, and a
+ * formula's result is read with the owner's rights. So a child is listed only
+ * when it is provably authorized through its owner (childAuthorizedByOwner);
+ * any other child stays out, and a formula naming it is refused as out of
+ * scope.
  */
 function ownedSingleChildren(
-  contract: CompiledEntityContract,
+  owner: { contract: CompiledEntityContract; table: TableDefinition },
   byEntity: ReadonlyMap<string, { contract: CompiledEntityContract; table: TableDefinition }>,
 ): ExtensionRegistryEntity["ownedSingleChildren"] {
   const children: ExtensionRegistryEntity["ownedSingleChildren"] = [];
-  for (const relationship of contract.model.relationships) {
+  for (const relationship of owner.contract.model.relationships) {
     if (relationship.kind !== "hasMany" || relationship.ownership !== "owned") continue;
     if (relationship.through || relationship.provider || relationship.via || !relationship.foreignKey) continue;
     const child = byEntity.get(relationship.target);
@@ -426,9 +432,38 @@ function ownedSingleChildren(
       [`tenant_id,${foreignKey}`, foreignKey].includes(index.columns.join(",")));
     const bounded = typeof relationship.cardinality === "object" && relationship.cardinality.max === 1;
     if (!keyed && !bounded) continue;
+    if (!childAuthorizedByOwner(owner, child, relationship.childAuthorization === "owner")) continue;
     children.push({ relation: relationship.key, entity: relationship.target, table: qualified(child.table), foreignKey });
   }
   return children.sort((left, right) => left.relation.localeCompare(right.relation));
+}
+
+const sameRoles = (left: readonly string[], right: readonly string[]) =>
+  left.length === right.length && [...left].sort().join("\n") === [...right].sort().join("\n");
+
+/**
+ * Whether every reader of the owner may read the child's values that a formula
+ * would show: the relation authorizes the child through its owner
+ * (`childAuthorization: owner`), or the child has exactly the owner's read,
+ * create, update and delete roles. Either way the child has no row policy of
+ * its own (row scope, owner axis, record ACL), no per-profile or per-field
+ * read roles, and no classified or field-policed column — rules the owner's
+ * roles say nothing about, so a formula over the child could show a value to
+ * an owner reader the child itself would hide.
+ */
+function childAuthorizedByOwner(
+  owner: { contract: CompiledEntityContract },
+  child: { contract: CompiledEntityContract; table: TableDefinition },
+  throughOwner: boolean,
+): boolean {
+  const authorization = child.contract.authorization;
+  if (child.table.rowScope || child.table.ownerAxis || child.table.source?.authorization?.recordPermissions) return false;
+  if (authorization.rowAccess?.enabled || authorization.ownerAxis) return false;
+  if (Object.keys(authorization.profileAuthorizations ?? {}).length || authorization.fieldAuthorizations.length) return false;
+  if (child.table.columns.some((column) => column.classification || column.fieldPolicy)) return false;
+  if (throughOwner) return true;
+  const roles = owner.contract.authorization.roles;
+  return (["read", "create", "update", "delete"] as const).every((action) => sameRoles(roles[action], authorization.roles[action]));
 }
 
 /**
@@ -500,7 +535,7 @@ export function compileExtensionStorage(
       limits: { ...resolved.limits },
       allowedOsfTypes: [...resolved.allowedOsfTypes],
       targets,
-      ownedSingleChildren: ownedSingleChildren(contract, byEntity),
+      ownedSingleChildren: ownedSingleChildren({ contract, table }, byEntity),
     };
     for (const [type, projection] of Object.entries(resolved.indexProjections)) {
       const previous = registry.indexProjections[type];

@@ -50,6 +50,17 @@ export function sessionFor(tenantId: string, roles: string[], userId = randomUUI
   return { tenantId, userId, roles, groups: [], scope: "tenant" as const, credential: "trusted-context" as const };
 }
 
+/**
+ * Whether a role holds MAINTAIN on a table. The privilege exists from
+ * PostgreSQL 17; an older server cannot grant it and rejects the name, so
+ * there nobody holds it.
+ */
+export async function holdsMaintain(db: DatabaseRuntime["db"], role: string, table: string): Promise<boolean> {
+  const version = Number((await sql<{ version: string }>`select current_setting('server_version_num') as version`.execute(db)).rows[0]!.version);
+  if (version < 170000) return false;
+  return (await sql<{ held: boolean }>`select has_table_privilege(${role}, ${table}, 'MAINTAIN') as held`.execute(db)).rows[0]!.held;
+}
+
 /** The compiled acceptance table; refuses a composition without the test layer rather than testing nothing. */
 export function acceptanceTable(): GeneratedCrudTable {
   const entry = extensionRegistry.entity(ENTITY);

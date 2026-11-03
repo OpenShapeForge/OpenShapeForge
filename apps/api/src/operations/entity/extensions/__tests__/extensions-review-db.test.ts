@@ -25,7 +25,7 @@ import { enforceExtensionReferencesOnDelete } from "../references.js";
 import { loadExtensionFields } from "../store.js";
 import { EXTENSION_BACKFILL_KIND, EXTENSION_RETENTION_KIND, applyExtensionRetention, extensionBackfillJobHandler, extensionRetentionJobHandler } from "../backfill.js";
 import rawCatalog from "../../../../generated/operations/catalog.json" with { type: "json" };
-import { createExtensionFixture, ENTITY, MANAGER_ROLE, READER_ROLE, sessionFor, VALUES_TABLE, UNIQUE_TABLE, WRITER_ROLE, type ExtensionFixture } from "./fixture.js";
+import { createExtensionFixture, ENTITY, holdsMaintain, MANAGER_ROLE, READER_ROLE, sessionFor, VALUES_TABLE, UNIQUE_TABLE, WRITER_ROLE, type ExtensionFixture } from "./fixture.js";
 
 let fixture: ExtensionFixture;
 const silent = { info() {}, warn() {}, error() {} };
@@ -232,8 +232,6 @@ describe("extensible entity review findings", () => {
   test("S7 the worker holds no MAINTAIN and only the definition columns a backfill changes", async () => {
     const worker = "openshapeforge_worker";
     const [rights] = await privileged(sql<Record<string, boolean>>`select
-      has_table_privilege(${worker}, ${VALUES_TABLE}, 'MAINTAIN') as values_maintain,
-      has_table_privilege(${worker}, 'erp.extensible_assets', 'MAINTAIN') as entity_maintain,
       has_table_privilege(${worker}, ${VALUES_TABLE}, 'INSERT') as values_dml,
       has_table_privilege(${worker}, ${UNIQUE_TABLE}, 'DELETE') as unique_dml,
       has_table_privilege(${worker}, 'platform.extension_field_definitions', 'SELECT') as definitions_select,
@@ -242,7 +240,11 @@ describe("extensible entity review findings", () => {
       has_column_privilege(${worker}, 'platform.extension_field_definitions', 'definition', 'UPDATE') as definitions_definition,
       has_table_privilege(${worker}, 'platform.extension_field_dependencies', 'SELECT,INSERT,UPDATE,DELETE') as dependencies_any,
       has_column_privilege(${worker}, 'erp.extensible_assets', 'name', 'UPDATE') as entity_name`);
-    expect(rights).toEqual({
+    const maintain = {
+      values_maintain: await holdsMaintain(fixture.privileged.db, worker, VALUES_TABLE),
+      entity_maintain: await holdsMaintain(fixture.privileged.db, worker, "erp.extensible_assets"),
+    };
+    expect({ ...maintain, ...rights } as Record<string, boolean>).toEqual({
       values_maintain: false, entity_maintain: false, values_dml: true, unique_dml: true,
       definitions_select: true, definitions_delete: false, definitions_state: true, definitions_definition: false,
       dependencies_any: false, entity_name: false,

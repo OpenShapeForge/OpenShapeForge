@@ -93,20 +93,72 @@ function valueColumn(shape: ExtensionShape, alias: string): { sql: RawBuilder<un
     case "boolean": return { sql: sql.id(alias, "value_boolean"), kind: "boolean" };
     case "date": return { sql: sql.id(alias, "value_date"), kind: "timestamp" };
     case "timestamp": return { sql: sql.id(alias, "value_timestamp"), kind: "timestamp" };
-    case "ref": return { sql: sql`${sql.id(alias, "value_ref_id")}::text`, kind: "text" };
+    // Compared as uuid, so the reference index serves it; the operands are
+    // checked to be ids first (assertReferencePredicate).
+    case "ref": return { sql: sql.id(alias, "value_ref_id"), kind: "text" };
     default: return { sql: sql.id(alias, "value_text"), kind: "text" };
   }
 }
 
-function exists(set: ExtensionFieldSet, field: ExtensionField, predicate?: RawBuilder<unknown>): RawBuilder<unknown> {
+function exists(set: ExtensionFieldSet, field: ExtensionField, predicate?: { column: RawBuilder<unknown>; sql: RawBuilder<unknown> }): RawBuilder<unknown> {
+  // The value index is partial on `<column> is not null`; stating it lets a
+  // predicate the planner cannot prove it from (a function of the column, as
+  // startsWith and contains are) use the index too.
   return sql`exists (select 1 from ${qualifiedTable(set.entry.valuesTable)} as ${sql.id(VALUE_ALIAS)}
     where ${sql.id(VALUE_ALIAS, "tenant_id")} = ${sql.id("row_source", "tenant_id")}
       and ${sql.id(VALUE_ALIAS, "record_id")} = ${sql.id("row_source", "id")}
       and ${sql.id(VALUE_ALIAS, "field_id")} = ${field.fieldId}::uuid
-      ${predicate ? sql`and ${predicate}` : sql``})`;
+      ${predicate ? sql`and ${predicate.column} is not null and ${predicate.sql}` : sql``})`;
 }
 
-/** The SQL of one `extensions` filter node, under the alias `row_source`. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A reference compares by record id: equality, membership and order, never text. */
+function assertReferencePredicate(key: string, predicate: Record<string, unknown>): void {
+  for (const [operator, operand] of Object.entries(predicate)) {
+    if (operator === "contains" || operator === "startsWith") {
+      extensionError(`extensions.${key} is a reference; compare it by record id (eq, ne, in, isNull).`, "BAD_USER_INPUT");
+    }
+    const operands = operator === "in" && Array.isArray(operand) ? operand : [operand];
+    if (operator !== "isNull" && operands.some((item) => typeof item !== "string" || !UUID.test(item))) {
+      extensionError(`extensions.${key} is a reference; its filter values are record ids.`, "VALIDATION");
+    }
+  }
+}
+
+/**
+ * Estimated selectivity of one tenant field predicate, most selective first,
+ * from its operators alone (no planner statistics are read: that would cost a
+ * round trip per query). Equality on a value, or an element of a collection,
+ * selects few rows; a bounded range or prefix more; a one-sided range more
+ * still; a substring cannot use the index at all; a boolean has two values;
+ * `ne` and "has a value" keep nearly everything, and "has no value" is an
+ * anti-join over every record. Ties go by key, so the same filter always
+ * yields the same SQL whatever the order of its keys.
+ */
+export function extensionPredicateRank(shape: Pick<ExtensionShape, "column" | "collection">, operators: readonly string[]): number {
+  if (shape.collection) return operators.includes("contains") ? 0 : 6;
+  const has = (...names: string[]) => names.some((name) => operators.includes(name));
+  if (shape.column === "boolean") return has("eq", "in") ? 4 : 5;
+  if (has("eq", "in")) return 0;
+  if ((has("gt", "gte") && has("lt", "lte")) || has("startsWith")) return 1;
+  if (has("gt", "gte", "lt", "lte")) return 2;
+  if (has("contains")) return 3;
+  return 5;
+}
+
+/**
+ * The SQL of one `extensions` filter node, under the alias `row_source`: one
+ * EXISTS per field (and one for its `isNull`), each answered from the index
+ * alone, ordered by extensionPredicateRank so the most selective probe runs
+ * first (the order of the "adaptive" shape of the phase-0 measurement, #372).
+ * Postgres keeps the written order among filters of equal cost, so the rank
+ * decides which probe a record meets first; where the planner turns the
+ * EXISTS into semi-joins it orders them by its own estimates, which the
+ * field-and-value statistics feed. The bounded walk with a candidate-set
+ * fallback that the measurement also tried is not built: it needs a sort
+ * index for every list order, which a list does not have.
+ */
 export function extensionFilterCondition(
   table: GeneratedCrudTable,
   session: DbSessionInput,
@@ -114,28 +166,32 @@ export function extensionFilterCondition(
 ): RawBuilder<unknown> {
   const set = provenSet(table, session);
   if (!record(value)) extensionError("An extensions filter maps field keys to predicates.", "BAD_USER_INPUT");
-  const conditions: RawBuilder<unknown>[] = [];
+  const conditions: Array<{ rank: number; key: string; sql: RawBuilder<unknown> }> = [];
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     const { field, shape } = fieldFor(set, key);
     const predicate = { ...(raw as Record<string, unknown>) };
     const column = valueColumn(shape, VALUE_ALIAS);
+    if (shape.column === "ref") assertReferencePredicate(key, shape.collection && Object.hasOwn(predicate, "contains") ? { eq: predicate.contains } : predicate);
     if (Object.hasOwn(predicate, "isNull")) {
       if (typeof predicate.isNull !== "boolean") extensionError("Invalid null filter.", "BAD_USER_INPUT");
-      conditions.push(predicate.isNull ? sql`not ${exists(set, field)}` : exists(set, field));
+      conditions.push({ rank: predicate.isNull ? 6 : 5, key, sql: predicate.isNull ? sql`not ${exists(set, field)}` : exists(set, field) });
       delete predicate.isNull;
     }
     if (shape.collection) {
       if (Object.hasOwn(predicate, "contains")) {
         // One index row per element: "contains x" is "some element equals x".
-        conditions.push(exists(set, field, structuredFilter({ value: { eq: predicate.contains } }, { value: column })));
+        conditions.push({ rank: extensionPredicateRank(shape, ["contains"]), key,
+          sql: exists(set, field, { column: column.sql, sql: structuredFilter({ value: { eq: predicate.contains } }, { value: column }) }) });
       }
       continue;
     }
     if (Object.keys(predicate).length) {
-      conditions.push(exists(set, field, structuredFilter({ value: predicate }, { value: column })));
+      conditions.push({ rank: extensionPredicateRank(shape, Object.keys(predicate)), key,
+        sql: exists(set, field, { column: column.sql, sql: structuredFilter({ value: predicate }, { value: column }) }) });
     }
   }
-  return conditions.length ? sql`(${sql.join(conditions, sql` and `)})` : sql`true`;
+  conditions.sort((left, right) => left.rank - right.rank || (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
+  return conditions.length ? sql`(${sql.join(conditions.map((condition) => condition.sql), sql` and `)})` : sql`true`;
 }
 
 /** A sort on one tenant field: which index rows order the page, and in which direction. */

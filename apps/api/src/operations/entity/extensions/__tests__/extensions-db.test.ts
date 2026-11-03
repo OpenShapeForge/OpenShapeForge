@@ -16,6 +16,7 @@ import { executeEntityOperation } from "../../runtime.js";
 import { serializeEntityRow } from "../../serialize-result.js";
 import { executeFieldDefinitionAction, executeReferencedBy, type FieldDefinitionAction } from "../definitions.js";
 import { findExtensionReferenceOrphans } from "../references.js";
+import { extensionFilterCondition, extensionPredicateRank } from "../query.js";
 import { EXTENSION_BACKFILL_KIND, EXTENSION_RETENTION_KIND, applyExtensionRetention, extensionBackfillJobHandler, extensionRetentionJobHandler, runBackfillBatch } from "../backfill.js";
 import { catalog } from "../../../../mcp/catalog.js";
 import { describeTool } from "../../../../mcp/entity-tool-projection.js";
@@ -244,6 +245,25 @@ describe("tenant fields on an extensible entity", () => {
     expect(ids(await list(reader, { filter: { ...scope, extensions: { links: { contains: c.id } } } }))).toEqual([d.id]);
     expect(ids(await list(reader, { filter: { ...scope, or: [{ extensions: { soort: { eq: "kit" } } }, { extensions: { accu: { lt: 6 } } }] } })).sort()).toEqual([a.id, c.id].sort());
     expect(await list(reader, { filter: { ...scope, extensions: { links: { eq: c.id } } } })).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+    // A reference compares by record id, as uuid, so the reference index serves it.
+    expect(ids(await list(reader, { filter: { ...scope, extensions: { links: { contains: a.id.toUpperCase() } } } }))).toEqual([d.id]);
+    expect(await list(reader, { filter: { ...scope, extensions: { links: { contains: "not-an-id" } } } })).toMatchObject({ error: { code: "VALIDATION" } });
+    expect(await list(reader, { filter: { ...scope, extensions: { parent: { in: [a.id, "x"] } } } })).toMatchObject({ error: { code: "VALIDATION" } });
+    expect(await list(reader, { filter: { ...scope, extensions: { parent: { startsWith: "0" } } } })).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+    expect(ids(await list(reader, { filter: { ...scope, extensions: { parent: { ne: a.id } } } }))).toEqual([]);
+    // Predicates are ordered most selective first by operator, whatever the
+    // order of the keys: equality, a range, a substring, "has no value".
+    const shapes = { scalar: { column: "text" as const, collection: false }, flag: { column: "boolean" as const, collection: false }, many: { column: "ref" as const, collection: true } };
+    expect([["eq"], ["in"], ["gte", "lt"], ["startsWith"], ["gt"], ["contains"], ["ne"]].map((operators) => extensionPredicateRank(shapes.scalar, operators)))
+      .toEqual([0, 0, 1, 1, 2, 3, 5]);
+    expect([extensionPredicateRank(shapes.flag, ["eq"]), extensionPredicateRank(shapes.many, ["contains"])]).toEqual([4, 0]);
+    const order = (filter: Record<string, unknown>) => {
+      const compiled = extensionFilterCondition(fixture.table, reader, filter).compile(fixture.app.db);
+      return compiled.parameters.filter((parameter) => Object.values(fields).includes(parameter as string));
+    };
+    const mixed = { links: { isNull: true }, soort: { contains: "it" }, accu: { gte: 1 }, parent: { eq: a.id } };
+    expect(order(mixed)).toEqual([fields.parent, fields.accu, fields.soort, fields.links]);
+    expect(order(Object.fromEntries(Object.entries(mixed).reverse()))).toEqual(order(mixed));
     // A classified key is never a filter or sort key, even for a writer who may read it.
     expect(await list(writer, { filter: { extensions: { bsn: { eq: "123456782" } } } })).toMatchObject({ error: { code: "FORBIDDEN" } });
     expect(await list(writer, { sort: { field: "extensions.bsn", direction: "asc" } })).toMatchObject({ error: { code: "FORBIDDEN" } });

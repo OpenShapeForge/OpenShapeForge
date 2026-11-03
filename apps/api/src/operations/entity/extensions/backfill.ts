@@ -290,12 +290,12 @@ export async function runBackfillBatch(
       switch (row!.operation) {
         case "retype":
           // The value stays; its index rows follow the new type. Claims are the unique backfill's.
-          await rewriteExtensionValues(trx, session, { table, set, recordId: record.id, before: source, after: source, fields: [field!], claims: false });
+          await rewriteExtensionValues(trx, session, { table, set, recordId: record.id, before: source, after: source, fields: [field!], claims: false, draft: false });
           break;
         case "rebuild":
         case "unique": {
           if (row!.operation === "rebuild") {
-            await rewriteExtensionValues(trx, session, { table, set, recordId: record.id, before: source, after: source, fields: [field!], claims: false });
+            await rewriteExtensionValues(trx, session, { table, set, recordId: record.id, before: source, after: source, fields: [field!], claims: false, draft: false });
             if (field!.definition.unique !== true) break;
             await sql`delete from ${qualifiedTable(entry!.uniqueTable)}
               where tenant_id = ${tenantId}::uuid and field_id = ${field!.fieldId}::uuid and record_id = ${record.id}::uuid`.execute(trx);
@@ -351,9 +351,14 @@ export async function runBackfillBatch(
  * One batch of a formula backfill: every record of the tenant after the
  * cursor, in id order, recomputes the field and every formula that reads
  * it, and its index is rewritten from the result (idempotent per record).
- * A batch that fails is rolled back to before its first record and the
- * field is `suspended` — never left `updating` — with the backfill failed
- * and the reason in its error; a new version of the formula starts again.
+ * A record whose formula gives an error code is computed like any other: the
+ * code is its value (null, `$meta[fieldId].error`), and the batch goes on.
+ * Only a database failure fails the batch: it is rolled back to before its
+ * first record and the field is `suspended` — never left `updating` — with
+ * the backfill failed and the reason in its error. Records of earlier
+ * batches already hold the new generation, the rest the old one, so readers
+ * see `extensionsMeta.<key>.suspended` and a query refuses the field; saving
+ * the formula again or `rebuildIndex` starts a new backfill.
  */
 async function runFormulaBatch(
   trx: Transaction<DB>,
@@ -370,7 +375,8 @@ async function runFormulaBatch(
         where tenant_id = ${tenantId}::uuid ${row.cursor ? sql`and id > ${row.cursor}::uuid` : sql``}
         order by id limit ${batchSize}`.execute(trx);
       for (const record of records.rows) {
-        await recomputeRecordFormulas(trx, session, { table, set, recordId: record.id, fields, rebuild: true });
+        // A definition change: a published head stays published (rewriteExtensionValues).
+        await recomputeRecordFormulas(trx, session, { table, set, recordId: record.id, fields, rebuild: true, draft: false });
       }
       const processed = row.processed + records.rows.length;
       const cursor = records.rows.at(-1)?.id ?? row.cursor;
@@ -391,11 +397,11 @@ async function runFormulaBatch(
       // quote values of records the designer cannot read.
       await sql`rollback to savepoint formula_backfill_batch`.execute(trx);
       await sql`update platform.extension_field_definitions set state = 'suspended'
-        where tenant_id = ${tenantId}::uuid and id = ${field.rowId}::uuid and state = 'updating'`.execute(trx);
+        where tenant_id = ${tenantId}::uuid and id = ${field.rowId}::uuid and state in ('updating', 'ready')`.execute(trx);
       forgetExtensionFields(trx, tenantId, row.entity);
       await failBackfill(trx, tenantId, row, {
         code: "FORMULA_BACKFILL_FAILED",
-        message: `${field.key} could not be computed for every record and is suspended; save the formula again to retry.`,
+        message: `${field.key} could not be computed for every record and is suspended; save the formula again or rebuild its index to resume.`,
       });
       return { state: "failed" as const, processed: row.processed, cursor: row.cursor, more: false };
     }

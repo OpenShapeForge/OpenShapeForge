@@ -21,7 +21,7 @@ import { primeSessionExtensions, withExtensionTool } from "../../../../mcp/exten
 import { getGeneratedCrudTables } from "../../catalog.js";
 import { createGeneratedEntityForTable, updateGeneratedEntityForTable } from "../../mutations.js";
 import { executeEntityOperation } from "../../runtime.js";
-import { EXTENSION_BACKFILL_KIND, extensionBackfillJobHandler, runBackfillBatch } from "../backfill.js";
+import { applyExtensionRetention, EXTENSION_BACKFILL_KIND, extensionBackfillJobHandler, runBackfillBatch } from "../backfill.js";
 import { executeFieldDefinitionAction, type FieldDefinitionAction } from "../definitions.js";
 import { extensionSnapshot } from "../snapshot.js";
 import { createExtensionFixture, ENTITY, MANAGER_ROLE, READER_ROLE, sessionFor, VALUES_TABLE, WRITER_ROLE, type ExtensionFixture } from "./fixture.js";
@@ -38,6 +38,8 @@ const number = (text: string, extra: Record<string, unknown> = {}) =>
   ({ osfType: "number", label: label(text), classification: { sensitivity: "public" }, ...extra });
 const formula = (text: string, name = "Formula", extra: Record<string, unknown> = {}) =>
   ({ label: label(name), formula: { text }, classification: { sensitivity: "public" }, ...extra });
+const typed = (osfType: string, text: string, extra: Record<string, unknown> = {}) =>
+  ({ osfType, label: label(text), classification: { sensitivity: "public" }, ...extra });
 
 async function tenant() {
   const id = randomUUID();
@@ -292,8 +294,11 @@ describe("formula fields on an extensible entity", () => {
     const backfillId = started.backfill!.id;
     const first = await withDbSession(fixture.worker.db, t.manager, (trx) => runBackfillBatch(trx, t.manager, backfillId, 2));
     expect(first).toMatchObject({ state: "running", processed: 2, more: true });
-    const computed = async () => (await Promise.all(records.map(async (record) => (await source(record.id))[triple]))).filter((value) => value !== undefined);
-    expect(await computed()).toHaveLength(2);
+    // Every record up to the cursor is computed, none after it (ids are random, so `fresh` may be among the first two).
+    const valueOf = async (record: Row) => (await source(record.id))[triple];
+    const done = records.filter((record) => record.id <= first.cursor!);
+    expect(await Promise.all(done.map(valueOf))).not.toContain(undefined);
+    expect(await Promise.all(records.filter((record) => record.id > first.cursor!).map(valueOf))).toEqual(records.filter((record) => record.id > first.cursor!).map(() => undefined));
     // Resumes after the cursor; running it again changes nothing.
     await drainJobs();
     expect(await listed(t, "triple")).toMatchObject({ state: "ready", backfill: { state: "done", processed: 4 } });
@@ -385,5 +390,174 @@ describe("formula fields on an extensible entity", () => {
     // Tenant B may define a formula of the same key over its own fields only.
     expect(await failure(define(b.manager, "create", { key: "double", kind: "formula", definition: formula("{X} * 2", "Double") })))
       .toMatchObject({ data: { errors: [expect.objectContaining({ code: "unknownField" })] } });
+  });
+
+  test("a result that would not fit the index is an error code, never a database error; a constant one is refused", async () => {
+    const t = await tenant();
+    await field(t.manager, "d", typed("date", "D"));
+    await field(t.manager, "n", number("N"));
+    await field(t.manager, "note", typed("string", "Note"));
+    // A formula without field references gives every record the same error: refused when saved, with that code.
+    expect(await failure(define(t.manager, "create", { key: "long", kind: "formula", definition: formula(`"${"x".repeat(3000)}"`, "Long") })))
+      .toMatchObject({ code: "VALIDATION", data: { errors: [expect.objectContaining({ code: "textTooLong" })] } });
+    expect(await failure(define(t.manager, "create", { key: "far", kind: "formula", definition: formula("DATEADD(CREATED_TIME(), 8000, 'years')", "Far") })))
+      .toMatchObject({ data: { errors: [expect.objectContaining({ code: "invalidDate" })] } });
+    const later = await ready(t, "later", formula("DATEADD({D}, {N}, 'years')", "Later"));
+    const twice = await ready(t, "twice", formula("{Note} & {Note}", "Twice"));
+    const sum = await ready(t, "sum", formula("{N} + 0.2", "Sum"));
+    expect((await created(t.writer, { d: "2026-01-01", n: 1 })).extensions.later).toBe("2027-01-01");
+    // Year 10026 has no place in a date column.
+    const far = await created(t.writer, { d: "2026-01-01", n: 8000, note: "x".repeat(600) });
+    expect(far.extensions).toMatchObject({ later: null, twice: null });
+    expect(far.extensionsMeta).toMatchObject({ later: { error: "invalidDate" }, twice: { error: "textTooLong" } });
+    expect(await indexed(far.id, later)).toEqual([]);
+    expect(await indexed(far.id, twice)).toEqual([]);
+    // The index holds the number as written, not its binary approximation.
+    const decimal = await created(t.writer, { n: 0.1 });
+    expect(decimal.extensions.sum).toBe(0.3);
+    expect(await indexed(decimal.id, sum)).toEqual([{ value_number: "0.3", value_text: null }]);
+    expect(await list(t.reader, { filter: { extensions: { sum: { eq: 0.3 } } } }).then(ids)).toEqual([decimal.id]);
+  });
+
+  test("retention and setNull compute the formulas over the value they change, in the same transaction", async () => {
+    const t = await tenant();
+    const note = await field(t.manager, "note", typed("string", "Note", { retention: { days: 30 } }));
+    await field(t.manager, "links", typed(ENTITY, "Links", { cardinality: "collection", onDelete: "setNull" }));
+    const copy = await ready(t, "copy", formula('IF({Note} = BLANK(), "none", {Note})', "Copy"));
+    const old = await created(t.writer, { note: "kept beyond retention" });
+    expect(old.extensions.copy).toBe("kept beyond retention");
+    await privileged(sql`update erp.extensible_assets set created_at = now() - interval '40 days' where id = ${old.id}::uuid`);
+    expect(await withDbSession(fixture.worker.db, t.manager, (trx) => applyExtensionRetention(trx, t.manager, ENTITY))).toEqual({ cleared: 1, retained: true });
+    expect((await source(old.id))[note]).toBeUndefined();
+    expect((await get(t.reader, old.id))!.extensions).toMatchObject({ note: null, copy: "none" });
+    expect(await indexed(old.id, copy)).toEqual([{ value_number: null, value_text: "none" }]);
+    expect(await list(t.reader, { filter: { extensions: { copy: { eq: "kept beyond retention" } } } }).then(ids)).toEqual([]);
+    // setNull goes through the same write: the record's formulas stay what its values say.
+    const target = await created(t.writer, undefined, "Target");
+    const linked = await created(t.writer, { links: [target.id], note: "linked" });
+    const removed = await executeEntityOperation(fixture.app.db, t.writer, { operation: { id: `${ENTITY}.delete`, intent: "delete" }, input: { id: target.id, confirmed: true, expectedVersion: String(target.updated_at) } });
+    expect(removed).toMatchObject({ data: { deleted: true } });
+    expect((await get(t.reader, linked.id))!.extensions).toMatchObject({ links: null, copy: "linked" });
+    expect(await indexed(linked.id, copy)).toEqual([{ value_number: null, value_text: "linked" }]);
+  });
+
+  test("a changed result type types every reader again: refused with the reader's name, or the reader follows", async () => {
+    const t = await tenant();
+    await field(t.manager, "a", number("A"));
+    const f = await ready(t, "f", formula("{A} + 1", "F"));
+    const g = await ready(t, "g", formula("{F} * 2", "G"));
+    const same = await ready(t, "same", formula("{F}", "Same"));
+    const record = await created(t.writer, { a: 4 });
+    expect(record.extensions).toMatchObject({ f: 5, g: 10, same: 5 });
+    const refused = await failure(define(t.manager, "update", { fieldId: f, definition: formula('"abc"', "F") }));
+    expect(refused).toMatchObject({ code: "VALIDATION", message: expect.stringContaining("'G' reads this formula and could no longer be computed"),
+      data: { errors: [expect.objectContaining({ code: "typeMismatch", params: expect.objectContaining({ field: "G" }) })] } });
+    expect((await listed(t, "f")).definition.formula.resultType).toBe("number");
+    // Without G, the reader that only passes F on becomes text with it, and is computed again.
+    await define(t.manager, "deprecate", { fieldId: g });
+    expect(await define(t.manager, "update", { fieldId: f, definition: formula('"x" & {A}', "F") })).toMatchObject({ state: "updating" });
+    expect(await listed(t, "same")).toMatchObject({ state: "updating", definition: { osfType: "string", formula: { resultType: "text" } } });
+    await drainJobs();
+    expect(await listed(t, "same")).toMatchObject({ state: "ready" });
+    expect((await get(t.reader, record.id))!.extensions).toMatchObject({ f: "x4", same: "x4" });
+    expect(await indexed(record.id, same)).toEqual([{ value_number: null, value_text: "x4" }]);
+    // G was deprecated over a number: its restore checks it again, and refuses.
+    expect(await failure(define(t.manager, "restore", { fieldId: g }))).toMatchObject({ code: "VALIDATION",
+      data: { errors: [expect.objectContaining({ code: "typeMismatch" })] } });
+    expect((await listed(t, "g")).state).toBe("deprecated");
+  });
+
+  test("a deprecated reader counts toward formulaDepth, and a restore is checked as a save", async () => {
+    const t = await tenant();
+    await field(t.manager, "a", number("A"));
+    const f1 = await ready(t, "f1", formula("{A} + 1", "F1"));
+    await ready(t, "f2", formula("{F1} + 1", "F2"));
+    await ready(t, "f3", formula("{F2} + 1", "F3"));
+    const x = await ready(t, "x", formula("{F3} + 1", "X"));
+    await ready(t, "g1", formula("{A} + 1", "G1"));
+    await ready(t, "g2", formula("{G1} + 1", "G2"));
+    const deepen = () => define(t.manager, "update", { fieldId: f1, definition: formula("{G2} + 1", "F1") });
+    expect(await failure(deepen())).toMatchObject({ data: { errors: [expect.objectContaining({ code: "depthExceeded" })] } });
+    await define(t.manager, "deprecate", { fieldId: x });
+    // Deprecated, X still reads F3: deepening F1 is refused as before, naming X.
+    expect(await failure(deepen())).toMatchObject({ code: "VALIDATION", message: expect.stringContaining("'X' reads this formula and would be 6 formulas deep") });
+    expect(await define(t.manager, "restore", { fieldId: x })).toMatchObject({ state: "updating" });
+    await drainJobs();
+    expect((await created(t.writer, { a: 1 })).extensions).toMatchObject({ f1: 2, f2: 3, f3: 4, x: 5 });
+  });
+
+  test("a stored field reads as a reader sees it: a record without a value reads the default", async () => {
+    const t = await tenant();
+    const old = await created(t.writer, {});
+    const x = await field(t.manager, "x", number("X", { defaultValue: 10 }));
+    expect((await get(t.reader, old.id))!.extensions.x).toBe(10);
+    await ready(t, "twice", formula("{X} * 2", "Twice"));
+    expect((await source(old.id))[x]).toBeUndefined();
+    expect((await get(t.reader, old.id))!.extensions.twice).toBe(20);
+    expect((await created(t.writer, { x: 3 })).extensions.twice).toBe(6);
+    // A new default is a new input: the formulas over it are computed again.
+    await define(t.manager, "update", { fieldId: x, definition: number("X", { defaultValue: 7 }) });
+    await drainJobs();
+    expect((await get(t.reader, old.id))!.extensions).toMatchObject({ x: 7, twice: 14 });
+  });
+
+  test("an error code does not stop a backfill; a database failure suspends the field until it is saved again or rebuilt", async () => {
+    const t = await tenant();
+    await field(t.manager, "d", typed("date", "D"));
+    await field(t.manager, "n", number("N"));
+    const f = await ready(t, "f", formula("{N} + 1", "F"));
+    const near = await created(t.writer, { d: "2026-01-01", n: 1 });
+    const beyond = await created(t.writer, { d: "2026-01-01", n: 9000 });
+    // One record per batch: the record beyond year 9999 gets its code, the others their date.
+    await define(t.manager, "update", { fieldId: f, definition: formula("DATEADD({D}, {N}, 'years')", "F") });
+    const backfillId = (await listed(t, "f")).backfill!.id;
+    for (let batch = 0; batch < 5; batch += 1) {
+      const result = await withDbSession(fixture.worker.db, t.manager, (trx) => runBackfillBatch(trx, t.manager, backfillId, 1));
+      expect(result.state).not.toBe("failed");
+      if (!result.more) break;
+    }
+    expect(await listed(t, "f")).toMatchObject({ state: "ready", backfill: { state: "done", processed: 2 } });
+    expect((await get(t.reader, near.id))!.extensions.f).toBe("2027-01-01");
+    expect((await get(t.reader, beyond.id))!.extensionsMeta.f).toMatchObject({ error: "invalidDate" });
+
+    // A snapshot freezes an error code as one, and a value only from a ready definition.
+    const snapshot = (id: string) => withDbSession(fixture.app.db, t.reader, async (trx) => {
+      const row = (await sql<{ row: Record<string, unknown> }>`select to_jsonb(a.*) as row from erp.extensible_assets a where id = ${id}::uuid`.execute(trx)).rows[0]!.row;
+      return extensionSnapshot(trx, t.reader, ENTITY, row);
+    });
+    expect((await snapshot(beyond.id)).extensions[f]).toEqual({ error: "invalidDate" });
+    expect((await snapshot(near.id)).extensions[f]).toBe("2027-01-01");
+
+    // A database failure (the worker lost its write grant) suspends the field.
+    await define(t.manager, "update", { fieldId: f, definition: formula("DATEADD({D}, {N}, 'days')", "F") });
+    expect((await snapshot(near.id)).extensions[f]).toEqual({ unavailable: "updating" });
+    await privileged(sql`revoke update (extension_values) on erp.extensible_assets from openshapeforge_worker`);
+    try {
+      await drainJobs();
+    } finally {
+      await privileged(sql`grant update (extension_values) on erp.extensible_assets to openshapeforge_worker`);
+    }
+    expect(await listed(t, "f")).toMatchObject({ state: "suspended", backfill: { state: "failed" } });
+    expect((await get(t.reader, near.id))!.extensionsMeta.f).toMatchObject({ suspended: true });
+    // The flag is the definition's, never stored per record.
+    expect(JSON.stringify(await source(near.id))).not.toContain("suspended");
+    expect((await snapshot(near.id)).extensions[f]).toEqual({ unavailable: "suspended" });
+    expect(await list(t.reader, { filter: { extensions: { f: { gte: "2027-01-01" } } } }))
+      .toMatchObject({ error: { code: "BAD_USER_INPUT", message: expect.stringContaining("suspended") } });
+    expect(await list(t.reader, { sort: { field: "extensions.f", direction: "asc" } })).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+    // rebuildIndex resumes it as a formula backfill.
+    await define(t.manager, "rebuildIndex", { fieldId: f });
+    expect((await listed(t, "f")).state).toBe("updating");
+    await drainJobs();
+    expect(await listed(t, "f")).toMatchObject({ state: "ready", backfill: { state: "done" } });
+    expect((await get(t.reader, near.id))!.extensions.f).toBe("2026-01-02");
+    expect(await list(t.reader, { filter: { extensions: { f: { gte: "2026-01-02" } } } }).then(ids)).toContain(near.id);
+  });
+
+  test("a formula reads no platform-written field: updatedAt and the publication state are out of scope", async () => {
+    const t = await tenant();
+    expect(await failure(define(t.manager, "create", { key: "touched", kind: "formula", definition: formula("YEAR({updatedAt})", "Touched") })))
+      .toMatchObject({ data: { errors: [expect.objectContaining({ code: "outOfScope", start: 5, end: 16 })] } });
+    expect(await ready(t, "made", formula("YEAR({createdAt})", "Made"))).toBeString();
   });
 });

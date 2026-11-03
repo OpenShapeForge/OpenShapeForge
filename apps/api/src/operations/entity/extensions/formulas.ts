@@ -31,21 +31,23 @@ import {
   type FormulaAst,
   type FormulaDiagnostic,
   type FormulaEnvironment,
+  type FormulaErrorCode,
   type FormulaField,
   type FormulaFieldRef,
   type FormulaRecord,
   type FormulaType,
 } from "@openshapeforge/formula";
+import { isDeepStrictEqual } from "node:util";
 import { operationFailure } from "@openshapeforge/operations";
 import type { RuntimeExtensibleEntity } from "@openshapeforge/plugin-runtime";
-import rawCatalog from "../../../generated/operations/catalog.json" with { type: "json" };
 import { storedFieldBaseType } from "../../../modules/field-schemas.js";
 import { getGeneratedCrudTables } from "../catalog.js";
 import { fieldNameForColumn } from "../columns.js";
-import type { EntityOperationContract, GeneratedCrudTable } from "../types.js";
-import { formulaColumns } from "./formula-columns.js";
+import type { GeneratedCrudTable } from "../types.js";
+import { formulaColumns, outOfScopeFormulaColumns, readContractProperties } from "./formula-columns.js";
 import {
   EXTENSION_META_KEY,
+  evaluateCondition,
   extensionError,
   extensionShape,
   isClassified,
@@ -55,6 +57,7 @@ import {
   type ExtensionField,
   type ExtensionFieldSet,
 } from "./model.js";
+import { conditionValues, readValue } from "./read.js";
 
 /** The osfType a formula's result is stored as: the one whose index column its result type is. */
 export const FORMULA_OSF_TYPES: Readonly<Record<FormulaType, string>> = {
@@ -91,19 +94,6 @@ function entityTable(entity: string): GeneratedCrudTable | undefined {
   return tables.length === 1 ? tables[0] : undefined;
 }
 
-const entityOperations = (rawCatalog as unknown as { entityOperations: EntityOperationContract[] }).entityOperations;
-
-/** The record properties the entity's read contract names, with their labels and osfTypes. */
-function readProperties(entity: string): Record<string, unknown> {
-  for (const intent of ["get", "list"]) {
-    const schema = entityOperations.find((operation) => operation.entityName === entity && operation.intent === intent)?.outputSchema;
-    const candidates = [schema, ...(Array.isArray(schema?.anyOf) ? schema.anyOf : [])];
-    const found = candidates.find((candidate) => record(candidate) && record(candidate.properties));
-    if (found) return (found as { properties: Record<string, unknown> }).properties;
-  }
-  return {};
-}
-
 function authoredType(name: string, osfType: string): string {
   if (isEntityOsfType(osfType)) return osfType;
   try {
@@ -117,17 +107,19 @@ const authoredCache = new Map<string, readonly FormulaField[]>();
 
 /**
  * The authored fields of a table a formula may name: the columns of
- * formulaColumns that the entity's read contract also names. A reference
- * (an entity-typed field, a foreign key) is listed with its own type, which a
- * formula refuses to read: related records are a lookup's business.
+ * formulaColumns (which the entity's read contract names, never a
+ * reference), and — only to refuse them as `outOfScope`, with the reason —
+ * the read-contract columns the platform changes outside the record's own
+ * write (formula-columns.ts).
  */
 function authoredFields(table: GeneratedCrudTable, scope: FormulaField["scope"], skip: ReadonlySet<string> = new Set()): readonly FormulaField[] {
   const cacheKey = `${table.name}:${scope === "self" ? "" : scope.relation}`;
   const cached = authoredCache.get(cacheKey);
   if (cached) return cached;
-  const properties = readProperties(table.source?.authoringEntityName ?? "");
+  const properties = readContractProperties(table.source?.authoringEntityName ?? "");
   const fields: FormulaField[] = [];
-  for (const column of formulaColumns(table)) {
+  const listed = [...formulaColumns(table).map((column) => ({ column, reason: undefined as string | undefined })), ...outOfScopeFormulaColumns(table)];
+  for (const { column, reason } of listed) {
     const name = fieldNameForColumn(column);
     const property = properties[name];
     if (skip.has(column.name) || !record(property)) continue;
@@ -135,6 +127,7 @@ function authoredFields(table: GeneratedCrudTable, scope: FormulaField["scope"],
     const i18n = record(property["x-osf-i18n"]) ? property["x-osf-i18n"].title : undefined;
     fields.push({
       id: name, key: name, label: labelText(i18n ?? property.title, name), type: authoredType(name, osfType), scope,
+      ...(reason ? { outOfScope: reason } : {}),
     });
   }
   authoredCache.set(cacheKey, Object.freeze(fields));
@@ -190,7 +183,10 @@ export function formulaDependencies(set: ExtensionFieldSet, ast: FormulaAst): Fo
   });
 }
 
-function refuseFormula(key: string, errors: readonly FormulaDiagnostic[]): never {
+/** A refusal: a save-time diagnostic, or the error code a formula without field references always yields. */
+type FormulaRefusal = Omit<FormulaDiagnostic, "code"> & { code: FormulaDiagnostic["code"] | FormulaErrorCode };
+
+function refuseFormula(key: string, errors: readonly FormulaRefusal[]): never {
   throw operationFailure({
     code: "VALIDATION",
     message: `The formula of ${key} cannot be saved: ${errors[0]!.message}.`,
@@ -207,19 +203,26 @@ const NOT_ON_A_FORMULA = [
   "unique", "required", "defaultValue", "options", "cardinality", "onDelete", "validation", "retention", "unit",
 ] as const;
 
+/** A formula that reads a changed one, typed again: its definition as it is stored from now on. */
+export type RetypedReader = { field: ExtensionField; definition: ExtensionDefinition };
+
 /**
  * Check a formula definition before it is saved and return it as stored:
  * the canonical text, the AST bound to field ids, the static result type and
  * `osfType` following it. Refused with every diagnostic (code, message,
  * span) in `data.errors`: syntax, unknown or ambiguous field, type conflict,
  * mixed branches, time functions, out of scope, classified field, a cycle
- * through any other formula of the entity, and `limits.formulaDepth`
- * exceeded by this formula or by any formula that reads it.
+ * through any other formula of the entity, `limits.formulaDepth` exceeded by
+ * this formula or by any formula that reads it (a deprecated one included),
+ * a formula that reads it and no longer types with it in place, and a
+ * formula without field references that gives every record an error code.
+ * `readers` are the formulas that read this one, transitively, whose stored
+ * AST or result type changes with it (retypedReaders).
  */
 export function validateFormulaDefinition(
   set: ExtensionFieldSet,
   input: { fieldId: string; key: string; definition: ExtensionDefinition; appliesWhen?: unknown },
-): { definition: ExtensionDefinition; dependsOn: FormulaDependency[] } {
+): { definition: ExtensionDefinition; dependsOn: FormulaDependency[]; readers: RetypedReader[] } {
   const definition = { ...input.definition };
   if (input.appliesWhen !== undefined && input.appliesWhen !== null) {
     extensionError("A formula field applies to every record; it takes no appliesWhen.");
@@ -239,34 +242,119 @@ export function validateFormulaDefinition(
       : [{ code: "undeterminedType", message: "This formula has no type", start: 0, end: (formula as { text: string }).text.length }]);
   }
   assertFormulaSetValid(set, { fieldId: input.fieldId, key: input.key, label: labelText(definition.label, input.key), reads: analysis.dependencies }, limit);
+  assertConstantComputes(input, analysis.ast!, analysis.resultType!, (formula as { text: string }).text);
   const text = formatFormula(analysis.ast!, env);
   return {
     definition: { ...definition, osfType: FORMULA_OSF_TYPES[analysis.resultType!], formula: { text, ast: analysis.ast!, resultType: analysis.resultType! } },
     dependsOn: formulaDependencies(set, analysis.ast!),
+    readers: retypedReaders(set, { fieldId: input.fieldId, key: input.key, ast: analysis.ast!, resultType: analysis.resultType! }),
   };
+}
+
+/**
+ * Every formula that reads the changed one, directly or through other
+ * formulas (deprecated and deleted ones aside: a restore checks those), typed
+ * again in evaluation order with the change in place. A reader that no longer
+ * types refuses the change, naming the reader and why; one whose AST or result
+ * type changes is returned with its new definition, which the caller stores
+ * as a new version and computes again. So a formula whose result type
+ * changes never leaves a reader computing over a type it was not checked
+ * against.
+ */
+function retypedReaders(
+  set: ExtensionFieldSet,
+  changed: { fieldId: string; key: string; ast: FormulaAst; resultType: FormulaType },
+): RetypedReader[] {
+  const formulas = set.fields.filter((field) => field.kind === "formula" && field.state !== "deleted" && field.state !== "deprecated" &&
+    field.fieldId !== changed.fieldId && storedFormula(field.definition) !== undefined);
+  const node = (field: string) => ({ entity: set.entity, field });
+  const selfReads = (ast: FormulaAst) => dependencies(ast).filter((ref) => ref.scope === "self").map((ref) => node(ref.id));
+  const graph = buildDependencyGraph([
+    { node: node(changed.fieldId), dependsOn: selfReads(changed.ast) },
+    ...formulas.map((field) => ({ node: node(field.fieldId), dependsOn: selfReads(storedFormula(field.definition)!.ast) })),
+  ]);
+  const readers = graph.affectedBy([node(changed.fieldId)]).map((item) => set.byId.get(item.field)!).filter((field) => field.fieldId !== changed.fieldId);
+  if (!readers.length) return [];
+  const replace = (env: FormulaEnvironment, fieldId: string, formula: { ast: FormulaAst; resultType: FormulaType }) =>
+    env.map((field) => field.id === fieldId && field.scope === "self"
+      ? { ...field, type: formula.resultType, kind: "formula" as const, dependencies: dependencies(formula.ast) } : field);
+  let env = replace(formulaEnvironment(set), changed.fieldId, changed);
+  const retyped: RetypedReader[] = [];
+  for (const reader of readers) {
+    const before = storedFormula(reader.definition)!;
+    const label = labelText(reader.definition.label, reader.key);
+    let text: string;
+    try {
+      text = formatFormula(before.ast, env);
+    } catch (error) {
+      refuseFormula(changed.key, [{ code: "typeMismatch", message: `'${label}' reads this formula and could no longer be computed: ${error instanceof Error ? error.message : String(error)}`,
+        start: 0, end: 0, params: { field: label } }]);
+    }
+    const analysis = analyze(text!, env, { fieldId: reader.fieldId });
+    if (analysis.errors.length || !analysis.ast || !analysis.resultType) {
+      const reason = analysis.errors[0] ?? { code: "undeterminedType" as const, message: "it has no type" };
+      refuseFormula(changed.key, [{ code: reason.code, message: `'${label}' reads this formula and could no longer be computed: ${reason.message}`,
+        start: 0, end: 0, params: { field: label, reason: reason.message } }]);
+    }
+    if (analysis.resultType === before.resultType && isDeepStrictEqual(analysis.ast, before.ast)) continue;
+    const formula = { text: formatFormula(analysis.ast!, env), ast: analysis.ast!, resultType: analysis.resultType! };
+    retyped.push({ field: reader, definition: { ...reader.definition, osfType: FORMULA_OSF_TYPES[formula.resultType], formula } });
+    env = replace(env, reader.fieldId, formula);
+  }
+  return retyped;
+}
+
+/**
+ * The set as it is once `fieldId` is back from deprecation: what a restore
+ * checks the field (and its readers) against before it lets it compute again.
+ */
+export function withRestoredField(set: ExtensionFieldSet, fieldId: string): ExtensionFieldSet {
+  const fields = set.fields.map((field) => field.fieldId === fieldId ? { ...field, state: "ready" as const } : field);
+  return {
+    ...set, hash: `${set.hash}:restored:${fieldId}`, fields,
+    byKey: new Map(fields.filter((field) => field.state !== "deleted").map((field) => [field.key, field])),
+    byId: new Map(fields.map((field) => [field.fieldId, field])),
+  };
+}
+
+/**
+ * A formula that reads no field has one value for every record, so the error
+ * code it would give every record refuses it now: `"x" & ...` beyond the text
+ * limit, `DATEADD(CREATED_TIME(), 8000, 'years')`. RECORD_ID() and
+ * CREATED_TIME() read a stand-in record (this field's id, now).
+ */
+function assertConstantComputes(input: { fieldId: string; key: string }, ast: FormulaAst, resultType: FormulaType, text: string): void {
+  if (dependencies(ast).length) return;
+  const result = evaluate(ast, { id: input.fieldId, createdAt: new Date().toISOString() }, { resultType });
+  if (result.ok) return;
+  refuseFormula(input.key, [{ code: result.error, message: `It gives every record the error ${result.error}`, start: 0, end: text.length,
+    params: { error: result.error } }]);
 }
 
 /**
  * The graph over every formula of the entity with this one in place: no
  * cycle anywhere, and no formula deeper than the limit — a change to a
- * formula another formula reads can make that reader too deep.
+ * formula another formula reads can make that reader too deep. A deprecated
+ * formula counts as a reader too: it can be restored, and its restore must
+ * not be the way past the limit.
  */
 function assertFormulaSetValid(
   set: ExtensionFieldSet,
   changed: { fieldId: string; key: string; label: string; reads: readonly FormulaFieldRef[] },
   limit: number,
 ): void {
-  const env = formulaEnvironment(set);
   const reads = new Map<string, string[]>();
-  for (const field of env) {
-    if (field.kind === "formula" && field.id !== changed.fieldId) {
-      reads.set(field.id, (field.dependencies ?? []).filter((ref) => ref.scope === "self").map((ref) => ref.id));
-    }
+  for (const field of set.fields) {
+    const formula = field.kind === "formula" && field.state !== "deleted" && field.fieldId !== changed.fieldId ? storedFormula(field.definition) : undefined;
+    if (formula) reads.set(field.fieldId, dependencies(formula.ast).filter((ref) => ref.scope === "self").map((ref) => ref.id));
   }
   reads.set(changed.fieldId, changed.reads.filter((ref) => ref.scope === "self").map((ref) => ref.id));
   const node = (field: string) => ({ entity: set.entity, field });
   const graph = buildDependencyGraph([...reads].map(([field, read]) => ({ node: node(field), dependsOn: read.map(node) })));
-  const labelOf = (id: string) => id === changed.fieldId ? changed.label : env.find((field) => field.id === id)?.label ?? id;
+  const labelOf = (id: string) => {
+    const field = set.byId.get(id);
+    return id === changed.fieldId ? changed.label : field ? labelText(field.definition.label, field.key) : id;
+  };
   const cycle = graph.cycles[0];
   if (cycle) {
     refuseFormula(changed.key, [{ code: "cycle", message: `Circular reference: ${[...cycle, cycle[0]!].map((item) => labelOf(item.field)).join(" → ")}`,
@@ -333,9 +421,9 @@ export function formulaGraph(set: ExtensionFieldSet): FormulaGraph {
 /** One owned single child as a formula reads it: its fields by name, or null without one. */
 export type OwnedChildValues = Readonly<Record<string, Readonly<Record<string, unknown>> | null>>;
 
-/** A stored row of `table` keyed by field name. */
+/** The columns of a stored row a formula may read (formulaColumns), keyed by field name. */
 export function fieldValues(table: GeneratedCrudTable, row: Readonly<Record<string, unknown>>): Record<string, unknown> {
-  return Object.fromEntries(table.columns.filter((column) => Object.hasOwn(row, column.name))
+  return Object.fromEntries(formulaColumns(table).filter((column) => Object.hasOwn(row, column.name))
     .map((column) => [fieldNameForColumn(column), row[column.name] ?? null]));
 }
 
@@ -346,9 +434,13 @@ export function childEntityTable(entity: string): GeneratedCrudTable | undefined
 /**
  * The record a formula reads (see @openshapeforge/formula `evaluate`):
  * authored fields by name, tenant fields by id, owned children under their
- * relation, and `id` / `createdAt` for RECORD_ID() and CREATED_TIME().
+ * relation, and `id` / `createdAt` for RECORD_ID() and CREATED_TIME(). A
+ * stored tenant field reads as a reader sees it (read.ts `readValue`): its
+ * value, else the default of a field that applies — a record written before
+ * the field existed holds none.
  */
 function formulaRecord(
+  set: ExtensionFieldSet,
   table: GeneratedCrudTable,
   row: Readonly<Record<string, unknown>>,
   source: Readonly<Record<string, unknown>>,
@@ -356,6 +448,11 @@ function formulaRecord(
 ): FormulaRecord {
   const values: Record<string, unknown> = fieldValues(table, row);
   for (const [key, value] of Object.entries(source)) if (key !== EXTENSION_META_KEY) values[key] = value;
+  const conditions = conditionValues(table, row, set, source);
+  for (const field of set.fields) {
+    if (field.kind !== "stored" || field.state === "deleted" || field.definition.defaultValue === undefined) continue;
+    values[field.fieldId] = readValue(field, source, evaluateCondition(field.appliesWhen, conditions));
+  }
   for (const [relation, child] of Object.entries(children)) values[relation] = child;
   values.id = row.id ?? null;
   values.createdAt = row.created_at ?? null;
@@ -399,7 +496,7 @@ export function evaluateFormulas(
   const { order } = formulaGraph(set);
   if (!order.length) return;
   const env = formulaEnvironment(set);
-  const values = formulaRecord(table, input.row, input.source, input.children) as Record<string, unknown>;
+  const values = formulaRecord(set, table, input.row, input.source, input.children) as Record<string, unknown>;
   for (const field of order) {
     if (input.only && !input.only.has(field.fieldId)) continue;
     const formula = storedFormula(field.definition)!;

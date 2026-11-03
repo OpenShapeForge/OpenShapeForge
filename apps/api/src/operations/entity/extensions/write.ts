@@ -459,12 +459,26 @@ export async function completeExtensionWrite(
 
 /**
  * The one internal write of tenant values outside the caller's own create or
- * update: setNull, retention, the delete and retype backfills. It
+ * update: setNull, retention, the delete, retype and rebuild backfills, and
+ * the formula recompute (recomputeRecordFormulas). It
  * writes the source, bumps `updated_at`, puts a versioned head back to draft
  * (an extensible entity is never an owned child, so the record is its own
  * head), rewrites the index (and claims) of `fields`, and appends the per-key
  * audit entry — the same effects a caller's write has. A field whose value
  * does not change only has its index rewritten (a retype).
+ *
+ * Every formula that reads one of the stored `fields`, directly or through
+ * other formulas, is computed again here, in the same transaction, against
+ * `after`: a value that changes outside the record's own write — erased by
+ * retention, unlinked by setNull, read as another type after a retype — never
+ * leaves a formula over it stale. The formulas whose result changes are
+ * written with the rest.
+ *
+ * `draft: false` leaves a published head as it is: a write that follows from
+ * a definition change (a formula backfill, a retype, a rebuild) changes no
+ * content its publisher wrote. A value that changes for the record itself
+ * (retention, setNull, the delete of a field, an owned child's write) puts
+ * the head back to draft, as a caller's write does.
  */
 export async function rewriteExtensionValues(
   trx: Transaction<DB>,
@@ -478,19 +492,22 @@ export async function rewriteExtensionValues(
     fields: readonly ExtensionField[];
     /** Rewrite claims as well; false for a retype, which leaves them to the unique backfill. */
     claims?: boolean;
+    /** Put a versioned head back to draft (default); false for a write that follows from a definition change. */
+    draft?: boolean;
   },
 ): Promise<void> {
-  const { table, set, recordId, before, after } = input;
-  const changed = input.fields.filter((field) => fieldChanged(field, before, after));
+  const { table, set, recordId, before } = input;
+  const { after, fields } = await withDependentFormulas(trx, session, input);
+  const changed = fields.filter((field) => fieldChanged(field, before, after));
   if (changed.length) {
     const updatedAt = table.columns.some((column) => column.name === "updated_at");
-    const draft = draftRule(table);
+    const draft = input.draft === false ? undefined : draftRule(table);
     await sql`update ${sql.id(table.schema, table.table)} set ${sql.id(EXTENSION_VALUES_COLUMN)} = ${jsonbLiteral(after)}
         ${updatedAt ? sql`, updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')` : sql``}
         ${draft ? sql`, ${sql.id(draft.column)} = ${draft.value}` : sql``}
       where tenant_id = ${session.tenantId}::uuid and id = ${recordId}::uuid`.execute(trx);
   }
-  for (const field of input.fields) {
+  for (const field of fields) {
     const indexed = input.claims === false ? { ...field, definition: { ...field.definition, unique: false } } : field;
     await writeExtensionFieldIndex(trx, session.tenantId!, set, indexed, recordId, after[field.fieldId]);
   }
@@ -498,6 +515,32 @@ export async function rewriteExtensionValues(
   // would otherwise read the whole entity row to derive it, which the
   // worker may not (it holds only the columns this write needs).
   if (changed.length) await appendExtensionAudit(trx, session, { table, before, after, changed }, recordId, true);
+}
+
+/**
+ * `after` with every formula over the stored `fields` computed again, and
+ * `fields` with each such formula whose result changed (see
+ * rewriteExtensionValues).
+ */
+async function withDependentFormulas(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  input: { table: GeneratedCrudTable; set: ExtensionFieldSet; recordId: string; before: Readonly<Record<string, unknown>>; after: Readonly<Record<string, unknown>>; fields: readonly ExtensionField[] },
+): Promise<{ after: Readonly<Record<string, unknown>>; fields: readonly ExtensionField[] }> {
+  const { table, set, recordId } = input;
+  const stored = input.fields.filter((field) => field.kind === "stored");
+  const affected = stored.length ? formulaGraph(set).affectedBy(stored.map((field) => ({ entity: set.entity, field: field.fieldId }))) : [];
+  if (!affected.length) return input;
+  const found = await sql<{ row: Record<string, unknown> }>`select ${formulaRowObject(table, "record")} as row
+    from ${sql.id(table.schema, table.table)} as record
+    where record.tenant_id = ${session.tenantId}::uuid and record.id = ${recordId}::uuid`.execute(trx);
+  const row = found.rows[0]?.row;
+  if (!row) return input;
+  const after = { ...input.after };
+  const children = await ownedChildValues(trx, session.tenantId!, set, recordId);
+  evaluateFormulas(set, table, { row, source: after, children, only: new Set(affected.map((field) => field.fieldId)) });
+  const recomputed = affected.filter((field) => !input.fields.includes(field) && fieldChanged(field, input.before, after));
+  return { after, fields: [...input.fields, ...recomputed] };
 }
 
 const REDACTED = "[REDACTED]";
@@ -558,7 +601,11 @@ async function appendExtensionAudit(
 export async function recomputeRecordFormulas(
   trx: Transaction<DB>,
   session: DbSessionInput,
-  input: { table: GeneratedCrudTable; set: ExtensionFieldSet; recordId: string; fields?: readonly ExtensionField[]; rebuild?: boolean },
+  input: {
+    table: GeneratedCrudTable; set: ExtensionFieldSet; recordId: string; fields?: readonly ExtensionField[]; rebuild?: boolean;
+    /** False when a definition change, not the record, is the cause (rewriteExtensionValues). */
+    draft?: boolean;
+  },
 ): Promise<boolean> {
   const { table, set, recordId } = input;
   const order = formulaGraph(set).order;
@@ -574,7 +621,10 @@ export async function recomputeRecordFormulas(
   const children = await ownedChildValues(trx, session.tenantId!, set, recordId);
   evaluateFormulas(set, table, { row, source: after, children, only: new Set(fields.map((field) => field.fieldId)) });
   const written = input.rebuild ? fields : fields.filter((field) => fieldChanged(field, before, after));
-  if (written.length) await rewriteExtensionValues(trx, session, { table, set, recordId, before, after, fields: written, claims: false });
+  if (written.length) {
+    await rewriteExtensionValues(trx, session, { table, set, recordId, before, after, fields: written, claims: false,
+      ...(input.draft === false ? { draft: false } : {}) });
+  }
   return true;
 }
 

@@ -102,7 +102,9 @@ export function projectExtensionRow(
       applicable,
       ...(fieldMeta.stale === true ? { stale: true as const } : {}),
       ...(typeof fieldMeta.error === "string" ? { error: fieldMeta.error } : {}),
-      ...(fieldMeta.suspended === true || field.state === "suspended" ? { suspended: true as const } : {}),
+      // From the definition, never stored per record: a suspended formula's
+      // values are of two generations until its backfill runs to the end.
+      ...(field.state === "suspended" ? { suspended: true as const } : {}),
       ...(field.state === "deprecated" ? { deprecated: true as const } : {}),
     };
   }

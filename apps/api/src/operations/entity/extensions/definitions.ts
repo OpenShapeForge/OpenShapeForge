@@ -38,7 +38,16 @@ import {
   type ExtensionState,
 } from "./model.js";
 import { extensionRegistry } from "./registry.js";
-import { presentFormulaDefinition, storedFormula, validateFormulaDefinition, type FormulaDependency } from "./formulas.js";
+import {
+  formulaDependencies,
+  formulaGraph,
+  presentFormulaDefinition,
+  storedFormula,
+  validateFormulaDefinition,
+  withRestoredField,
+  type FormulaDependency,
+  type RetypedReader,
+} from "./formulas.js";
 import {
   announceFieldDefinitionChange,
   FIELD_DEFINITION_RESOURCE_SUFFIX,
@@ -155,7 +164,7 @@ export function validateFieldDefinition(
   table: GeneratedCrudTable,
   input: { fieldId: string; key: string; kind?: unknown; definition: unknown; appliesWhen?: unknown },
   existing?: ExtensionField,
-): { kind: ExtensionKind; definition: ExtensionDefinition; appliesWhen: unknown; dependsOn: Array<FormulaDependency | { field: string }> } {
+): { kind: ExtensionKind; definition: ExtensionDefinition; appliesWhen: unknown; dependsOn: Array<FormulaDependency | { field: string }>; readers?: RetypedReader[] } {
   const kind = input.kind ?? "stored";
   if (typeof kind === "string" && UNAVAILABLE_KINDS.has(kind)) {
     extensionError(`Fields of kind ${kind} are not available yet (nog niet beschikbaar).`, "NOT_AVAILABLE");
@@ -180,7 +189,7 @@ export function validateFieldDefinition(
       extensionError("A tenant field declares its classification (public, internal, confidential, pii or bsn).");
     }
     const valid = validateFormulaDefinition(set, { fieldId: input.fieldId, key: input.key, definition, appliesWhen: input.appliesWhen });
-    return { kind: "formula", definition: valid.definition, appliesWhen: null, dependsOn: valid.dependsOn };
+    return { kind: "formula", definition: valid.definition, appliesWhen: null, dependsOn: valid.dependsOn, readers: valid.readers };
   }
   if (definition.formula !== undefined) extensionError("Only a field of kind formula carries a formula.");
   const osfType = definition.osfType;
@@ -417,7 +426,7 @@ async function updateFormula(
   session: DbSessionInput,
   set: ExtensionFieldSet,
   field: ExtensionField,
-  change: { key: string; definition: ExtensionDefinition; dependsOn: Parameters<typeof writeDependencies>[4] },
+  change: { key: string; definition: ExtensionDefinition; dependsOn: Parameters<typeof writeDependencies>[4]; readers: readonly RetypedReader[] },
 ): Promise<[ExtensionField, BackfillRow | undefined]> {
   if (!isDeepStrictEqual(field.definition.classification, change.definition.classification)) {
     extensionError(`${field.key}: its classification never changes once the field exists; create a new field, copy the values and delete this one.`);
@@ -430,7 +439,40 @@ async function updateFormula(
     appliesWhen: null, state: recompute ? "updating" : field.state, position: field.position,
   });
   await writeDependencies(trx, session, set.entity, field.fieldId, change.dependsOn);
-  return [next, recompute ? await startBackfill(trx, session, { entity: set.entity, field: next, operation: "formula" }) : undefined];
+  const started = recompute ? await startBackfill(trx, session, { entity: set.entity, field: next, operation: "formula" }) : undefined;
+  await storeRetypedReaders(trx, session, set, change.readers);
+  return [next, started];
+}
+
+/**
+ * The readers a formula change typed again (formulas.ts `retypedReaders`):
+ * each a new version with its new AST and result type, `updating` until its
+ * own backfill has computed every record (and rewritten its index in the
+ * column of its new type).
+ */
+async function storeRetypedReaders(trx: Transaction<DB>, session: DbSessionInput, set: ExtensionFieldSet, readers: readonly RetypedReader[]): Promise<void> {
+  for (const reader of readers) {
+    const next = await insertVersion(trx, session, set.entity, {
+      ...reader.field, version: reader.field.version + 1, definition: reader.definition, state: "updating",
+    });
+    await writeDependencies(trx, session, set.entity, reader.field.fieldId, formulaDependencies(set, storedFormula(reader.definition)!.ast));
+    await startBackfill(trx, session, { entity: set.entity, field: next, operation: "formula" });
+  }
+}
+
+/**
+ * A stored field's default or `appliesWhen` changed: what a record without a
+ * value reads changes with it (read.ts `readValue`), and so does every
+ * formula over it. Each computed formula that reads the field directly is
+ * backfilled; that backfill computes the formulas over it in turn.
+ */
+async function recomputeFormulaReaders(trx: Transaction<DB>, session: DbSessionInput, set: ExtensionFieldSet, field: ExtensionField): Promise<void> {
+  const node = { entity: set.entity, field: field.fieldId };
+  for (const reader of formulaGraph(set).affectedBy([node])) {
+    const reads = storedFormula(reader.definition)!;
+    if (!formulaDependencies(set, reads.ast).some((dependency) => dependency.via === null && dependency.field === field.fieldId)) continue;
+    await startBackfill(trx, session, { entity: set.entity, field: reader, operation: "formula" });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -491,7 +533,9 @@ export async function executeFieldDefinitionAction(
           field.state !== "suspended") {
         return toRecord(set, field);
       }
-      if (field.kind === "formula") return toRecord(set, ...await updateFormula(trx, session, set, field, { key, definition: valid.definition, dependsOn: valid.dependsOn }));
+      if (field.kind === "formula") {
+        return toRecord(set, ...await updateFormula(trx, session, set, field, { key, definition: valid.definition, dependsOn: valid.dependsOn, readers: valid.readers ?? [] }));
+      }
       let backfill = await typeChange(trx, session, set, field.definition, valid.definition, field);
       if (valid.definition.unique === true && field.definition.unique !== true) {
         // Counted across the tenant, normalized as claims compare; the values
@@ -520,6 +564,9 @@ export async function executeFieldDefinitionAction(
         appliesWhen: valid.appliesWhen, state: backfill ? "updating" : field.state, position: field.position,
       });
       await writeDependencies(trx, session, entity, field.fieldId, valid.dependsOn);
+      if (!isDeepStrictEqual(valid.definition.defaultValue, field.definition.defaultValue) || !isDeepStrictEqual(valid.appliesWhen, field.appliesWhen ?? null)) {
+        await recomputeFormulaReaders(trx, session, set, field);
+      }
       // A retype that also turns unique on claims as it rebuilds: the unique
       // backfill rewrites claims only, the retype the index only.
       const started = backfill ? await startBackfill(trx, session, { entity, field: next, operation: backfill === "retype" && valid.definition.unique === true && field.definition.unique !== true ? "unique" : backfill }) : undefined;
@@ -534,12 +581,20 @@ export async function executeFieldDefinitionAction(
       const from: ExtensionState[] = action === "deprecate" ? ["ready", "updating", "suspended"] : ["deprecated"];
       if (!from.includes(field.state)) extensionError(`${field.key} is ${field.state}; only a ${from.join(" or ")} field can be ${action}d.`, "CONFLICT");
       if (action === "deprecate") assertNoDependents(set, field, await dependentsOf(trx, session, entity, field.fieldId), "deprecated");
-      // A restored formula was not computed while it was deprecated: its
-      // backfill brings every record up to date again.
+      // A restored formula was not computed while it was deprecated: it is
+      // checked again as if it were saved now — the fields it reads may have
+      // changed type, a cycle or the depth limit may have been reached in
+      // the meantime — and its backfill brings every record up to date.
       const recompute = action === "restore" && field.kind === "formula";
+      const restored = recompute
+        ? validateFormulaDefinition(withRestoredField(set, field.fieldId), { fieldId: field.fieldId, key: field.key, definition: presentFormulaDefinition(set, field) })
+        : undefined;
       const next = await insertVersion(trx, session, entity, { ...field, version: field.version + 1,
+        ...(restored ? { definition: restored.definition } : {}),
         state: action === "deprecate" ? "deprecated" : recompute ? "updating" : "ready" });
+      if (restored) await writeDependencies(trx, session, entity, field.fieldId, restored.dependsOn);
       const started = recompute ? await startBackfill(trx, session, { entity, field: next, operation: "formula" }) : undefined;
+      if (restored) await storeRetypedReaders(trx, session, set, restored.readers);
       return toRecord(set, next, started);
     }
     case "affectedRecords": {
@@ -572,7 +627,11 @@ export async function executeFieldDefinitionAction(
         : [requireField(set, input.fieldId)];
       const backfills: Array<{ fieldId: string; backfillId: string }> = [];
       for (const field of fields) {
-        const started = await startBackfill(trx, session, { entity, field, operation: "rebuild" });
+        // A suspended formula is computed again rather than re-indexed: the
+        // index of a backfill that stopped halfway holds two generations.
+        const resume = field.kind === "formula" && field.state === "suspended"
+          ? await insertVersion(trx, session, entity, { ...field, version: field.version + 1, state: "updating" }) : undefined;
+        const started = await startBackfill(trx, session, { entity, field: resume ?? field, operation: resume ? "formula" : "rebuild" });
         backfills.push({ fieldId: field.fieldId, backfillId: started.id });
       }
       return { backfills };

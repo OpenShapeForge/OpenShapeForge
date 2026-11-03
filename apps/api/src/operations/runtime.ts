@@ -2284,10 +2284,10 @@ export function operationGraphqlContribution(
   modules: readonly RuntimeModule[],
   runtime: ModuleRuntimeContext,
 ): RuntimeModule | undefined {
-  // The core jobs, transition and billing Operations project in every
-  // process, as their REST and MCP surfaces do: the handlers ship with the
-  // runtime, not with a module.
-  const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN, TRANSITIONS_PLUGIN, BILLING_PLUGIN]);
+  // The core jobs, transition, billing and tenant field Operations project in
+  // every process, as their REST and MCP surfaces do: the handlers ship with
+  // the runtime, not with a module.
+  const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN, TRANSITIONS_PLUGIN, BILLING_PLUGIN, EXTENSIONS_PLUGIN]);
   const projected = catalog.operations.filter((operation) =>
     activePlugins.has(operation.plugin) && operation.transports.graphql.enabled
   );

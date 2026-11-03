@@ -498,6 +498,7 @@ describe("canonical operation runtime", () => {
         operation.plugin === "osf-blueprints" ||
         operation.plugin === "osf-control" ||
         operation.plugin === "osf-edit-leases" ||
+        operation.plugin === "osf-extensions" ||
         operation.plugin === "osf-grants" ||
         operation.plugin === "osf-jobs" ||
         operation.plugin === "osf-record-actions" ||

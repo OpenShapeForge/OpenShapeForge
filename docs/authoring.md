@@ -647,6 +647,54 @@ additive, so a built database rolls forward:
 - `customFields` on the entity's web interface and `referencedByPath` on each
   target's.
 
+### Formulas
+
+A tenant field of `kind: formula` is computed, never entered:
+`definition: { label, classification, formula: { text: "{Capacity kWh} * {Price per kWh}" } }`.
+The language is spreadsheet (Airtable) grammar, implemented by
+`@openshapeforge/formula` and compiled to the canonical expression AST:
+
+- Fields by label in braces (`{Capacity kWh}`) or by key (`capacityKwh`), an
+  owned single child's field under its relation (`spec.weight`); numbers,
+  strings in either quote, `TRUE()`/`FALSE()`; `+ - * /`, `&` to join text,
+  `= != <> < > <= >=`.
+- Functions: text `CONCATENATE LEFT RIGHT MID LEN TRIM UPPER LOWER SUBSTITUTE`;
+  logical `IF AND OR NOT SWITCH BLANK ISERROR`; numeric `ROUND ROUNDUP
+  ROUNDDOWN MIN MAX SUM AVERAGE ABS VALUE MOD POWER SQRT CEILING FLOOR`; date
+  `DATEADD DATETIME_DIFF DATETIME_FORMAT YEAR MONTH DAY` with a unit in quotes
+  (`'days'`, `'months'`, …); record `RECORD_ID CREATED_TIME`.
+- In reach: the record's authored fields, its current tenant fields (formulas
+  included, up to `limits.formulaDepth` deep) and the authored fields of its
+  owned single children. Anything across a reference or collection is out of
+  scope, and a classified field is never in reach: the result would reveal it.
+  `updatedAt` is not in reach either.
+
+Saving refuses with every reason in `data.errors` (`code`, `message`, the
+`start`/`end` of the text it is about): `syntaxError`, `unknownField`,
+`ambiguousField`, `unknownFunction`, `argumentCount`, `typeMismatch`,
+`mixedBranches` (every branch of `IF`/`SWITCH` has one type), `timeFunction`,
+`outOfScope`, `unsupportedFieldType`, `classifiedField`, `cycle` (through any
+formula of the entity) and `depthExceeded` (by this formula, or by a formula
+that reads it). Time functions (`NOW()`, `TODAY()`) are refused: a stored
+"now" is stale the moment it is written. A formula takes no `appliesWhen`,
+`unique`, `required`, `defaultValue` or options; its classification is
+required and never changes.
+
+The stored definition keeps the text, the AST bound to field ids (renaming a
+field never breaks a formula; the text is printed with today's labels) and
+the static `resultType` (`text`, `number`, `boolean`, `date`, `timestamp`),
+which sets `osfType` and the index column: a formula filters and sorts like a
+stored field of that type. Every create evaluates every formula, and every
+update the ones it affects, in dependency order inside the write transaction;
+a write of an owned child recomputes its owner. A blank input counts as blank
+or 0, as in a spreadsheet. A per-record failure (`divideByZero`,
+`invalidNumber`, `numberOutOfRange`, `invalidDate`, `typeError`) is `null`
+with the code in `extensionsMeta.<key>.error`, and no index value. A new,
+changed or restored formula is `updating` while a backfill recomputes every
+record and every formula that reads it; a backfill that fails leaves it
+`suspended` until it is saved again. A snapshot freezes the value, with the
+formula's text and result type.
+
 A collection may also be presented as a tree:
 `interfaces.web.views.collection.tree: { children, label, count }`, where
 `children` is a collection relationship of the entity and `label` and `count`

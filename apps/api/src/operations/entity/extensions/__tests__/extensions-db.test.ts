@@ -248,6 +248,11 @@ describe("tenant fields on an extensible entity", () => {
     expect(await list(writer, { filter: { extensions: { bsn: { eq: "123456782" } } } })).toMatchObject({ error: { code: "FORBIDDEN" } });
     expect(await list(writer, { sort: { field: "extensions.bsn", direction: "asc" } })).toMatchObject({ error: { code: "FORBIDDEN" } });
     expect(await list(writer, { filter: { extensions: { nope: { eq: 1 } } } })).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+    // The raw source column is no filter or sort key under either name.
+    for (const key of ["extensionValues", "extension_values"]) {
+      expect(await list(writer, { filter: { [key]: { eq: "{}" } } })).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+      expect(await list(writer, { sort: { field: key, direction: "asc" } })).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+    }
     // limits.filtersPerQuery counts predicates over the whole tree (limit 3).
     expect(await list(reader, { filter: { extensions: { accu: { gte: 1, lte: 100 } }, and: [{ extensions: { soort: { eq: "kit" } } }, { extensions: { aantal: { eq: 1 } } }] } }))
       .toMatchObject({ error: { code: "BAD_USER_INPUT", message: expect.stringContaining("at most 3") } });

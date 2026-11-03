@@ -1590,14 +1590,18 @@ describe("tenant fields on a carried-forward database", () => {
           // The worker: no MAINTAIN, the definition columns a backfill changes
           // only, and nothing on the dependencies.
           const worker = databaseRole("worker").name;
+          // MAINTAIN exists from PostgreSQL 17; older servers cannot grant it at all.
+          const maintainKnown = Number((await sql<{ version: string }>`select current_setting('server_version_num') as version`.execute(db)).rows[0]!.version) >= 170000;
+          const maintain = maintainKnown
+            ? (await sql<{ maintain: boolean }>`select has_table_privilege(${worker}, ${entity.valuesTable}, 'MAINTAIN') as maintain`.execute(db)).rows[0]!.maintain
+            : false;
           const rights = await sql<Record<string, boolean>>`select
-            has_table_privilege(${worker}, ${entity.valuesTable}, 'MAINTAIN') as maintain,
             has_table_privilege(${worker}, 'platform.extension_field_definitions', 'DELETE') as definitions_delete,
             has_column_privilege(${worker}, 'platform.extension_field_definitions', 'state', 'UPDATE') as definitions_state,
             has_column_privilege(${worker}, 'platform.extension_field_definitions', 'definition', 'UPDATE') as definitions_definition,
             has_table_privilege(${worker}, 'platform.extension_field_dependencies', 'SELECT,INSERT,UPDATE,DELETE') as dependencies,
             has_table_privilege(${worker}, 'platform.system_bypass_audit', 'INSERT') as bypass_audit`.execute(db);
-          expect(rights.rows[0]).toEqual({
+          expect({ maintain, ...rights.rows[0] }).toEqual({
             maintain: false, definitions_delete: false, definitions_state: true, definitions_definition: false, dependencies: false, bypass_audit: true,
           });
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);

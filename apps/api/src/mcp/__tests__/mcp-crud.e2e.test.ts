@@ -301,11 +301,12 @@ describe("generated MCP server", () => {
     const envelope = toolEnvelope(created.body);
     const id = envelope.data.id as string;
     createdRows.push({ table: relation, id, identity: tenantA });
-    // The three generated record Operations, plus the record-scoped
-    // `referencedBy` read every entity a tenant field may point at carries.
-    expect(envelope.operations).toHaveLength(4);
+    // The three generated record Operations. A plugin Operation MCP does not
+    // project, such as the `referencedBy` read a tenant-field target carries
+    // on REST and GraphQL, is not offered here: no tool could invoke it.
+    expect(envelope.operations).toHaveLength(3);
     expect(envelope.operations.map((offer: any) => offer.operation.id)).toEqual(
-      expect.arrayContaining(["Relation.get", "Relation.update", "Relation.delete", "Relation.referencedBy"]),
+      expect.arrayContaining(["Relation.get", "Relation.update", "Relation.delete"]),
     );
 
     const listed = await rpc(tenantA, "resources/list");
@@ -322,9 +323,9 @@ describe("generated MCP server", () => {
       (await rpc(tenantA, "resources/read", { uri: `app://relations/${id}` })).body,
     );
     expect(record.data.id).toBe(id);
-    expect(record.operations).toHaveLength(4);
+    expect(record.operations).toHaveLength(3);
     expect(record.operations.map((offer: any) => offer.operation.id)).toEqual(
-      expect.arrayContaining(["Relation.get", "Relation.update", "Relation.delete", "Relation.referencedBy"]),
+      expect.arrayContaining(["Relation.get", "Relation.update", "Relation.delete"]),
     );
   });
 

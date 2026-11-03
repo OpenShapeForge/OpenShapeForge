@@ -85,7 +85,7 @@ export async function invokeTool(
       // count pass is always requested (#17).
       const operationResult = await executeEntityOperation(db, session, {
         operation: operationRef("list"),
-        offerIntents,
+        offerIntents, offerTransport: "mcp",
         input: {
           ...(typeof args.first === "number" ? { limit: args.first } : {}),
           ...(typeof args.after === "string" ? { cursor: args.after } : {}),
@@ -113,7 +113,7 @@ export async function invokeTool(
     case "get": {
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("get"),
-        offerIntents,
+        offerIntents, offerTransport: "mcp",
         input: { id: requireId(args) },
       });
       if (result.intent !== "get") throw new Error("Unexpected entity result.");
@@ -130,7 +130,7 @@ export async function invokeTool(
       const operation = entityOperationContract(operationRef("create").id);
       if (operation.implementation?.type === "plugin") {
         const result = await executeEntityOperation(db, session, {
-          operation: operationRef("create"), offerIntents,
+          operation: operationRef("create"), offerIntents, offerTransport: "mcp",
           input: pluginEntityTransportInput(operation, args),
         });
         if (result.intent !== "create") throw new Error("Unexpected entity result.");
@@ -186,7 +186,7 @@ export async function invokeTool(
             "A create that collects a value securely does not take field bindings; bind the field afterwards.");
         }
         const result = await completeEntitySecureInput(db, session, {
-          operation: operationRef("create"), offerIntents,
+          operation: operationRef("create"), offerIntents, offerTransport: "mcp",
           input: { values: modelValues, ...(typeof args.confirmed === "boolean" ? { confirmed: args.confirmed } : {}) },
         }, { into: elicitField, value: values[elicitField] });
         if (result.intent !== "create") throw new Error("Unexpected entity result.");
@@ -197,7 +197,7 @@ export async function invokeTool(
 
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("create"),
-        offerIntents,
+        offerIntents, offerTransport: "mcp",
         input: {
           values,
           ...(typeof args.blueprintId === "string" ? { blueprintId: args.blueprintId } : {}),
@@ -221,7 +221,7 @@ export async function invokeTool(
       const operation = entityOperationContract(operationRef("update").id);
       if (operation.implementation?.type === "plugin") {
         const result = await executeEntityOperation(db, session, {
-          operation: operationRef("update"), offerIntents,
+          operation: operationRef("update"), offerIntents, offerTransport: "mcp",
           input: pluginEntityTransportInput(operation, args),
         });
         if (result.intent !== "update") throw new Error("Unexpected entity result.");
@@ -248,7 +248,7 @@ export async function invokeTool(
         await assertPublishableWrite(db, session, tables, table, authoredUpdate, id);
         return executeEntityOperation(db, session, {
         operation: operationRef("update"),
-        offerIntents,
+        offerIntents, offerTransport: "mcp",
         input: {
           id,
           values,
@@ -270,7 +270,7 @@ export async function invokeTool(
       const id = requireId(args);
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("delete"),
-        offerIntents,
+        offerIntents, offerTransport: "mcp",
         input: {
           id,
           ...entityMutationControls(args),

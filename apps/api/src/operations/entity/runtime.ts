@@ -1359,9 +1359,33 @@ async function executeEntityOperationWithContext(
   }
 }
 
+/** Plugin Operations an interface does not project, by interface; the generated ones follow `offerIntents`. */
+const unprojectedPluginOperations = {
+  mcp: new Set(pluginOperations.filter((operation) => !operation.transports.mcp.enabled).map((operation) => operation.key)),
+};
+
+/**
+ * Drop the offers of Operations the requesting interface cannot invoke, from
+ * the result envelope and from every item of a page. On MCP these are the
+ * REST, GraphQL and web Operations such as `<Entity>.referencedBy` and the
+ * tenant field definitions (osf-extensions).
+ */
+function projectOfferTransport(result: EntityOperationResult, transport: EntityOperationRequest["offerTransport"]): EntityOperationResult {
+  if (!transport || "error" in result) return result;
+  const hidden = unprojectedPluginOperations[transport];
+  if (!hidden.size) return result;
+  const visible = <T extends { operation: { id: string } }>(offers: readonly T[] | undefined) =>
+    offers?.filter((offer) => !hidden.has(offer.operation.id));
+  const projected = { ...result, operations: visible(result.operations) ?? result.operations } as EntityOperationResult;
+  if (projected.intent === "list" && "data" in projected && projected.data) {
+    projected.data = { ...projected.data, items: projected.data.items.map((item) => ({ ...item, operations: visible(item.operations) ?? item.operations })) };
+  }
+  return projected;
+}
+
 export const executeEntityOperation = (db: OpenShapeForgeDatabase, session: DbSessionInput, request: EntityOperationRequest): Promise<EntityOperationResult> =>
   withAuditContext(request.operation.id, (session as { credential?: import("../../auth/trusted-context.js").SessionCredential }).credential,
-    () => executeEntityOperationWithContext(db, session, request),
+    async () => projectOfferTransport(await executeEntityOperationWithContext(db, session, request), request.offerTransport),
     (session as { principalKind?: "person" | "service" }).principalKind);
 
 /** Server-only continuation: secret values are never accepted through public Operation input. */
@@ -1369,6 +1393,6 @@ export function completeEntitySecureInput(db: OpenShapeForgeDatabase, session: D
   request: EntityOperationRequest, completion: SecureCompletion): Promise<EntityOperationResult> {
   if (request.operation.intent !== "create") throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion requires a create Operation." });
   return withAuditContext(request.operation.id, (session as { credential?: import("../../auth/trusted-context.js").SessionCredential }).credential,
-    () => executeEntityOperationWithContext(db, session, request, completion),
+    async () => projectOfferTransport(await executeEntityOperationWithContext(db, session, request, completion), request.offerTransport),
     (session as { principalKind?: "person" | "service" }).principalKind);
 }

@@ -354,6 +354,13 @@ export type EntityOperationRequest = {
   input?: EntityOperationInput;
   /** Interface projection to intersect with authorized result offers. */
   offerIntents?: readonly GeneratedCrudExposureOperation[];
+  /**
+   * The interface the offers are shown on. A plugin Operation that interface
+   * does not project (`transports.<interface>.enabled: false`) is not offered
+   * there: a caller could not invoke it. Absent offers every Operation, as
+   * the canonical contract does.
+   */
+  offerTransport?: "mcp";
 };
 
 export type EntityOperationOffer = OperationOffer<GeneratedCrudExposureOperation | "invoke">;

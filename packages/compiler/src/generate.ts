@@ -975,6 +975,9 @@ function renderManifestJson(
         generatedEntities,
       },
       ...(manifest.entityValues ? { entityValues: manifest.entityValues } : {}),
+      // Entities that accept tenant-defined fields, their side tables and the
+      // reverse reference map; the runtime validates it on load.
+      ...(manifest.extensionRegistry ? { extensionRegistry: manifest.extensionRegistry } : {}),
       tables,
       ...(entitySubtypes.length > 0 ? { entitySubtypes } : {}),
     },

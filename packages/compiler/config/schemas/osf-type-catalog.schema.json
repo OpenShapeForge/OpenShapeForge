@@ -73,6 +73,19 @@
             }
           },
           "format": { "type": "string" },
+          "indexProjection": {
+            "type": "object",
+            "description": "For an object type: which child lands in which typed column of a tenant-field index row. An object type without one cannot be a tenant field (docs/authoring.md, \"Extensible entities\").",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": {
+              "text": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+              "number": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+              "boolean": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+              "date": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
+              "timestamp": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" }
+            }
+          },
           "icon": { "type": "string" },
           "props": { "type": "object" },
           "classification": {

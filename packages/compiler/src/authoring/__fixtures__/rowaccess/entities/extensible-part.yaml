@@ -1,0 +1,72 @@
+# Test fixture — an entity whose tenants may add fields of their own, in a
+# module of its own (schema `parts`), with an owned single child a formula may
+# read and one excluded reference target. Not part of the shipped slice.
+schemaVersion: 3
+kind: coreEntity
+module: parts
+entity: ExtensiblePart
+title: Extensible part
+language: en
+labels: { en: Extensible part, nl: Uitbreidbaar onderdeel }
+domains: [relations]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite, Organization.All.ReadWrite]
+    create: [General.All.ReadWrite]
+    update: [General.All.ReadWrite]
+    delete: [General.All.ReadWrite]
+displayTemplate: "{{name}}"
+filterField: name
+extensible:
+  authorization: { manage: [General.All.ReadWrite] }
+  limits: { fields: 50 }
+  excludedTypes: [iban]
+  excludedTargets: [RestCustom]
+fields:
+  - key: name
+    osfType: string
+    required: true
+    label: { en: Name, nl: Naam }
+    validation: { maxLength: 200 }
+    persisted: { column: name, storageClass: core }
+operations:
+  list:
+    name: List extensible parts
+    description: Read accessible extensible part records.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read extensible part
+    description: Read one accessible extensible part record.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create extensible part
+    description: Create an extensible part record.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update extensible part
+    description: Update an extensible part record.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  delete:
+    name: Delete extensible part
+    description: Delete an extensible part record.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }

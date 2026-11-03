@@ -784,6 +784,8 @@ export type PlatformSchemaManifest = {
    */
   entitySubtypes?: TableDefinition[];
   entityValues?: import("./authoring/entity-value-types.js").EntityValueRegistry;
+  /** Entities that accept tenant-defined fields (authoring/extensible.ts); absent when none does. */
+  extensionRegistry?: import("./authoring/extension-registry-types.js").ExtensionRegistry;
 };
 
 /**

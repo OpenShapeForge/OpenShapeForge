@@ -131,6 +131,13 @@ export interface OsfTypeDefinition {
   children?: Field[];
   item?: Field;
   /**
+   * Where an object value lands in a tenant-field index row (extensible.ts):
+   * index column -> the child whose value fills it. An object type without
+   * one cannot be a tenant field, because the index holds one value per base
+   * type for each record and field.
+   */
+  indexProjection?: OsfTypeIndexProjection;
+  /**
    * Lucide-react icon name (e.g. "AtSign", "Phone") used by the renderer
    * when displaying field rows that need a type indicator — most visibly in
    * the array-field item rows, where the icon sits between the drag handle
@@ -165,6 +172,10 @@ export interface OsfTypeDefinition {
 }
 
 export type OsfTypeValueSchema = Record<string, unknown>;
+
+/** The typed columns of a tenant-field index row. */
+export type ExtensionIndexColumn = "text" | "number" | "boolean" | "date" | "timestamp";
+export type OsfTypeIndexProjection = Partial<Record<ExtensionIndexColumn, string>>;
 
 export interface OsfTypeCatalog {
   schemaVersion: number;
@@ -440,6 +451,11 @@ export interface EntityWebViewDefinition {
   /** Authoring shorthand: every non-reserved key is a target-owned named view. */
   [name: string]: unknown;
   collection: {
+    /**
+     * Optional collapsible tree presentation of this same collection: each
+     * record groups the records its `children` collection holds.
+     */
+    tree?: { children: string; label?: string; count?: string };
     /** Optional grouped board presentation of this same collection. */
     board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: string; currency: string }; card: { title: string | string[]; timestamp?: string; indicator?: string; subtitle?: string[]; amount?: { value: string; currency: string }; body?: string[] } };
     /** Opaque host renderer-registry key; omission uses the generic collection renderer. */
@@ -552,6 +568,23 @@ export interface OperationCatalogDefinition {
   interfaces: Omit<EntityInterfacesDefinition, "web"> & { web?: OperationCatalogWebInterface };
 }
 
+/** The authored `extensible:` block of a coreEntity. */
+export interface ExtensibleConfig {
+  authorization: { manage: string[] };
+  limits?: Partial<ExtensibleLimits>;
+  /** osfType names a tenant may not use, on top of the compiler's own exclusions. */
+  excludedTypes?: string[];
+  /** Entities a tenant reference field may not point at. */
+  excludedTargets?: string[];
+}
+
+export interface ExtensibleLimits {
+  fields: number;
+  filtersPerQuery: number;
+  formulaDepth: number;
+  syncFanOut: number;
+}
+
 export interface CoreEntity {
   audit?: { timeline?: { include?: string[]; parents?: string[] } };
   /** Canonical read Operations resolve records; this entity owns no SQL table. */
@@ -620,6 +653,12 @@ export interface CoreEntity {
   hardDelete?: {
     requireNeverPublished: true;
   };
+  /**
+   * Opt-in tenant-defined fields (extensible.ts). Never inherited by a
+   * subtype; only an entity without a row-scope axis, owner axis or record
+   * ACL may declare it.
+   */
+  extensible?: ExtensibleConfig;
   fields: Field[];
   authorization?: AuthorizationConfig;
   /** Derived by the compiler from `interfaces.web`; never authored. */

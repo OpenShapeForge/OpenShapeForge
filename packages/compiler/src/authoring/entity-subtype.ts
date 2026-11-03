@@ -41,11 +41,13 @@ const FIELD_OVERRIDE_KEYS = new Set(["key", "hidden", "label", "description", "h
 const OPERATION_OVERRIDE_KEYS = new Set(["name", "description", "guidance"]);
 /**
  * Base properties a subtype never inherits: a second blueprint Operation set,
- * the audit timeline composition and the lowered UI are the base's own.
+ * the audit timeline composition and the lowered UI are the base's own, and
+ * so are tenant-defined fields (`extensible`): their storage and definition
+ * Operations belong to the base table, not to a scoped projection of it.
  * Retention, hooks and hard-delete rules stay: they guard the shared rows and
  * the runtime reads them from the table the subtype is served from.
  */
-const BASE_KEYS_NOT_INHERITED = ["blueprint", "audit", "workerAccess", "versioning", "ui"] as const;
+const BASE_KEYS_NOT_INHERITED = ["blueprint", "audit", "workerAccess", "versioning", "extensible", "ui"] as const;
 const INTRINSIC_FIELDS = new Set(["id", "tenantId", "createdAt", "updatedAt"]);
 /** Validation constraints a subtype may only tighten, with the direction that tightens them. */
 const NARROWING_RULES: Record<string, "raise" | "lower"> = {

@@ -615,3 +615,23 @@ describe("the shipped Team subtype of RelationGroup", () => {
     expect(teamContract.views.core?.list?.columns.map((column) => column.key)).toEqual(["name", "status"]);
   });
 });
+
+describe("tenant-defined fields on a subtyped base", () => {
+  const extensibleGroup = (): Doc => ({ ...group(), extensible: { authorization: { manage: ["Groups.Manage"] } } });
+
+  test("stay with the base: a subtype neither inherits extensible nor gets storage or a registry entry", () => {
+    const dir = authoringDir(corpus({ group: extensibleGroup() }));
+    expect(compile(loadEntity(dir, "group")).extensible?.manageRoles).toEqual(["Groups.Manage", "Organization.All.ReadWrite"]);
+    expect(compile(loadEntity(dir, "team")).extensible).toBeUndefined();
+    expect(compile(loadEntity(dir, "project-group")).extensible).toBeUndefined();
+    const manifest = manifestOf(corpus({ group: extensibleGroup() }));
+    expect(Object.keys(manifest.extensionRegistry?.entities ?? {})).toEqual(["Group"]);
+    expect(manifest.tables.map((table) => `${table.schema}.${table.name}`)).toContain("erp.groups_field_values");
+    // A subtype is no reference target of its own: a reference stores the base row.
+    expect(manifest.extensionRegistry?.entities.Group?.targets.map((target) => target.entity)).toEqual(["Group", "Person"]);
+  });
+
+  test("a subtype document cannot declare it", () => {
+    expect(() => manifestOf(corpus({ team: { ...team(), extensible: { authorization: { manage: ["Groups.Manage"] } } } }))).toThrow(/extensible/);
+  });
+});

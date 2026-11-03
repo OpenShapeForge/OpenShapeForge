@@ -567,6 +567,72 @@ Relationships are fields; there is no entity-level `relationships:` block
   reference> }`) is the one collection that stays authored: it has no
   foreign key of its own to derive from.
 
+## Extensible entities
+
+`extensible:` lets the tenants of a deployment add fields of their own to an
+entity at runtime, without a schema change per field. A host can also add it
+to an entity from an earlier layer with `kind: entityPatch`.
+
+```yaml
+extensible:
+  authorization: { manage: [CpqCatalog.Catalogue.ReadWrite] }   # required, one role or more
+  limits: { fields: 100, filtersPerQuery: 5, formulaDepth: 5, syncFanOut: 100 }  # optional; these are the defaults
+  excludedTypes: []                 # osfTypes a tenant may not use here
+  excludedTargets: [NaturalPerson]  # entities a tenant reference may not point at
+```
+
+- `Organization.All.ReadWrite` may always manage the fields; the compiler adds
+  it to the manage roles. The entity's own read roles list the definitions.
+- Only an entity without a row-scope axis (`rowAccess.owner`/`group`), owner
+  axis or record ACL may declare it, because the side tables below carry only
+  the tenant policy. Plain `rowAccess: { enabled: true, empty: public }` is
+  fine. A subtype never inherits it; an Operation-backed or identity-less
+  entity cannot declare it.
+- A tenant field uses the same types as authored fields: the base types and
+  every catalog type, minus `typedValue`, `fieldDefinition`, `entityValue`,
+  `keyValueMap`, `variableTemplate`, `labelSet`, `condition`, `excludedTypes`
+  and every object type without an `indexProjection`. A reference names a
+  target entity: any tenant-scoped, generated-CRUD entity with a `get`, outside
+  `excludedTargets` and the `platform` schema.
+- `indexProjection` on an object type in `osf-types.yaml` says which child
+  lands in which index column (`text`, `number`, `boolean`, `date`,
+  `timestamp`); `measurement` has `{ number: value, text: unit }`. An object
+  type gains tenant-field support by declaring one.
+
+What the compiler adds for an extensible entity `<schema>.<table>`, all of it
+additive, so a built database rolls forward:
+
+- `extension_values jsonb not null default '{}'` on the table: the source of
+  every tenant value, keyed by field id.
+- `<table>_field_values`: one typed row per record, field and collection
+  element (`ordinal`), keyed `(tenant_id, record_id, field_id, ordinal)` with a
+  composite reference to the record that cascades, and the partial indexes of
+  `EXTENSION_VALUE_INDEXES` (packages/compiler/src/authoring/extensible.ts).
+- `<table>_field_unique_values`: the claimed values of `unique` fields, keyed
+  `(tenant_id, field_id, value_text)`, released with the record.
+- Both side tables get the entity's tenant policy and worker surface, with
+  worker DML for the backfill. The definitions themselves live in
+  `platform.extension_field_definitions` (append-only versions),
+  `platform.extension_field_dependencies` and `platform.extension_field_backfills`.
+- `extensionRegistry` in the backend `manifest.json`: per entity its tables,
+  manage roles, limits, allowed types, targets and owned single children
+  (owned children keyed unique per parent), the index projections, and per
+  target entity the extensible entities that may reference it.
+- The `osf-extensions` Operations, on REST and GraphQL but not MCP:
+  `<Entity>.fieldDefinitions.{list,create,update,deprecate,restore,delete,reorder,affectedRecords}`
+  at `POST /api/rest/v1/<base>/field-definitions/<action>`, and on every target
+  entity `<Entity>.referencedBy` at `POST /api/rest/v1/<base>/:id/referenced-by`.
+- `extensions` and `extensionsMeta` on the entity's records, `extensions` on
+  create and update, an `extensions` branch in list filters and
+  `extensions.<key>` as a sort field, all open objects in the static contracts.
+- `customFields` on the entity's web interface and `referencedByPath` on each
+  target's.
+
+A collection may also be presented as a tree:
+`interfaces.web.views.collection.tree: { children, label, count }`, where
+`children` is a collection relationship of the entity and `label` and `count`
+are its fields. The web manifest publishes it as `views.collection.tree`.
+
 ## Entity subtypes: `kind: entitySubtype`
 
 A subtype is a scoped projection of one stored entity: the same table and the

@@ -150,6 +150,10 @@ describe("formula fields on an extensible entity", () => {
     expect(second.extensions.named).toBe("Pack (2)");
     expect(await indexed(second.id, named)).toEqual([{ value_number: null, value_text: "Pack (2)" }]);
     expect(await update(t.writer, second.id, { name: "Cell" })).toMatchObject({ data: { extensions: { named: "Cell (2)" } } });
+    // A runtime create, without caller extensions, computes its formulas too.
+    const runtime = await createGeneratedEntityForTable(fixture.app.db, t.writer, fixture.table, { name: "Runtime" });
+    expect((await source(String(runtime.id)))[total]).toBe(0);
+    expect((runtime as unknown as Row).extensions.total).toBe(0);
   });
 
   test("{Capacity kWh} * spec.weight reads the owned child; a write of the child recomputes its owner", async () => {

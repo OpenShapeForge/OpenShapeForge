@@ -68,6 +68,7 @@ import {
   extensionValuesColumn,
   lockOwnerExtensionFields,
   prepareExtensionWrite,
+  prepareFormulaOnlyCreate,
   recomputeOwnerFormulas,
 } from "./extensions/write.js";
 import { extensibleEntityOf, loadExtensionFields } from "./extensions/store.js";
@@ -341,7 +342,7 @@ async function insertGeneratedRowInTransaction(
   // Tenant fields are checked against the tenant's definitions here, with
   // the authored values of this create, before anything is written.
   const extensionWrite = extensions === undefined
-    ? (await loadExtensionFields(trx, session, table), undefined)
+    ? await prepareFormulaOnlyCreate(trx, session, table)
     : await prepareExtensionWrite(trx, session, table, { operation: "create", row: storageRow(prepared), extensions });
   const extensionValue = extensionStorageValue(extensionWrite);
   // Everything above reads, validates and may wait on another transaction's

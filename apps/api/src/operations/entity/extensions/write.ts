@@ -339,6 +339,22 @@ async function prepareFormulas(
   return { ...(current ? { current } : {}), children };
 }
 
+/**
+ * A create without caller `extensions` (a runtime create) settles no
+ * defaults, but its formulas are still computed: an empty write whose
+ * completion evaluates them against the inserted row. Undefined when the
+ * entity is not extensible or has no formula to compute.
+ */
+export async function prepareFormulaOnlyCreate(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+): Promise<PreparedExtensionWrite | undefined> {
+  const set = await loadExtensionFields(trx, session, table, { lock: "shared" });
+  if (!set || !formulaGraph(set).order.length) return undefined;
+  return { table, set, before: {}, after: {}, changed: [], formulas: { children: await ownedChildValues(trx, session.tenantId!, set, undefined) } };
+}
+
 /** A deleted field's value is stripped by its backfill; a write that touches the record anyway drops what remains of it. */
 function stripDeleted(set: ExtensionFieldSet, after: Record<string, unknown>): void {
   for (const key of Object.keys(after)) {

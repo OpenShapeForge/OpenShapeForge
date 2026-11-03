@@ -16,7 +16,7 @@ import {
   requireArguments,
   requireId,
 } from "./entity-tool-guards.js";
-import { OperationFailure } from "@openshapeforge/operations";
+import { isOperationAccepted, OperationFailure } from "@openshapeforge/operations";
 import type { Tool } from "@modelcontextprotocol/server";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
@@ -39,7 +39,7 @@ import {
   type McpOperation,
 } from "./catalog.js";
 import { entityMutationControls, serializeRowForEntity } from "./catalog-rows.js";
-import { ok, type ToolResult } from "./tool-results.js";
+import { acceptedToolResult, ok, type ToolResult } from "./tool-results.js";
 import { partial } from "./composed-results.js";
 
 
@@ -221,6 +221,7 @@ export async function invokeTool(
         });
         if (result.intent !== "update") throw new Error("Unexpected entity result.");
         if ("error" in result) throw new OperationFailure(result.error);
+        if (isOperationAccepted(result)) return acceptedToolResult(result);
         if (!result.data) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
         return ok({ data: serializeRowForEntity(entity, table, result.data), operations: result.operations });
       }
@@ -252,6 +253,7 @@ export async function invokeTool(
       });
       if (result.intent !== "update") throw new Error("Unexpected entity result.");
       if ("error" in result) throw new OperationFailure(result.error);
+      if (isOperationAccepted(result)) return acceptedToolResult(result);
       const row = result.data;
       if (!row) throw new HttpError(404, "NOT_FOUND", "Resource not found.");
       return ok({
@@ -272,6 +274,7 @@ export async function invokeTool(
       });
       if (result.intent !== "delete") throw new Error("Unexpected entity result.");
       if ("error" in result) throw new OperationFailure(result.error);
+      if (isOperationAccepted(result)) return acceptedToolResult(result);
       const deleted = result.data.deleted;
       if (!deleted)
         throw new HttpError(404, "NOT_FOUND", "Resource not found.");

@@ -4,6 +4,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { deleteEntity } from "./entity-delete-client";
+import { acceptanceMessage } from "@/lib/operation-acceptance";
 import type {
   EntityPageHeaderAction,
   EntityPageHeaderActionsContext,
@@ -28,6 +29,7 @@ export function useEntityHeaderAction(
 ) {
   const router = useRouter();
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   function handleAction(action: EntityPageHeaderAction) {
@@ -59,12 +61,19 @@ export function useEntityHeaderAction(
 
     startTransition(async () => {
       try {
-        await deleteEntity({
+        const outcome = await deleteEntity({
           mutationName: deleteMutationName,
           entityId,
           expectedVersion,
           confirmed: true,
         });
+        if ("accepted" in outcome) {
+          // Taken over: stay on the record, which still exists, and say so.
+          setActionError(null);
+          setActionNotice(acceptanceMessage(outcome.accepted, actionsContext.lang));
+          router.refresh();
+          return;
+        }
         router.push(baseRoute);
       } catch (error) {
         setActionError(error instanceof Error ? error.message : "Delete failed.");
@@ -74,6 +83,7 @@ export function useEntityHeaderAction(
 
   return {
     actionError,
+    actionNotice,
     handleAction,
     isPending,
   };

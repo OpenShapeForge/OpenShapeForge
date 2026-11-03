@@ -50,6 +50,9 @@ const NOT_A_REQUEST_REFUSAL = new Set([
   "REQUIRED",
   // Availability offer diagnostics accompany a successful read, not a refused CRUD request.
   "OPERATION_UNAVAILABLE",
+  // Refuses only an operation override's service-identity replay of a
+  // takeover (operation-overrides.ts), never an ordinary caller's request.
+  "TAKEOVER_INVALID",
 ]);
 
 function thrownCodes(): Set<string> {

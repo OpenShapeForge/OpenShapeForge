@@ -79,7 +79,12 @@ test("the Tenant registry row is provisioned, never created or deleted through a
   const openapi = JSON.parse(artifacts.groups.db.find(artifact => artifact.path.endsWith("openapi.json"))!.contents);
   const registryPaths = Object.entries(openapi.paths).filter(([path]) => path.startsWith("/api/rest/") && /tenants(\/|$)/.test(path));
   expect(registryPaths.length).toBeGreaterThan(0);
-  expect(registryPaths.every(([, methods]) => Object.keys(methods as object).filter(method => ["get", "post", "put", "patch", "delete"].includes(method)).every(method => method === "get"))).toBe(true);
+  // `referenced-by` is the read-only canonical Operation every possible
+  // tenant-field target carries (a POST only because it takes a body), not a
+  // generic write; it must stay the one POST under the registry.
+  const referencedBy = registryPaths.filter(([path]) => path.endsWith("/referenced-by"));
+  expect(referencedBy.every(([, methods]) => Object.keys(methods as object).filter(method => ["get", "post", "put", "patch", "delete"].includes(method)).join() === "post")).toBe(true);
+  expect(registryPaths.filter(([path]) => !path.endsWith("/referenced-by")).every(([, methods]) => Object.keys(methods as object).filter(method => ["get", "post", "put", "patch", "delete"].includes(method)).every(method => method === "get"))).toBe(true);
   expect(JSON.stringify(openapi)).not.toMatch(/"operationId":"(create|delete)Tenant"/);
 
   // Web: no page or action shard for the entity, no page configs, and the

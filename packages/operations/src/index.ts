@@ -80,9 +80,13 @@ export type {
   OperationInputBinding,
   OperationReference,
   OperationResult,
+  OperationAccepted,
+  OperationAcceptance,
+  OperationAcceptedBy,
   OperationViolation,
 } from "./contract.js";
 export {
+  isOperationAccepted,
   isOperationFailure,
   OperationFailure,
   operationErrorOf,

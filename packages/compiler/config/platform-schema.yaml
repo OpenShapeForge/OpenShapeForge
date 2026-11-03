@@ -259,6 +259,135 @@ tables:
         columns: [tenant_id, entity_type, record_id, field_key]
         unique: true
 
+  # Tenant-defined fields of extensible entities (docs/authoring.md,
+  # "Extensible entities"). One table for every extensible entity; a
+  # definition is append-only: a change writes a new version and moves
+  # `is_current`, so a snapshot that names a field version can still read it
+  # after the field changed or was deleted. Written only by the
+  # `osf-extensions` field-definition Operations and the backfill worker,
+  # which marks a definition ready once its records are rewritten.
+  - schema: platform
+    name: extension_field_definitions
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    workerDml: true
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      # Stable across versions: the key of every stored value and index row.
+      - { name: field_id, type: uuid, required: true }
+      # The extensible entity's name, e.g. Product.
+      - { name: entity, type: text, required: true }
+      - { name: key, type: text, required: true }
+      - { name: version, type: integer, required: true }
+      - { name: kind, type: text, required: true }
+      # A fieldDefinition, validated against the bundled field-definition schema.
+      - { name: definition, type: jsonb, required: true }
+      # A condition over the record's fields; absent applies to every record.
+      - { name: applies_when, type: jsonb }
+      - { name: state, type: text, required: true }
+      - { name: position, type: integer, required: true }
+      - { name: is_current, type: boolean, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: created_by, type: uuid }
+    indexes:
+      - name: extension_field_definitions_version_uidx
+        columns: [tenant_id, field_id, version]
+        unique: true
+      - name: extension_field_definitions_current_key_uidx
+        columns: [tenant_id, entity, key]
+        unique: true
+        where: is_current AND state <> 'deleted'
+      - name: extension_field_definitions_current_entity_idx
+        columns: [tenant_id, entity]
+        where: is_current
+    constraints:
+      - compilerOwned: true
+        version: 0001_extension-field-definitions-kind
+        name: extension_field_definitions_kind_check
+        kind: check
+        expression: "kind IN ('stored', 'formula', 'lookup', 'rollup')"
+      - compilerOwned: true
+        version: 0001_extension-field-definitions-state
+        name: extension_field_definitions_state_check
+        kind: check
+        expression: "state IN ('updating', 'ready', 'deprecated', 'suspended', 'deleted')"
+
+  # The dependency graph of computed tenant fields (formula, lookup, rollup):
+  # which field reads which, and through which reference or relationship.
+  # Rebuilt for a field on every definition change; the source for cycle
+  # detection, evaluation order and "which fields does this write touch".
+  # `via_field` is null for a field of the same record, so uniqueness is two
+  # partial indexes: a plain unique index would let null rows repeat.
+  - schema: platform
+    name: extension_field_dependencies
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    workerDml: true
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: field_id, type: uuid, required: true }
+      - { name: depends_on_entity, type: text, required: true }
+      # An authored field key, or a tenant field id.
+      - { name: depends_on_field, type: text, required: true }
+      - { name: via_field, type: text }
+    indexes:
+      - name: extension_field_dependencies_via_uidx
+        columns: [tenant_id, field_id, depends_on_entity, depends_on_field, via_field]
+        unique: true
+        where: via_field IS NOT NULL
+      - name: extension_field_dependencies_direct_uidx
+        columns: [tenant_id, field_id, depends_on_entity, depends_on_field]
+        unique: true
+        where: via_field IS NULL
+      - name: extension_field_dependencies_dependent_idx
+        columns: [tenant_id, depends_on_entity, depends_on_field]
+
+  # Progress of the backfill jobs that rewrite records after a definition
+  # change (retype, delete, unique, computed fields, rebuild). The job itself
+  # runs from platform.jobs; this row is what the field shows as `updating`.
+  - schema: platform
+    name: extension_field_backfills
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    workerDml: true
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: entity, type: text, required: true }
+      - { name: field_id, type: uuid, required: true }
+      - { name: definition_version, type: integer, required: true }
+      - { name: operation, type: text, required: true }
+      - { name: state, type: text, required: true, default: "'queued'" }
+      - { name: processed, type: integer, required: true, default: "0" }
+      - { name: total, type: integer, required: true, default: "0" }
+      # Opaque resume position of an interrupted run.
+      - { name: cursor, type: text }
+      - { name: error, type: jsonb }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: extension_field_backfills_field_idx
+        columns: [tenant_id, entity, field_id, created_at]
+      - name: extension_field_backfills_open_idx
+        columns: [tenant_id, state, created_at]
+        where: state IN ('queued', 'running')
+    constraints:
+      - compilerOwned: true
+        version: 0001_extension-field-backfills-operation
+        name: extension_field_backfills_operation_check
+        kind: check
+        expression: "operation IN ('retype', 'delete', 'unique', 'formula', 'lookup', 'rollup', 'rebuild')"
+      - compilerOwned: true
+        version: 0001_extension-field-backfills-state
+        name: extension_field_backfills_state_check
+        kind: check
+        expression: "state IN ('queued', 'running', 'done', 'failed')"
+
   # Central, interface-neutral edit leases for long-running human write modes.
   # A lease is record-wide: one actor editing a Relation blocks every other
   # lease-requiring operation on that same Relation until release or expiry.

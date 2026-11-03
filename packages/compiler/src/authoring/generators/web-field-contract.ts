@@ -59,6 +59,8 @@ const CONTRACT_DECLARATIONS: readonly ContractDeclaration[] = [
   { kind: "interface", name: "FieldDefinitionDocument" },
   { kind: "interface", name: "FieldDefinition" },
   { kind: "type", name: "OsfTypeValueSchema" },
+  { kind: "type", name: "ExtensionIndexColumn" },
+  { kind: "type", name: "OsfTypeIndexProjection" },
   { kind: "interface", name: "OsfTypeDefinition" },
   { kind: "type", name: "FieldSuggestions" },
   { kind: "type", name: "FieldRelationship" },

@@ -729,6 +729,10 @@
         "nl": "Meetwaarde"
       },
       "baseType": "object",
+      "indexProjection": {
+        "number": "value",
+        "text": "unit"
+      },
       "icon": "Ruler",
       "render": {
         "display": "TextDisplay",

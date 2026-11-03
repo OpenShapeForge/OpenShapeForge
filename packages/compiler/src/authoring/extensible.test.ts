@@ -17,6 +17,8 @@ import {
 } from "./extensible.js";
 import { loadOsfTypes } from "./loader.js";
 import { generateArtifacts } from "../generate.js";
+import { collectPluginMigrationRegistry } from "../generate-plugin-migrations.js";
+import { loadManifest } from "../load-manifest.js";
 import type { PlatformSchemaManifest, TableDefinition } from "../schema.js";
 import type { CompiledEntityContract } from "./types/compiled.js";
 
@@ -329,5 +331,52 @@ describe("extensible: roll-forward", () => {
     // EXISTS, which a built database skips; roll-forward adds the column.
     expect(missing).toHaveLength(1);
     expect(missing[0]).toStartWith(`CREATE TABLE IF NOT EXISTS "parts"."extensible_parts" (`);
+  });
+});
+
+describe("extensible: platform tables", () => {
+  const platform = loadManifest(join(import.meta.dir, "..", "..", "config", "platform-schema.yaml"));
+  const of = async (name: string) => table(await platform, `platform.${name}`);
+
+  it("declares append-only definitions with one current key per entity", async () => {
+    const definitions = await of("extension_field_definitions");
+    expect(definitions).toMatchObject({ tenantScoped: true, domainInternal: true, generatedCrudEligible: false, workerDml: true });
+    expect(definitions.columns.map((column) => `${column.name}:${column.type}${column.required ? "!" : ""}`)).toEqual([
+      "id:uuid", "tenant_id:uuid!", "field_id:uuid!", "entity:text!", "key:text!", "version:integer!", "kind:text!",
+      "definition:jsonb!", "applies_when:jsonb", "state:text!", "position:integer!", "is_current:boolean!",
+      "created_at:timestamptz!", "created_by:uuid",
+    ]);
+    expect(definitions.indexes).toEqual([
+      { name: "extension_field_definitions_version_uidx", columns: ["tenant_id", "field_id", "version"], unique: true },
+      { name: "extension_field_definitions_current_key_uidx", columns: ["tenant_id", "entity", "key"], unique: true, where: "is_current AND state <> 'deleted'" },
+      { name: "extension_field_definitions_current_entity_idx", columns: ["tenant_id", "entity"], where: "is_current" },
+    ]);
+  });
+
+  it("keeps a dependency unique whether or not it goes through a reference", async () => {
+    const dependencies = await of("extension_field_dependencies");
+    expect(dependencies.columns.find((column) => column.name === "via_field")?.required).toBeUndefined();
+    expect(dependencies.indexes?.filter((index) => index.unique).map((index) => [index.columns.length, index.where])).toEqual([
+      [5, "via_field IS NOT NULL"], [4, "via_field IS NULL"],
+    ]);
+  });
+
+  it("records backfill progress with defaults a new row needs", async () => {
+    const backfills = await of("extension_field_backfills");
+    expect(backfills.columns.filter((column) => column.default !== undefined).map((column) => [column.name, column.default])).toEqual([
+      ["id", "gen_random_uuid()"], ["state", "'queued'"], ["processed", "0"], ["total", "0"],
+      ["created_at", "now()"], ["updated_at", "now()"],
+    ]);
+  });
+
+  it("closes the kind, state and operation vocabularies with compiler-owned checks", async () => {
+    const manifest = await platform;
+    const registry = collectPluginMigrationRegistry({ ...manifest, tables: manifest.tables.filter((entry) => entry.name.startsWith("extension_field_")) }, []);
+    const sql = registry.migrations.map((migration) => migration.sql).join("\n");
+    expect(registry.migrations.every((migration) => migration.plugin === "osf-compiler")).toBe(true);
+    expect(sql).toContain("CHECK (kind IN ('stored', 'formula', 'lookup', 'rollup'))");
+    expect(sql).toContain("CHECK (state IN ('updating', 'ready', 'deprecated', 'suspended', 'deleted'))");
+    expect(sql).toContain("CHECK (operation IN ('retype', 'delete', 'unique', 'formula', 'lookup', 'rollup', 'rebuild'))");
+    expect(sql).toContain("CHECK (state IN ('queued', 'running', 'done', 'failed'))");
   });
 });

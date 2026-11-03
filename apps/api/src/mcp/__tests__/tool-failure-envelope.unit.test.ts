@@ -226,6 +226,14 @@ describe("a database rule's refusal", () => {
 });
 
 describe("native composition of a canonical entity success", () => {
+  it("passes an operation override's acceptance on instead of parsing its sentence", () => {
+    const accepted = { by: { kind: "workflow", ref: "run-1" }, status: "running" };
+    expect(nativeToolOutput({
+      content: [{ type: "text" as const, text: "Started workflow run-1; the change happens when it completes." }],
+      structuredContent: { accepted, operations: [] },
+    })).toEqual({ accepted });
+  });
+
   it("maps the operation data and does not expose offers as business output", () => {
     expect(nativeToolOutput(ok({
       data: { id: "relation-1", displayName: "Example" },

@@ -9,11 +9,25 @@
  * filter or sort key —
  * the existing oracle guard ignores names it does not know, so this one
  * refuses them explicitly.
+ *
+ * Defaults (§11 besluit 31): a create stores the default, so only records
+ * written before the field existed hold none. A filter is default-aware for
+ * a field that applies to every record (no `appliesWhen`): when the default
+ * satisfies the predicate, records without an index row for the field match
+ * too, as a reader sees them. A field with `appliesWhen` is filtered on
+ * stored values only — whether a record without one would read the default
+ * depends on the condition, which the index does not hold. A sort treats a
+ * missing value as missing (nulls last), whatever the default.
+ *
+ * A measurement (an object type with an index projection) is a number in a
+ * unit: it is filtered as `{ value: { <operator>: … }, unit: { eq: … } }`,
+ * never on the number alone, and it is not a sort key in phase 1 — numbers
+ * in different units do not order.
  */
 import { sql, type RawBuilder } from "kysely";
 import { operationFailure } from "@openshapeforge/operations";
 import type { DbSessionInput } from "../../../db/session.js";
-import { structuredFilter, type QueryField } from "../../../platform/structured-filter.js";
+import { isCalendarDate, structuredFilter, type QueryField } from "../../../platform/structured-filter.js";
 import { filterLeaves } from "../filter-groups.js";
 import type { GeneratedCrudTable, ListPageInput } from "../types.js";
 import { extensionError, extensionShape, record, type ExtensionField, type ExtensionFieldSet, type ExtensionShape } from "./model.js";
@@ -75,23 +89,46 @@ export function assertExtensionQueryAllowed(
       if (shape.collection && Object.keys(predicate as object).some((operator) => operator !== "contains")) {
         extensionError(`extensions.${key} holds several values; filter it with contains.`, "BAD_USER_INPUT");
       }
-      predicates += Object.keys(predicate as object).length;
+      predicates += shape.projection ? Object.keys(compoundPredicate(key, shape, predicate as Record<string, unknown>).value).length || 1
+        : Object.keys(predicate as object).length;
     }
   }
   if (predicates > set.entry.limits.filtersPerQuery) {
     extensionError(`A query filters on at most ${set.entry.limits.filtersPerQuery} tenant field predicates; this one has ${predicates}.`, "BAD_USER_INPUT");
   }
-  if (sortField !== undefined) {
-    const { shape } = fieldFor(set, sortField);
-    if (shape.collection) extensionError(`extensions.${sortField} holds several values and cannot be sorted on.`, "BAD_USER_INPUT");
+  if (sortField !== undefined) assertSortable(sortField, fieldFor(set, sortField).shape);
+}
+
+function assertSortable(key: string, shape: ExtensionShape): void {
+  if (shape.collection) extensionError(`extensions.${key} holds several values and cannot be sorted on.`, "BAD_USER_INPUT");
+  if (shape.projection) extensionError(`extensions.${key} is a measurement; its values are in different units and cannot be sorted on.`, "BAD_USER_INPUT");
+}
+
+/**
+ * A measurement predicate: `{ value: { <operator>: … }, unit: { eq: … } }`
+ * (or `{ isNull }`). The unit is required: a number without its unit
+ * compares kilowatt-hours with watt-hours.
+ */
+function compoundPredicate(key: string, shape: ExtensionShape, predicate: Record<string, unknown>): { value: Record<string, unknown>; unit?: string } {
+  if (Object.keys(predicate).length === 1 && Object.hasOwn(predicate, "isNull")) return { value: {} };
+  const valueComponent = shape.projection!.number;
+  const unitComponent = shape.projection!.text;
+  const unknown = Object.keys(predicate).filter((name) => name !== valueComponent && name !== unitComponent);
+  const unit = unitComponent ? predicate[unitComponent] : undefined;
+  if (unknown.length || !valueComponent || !unitComponent || !record(predicate[valueComponent]) ||
+      !Object.keys(predicate[valueComponent] as object).length || !record(unit) ||
+      Object.keys(unit).join() !== "eq" || typeof unit.eq !== "string") {
+    extensionError(`extensions.${key} is a measurement; filter it as { ${valueComponent ?? "value"}: { <operator>: … }, ${unitComponent ?? "unit"}: { eq: "<unit>" } }.`, "BAD_USER_INPUT");
   }
+  return { value: predicate[valueComponent!] as Record<string, unknown>, unit: (unit as { eq: string }).eq };
 }
 
 function valueColumn(shape: ExtensionShape, alias: string): { sql: RawBuilder<unknown>; kind: QueryField["kind"] } {
   switch (shape.column) {
     case "number": return { sql: sql.id(alias, "value_number"), kind: "number" };
     case "boolean": return { sql: sql.id(alias, "value_boolean"), kind: "boolean" };
-    case "date": return { sql: sql.id(alias, "value_date"), kind: "timestamp" };
+    // A date is a calendar day, compared as one (a timestamp operand is refused).
+    case "date": return { sql: sql.id(alias, "value_date"), kind: "date" };
     case "timestamp": return { sql: sql.id(alias, "value_timestamp"), kind: "timestamp" };
     // Compared as uuid, so the reference index serves it; the operands are
     // checked to be ids first (assertReferencePredicate).
@@ -147,6 +184,38 @@ export function extensionPredicateRank(shape: Pick<ExtensionShape, "column" | "c
   return 5;
 }
 
+/** Whether one stored scalar satisfies one operator, as the SQL of structuredFilter decides it. */
+function scalarSatisfies(kind: QueryField["kind"], operator: string, operand: unknown, value: unknown): boolean {
+  if (value === null || value === undefined) return operator === "isNull" && operand === true;
+  const order = (left: unknown, right: unknown): number | undefined => {
+    if (kind === "number") { const a = Number(left), b = Number(right); return Number.isFinite(a) && Number.isFinite(b) ? a - b : undefined; }
+    if (kind === "timestamp") { const a = Date.parse(String(left)), b = Date.parse(String(right)); return Number.isFinite(a) && Number.isFinite(b) ? a - b : undefined; }
+    if (kind === "boolean") return left === right ? 0 : undefined;
+    if (kind === "date" && !isCalendarDate(right)) return undefined;
+    return typeof left === "string" && typeof right === "string" ? (left < right ? -1 : left > right ? 1 : 0) : undefined;
+  };
+  const compared = order(value, operand);
+  switch (operator) {
+    case "isNull": return operand === false;
+    case "eq": return compared === 0;
+    case "ne": return compared !== undefined && compared !== 0;
+    case "gt": return compared !== undefined && compared > 0;
+    case "gte": return compared !== undefined && compared >= 0;
+    case "lt": return compared !== undefined && compared < 0;
+    case "lte": return compared !== undefined && compared <= 0;
+    case "in": return Array.isArray(operand) && operand.some((item) => order(value, item) === 0);
+    case "contains": return typeof value === "string" && typeof operand === "string" && value.toLowerCase().includes(operand.toLowerCase());
+    case "startsWith": return typeof value === "string" && typeof operand === "string" && value.toLowerCase().startsWith(operand.toLowerCase());
+    default: return false;
+  }
+}
+
+/** The default a reader sees on a record without a value, when a filter may count it (see the module comment). */
+function filterableDefault(field: ExtensionField): { value: unknown } | undefined {
+  return field.definition.defaultValue !== undefined && (field.appliesWhen === null || field.appliesWhen === undefined)
+    ? { value: field.definition.defaultValue } : undefined;
+}
+
 /**
  * The SQL of one `extensions` filter node, under the alias `row_source`: one
  * EXISTS per field (and one for its `isNull`), each answered from the index
@@ -171,23 +240,45 @@ export function extensionFilterCondition(
     const { field, shape } = fieldFor(set, key);
     const predicate = { ...(raw as Record<string, unknown>) };
     const column = valueColumn(shape, VALUE_ALIAS);
+    const fallback = filterableDefault(field);
+    /** A probe for stored values, widened to records without one when the default matches too. */
+    const probe = (stored: RawBuilder<unknown>, defaultMatches: boolean) =>
+      fallback && defaultMatches ? sql`(${stored} or not ${exists(set, field)})` : stored;
     if (shape.column === "ref") assertReferencePredicate(key, shape.collection && Object.hasOwn(predicate, "contains") ? { eq: predicate.contains } : predicate);
     if (Object.hasOwn(predicate, "isNull")) {
       if (typeof predicate.isNull !== "boolean") extensionError("Invalid null filter.", "BAD_USER_INPUT");
-      conditions.push({ rank: predicate.isNull ? 6 : 5, key, sql: predicate.isNull ? sql`not ${exists(set, field)}` : exists(set, field) });
+      // With a default, a record without a value reads the default: never null.
+      const condition = fallback
+        ? (predicate.isNull ? sql`false` : sql`true`)
+        : predicate.isNull ? sql`not ${exists(set, field)}` : exists(set, field);
+      conditions.push({ rank: predicate.isNull ? 6 : 5, key, sql: condition });
       delete predicate.isNull;
+    }
+    if (shape.projection) {
+      if (!Object.keys(predicate).length) continue;
+      const compound = compoundPredicate(key, shape, predicate);
+      const unitColumn = sql.id(VALUE_ALIAS, "value_text");
+      const fallbackValue = record(fallback?.value) ? fallback!.value as Record<string, unknown> : undefined;
+      const defaultMatches = fallbackValue !== undefined && fallbackValue[shape.projection.text!] === compound.unit &&
+        Object.entries(compound.value).every(([operator, operand]) => scalarSatisfies("number", operator, operand, fallbackValue[shape.projection!.number!]));
+      conditions.push({ rank: extensionPredicateRank(shape, Object.keys(compound.value)), key,
+        sql: probe(exists(set, field, { column: column.sql, sql: sql`${structuredFilter({ value: compound.value }, { value: column })} and ${unitColumn} = ${compound.unit}` }), defaultMatches) });
+      continue;
     }
     if (shape.collection) {
       if (Object.hasOwn(predicate, "contains")) {
         // One index row per element: "contains x" is "some element equals x".
+        const defaultMatches = Array.isArray(fallback?.value) && (fallback!.value as unknown[]).includes(predicate.contains);
         conditions.push({ rank: extensionPredicateRank(shape, ["contains"]), key,
-          sql: exists(set, field, { column: column.sql, sql: structuredFilter({ value: { eq: predicate.contains } }, { value: column }) }) });
+          sql: probe(exists(set, field, { column: column.sql, sql: structuredFilter({ value: { eq: predicate.contains } }, { value: column }) }), defaultMatches) });
       }
       continue;
     }
     if (Object.keys(predicate).length) {
+      const defaultMatches = fallback !== undefined &&
+        Object.entries(predicate).every(([operator, operand]) => scalarSatisfies(column.kind, operator, operand, fallback.value));
       conditions.push({ rank: extensionPredicateRank(shape, Object.keys(predicate)), key,
-        sql: exists(set, field, { column: column.sql, sql: structuredFilter({ value: predicate }, { value: column }) }) });
+        sql: probe(exists(set, field, { column: column.sql, sql: structuredFilter({ value: predicate }, { value: column }) }), defaultMatches) });
     }
   }
   conditions.sort((left, right) => left.rank - right.rank || (left.key < right.key ? -1 : left.key > right.key ? 1 : 0));
@@ -212,7 +303,7 @@ export function extensionSort(
   if (typeof sort?.field !== "string" || !sort.field.startsWith(EXTENSION_SORT_PREFIX) || !extensibleEntityOf(table)) return undefined;
   const set = provenSet(table, session);
   const { field, shape } = fieldFor(set, sort.field.slice(EXTENSION_SORT_PREFIX.length));
-  if (shape.collection) extensionError(`extensions.${field.key} holds several values and cannot be sorted on.`, "BAD_USER_INPUT");
+  assertSortable(field.key, shape);
   return {
     valuesTable: set.entry.valuesTable,
     fieldId: field.fieldId,

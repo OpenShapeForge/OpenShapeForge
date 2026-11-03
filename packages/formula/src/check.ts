@@ -165,6 +165,10 @@ class Checker {
       );
       return { type: "invalid", ast, syntax: node };
     }
+    if (field.outOfScope) {
+      this.report("outOfScope", `'${field.label}' is out of a formula's reach: ${field.outOfScope}`, node, { field: field.label });
+      return { type: "invalid", ast, syntax: node };
+    }
     if (!isFormulaType(field.type)) {
       this.report(
         "unsupportedFieldType",

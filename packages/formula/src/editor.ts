@@ -141,7 +141,7 @@ export function suggest(text: string, cursor: number, env: FormulaEnvironment, o
   const mode = completionMode(text, Math.max(0, Math.min(cursor, text.length)));
   if (mode.kind === "none") return { from: cursor, to: cursor, items: [] };
   const usable = env.filter(
-    (field) => isFormulaType(field.type) && !field.classified && !(field.scope === "self" && field.id === options.fieldId),
+    (field) => isFormulaType(field.type) && !field.classified && !field.outOfScope && !(field.scope === "self" && field.id === options.fieldId),
   );
   const fieldsInReach =
     mode.kind === "member"

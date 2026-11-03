@@ -25,6 +25,7 @@ import { type Kysely, sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
+import { databaseRole } from "../database-roles.js";
 import { runMigrationChain } from "../migration-chain.js";
 import {
   diffManifestAgainstDatabase,
@@ -1455,4 +1456,85 @@ describe("tenant registry identity default (0017)", () => {
     });
   }, TEST_TIMEOUT);
 
+});
+
+/**
+ * Extensible entities arrive on a database that was built before the entity
+ * declared `extensible:`: the source column and both side tables are new, and
+ * so are the three platform tables that hold the tenant definitions. All of it
+ * is additive, so the roll-forward must carry the rows already there across
+ * without a versioned migration.
+ */
+describe("tenant fields on a carried-forward database", () => {
+  const registry = (manifest as {
+    extensionRegistry?: {
+      entities: Record<string, { table: string; valuesTable: string; uniqueTable: string }>;
+    };
+  }).extensionRegistry;
+  const extensible = Object.values(registry?.entities ?? {})[0];
+  const platformTables = [
+    "platform.extension_field_backfills",
+    "platform.extension_field_definitions",
+    "platform.extension_field_dependencies",
+  ];
+
+  // Needs the extensible acceptance layer (test/fixtures/authoring/extensible);
+  // the production composition declares no extensible entity.
+  test.skipIf(extensible === undefined)(
+    "a database built before the entity was extensible rolls forward additively and keeps its rows",
+    async () => {
+      const entity = extensible!;
+      const tenant = randomUUID();
+      await withScratchDb(async (url) => {
+        await runChain(url);
+        await withDb(url, async (db) => {
+          await sql`insert into erp.extensible_assets (tenant_id, name) values (${tenant}::uuid, 'kept')`.execute(db);
+          // Rewind to the origin/main shape: no source column, no side tables,
+          // no platform tables for tenant definitions.
+          await sql.raw(`drop table ${entity.valuesTable}, ${entity.uniqueTable}`).execute(db);
+          await sql.raw(`alter table ${entity.table} drop column extension_values`).execute(db);
+          await sql.raw(`drop table ${platformTables.join(", ")}`).execute(db);
+          await staleChecksum(db);
+        });
+
+        const result = await runChain(url);
+        expect(result.applied).toBe(true);
+        expect(result.built).toBeUndefined();
+        expect(result.checksum).toBe(manifest.checksum);
+        expect(result.rollForward?.addedTables.toSorted()).toEqual(
+          [...platformTables, entity.valuesTable, entity.uniqueTable].toSorted(),
+        );
+        expect(result.rollForward?.addedColumns).toEqual([`${entity.table}.extension_values`]);
+
+        await withDb(url, async (db) => {
+          // The existing row survives and gets the column default.
+          const rows = await sql<{ name: string; extension_values: unknown }>`
+            select name, extension_values from erp.extensible_assets where tenant_id = ${tenant}::uuid
+          `.execute(db);
+          expect(rows.rows).toEqual([{ name: "kept", extension_values: {} }]);
+
+          expect((await diffManifestAgainstDatabase(db)).nonAdditive).toEqual([]);
+          expect(await findUndeclaredDatabaseSchema(db)).toEqual({ tables: [], columns: [] });
+
+          // The grants and row policies come with the tables: tenant isolation
+          // is forced, and the worker (backfill) and app roles can reach them.
+          for (const table of [entity.valuesTable, entity.uniqueTable]) {
+            const [schema, name] = table.split(".");
+            const flags = await sql<{ rls: boolean; forced: boolean; worker: boolean; app: boolean }>`
+              select c.relrowsecurity as rls, c.relforcerowsecurity as forced,
+                has_table_privilege(${databaseRole("worker").name}, ${table}, 'INSERT,UPDATE,DELETE') as worker,
+                has_table_privilege(${databaseRole("app").name}, ${table}, 'SELECT') as app
+              from pg_class c join pg_namespace n on n.oid = c.relnamespace
+              where n.nspname = ${schema} and c.relname = ${name}
+            `.execute(db);
+            expect(flags.rows).toEqual([{ rls: true, forced: true, worker: true, app: true }]);
+          }
+          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);
+        });
+
+        expect((await runChain(url)).applied).toBe(false);
+      });
+    },
+    TEST_TIMEOUT,
+  );
 });

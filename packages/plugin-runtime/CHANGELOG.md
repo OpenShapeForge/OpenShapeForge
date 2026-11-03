@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+
+- **Extension registry types.** `RuntimeExtensibleEntity`,
+  `RuntimeExtensionRegistryManifest`, `RuntimeExtensionRegistry` and
+  `RuntimeExtensionIndexColumn` describe the manifest's `extensionRegistry`
+  (tenant-defined fields on `extensible` entities): storage, manage roles,
+  limits, allowed osfTypes and reference targets. Metadata only.
+
 ### Package compatibility
 
 - The reviewed compiler field-value policy release publishes operations,

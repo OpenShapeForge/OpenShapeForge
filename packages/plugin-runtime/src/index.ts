@@ -51,6 +51,7 @@ export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtif
   RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type {
   OperationAcceptance,
+  OperationAccepted,
   OperationConfirmation,
   OperationError,
   OperationPrerequisite,
@@ -390,7 +391,10 @@ export type RuntimeOperationExecutionResult =
  * Ignoring it leaves behaviour exactly as it was.
  */
 export type RuntimeDeclarativeServiceExecutionResult =
-  & RuntimeOperationExecutionResult
+  // A Service is composed, never taken over by an operation override: its
+  // answer is its data or a failure, not an acceptance.
+  & { intent?: string }
+  & Exclude<OperationResult<unknown>, OperationAccepted>
   & { connectionUse?: RuntimeDeclarativeServiceConnectionUse };
 
 export type RuntimeOperationExecutionContext = {

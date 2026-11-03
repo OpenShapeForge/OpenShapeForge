@@ -222,13 +222,17 @@ export type OperationAcceptance = {
  * `data` and no `error` member, so `isOperationFailure` stays false; a reader
  * of `data` sees it absent and should rule this arm out with
  * `isOperationAccepted` before treating a missing value as "not found".
+ *
+ * `error` is deliberately not declared, not even as `never`: an optional
+ * member keeps this arm on both sides of an `"error" in result` check, so
+ * every consumer that narrows a failure that way would see `error` as
+ * possibly undefined.
  */
 export type OperationAccepted<TIntent extends string = string> = {
   accepted: OperationAcceptance;
   operations: readonly OperationOffer<TIntent>[];
   /** Never present; declared so a reader of `data` must handle its absence. */
   data?: never;
-  error?: never;
 };
 
 /** Validation is one failure category in this same result contract. */

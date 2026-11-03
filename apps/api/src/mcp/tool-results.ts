@@ -154,7 +154,7 @@ export function runtimeOperationResult(
     structuredContent?: unknown;
     isError?: boolean | undefined;
   },
-): RuntimeOperationExecutionResult {
+): RuntimeDeclarativeServiceExecutionResult {
   const structured = result.structuredContent && typeof result.structuredContent === "object" && !Array.isArray(result.structuredContent)
     ? result.structuredContent as Record<string, unknown>
     : undefined;
@@ -193,7 +193,7 @@ export function runtimeOperationResult(
         : []
     );
     return {
-      ...(structured as RuntimeOperationExecutionResult),
+      ...(structured as RuntimeDeclarativeServiceExecutionResult),
       ...(resources.length > 0 ? { resources } : {}),
     };
   }

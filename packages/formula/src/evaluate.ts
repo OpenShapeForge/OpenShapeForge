@@ -8,7 +8,17 @@
 //
 // IF, SWITCH, AND, OR and ISERROR are walked lazily, so `IF({b} = 0, 0, {a} / {b})`
 // never divides by zero and `ISERROR(...)` catches an error instead of
-// propagating it. Nothing throws.
+// propagating it. Nothing throws: anything unforeseen is a `typeError`.
+//
+// Every value is bounded, so a result always fits the typed index and no
+// formula can make a write allocate without limit: text is at most
+// MAX_TEXT_LENGTH characters on the way and MAX_RESULT_TEXT_LENGTH (and
+// MAX_RESULT_TEXT_BYTES) as a result, both `textTooLong` beyond; a text function whose output can outgrow
+// its input by more than a constant factor (`&`, CONCATENATE, SUBSTITUTE) is
+// refused before it builds the text. A date or timestamp lies in the years
+// 0001 to 9999 (`invalidDate` otherwise), a number is finite and is rounded
+// to ROUNDING_DECIMALS decimals as a result, so binary noise such as
+// 0.1 + 0.2 = 0.30000000000000004 never reaches the index.
 import type { CompilerExpressionInput } from "./canonical/canonical-condition.js";
 import { evaluateExpression, isErrorValue } from "./canonical/expression-evaluator.js";
 import { fieldPath } from "./check.js";
@@ -44,6 +54,23 @@ const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/;
 
 const literal = (value: unknown): CompilerExpressionInput => ({ kind: "literal", value });
+const utf8 = new TextEncoder();
+
+/** The longest text a formula builds on the way to its result. */
+export const MAX_TEXT_LENGTH = 10_000;
+/** The longest text a formula may produce. */
+export const MAX_RESULT_TEXT_LENGTH = 1_000;
+/**
+ * And its most bytes as UTF-8: what one row of the typed index holds
+ * (PostgreSQL refuses a btree entry beyond 2704 bytes, and 1000 characters
+ * of non-Latin script are up to 3000).
+ */
+export const MAX_RESULT_TEXT_BYTES = 2_000;
+/** The decimals a number result keeps. */
+export const ROUNDING_DECIMALS = 10;
+/** A date or timestamp lies in the years 0001 to 9999: from the first instant, before the last. */
+const FIRST_INSTANT = Date.parse("0001-01-01T00:00:00.000Z");
+const END_INSTANT = Date.parse("+010000-01-01T00:00:00.000Z");
 
 /**
  * The value of `ast` for `record`, or the reason it has none. `record` holds
@@ -51,17 +78,21 @@ const literal = (value: unknown): CompilerExpressionInput => ({ kind: "literal",
  * and `id` / `createdAt` for RECORD_ID() and CREATED_TIME().
  */
 export function evaluate(ast: FormulaAst, record: FormulaRecord, options: EvaluateOptions = {}): FormulaEvaluation {
-  const types = new Map((options.env ?? []).map((field) => [fieldPath(field), field.type]));
-  const outcome = run(ast, record, types);
-  if (outcome instanceof Fault) return { ok: false, error: outcome.code };
-  return finish(outcome, options.resultType);
+  try {
+    const types = new Map((options.env ?? []).map((field) => [fieldPath(field), field.type]));
+    const outcome = run(ast, record, types);
+    if (outcome instanceof Fault) return { ok: false, error: outcome.code };
+    return finish(outcome, options.resultType);
+  } catch {
+    return { ok: false, error: "typeError" };
+  }
 }
 
 function run(node: CompilerExpressionInput, record: FormulaRecord, types: Map<string, string>): Outcome {
   const kind = (node as { kind?: string }).kind;
   switch (kind) {
     case "literal":
-      return (node as { value: unknown }).value ?? null;
+      return check((node as { value: unknown }).value ?? null);
     case "path":
       return readField((node as { path: string }).path, record, types);
     case "if": {
@@ -116,6 +147,7 @@ function run(node: CompilerExpressionInput, record: FormulaRecord, types: Map<st
       if ((op === "div" || op === "mod") && values.slice(1).some((value) => toDivisor(value) === 0)) {
         return new Fault("divideByZero");
       }
+      if (builtLength(op, values) > MAX_TEXT_LENGTH) return new Fault("textTooLong");
       return check(evaluateExpression({ ...node, operands: values.map(literal) } as CompilerExpressionInput, {}));
     }
     case "rule": {
@@ -152,17 +184,51 @@ function run(node: CompilerExpressionInput, record: FormulaRecord, types: Map<st
   }
 }
 
+/**
+ * The length of the text `op` would build from `values`, for the operators
+ * whose output can outgrow their input by more than a constant factor;
+ * counted without building it. Every other operator returns 0 here: its text
+ * is at most a few times its (already bounded) input, and is checked after.
+ */
+function builtLength(op: string, values: readonly unknown[]): number {
+  switch (op) {
+    case "concat":
+      return values.reduce<number>((total, value) => total + textOf(value).length, 0);
+    case "substitute": {
+      const [text, needle, replacement] = values.slice(0, 3).map(textOf) as [string, string, string];
+      if (needle === "" || replacement.length <= needle.length) return 0;
+      const occurrence = values[3];
+      let count = 0;
+      for (let at = text.indexOf(needle); at >= 0; at = text.indexOf(needle, at + needle.length)) {
+        count += 1;
+        if (occurrence !== null && occurrence !== undefined) break;
+      }
+      return text.length + count * (replacement.length - needle.length);
+    }
+    default:
+      return 0;
+  }
+}
+
+/** A value as the canonical evaluator turns it into text. */
+function textOf(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? "" : value.toISOString();
+  return String(value);
+}
+
 function toDivisor(value: unknown): number | undefined {
   if (value === null || value === undefined || value === "") return 0;
   return typeof value === "number" ? value : undefined;
 }
 
-/** A NaN, an infinity or an invalid date becomes the fault that explains it. */
+/** A NaN, an infinity, an invalid date or a text beyond MAX_TEXT_LENGTH becomes the fault that explains it. */
 function check(value: unknown): Outcome {
   if (typeof value === "number") {
     if (Number.isNaN(value)) return new Fault("invalidNumber");
     if (!Number.isFinite(value)) return new Fault("numberOutOfRange");
   }
+  if (typeof value === "string" && value.length > MAX_TEXT_LENGTH) return new Fault("textTooLong");
   if (value instanceof Date && Number.isNaN(value.getTime())) return new Fault("invalidDate");
   return value === undefined ? null : value;
 }
@@ -173,14 +239,14 @@ function readField(path: string, record: FormulaRecord, types: Map<string, strin
   const type = types.get(path);
   switch (type) {
     case undefined:
-      return raw;
+      return check(raw);
     case "number": {
       if (typeof raw === "number") return Number.isFinite(raw) ? raw : new Fault("typeError");
       if (typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw))) return Number(raw);
       return new Fault("typeError");
     }
     case "text":
-      return typeof raw === "string" ? raw : new Fault("typeError");
+      return typeof raw === "string" ? check(raw) : new Fault("typeError");
     case "boolean":
       return typeof raw === "boolean" ? raw : new Fault("typeError");
     case "date":
@@ -197,18 +263,23 @@ function readField(path: string, record: FormulaRecord, types: Map<string, strin
       return Number.isNaN(instant.getTime()) ? new Fault("invalidDate") : instant;
     }
     default:
-      return raw;
+      return check(raw);
   }
 }
 
 function finish(value: unknown, resultType: FormulaType | undefined): FormulaEvaluation {
   if (value === null || value === undefined) return { ok: true, value: null };
+  if (value instanceof Date && !(value.getTime() >= FIRST_INSTANT && value.getTime() < END_INSTANT)) return { ok: false, error: "invalidDate" };
+  if (typeof value === "string" && (value.length > MAX_RESULT_TEXT_LENGTH || utf8.encode(value).length > MAX_RESULT_TEXT_BYTES)) {
+    return { ok: false, error: "textTooLong" };
+  }
   switch (resultType) {
     case undefined:
       if (value instanceof Date) return { ok: true, value: value.toISOString() };
+      if (typeof value === "number") return { ok: true, value: rounded(value) };
       return isFormulaValue(value) ? { ok: true, value } : { ok: false, error: "typeError" };
     case "number":
-      return typeof value === "number" ? { ok: true, value: value === 0 ? 0 : value } : { ok: false, error: "typeError" };
+      return typeof value === "number" ? { ok: true, value: rounded(value) } : { ok: false, error: "typeError" };
     case "text":
       return typeof value === "string" ? { ok: true, value } : { ok: false, error: "typeError" };
     case "boolean":
@@ -218,6 +289,12 @@ function finish(value: unknown, resultType: FormulaType | undefined): FormulaEva
     case "timestamp":
       return value instanceof Date ? { ok: true, value: value.toISOString() } : { ok: false, error: "typeError" };
   }
+}
+
+/** A finite number to ROUNDING_DECIMALS decimals, never -0. */
+function rounded(value: number): number {
+  const result = Number(value.toFixed(ROUNDING_DECIMALS));
+  return result === 0 ? 0 : result;
 }
 
 function isFormulaValue(value: unknown): value is FormulaValue {

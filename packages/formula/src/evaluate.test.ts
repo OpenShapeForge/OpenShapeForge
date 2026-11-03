@@ -81,6 +81,67 @@ describe("per-record error codes instead of exceptions", () => {
   });
 });
 
+describe("every value is bounded, so a result always fits the typed index", () => {
+  const nested = (levels: number) => {
+    let text = "'aaaa'";
+    for (let level = 0; level < levels; level += 1) text = `SUBSTITUTE(${text}, 'a', 'aa')`;
+    return text;
+  };
+
+  test("a date or timestamp lies in the years 0001 to 9999", () => {
+    expect(evaluated("DATEADD({Launch date}, 8000, 'years')")).toEqual({ ok: false, error: "invalidDate" });
+    expect(evaluated("DATEADD({Launch date}, -2030, 'years')")).toEqual({ ok: false, error: "invalidDate" });
+    expect(evaluated("DATEADD(CREATED_TIME(), 8000, 'years')")).toEqual({ ok: false, error: "invalidDate" });
+    expect(evaluated("DATEADD({Launch date}, 7973, 'years')")).toEqual({ ok: true, value: "9999-03-01" });
+    expect(evaluated("DATEADD({Launch date}, -2025, 'years')")).toEqual({ ok: true, value: "0001-03-01" });
+    // Out of range on the way is fine; only the result is bounded.
+    expect(evaluated("DATEADD(DATEADD({Launch date}, 8000, 'years'), -8000, 'years')")).toEqual({ ok: true, value: "2026-03-01" });
+    expect(evaluated("YEAR(DATEADD({Launch date}, 8000, 'years'))")).toEqual({ ok: true, value: 10026 });
+  });
+
+  test("a text result is at most 1000 characters", () => {
+    expect(evaluated(`'${"x".repeat(1000)}'`)).toEqual({ ok: true, value: "x".repeat(1000) });
+    expect(evaluated(`'${"x".repeat(1001)}'`)).toEqual({ ok: false, error: "textTooLong" });
+    expect(evaluated(`LEN('${"x".repeat(3000)}')`)).toEqual({ ok: true, value: 3000 });
+    // And at most 2000 bytes as UTF-8, so it always fits one index row.
+    expect(evaluated(`'${"€".repeat(666)}'`)).toEqual({ ok: true, value: "€".repeat(666) });
+    expect(evaluated(`'${"€".repeat(667)}'`)).toEqual({ ok: false, error: "textTooLong" });
+    expect(evaluated(nested(7))).toEqual({ ok: true, value: "a".repeat(512) });
+    expect(evaluated(nested(8))).toEqual({ ok: false, error: "textTooLong" });
+  });
+
+  test("text on the way is at most 10000 characters, refused before it is built", () => {
+    // Each level doubles the text: 4 · 2^11 = 8192 still fits, 4 · 2^12 does not.
+    expect(evaluated(`LEN(${nested(11)})`)).toEqual({ ok: true, value: 8192 });
+    expect(evaluated(`LEN(${nested(12)})`)).toEqual({ ok: false, error: "textTooLong" });
+    // Sixty doublings would be 4 · 2^60 characters: refused at the twelfth.
+    expect(evaluated(`LEN(${nested(60)})`)).toEqual({ ok: false, error: "textTooLong" });
+    expect(evaluated(`LEN(SUBSTITUTE('${"a".repeat(2000)}', 'a', 'aaaaaa'))`)).toEqual({ ok: false, error: "textTooLong" });
+    expect(evaluated(`LEN(SUBSTITUTE('${"a".repeat(2000)}', 'a', 'aaaaaa', 1))`)).toEqual({ ok: true, value: 2005 });
+    const long = { ...record, title: "t".repeat(6000) };
+    expect(evaluated("LEN({Title} & {Title})", long)).toEqual({ ok: false, error: "textTooLong" });
+    expect(evaluated("LEN(CONCATENATE({Title}, {Title}))", long)).toEqual({ ok: false, error: "textTooLong" });
+    expect(evaluated("LEN({Title})", long)).toEqual({ ok: true, value: 6000 });
+    expect(evaluated("LEN({Title})", { ...record, title: "t".repeat(10_001) })).toEqual({ ok: false, error: "textTooLong" });
+    expect(evaluated("ISERROR({Title} & {Title})", long)).toEqual({ ok: true, value: true });
+  });
+
+  test("a number result keeps 10 decimals; a non-finite one is an error", () => {
+    expect(evaluated("0.1 + 0.2")).toEqual({ ok: true, value: 0.3 });
+    expect(evaluated("1 / 3")).toEqual({ ok: true, value: 0.3333333333 });
+    expect(evaluated("{Capacity kWh} * pricing.amount")).toEqual({ ok: true, value: 6749.325 });
+    expect(evaluated("-0.00000000001")).toEqual({ ok: true, value: 0 });
+    // Doubles carry about 15 significant digits: more is computed, but not kept.
+    expect(evaluated("{Cost {net\\}} + 0", { ...record, "f-cost": "12345678901234567.89" })).toEqual({ ok: true, value: 12345678901234568 });
+    expect(evaluated("POWER(10, 400)")).toEqual({ ok: false, error: "numberOutOfRange" });
+  });
+
+  test("an exception anywhere is a typeError, never thrown", () => {
+    const hostile = Object.defineProperty({ ...record }, "title", { get() { throw new Error("unreadable"); }, enumerable: true });
+    expect(evaluated("LEN({Title})", hostile)).toEqual({ ok: false, error: "typeError" });
+  });
+});
+
 describe("lazy branches", () => {
   test("the branch not taken is never evaluated", () => {
     expect(evaluated("IF({Price per kWh} = 0, 0, {Capacity kWh} / {Price per kWh})", { ...record, "f-ppk": 0 })).toEqual({

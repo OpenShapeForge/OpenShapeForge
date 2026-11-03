@@ -32,6 +32,12 @@ export type FormulaField = {
   /** A {@link FormulaType}; any other value is a field a formula cannot use. */
   type: FormulaType | (string & {});
   classified?: boolean;
+  /**
+   * Set on a field that is listed only to refuse it: why a formula may not
+   * read it (`outOfScope`), e.g. because the platform changes it outside the
+   * record's own write.
+   */
+  outOfScope?: string;
   /** Absent means stored. */
   kind?: FormulaFieldKind;
   scope: FormulaFieldScope;
@@ -82,6 +88,7 @@ export type FormulaErrorCode =
   | "invalidNumber"
   | "numberOutOfRange"
   | "invalidDate"
+  | "textTooLong"
   | "typeError";
 
 /** A formula value ready for the source (`extension_values`) and the typed index. */

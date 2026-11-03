@@ -42,7 +42,7 @@ export { formatFormula, FormulaFormatError } from "./format.js";
 export { childExpressions, dependencies, dependencyNodes } from "./dependencies.js";
 export { buildDependencyGraph, dependencyNodeKey } from "./graph.js";
 export type { DependencyDefinition, DependencyGraph, DependencyNode } from "./graph.js";
-export { evaluate } from "./evaluate.js";
+export { evaluate, MAX_RESULT_TEXT_BYTES, MAX_RESULT_TEXT_LENGTH, MAX_TEXT_LENGTH, ROUNDING_DECIMALS } from "./evaluate.js";
 export type { EvaluateOptions } from "./evaluate.js";
 export { analyze, applySuggestion, formulaTokens, suggest } from "./editor.js";
 export type {

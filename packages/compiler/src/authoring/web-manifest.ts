@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { collectBlueprintOperations } from "../blueprint-operations.js";
+import { fieldDefinitionsPath, referencedByPath } from "../extension-operations.js";
+import type { ExtensionRegistry } from "./extension-registry-types.js";
 /** A REST-driven browser must positively project both its collection and transport. */
 export function hasWebRestCollection(contract: CompiledEntityContract): boolean {
   return contract.source
@@ -864,6 +866,27 @@ function applyRelationshipUsage(
   };
 }
 
+/**
+ * The authored collection tree: `children` must be a stored collection
+ * relationship of the entity, `label` and `count` fields of it.
+ */
+function collectionTree(contract: CompiledEntityContract): WebCollectionView["tree"] {
+  const tree = contract.interfaces?.web?.collectionTree;
+  if (!tree) return undefined;
+  const entityName = contract.entity.name;
+  const children = contract.model.relationships.find((relationship) => relationship.key === tree.children);
+  if (!children || children.kind !== "hasMany" || children.provider) {
+    throw new Error(`${entityName}: collection tree children ${tree.children} must be a stored collection relationship of ${entityName}.`);
+  }
+  for (const key of ["label", "count"] as const) {
+    const field = tree[key];
+    if (field !== undefined && !contract.model.fields.some((candidate) => candidate.key === field)) {
+      throw new Error(`${entityName}: collection tree ${key} ${field} is not a field of ${entityName}.`);
+    }
+  }
+  return { children: tree.children, ...(tree.label ? { label: tree.label } : {}), ...(tree.count ? { count: tree.count } : {}) };
+}
+
 function projectEntity(
   source: ProjectableEntity,
   all: ReadonlyMap<string, ProjectableEntity>,
@@ -895,6 +918,7 @@ function projectEntity(
   // Every single entity reference is an authored field, so its writability and
   // presentation are projected above; relationships add no implicit fields.
   const fields = Object.fromEntries(explicitFields);
+  const tree = collectionTree(contract);
   const authoredBoard = contract.interfaces?.web?.collectionBoard;
   let board: WebCollectionView["board"];
   if (authoredBoard) {
@@ -1371,7 +1395,7 @@ function projectEntity(
       message: "Generic create requires an atomic collection Operation and is currently unsupported.",
     } } } : {}),
     views: {
-      collection: { ...source.collection, ...(board ? { board } : {}), ...(createUnsupported ? { operations: withoutCreate(source.collection.operations) } : {}) },
+      collection: { ...source.collection, ...(tree ? { tree } : {}), ...(board ? { board } : {}), ...(createUnsupported ? { operations: withoutCreate(source.collection.operations) } : {}) },
       ...(record ? { record } : {}),
       ...(Object.keys(named).length ? { named } : {}),
     },
@@ -2081,6 +2105,8 @@ export function buildWebManifest(
   options: WebManifestOptions = {},
   standalone: WebStandaloneOperationsInput = { catalogs: [], operations: [] },
   referentiedata: CoreReferentiedataSnapshot = {},
+  /** The backend manifest's tenant-field registry; absent, no entity offers tenant fields. */
+  extensionRegistry?: ExtensionRegistry,
 ): WebManifestV1 {
   materializeCollectionOperations(entities, referentiedata);
   const resolved: Required<WebManifestOptions> = {
@@ -2117,6 +2143,7 @@ export function buildWebManifest(
   }
   const projected = projectable.map((entity) => entity.contract.source
     ? providers.get(entity.contract.entity.name)! : projectEntity(entity, byName, providers));
+  if (extensionRegistry) withCustomFields(projected, byName, extensionRegistry);
   // Reading uses the same authored catalog labels as editing. Keep the source
   // identity for choices and preserve unknown stored codes as renderer fallbacks.
   for (const entity of [...projected, ...Object.values(pages?.entities ?? {})]) {
@@ -2163,6 +2190,34 @@ export function buildWebManifest(
     ...(pages ? { operations: pages.operations, pages: pages.pages } : {}),
     ...(definitions.length ? { entityValueDefinitions } : {}),
   };
+}
+
+/**
+ * Tenant fields on the web: the definition routes and limits of an extensible
+ * entity, and the "referenced by" route of every entity a tenant reference
+ * may point at, both taken from the backend manifest's registry so the
+ * browser is offered exactly what the runtime serves.
+ */
+function withCustomFields(
+  projected: WebEntityInterface[],
+  byName: ReadonlyMap<string, ProjectableEntity>,
+  registry: ExtensionRegistry,
+): void {
+  for (const entity of projected) {
+    const contract = byName.get(entity.entityId)?.contract;
+    if (!contract || contract.source) continue;
+    const extensible = registry.entities[entity.entityId];
+    if (extensible) {
+      entity.customFields = {
+        manageRoles: [...extensible.manageRoles],
+        definitionsPath: fieldDefinitionsPath(contract),
+        limits: { ...extensible.limits },
+        allowedOsfTypes: [...extensible.allowedOsfTypes],
+        targets: extensible.targets.map((target) => target.entity),
+      };
+    }
+    if (registry.referencedBy[entity.entityId]?.length) entity.referencedByPath = referencedByPath(contract);
+  }
 }
 
 /** Stable JSON representation for generated artifacts and deterministic checks. */

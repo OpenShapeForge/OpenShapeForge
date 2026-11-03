@@ -190,7 +190,7 @@ test("helpers: Retry-After forms and what counts as canonical", async () => {
 });
 
 test("an accepted takeover is a settled answer for a non-keyed write, returned unchanged and not re-sent", async () => {
-  const accepted = { accepted: { by: { kind: "workflow", ref: "run-9" }, status: "waiting" }, operations: [] };
+  const accepted = { accepted: { by: { kind: "workflow", ref: "run-9" }, status: "waiting" as const }, operations: [] };
   const f = fixture({ execute: [Response.json(accepted, { status: 202 })] }, "none", { tracked: true });
   expect(await f.broker.execute(await f.broker.authorize(reference))).toEqual(accepted);
   expect(f.calls.execute).toBe(1);

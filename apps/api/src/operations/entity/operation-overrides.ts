@@ -38,6 +38,7 @@ import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import { organizationServiceIdentities } from "../../auth/organization-service-identities.js";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { RuntimeModule } from "../../modules/contract.js";
+import { sessionRelation } from "../../auth/identity-link.js";
 
 export { OPERATION_TAKEOVER_INPUT_MEMBER };
 
@@ -173,19 +174,39 @@ type TakeoverRow = {
   owner_ref: string | null;
   owner_status: string | null;
   completed_at: string | null;
+  caller_user_id?: string | null;
+  caller_relation_id?: string | null;
 };
 
 export type TakeoverReplay = { takeoverId: string; operationId: string; recordId: string; inputHash: string };
+/** A proven replay, with the caller the takeover recorded. */
+export type PreparedTakeoverReplay = TakeoverReplay & {
+  caller: { userId: string | null; relationId: string | null };
+};
+
+/**
+ * The session the replay's trusted stamps are taken from: the recorded
+ * caller's user and Relation, never the service identity that replays.
+ */
+export function takeoverStampSession<T extends DbSessionInput>(session: T, replay: PreparedTakeoverReplay): T {
+  return {
+    ...session,
+    userId: replay.caller.userId,
+    relation: replay.caller.relationId
+      ? { status: "linked", relationId: replay.caller.relationId, displayName: null }
+      : null,
+  } as T;
+}
 
 /** Prove an open takeover for this exact replay before any write is prepared. */
 export async function prepareTakeoverReplay(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
   replay: TakeoverReplay,
-): Promise<TakeoverReplay> {
+): Promise<PreparedTakeoverReplay> {
   if (relatedScope.getStore()) takeoverInvalid("A takeover cannot be replayed inside another write.");
   const row = await withDbSession(db, session, async (trx) => (await sql<TakeoverRow>`
-    select id, operation_id, record_id, input_hash, completed_at
+    select id, operation_id, record_id, input_hash, completed_at, caller_user_id, caller_relation_id
     from platform.operation_takeovers
     where id = ${replay.takeoverId}::uuid and tenant_id = ${session.tenantId}::uuid
   `.execute(trx)).rows[0]);
@@ -193,7 +214,7 @@ export async function prepareTakeoverReplay(
     row.record_id !== replay.recordId || row.input_hash !== replay.inputHash) {
     takeoverInvalid();
   }
-  return replay;
+  return { ...replay, caller: { userId: row.caller_user_id ?? null, relationId: row.caller_relation_id ?? null } };
 }
 
 /**
@@ -310,40 +331,48 @@ export async function takeOverEntityOperation(
   const [{ binding, overrideId }] = answers as [(typeof answers)[number]];
   const inputHash = takeoverInputHash(request.input);
   const tenantId = session.tenantId!;
+  const relationId = sessionRelation(session as Parameters<typeof sessionRelation>[0])?.relationId;
+  const callerRelationId = relationId && UUID.test(relationId) ? relationId : null;
   const lookup = () => withDbSession(db, session, async (trx) => (await sql<TakeoverRow>`
     select id, owner_kind, owner_ref, owner_status, completed_at
     from platform.operation_takeovers
     where tenant_id = ${tenantId}::uuid and operation_id = ${request.operation.id}
       and record_id = ${request.recordId} and input_hash = ${inputHash} and completed_at is null
   `.execute(trx)).rows[0]);
-  const inFlight = () => operationFailure({
-    code: "OPERATION_IN_PROGRESS",
-    message: "This change is already being taken over.",
-    retryable: true,
-  });
-  // A retry of an open takeover answers with the run it already started.
+  // A retry of an open takeover answers with the run it already started. A
+  // takeover recorded without an owner reference (the process stopped, or
+  // storing the reference failed, after the row committed) is asked again
+  // under the same takeover id and idempotency key: the owner answers with
+  // the run it already has for it, or starts the one that never started.
   const open = await lookup();
+  let takeoverId: string | undefined;
   if (open) {
     const accepted = acceptedFromRow(open);
     if (accepted) return { kind: "accepted", accepted };
-    throw inFlight();
-  }
-  const takeoverId = await withDbSession(db, session, async (trx) => {
-    await request.consumeControls(trx as Transaction<unknown>);
-    return (await sql<{ id: string }>`
-      insert into platform.operation_takeovers
-        (tenant_id, operation_id, record_id, input_hash, caller_user_id, owner_module, override_id)
-      values (${tenantId}::uuid, ${request.operation.id}, ${request.recordId}, ${inputHash},
-        ${session.userId && UUID.test(session.userId) ? session.userId : null}::uuid, ${binding.module}, ${overrideId})
-      on conflict (tenant_id, operation_id, record_id, input_hash) where completed_at is null do nothing
-      returning id
-    `.execute(trx)).rows[0]?.id;
-  });
-  if (!takeoverId) {
-    const raced = await lookup();
-    const accepted = raced && acceptedFromRow(raced);
-    if (accepted) return { kind: "accepted", accepted };
-    throw inFlight();
+    takeoverId = open.id;
+  } else {
+    takeoverId = await withDbSession(db, session, async (trx) => {
+      await request.consumeControls(trx as Transaction<unknown>);
+      return (await sql<{ id: string }>`
+        insert into platform.operation_takeovers
+          (tenant_id, operation_id, record_id, input_hash, caller_user_id, caller_relation_id, owner_module, override_id)
+        values (${tenantId}::uuid, ${request.operation.id}, ${request.recordId}, ${inputHash},
+          ${session.userId && UUID.test(session.userId) ? session.userId : null}::uuid,
+          ${callerRelationId}::uuid, ${binding.module}, ${overrideId})
+        on conflict (tenant_id, operation_id, record_id, input_hash) where completed_at is null do nothing
+        returning id
+      `.execute(trx)).rows[0]?.id;
+    });
+    if (!takeoverId) {
+      // A concurrent call recorded it first: its run, or the same takeover.
+      const raced = await lookup();
+      const accepted = raced && acceptedFromRow(raced);
+      if (accepted) return { kind: "accepted", accepted };
+      if (!raced) {
+        throw operationFailure({ code: "OPERATION_IN_PROGRESS", message: "This change is already being taken over.", retryable: true });
+      }
+      takeoverId = raced.id;
+    }
   }
   const discard = () => withDbSession(db, session, (trx) => sql`
     delete from platform.operation_takeovers

@@ -47,10 +47,11 @@ import {
   prepareTakeoverReplay,
   takeOverEntityOperation,
   takeoverInputHash,
+  takeoverStampSession,
   takeTakeoverInput,
   withinRelatedChanges,
   type EntityTakeoverOutcome,
-  type TakeoverReplay,
+  type PreparedTakeoverReplay,
 } from "./operation-overrides.js";
 import {
   createGeneratedEntity,
@@ -1092,9 +1093,11 @@ async function executeEntityOperationWithContext(
       if (intent === "delete") {
         const operations = getEntityOperationOffers(entityName, session,
           projectedOfferIntents(request, COLLECTION_OFFER_INTENTS));
-        return outcome.kind === "accepted"
-          ? { intent, accepted: outcome.accepted, operations }
-          : { intent, data: { deleted: outcome.data.deleted === true }, operations };
+        if (outcome.kind === "accepted") return { intent, accepted: outcome.accepted, operations };
+        // Deleted is what the database says, not what the override claims:
+        // the row must be gone from the caller's own view.
+        const remaining = await fetchGeneratedEntityRow(db, session, table, id);
+        return { intent, data: { deleted: remaining === null }, operations };
       }
       // The record as it is now, under the caller's own projection: the
       // override's own payload is never passed through as the record.
@@ -1108,7 +1111,7 @@ async function executeEntityOperationWithContext(
         ? { intent, accepted: outcome.accepted, operations }
         : { intent, data, operations };
     };
-    const replayFor = (id: string): Promise<TakeoverReplay> | undefined => replayTakeoverId
+    const replayFor = (id: string): Promise<PreparedTakeoverReplay> | undefined => replayTakeoverId
       ? prepareTakeoverReplay(db, session, {
           takeoverId: replayTakeoverId,
           operationId: request.operation.id,
@@ -1376,7 +1379,9 @@ async function executeEntityOperationWithContext(
           return updateGeneratedEntity(db, session, {
           table: table.name, id: requireId(request.input), values: committed.values,
           ...(committed.bindings ? { fieldBindings: committed.bindings } : {}),
-          ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
+          // A replay stamps the caller the takeover recorded, not the service identity.
+          ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation,
+            replay ? takeoverStampSession(session, replay) : session) } } : {}),
           ...(guard ? { guard } : {}),
         });
         };

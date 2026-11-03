@@ -39,6 +39,10 @@ if (process.env.OSF_OVERRIDE_RUNTIME_ISOLATED !== "1") {
         required: true,
         persisted: { column: "name", storageClass: "core" },
       });
+      // Stamped by Owner.update in the stamp test (writer metadata patched below).
+      for (const [key, column] of [["changedBy", "changed_by"], ["changedRelation", "changed_relation"]]) {
+        owner.fields.push({ key, osfType: "string", validation: { format: "uuid" }, persisted: { column, storageClass: "core" } });
+      }
       for (const entity of [owner, child]) {
         entity.fields.push({
           key: "tenantId",
@@ -73,6 +77,9 @@ if (process.env.OSF_OVERRIDE_RUNTIME_ISOLATED !== "1") {
   ).tables;
   const { default: runtimeManifest } = await import("../../generated/db/manifest.json", { with: { type: "json" } });
   const { default: catalog } = await import("../../generated/operations/catalog.json", { with: { type: "json" } });
+  for (const column of tables.find((table: any) => table.source?.authoringEntityName === "Owner").columns) {
+    if (column.name === "changed_by" || column.name === "changed_relation") column.writtenBy = [{ operation: "Owner.update" }];
+  }
   (runtimeManifest.tables as any[]).push(...tables);
   for (const { contract } of entries)
     for (const op of Object.values(contract.entityOperations) as any[]) {
@@ -433,6 +440,79 @@ if (process.env.OSF_OVERRIDE_RUNTIME_ISOLATED !== "1") {
     ambiguous = true;
     expect(await run("Owner.update", await updateInput(owner.id, "Two"))).toMatchObject({ error: { code: "OPERATION_AMBIGUOUS" } });
     expect(executed).toHaveLength(0);
+  });
+
+  test("a takeover recorded without an owner reference is asked again under the same id", async () => {
+    behaviour = { takes: takesOwnerUpdate };
+    const owner = await newOwner();
+    const input = await updateInput(owner.id, "Orphan");
+    // As if the process stopped after the takeover committed and before the
+    // owner's answer was stored.
+    const orphan = (await sql<{ id: string }>`
+      insert into platform.operation_takeovers (tenant_id, operation_id, record_id, input_hash, caller_user_id, owner_module, override_id)
+      values (${actor.tenantId}::uuid, 'Owner.update', ${owner.id}, ${takeoverInputHash(input)}, ${actor.userId}::uuid, 'workflow-test', 'definition-1')
+      returning id`.execute(privileged.db)).rows[0]!.id;
+    const keys: string[] = [];
+    behaviour.execute = async (_context, request) => {
+      keys.push(request.idempotencyKey);
+      return { error: { code: "ACTION_UNAVAILABLE", message: "No run.", retryable: false } };
+    };
+    // The owner reports no run: the orphan is discarded, not left in progress.
+    expect(await run("Owner.update", input)).toMatchObject({ error: { code: "ACTION_UNAVAILABLE" } });
+    expect(executed.at(-1).takeoverId).toBe(orphan);
+    expect(await takeovers(owner.id)).toHaveLength(0);
+
+    const second = (await sql<{ id: string }>`
+      insert into platform.operation_takeovers (tenant_id, operation_id, record_id, input_hash, caller_user_id, owner_module, override_id)
+      values (${actor.tenantId}::uuid, 'Owner.update', ${owner.id}, ${takeoverInputHash(input)}, ${actor.userId}::uuid, 'workflow-test', 'definition-1')
+      returning id`.execute(privileged.db)).rows[0]!.id;
+    behaviour.execute = async (_context, request) => {
+      keys.push(request.idempotencyKey);
+      return { accepted: { by: { kind: "workflow", ref: "run-existing" }, status: "running" } };
+    };
+    const resumed: any = await run("Owner.update", input);
+    expect(resumed.accepted.by.ref).toBe("run-existing");
+    expect(executed.at(-1).takeoverId).toBe(second);
+    expect(keys[0]).toBe(keys[1]);
+    expect((await takeovers(owner.id))[0]).toMatchObject({ id: second, owner_ref: "run-existing" });
+    const calls = executed.length;
+    expect(((await run("Owner.update", input)) as any).accepted.by.ref).toBe("run-existing");
+    expect(executed).toHaveLength(calls);
+  });
+
+  test("a completed delete reports deleted only when the record is gone", async () => {
+    behaviour = {
+      takes: (request) => request.operation.id === "Owner.delete",
+      execute: async () => ({ completed: { deleted: true } }),
+    };
+    const owner = await newOwner();
+    const result: any = await run("Owner.delete", { id: owner.id, expectedVersion: (await stored("owners", owner.id)).version, confirmed: true });
+    expect(result).toMatchObject({ intent: "delete", data: { deleted: false } });
+    expect(await stored("owners", owner.id)).toBeDefined();
+  });
+
+  test("a replay stamps the recorded caller, not the service identity", async () => {
+    behaviour = { takes: takesOwnerUpdate };
+    const operation = entityOperationContract("Owner.update");
+    const original = operation.stamps;
+    (operation as any).stamps = [
+      { field: "changedBy", source: "actorUserId" },
+      { field: "changedRelation", source: "actorRelation" },
+    ];
+    try {
+      const owner = await newOwner();
+      const relationId = randomUUID();
+      const caller = { ...actor, relation: { status: "linked", relationId, displayName: "Caller" } };
+      const input = await updateInput(owner.id, "Stamped");
+      expect(((await run("Owner.update", input, caller)) as any).accepted).toBeDefined();
+      expect((await takeovers(owner.id))[0]).toMatchObject({ caller_user_id: actor.userId, caller_relation_id: relationId });
+      // The service identity has no linked Relation of its own.
+      const replayed: any = await run("Owner.update", { ...input, osfTakeover: executed[0].takeoverId }, service());
+      expect(record(replayed).name).toBe("Stamped");
+      expect((await stored("owners", owner.id)).row).toMatchObject({ changed_by: actor.userId, changed_relation: relationId });
+    } finally {
+      (operation as any).stamps = original;
+    }
   });
 
   test("REST answers a taken-over update and delete with 202", async () => {

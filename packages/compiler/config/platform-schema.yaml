@@ -1435,6 +1435,9 @@ tables:
       - { name: record_id, type: text, required: true }
       - { name: input_hash, type: text, required: true }
       - { name: caller_user_id, type: uuid }
+      # The caller's linked Relation at takeover, so the replay stamps the
+      # caller (actorUserId, actorRelation), not the service identity.
+      - { name: caller_relation_id, type: uuid }
       - { name: owner_module, type: text, required: true }
       - { name: override_id, type: text, required: true }
       # Filled once the override answered `accepted`: its own reference to the

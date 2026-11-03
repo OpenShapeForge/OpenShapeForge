@@ -1601,7 +1601,7 @@ describe("tenant fields on a carried-forward database", () => {
             has_column_privilege(${worker}, 'platform.extension_field_definitions', 'definition', 'UPDATE') as definitions_definition,
             has_table_privilege(${worker}, 'platform.extension_field_dependencies', 'SELECT,INSERT,UPDATE,DELETE') as dependencies,
             has_table_privilege(${worker}, 'platform.system_bypass_audit', 'INSERT') as bypass_audit`.execute(db);
-          expect({ maintain, ...rights.rows[0] }).toEqual({
+          expect({ maintain, ...rights.rows[0] } as Record<string, boolean>).toEqual({
             maintain: false, definitions_delete: false, definitions_state: true, definitions_definition: false, dependencies: false, bypass_audit: true,
           });
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);

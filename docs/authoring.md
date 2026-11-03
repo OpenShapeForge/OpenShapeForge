@@ -1283,8 +1283,12 @@ Omitting `recordLayout` preserves the existing default.
 
 The default `authoring.config.yaml` is the production composition. The
 repository's two `ExternalProcessRun` and `MeterConnection` sample entities
-are test fixtures and are not compiled into the API image. To run this
-repository's record-action DB and end-to-end tests locally, copy
+are test fixtures and are not compiled into the API image; neither is the
+extensible acceptance layer (`test/fixtures/authoring/extensible`):
+`ExtensibleAsset` with tenant-defined fields, its owned single child
+`ExtensibleAssetSpec` and the reference target `ExtensibleAssetLocation`. To
+run this repository's record-action and tenant-field DB and end-to-end tests
+locally, copy
 `test/fixtures/authoring/test-composition.yaml` to the ignored
 `authoring.config.local.yaml`, then run `bun run generate`. Remove the local
 file and regenerate to return to the default composition. Do not replace an

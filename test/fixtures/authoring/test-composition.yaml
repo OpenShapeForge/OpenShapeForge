@@ -2,3 +2,4 @@
 # generating test artifacts; never include this file in a production build.
 layers:
   - test/fixtures/authoring/record-actions
+  - test/fixtures/authoring/extensible

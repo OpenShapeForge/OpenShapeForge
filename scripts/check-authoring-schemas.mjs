@@ -161,8 +161,14 @@ const actualCoverage = new Map();
 for (const { schema } of validated) {
   actualCoverage.set(schema, (actualCoverage.get(schema) ?? 0) + 1);
 }
-const fixtureLayerActive = scanRoots.some(root => relative(repoRoot, root) === join("test", "fixtures", "authoring", "record-actions"));
-const expectedCoverage = Object.fromEntries(Object.entries(EXPECTED_SCHEMA_COVERAGE).map(([schema, count]) => [schema, count + (schema === "core-entity.schema.json" && fixtureLayerActive ? 2 : 0)]));
+// The test composition's layers (test/fixtures/authoring/test-composition.yaml)
+// and the core entities each adds: two record-action samples, and the
+// extensible acceptance entity with its owned child and reference target.
+const FIXTURE_LAYER_CORE_ENTITIES = { "record-actions": 2, extensible: 3 };
+const fixtureCoreEntities = Object.entries(FIXTURE_LAYER_CORE_ENTITIES)
+  .filter(([layer]) => scanRoots.some(root => relative(repoRoot, root) === join("test", "fixtures", "authoring", layer)))
+  .reduce((total, [, count]) => total + count, 0);
+const expectedCoverage = Object.fromEntries(Object.entries(EXPECTED_SCHEMA_COVERAGE).map(([schema, count]) => [schema, count + (schema === "core-entity.schema.json" ? fixtureCoreEntities : 0)]));
 for (const [schema, expected] of Object.entries(expectedCoverage).sort()) {
   const actual = actualCoverage.get(schema) ?? 0;
   if (actual !== expected) {

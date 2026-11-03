@@ -60,8 +60,10 @@ merged. OSV-Scanner's `bun.lock` support is the reason this gate does not use
   exactly one file each (catches path collisions/normalization surprises).
 - **Coverage** — when `apps/web` exists, the generated + on-disk web shards
   (entity manifests, server actions) must match
-  `expectedGeneratedCrudEntityCount` (currently `4` — bump it when adding an
-  entity) and agree name-for-name. Skipped in a repo with no `apps/web`.
+  `expectedGeneratedCrudEntityCount` (currently `117` for the production
+  composition, plus `2` with the record-action test layer and `1` with the
+  extensible acceptance layer — bump it when adding an entity with a Web
+  contract) and agree name-for-name. Skipped in a repo with no `apps/web`.
 - **Orphans** — files under compiler-owned or plugin-owned generated
   roots/files that a fresh generation would not produce fail the check.
 

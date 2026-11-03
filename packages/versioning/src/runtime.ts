@@ -67,40 +67,14 @@ function content(row: Row, ...excluded: readonly string[][]): Row {
 }
 
 /**
- * Tenant fields of an extensible head (§5.8, §6): the snapshot freezes their
- * values keyed by field id together with the definition version each was
- * read under — label, type, unit, options — so an old version stays legible
- * after a field is renamed or deleted. Classified fields are never frozen
- * (erasure must not reach into an immutable snapshot), and the raw
- * `extension_values` source is never part of the row. Keys are sorted by the
- * stable serialization, so the content hash stays deterministic.
+ * The raw source of tenant fields (`extension_values`) is never content of a
+ * snapshot, on any row: an extensible head freezes its fields through the
+ * platform's extension snapshot (values as a reader sees them, without
+ * classified fields, with the definitions needed to read them), and the
+ * column is stripped from every other row as well, in case a child table
+ * carries one (the compiler refuses `extensible` on an owned child).
  */
-export type SnapshotExtensionDefinition = {
-  field_id: string; key: string; version: number; state: string; definition: Row;
-};
-const CLASSIFIED = new Set(["confidential", "pii", "bsn"]);
-export function extensionSnapshot(source: Row, definitions: readonly SnapshotExtensionDefinition[]): {
-  extensions: Row; extensionDefinitions: Row;
-} {
-  const values = source.extension_values && typeof source.extension_values === "object" && !Array.isArray(source.extension_values)
-    ? source.extension_values as Row : {};
-  const extensions: Row = {};
-  const extensionDefinitions: Row = {};
-  for (const field of definitions) {
-    if (field.state === "deleted") continue;
-    const definition = field.definition ?? {};
-    const classification = definition.classification as { sensitivity?: unknown } | undefined;
-    if (CLASSIFIED.has(String(classification?.sensitivity ?? ""))) continue;
-    const options = (definition.options as { type?: unknown; items?: unknown } | undefined);
-    extensionDefinitions[field.field_id] = {
-      version: Number(field.version), key: field.key, label: definition.label ?? field.key, osfType: definition.osfType,
-      ...(definition.unit !== undefined ? { unit: definition.unit } : {}),
-      ...(options?.type === "static" && Array.isArray(options.items) ? { options: options.items } : {}),
-    };
-    if (Object.hasOwn(values, field.field_id) && values[field.field_id] !== null) extensions[field.field_id] = values[field.field_id];
-  }
-  return { extensions, extensionDefinitions };
-}
+const EXTENSION_SOURCE = ["extension_values"];
 
 /**
  * The walk follows the ownership tree the compiler bound from the authored
@@ -120,7 +94,7 @@ async function snapshotNode(executor: unknown, table: string, row: Row, owned: r
     const ordered = orderSnapshotChildren(found.map((entry) => entry.row), relation.childColumns);
     children[relation.table] = await Promise.all(ordered.map((row) => snapshotNode(executor, relation.table, row, relation.children)));
   }
-  return { table, row: content(row, BOOKKEEPING), children };
+  return { table, row: content(row, BOOKKEEPING, EXTENSION_SOURCE), children };
 }
 
 /**
@@ -152,13 +126,13 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
       await rows(transaction, "select set_config('app.publishing_entity', $1::text, true)", [sourceEntity]);
       const tree = await snapshotNode(transaction, head.table, source, owned);
       // An extensible head carries its tenant fields as `extensions`, never
-      // as the raw source column (see extensionSnapshot).
+      // as the raw source column (see EXTENSION_SOURCE).
       const extensible = Object.hasOwn(source, "extension_values");
-      const extension = extensible ? extensionSnapshot(source, await rows<SnapshotExtensionDefinition>(transaction,
-        `select field_id::text, key, version, state, definition from platform.extension_field_definitions
-          where tenant_id = app.current_tenant() and entity = $1 and is_current order by field_id`, [sourceEntity])) : undefined;
+      const service = context.platform?.schemas.extensions;
+      if (extensible && !service) fail("OPERATION_UNAVAILABLE", `${sourceEntity} carries tenant fields this host cannot snapshot.`);
+      const extension = extensible ? await service!.snapshot(transaction, session, sourceEntity, source) : undefined;
       const snapshot = { schemaVersion: 1, entity: sourceEntity, head: {
-        ...tree, row: content(tree.row, PUBLICATION, extensible ? ["extension_values"] : []), ...(extension ?? {}),
+        ...tree, row: content(tree.row, PUBLICATION), ...(extension ? { extensions: extension.extensions, extensionDefinitions: extension.extensionDefinitions } : {}),
       } };
       const canonical = stable(snapshot);
       const contentHash = createHash("sha256").update(canonical).digest("hex");

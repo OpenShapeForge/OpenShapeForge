@@ -306,6 +306,22 @@ export type RuntimeVersioningRegistry = {
   get(sourceEntity: string): RuntimeVersioningBinding | undefined;
 };
 
+/**
+ * What a published snapshot freezes of an extensible head's tenant fields,
+ * read inside the publishing transaction: the values as a reader sees them
+ * (a default included where it applies), keyed by field id, and per frozen
+ * field the definition needed to read the value later. Classified fields are
+ * never part of it; the raw source never is.
+ */
+export type RuntimeExtensionSnapshot = {
+  readonly extensions: Readonly<Record<string, unknown>>;
+  readonly extensionDefinitions: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+};
+
+export type RuntimeExtensionSnapshotService = {
+  snapshot(transaction: unknown, session: PluginSessionContext, entityName: string, row: Readonly<Record<string, unknown>>): Promise<RuntimeExtensionSnapshot>;
+};
+
 export type RuntimeOperationDefinition = OperationReference & {
   key?: string;
   /** Native field binding is part of execution identity, without physical storage names. */
@@ -550,6 +566,8 @@ export type PluginPlatformServices = {
     entityValues?: RuntimeEntityValueRegistry;
     /** Absent on hosts without published-snapshot versioning; callers must fail closed. */
     versioning?: RuntimeVersioningRegistry;
+    /** Absent on hosts without extensible entities; a snapshot of an extensible head then fails closed. */
+    extensions?: RuntimeExtensionSnapshotService;
   };
   events: {
     append(

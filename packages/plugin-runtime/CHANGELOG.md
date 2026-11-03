@@ -9,6 +9,10 @@
   `RuntimeExtensionIndexColumn` describe the manifest's `extensionRegistry`
   (tenant-defined fields on `extensible` entities): storage, manage roles,
   limits, allowed osfTypes and reference targets. Metadata only.
+- **Extension snapshot service.** `schemas.extensions.snapshot` (optional,
+  `RuntimeExtensionSnapshotService`) returns what a published snapshot of an
+  extensible head freezes of its tenant fields; the versioning runtime fails
+  closed without it.
 
 ### Package compatibility
 

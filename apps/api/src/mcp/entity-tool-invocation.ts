@@ -26,6 +26,7 @@ import {
   requireCreateOperationConfirmation,
 } from "../operations/entity/index.js";
 import { assertEntityValuesValid } from "../operations/entity/input-validation.js";
+import { splitExtensionInput } from "../operations/entity/extensions/write.js";
 import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import { HttpError } from "../rest/http-error.js";
 import { guardModelTypedValueArguments, withGuardedModelTypedValueWrite } from "./typed-value-write-guard.js";
@@ -156,13 +157,17 @@ export async function invokeTool(
         : values;
       assertOperationWrittenFields(modelValues, table);
       assertDeclaredProperties(tool.inputSchema, modelValues, "field");
-      assertWritableValues(modelValues, entity, table, session);
-      await guardModelTypedValueArguments(db, session, table, modelValues);
+      // Tenant fields are the runtime's to validate against this tenant's
+      // definitions (operations/entity/extensions); the checks below judge
+      // the authored fields only.
+      const authoredValues = splitExtensionInput(table, modelValues).values;
+      assertWritableValues(authoredValues, entity, table, session);
+      await guardModelTypedValueArguments(db, session, table, authoredValues);
       // The model's payload against the write contract BEFORE the
       // acknowledgement: an invalid create answers VALIDATION, never
       // CONFIRMATION_REQUIRED. The completed-elicitation write below does not
       // pass through executeEntityOperation, so this is its contract check.
-      assertEntityValuesValid(operation, table, modelValues, {
+      assertEntityValuesValid(operation, table, authoredValues, {
         partial: typeof args.blueprintId === "string",
       });
       requireCreateOperationConfirmation(operation, {
@@ -170,7 +175,7 @@ export async function invokeTool(
           ? { confirmed: args.confirmed }
           : {}),
       });
-      await assertPublishableWrite(db, session, tables, table, values);
+      await assertPublishableWrite(db, session, tables, table, splitExtensionInput(table, values).values);
       if (elicitationCompleted && elicitField) {
         if (args.blueprintId !== undefined) throw new HttpError(400, "BAD_USER_INPUT", "Secure completion does not accept a blueprint.");
         // The elicitation write does not pass through executeEntityOperation,
@@ -237,9 +242,10 @@ export async function invokeTool(
         "field",
       );
       assertOperationWrittenFields(values, table);
-      assertWritableValues(values, entity, table, session);
-      const result = await withGuardedModelTypedValueWrite(db, session, table, values, id, async () => {
-        await assertPublishableWrite(db, session, tables, table, values, id);
+      const authoredUpdate = splitExtensionInput(table, values).values;
+      assertWritableValues(authoredUpdate, entity, table, session);
+      const result = await withGuardedModelTypedValueWrite(db, session, table, authoredUpdate, id, async () => {
+        await assertPublishableWrite(db, session, tables, table, authoredUpdate, id);
         return executeEntityOperation(db, session, {
         operation: operationRef("update"),
         offerIntents,

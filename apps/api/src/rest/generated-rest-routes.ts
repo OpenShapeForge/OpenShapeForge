@@ -17,7 +17,7 @@
  * APIs present identical field names.
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { OperationFailure } from "@openshapeforge/operations";
+import { isOperationAccepted, OperationFailure } from "@openshapeforge/operations";
 import { API_BUILD_IDENTITY } from "../config/build-identity.js";
 import openApiSpec from "../generated/rest/openapi.json" with { type: "json" };
 import { DECIMAL_PATTERN, INTEGER_TEXT_PATTERN } from "@openshapeforge/operations";
@@ -577,6 +577,11 @@ export function registerGeneratedRestRoutes(
           });
           if (result.intent !== "update") throw new Error("Unexpected entity result.");
           if ("error" in result) throw new OperationFailure(result.error);
+          // Taken over by an operation override: the change has not happened
+          // yet, so this is neither the updated record nor a 404.
+          if (isOperationAccepted(result)) {
+            return reply.status(202).send({ accepted: result.accepted, operations: result.operations });
+          }
           const row = result.data;
           if (!row) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");
@@ -611,6 +616,10 @@ export function registerGeneratedRestRoutes(
           });
           if (result.intent !== "delete") throw new Error("Unexpected entity result.");
           if ("error" in result) throw new OperationFailure(result.error);
+          // Taken over: not deleted yet, and not missing either.
+          if (isOperationAccepted(result)) {
+            return reply.status(202).send({ accepted: result.accepted, operations: result.operations });
+          }
           const deleted = result.data.deleted;
           if (!deleted) {
             throw new HttpError(404, "NOT_FOUND", "Resource not found.");

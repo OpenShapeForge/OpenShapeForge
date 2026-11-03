@@ -24,6 +24,8 @@ import { assertStoredTypedValuesSupported, projectTypedValues } from "./typed-va
 import { projectVisibleFieldBindings } from "./field-binding-policy.js";
 import { withoutHiddenColumns } from "./subtype-scope.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
+import { projectExtensionRow } from "./extensions/read.js";
+import { carriesExtensionValues } from "./extensions/store.js";
 import type {
   GeneratedCrudColumn,
   GeneratedCrudExposureOperation,
@@ -195,7 +197,8 @@ export function projectRows(
   const hasTypedValue = table.columns.some((column) => column.typedBy);
   const hasBindings = table.columns.some((column) => column.fieldBindings);
   const hasHidden = (table.subtype?.hiddenColumns.length ?? 0) > 0;
-  if (!hasClassification && !hasElicitedOutput && !hasBigint && !hasTypedValue && !hasBindings && !hasHidden && !entityValueCarriers(table, entityValues).length) {
+  if (!hasClassification && !hasElicitedOutput && !hasBigint && !hasTypedValue && !hasBindings && !hasHidden && !entityValueCarriers(table, entityValues).length &&
+      !carriesExtensionValues(table)) {
     return rows;
   }
   return rows.map((row) => projectGeneratedEntityRow(table, session, row, entityValues));
@@ -234,7 +237,9 @@ export function projectGeneratedEntityRow(
 ): GeneratedEntityRow {
   // A subtype's hidden columns leave first: nothing below, redaction
   // included, may hand them to a reader of this projection.
-  const normalized = projectTypedValues(table, normalizeEntityStorageRow(table, projectEntityValueRow(table, withoutHiddenColumns(table, row), entityValues)));
+  // Tenant fields leave their source column as `extensions`, redacted per
+  // key, before anything else sees the row (extensions/read.ts).
+  const normalized = projectTypedValues(table, normalizeEntityStorageRow(table, projectEntityValueRow(table, projectExtensionRow(table, session, withoutHiddenColumns(table, row)), entityValues)));
   const classified = redactRow(
     normalized,
     table.columns,

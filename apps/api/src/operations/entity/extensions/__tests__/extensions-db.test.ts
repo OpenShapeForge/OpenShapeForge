@@ -24,7 +24,8 @@ import { hasExtensibleEntities, primeSessionExtensions, withExtensionTool } from
 import { renderTypeDefinition } from "../../../../graphql/generated-entity-schema.js";
 import { createModuleSessionCapability, ModulePlatformRuntime } from "../../../../modules/platform.js";
 import { bindOperationHandlers, invokeOperation, type OperationContract } from "../../../runtime.js";
-import { createExtensionFixture, MANAGER_ROLE, READER_ROLE, sessionFor, WRITER_ROLE, type ExtensionFixture } from "./fixture.js";
+import rawCatalog from "../../../../generated/operations/catalog.json" with { type: "json" };
+import { createExtensionFixture, ENTITY, MANAGER_ROLE, READER_ROLE, sessionFor, TARGET_ENTITY, WRITER_ROLE, type ExtensionFixture } from "./fixture.js";
 
 let fixture: ExtensionFixture;
 const tenantA = randomUUID();
@@ -41,45 +42,55 @@ const handlers = composeJobHandlers([{ name: "test-extensions", jobHandlers: {
 
 type Session = ReturnType<typeof sessionFor>;
 const define = (session: Session, action: FieldDefinitionAction, input: Record<string, unknown> = {}) =>
-  withDbSession(fixture.app.db, session, (trx) => executeFieldDefinitionAction(trx, session, "Task", action, input));
+  withDbSession(fixture.app.db, session, (trx) => executeFieldDefinitionAction(trx, session, ENTITY, action, input));
 const failure = async (promise: Promise<unknown>) => {
   try { await promise; } catch (error) { return (error as { operationError?: { code: string; message: string } }).operationError ?? error; }
   throw new Error("expected a refusal");
 };
 const label = (nl: string) => ({ nl, en: nl });
 
-async function createTask(session: Session, extensions?: Record<string, unknown>, title = "Taak") {
+async function createAsset(session: Session, extensions?: Record<string, unknown>, name = "Object") {
   return executeEntityOperation(fixture.app.db, session, {
-    operation: { id: "Task.create", intent: "create" },
-    input: { values: { title, type: "follow_up", status: "open", ...(extensions ? { extensions } : {}) } },
+    operation: { id: `${ENTITY}.create`, intent: "create" },
+    input: { values: { name, ...(extensions ? { extensions } : {}) } },
   });
 }
-async function created(session: Session, extensions?: Record<string, unknown>, title?: string) {
-  const result = await createTask(session, extensions, title);
+async function created(session: Session, extensions?: Record<string, unknown>, name?: string) {
+  const result = await createAsset(session, extensions, name);
   if ("error" in result || !result.data) throw new Error(`create failed: ${JSON.stringify(result)}`);
   return result.data as Record<string, unknown> & { id: string; extensions: Record<string, unknown>; extensionsMeta: Record<string, Record<string, unknown>> };
 }
+async function createLocation(session: Session, name: string) {
+  const result = await executeEntityOperation(fixture.app.db, session, {
+    operation: { id: `${TARGET_ENTITY}.create`, intent: "create" }, input: { values: { name } },
+  });
+  if ("error" in result || !result.data) throw new Error(`create failed: ${JSON.stringify(result)}`);
+  return result.data as Record<string, unknown> & { id: string; updated_at?: unknown };
+}
+/** The acceptance entity requires optimistic concurrency on update; a session that cannot read the row passes a stale version. */
 async function update(session: Session, id: string, values: Record<string, unknown>) {
-  return executeEntityOperation(fixture.app.db, session, { operation: { id: "Task.update", intent: "update" }, input: { id, values } });
+  const current = await get(session, id);
+  const expectedVersion = current ? String(current.updated_at) : new Date(0).toISOString();
+  return executeEntityOperation(fixture.app.db, session, { operation: { id: `${ENTITY}.update`, intent: "update" }, input: { id, values, expectedVersion } });
 }
 async function get(session: Session, id: string) {
-  const result = await executeEntityOperation(fixture.app.db, session, { operation: { id: "Task.get", intent: "get" }, input: { id } });
+  const result = await executeEntityOperation(fixture.app.db, session, { operation: { id: `${ENTITY}.get`, intent: "get" }, input: { id } });
   if ("error" in result) throw new Error(JSON.stringify(result.error));
   return result.data as (Record<string, unknown> & { extensions: Record<string, unknown>; extensionsMeta: Record<string, Record<string, unknown>> }) | null;
 }
 async function remove(session: Session, row: { id: string; updated_at?: unknown }) {
-  return executeEntityOperation(fixture.app.db, session, { operation: { id: "Task.delete", intent: "delete" },
+  return executeEntityOperation(fixture.app.db, session, { operation: { id: `${ENTITY}.delete`, intent: "delete" },
     input: { id: row.id, confirmed: true, expectedVersion: String(row.updated_at) } });
 }
 async function list(session: Session, input: Record<string, unknown>) {
-  return executeEntityOperation(fixture.app.db, session, { operation: { id: "Task.list", intent: "list" }, input });
+  return executeEntityOperation(fixture.app.db, session, { operation: { id: `${ENTITY}.list`, intent: "list" }, input });
 }
 const ids = (result: Awaited<ReturnType<typeof list>>) => {
   if ("error" in result) throw new Error(JSON.stringify(result.error));
   return (result.data as { items: Array<{ data: { id: string } }> }).items.map((item) => item.data.id);
 };
 async function indexRows(recordId: string, fieldId?: string) {
-  return (await sql<Record<string, unknown>>`select * from erp.tasks_field_values where record_id = ${recordId}::uuid
+  return (await sql<Record<string, unknown>>`select * from erp.extensible_assets_field_values where record_id = ${recordId}::uuid
     ${fieldId ? sql`and field_id = ${fieldId}::uuid` : sql``} order by field_id, ordinal`.execute(fixture.privileged.db)).rows;
 }
 async function drainJobs() {
@@ -120,8 +131,9 @@ describe("tenant fields on an extensible entity", () => {
       ["aantal", { osfType: "integer", label: label("Aantal"), defaultValue: 1, classification: { sensitivity: "public" } }],
       ["bsn", { osfType: "string", label: label("BSN"), classification: { sensitivity: "bsn" } }],
       ["sku", { osfType: "string", label: label("SKU"), unique: true, classification: { sensitivity: "internal" } }],
-      ["links", { osfType: "Task", label: label("Gekoppeld"), cardinality: "collection", onDelete: "setNull", classification: { sensitivity: "public" } }],
-      ["parent", { osfType: "Task", label: label("Hoofdtaak"), onDelete: "restrict", classification: { sensitivity: "public" } }],
+      ["links", { osfType: ENTITY, label: label("Gekoppeld"), cardinality: "collection", onDelete: "setNull", classification: { sensitivity: "public" } }],
+      ["parent", { osfType: ENTITY, label: label("Hoofdtaak"), onDelete: "restrict", classification: { sensitivity: "public" } }],
+      ["plek", { osfType: TARGET_ENTITY, label: label("Plek"), onDelete: "restrict", classification: { sensitivity: "public" } }],
       ["accu", { osfType: "number", label: label("Accu kWh"), required: true, classification: { sensitivity: "public" } },
         { operator: "equals", left: { kind: "path", path: "extensions.soort" }, right: { kind: "literal", value: "batterij" } }],
     ];
@@ -132,12 +144,13 @@ describe("tenant fields on an extensible entity", () => {
     }
     expect(await failure(define(manager, "create", { key: "soort", definition: { osfType: "string", classification: { sensitivity: "public" } } })))
       .toMatchObject({ code: expect.stringMatching(/CONFLICT|LIMIT_EXCEEDED/) });
-    const ninth = await define(manager, "create", { key: "negende", definition: { osfType: "string", classification: { sensitivity: "public" } } }) as { fieldId: string };
-    expect(await failure(define(manager, "create", { key: "tiende", definition: { osfType: "string", classification: { sensitivity: "public" } } })))
+    // limits.fields is 10 on the acceptance entity.
+    const last = await define(manager, "create", { key: "laatste", definition: { osfType: "string", classification: { sensitivity: "public" } } }) as { fieldId: string };
+    expect(await failure(define(manager, "create", { key: "teveel", definition: { osfType: "string", classification: { sensitivity: "public" } } })))
       .toMatchObject({ code: "LIMIT_EXCEEDED" });
     // A deleted field frees its slot (and needs no backfill work: no record has it).
-    await define(manager, "deprecate", { fieldId: ninth.fieldId });
-    await define(manager, "delete", { fieldId: ninth.fieldId, confirmAffectedRecords: 0 });
+    await define(manager, "deprecate", { fieldId: last.fieldId });
+    await define(manager, "delete", { fieldId: last.fieldId, confirmAffectedRecords: 0 });
     const listed = await define(reader, "list") as { items: Array<{ key: string; position: number }> };
     expect(listed.items.map((item) => item.key)).toEqual(specs.map(([key]) => key));
     // Tenant B sees none of tenant A's definitions.
@@ -153,16 +166,16 @@ describe("tenant fields on an extensible entity", () => {
     expect(serialized.extensions).toEqual(battery.extensions);
     expect(serialized.extensionValues).toBeUndefined();
 
-    const missing = await createTask(writer, { soort: "batterij" });
+    const missing = await createAsset(writer, { soort: "batterij" });
     expect(missing).toMatchObject({ error: { code: "VALIDATION", violations: [expect.objectContaining({ field: "extensions.accu", code: "REQUIRED" })] } });
     const kit = await created(writer, { soort: "kit" }, "Kit");
     expect(kit.extensionsMeta.accu).toEqual({ applicable: false });
     expect(kit.extensions.accu).toBeNull();
-    expect(await createTask(writer, { kleur: "rood" })).toMatchObject({ error: { code: "VALIDATION", violations: [expect.objectContaining({ code: "UNKNOWN_FIELD" })] } });
-    expect(await createTask(writer, { aantal: 1.5 })).toMatchObject({ error: { code: "VALIDATION", violations: [expect.objectContaining({ field: "extensions.aantal" })] } });
-    expect(await createTask(writer, { extensionValues: {} } as never)).toMatchObject({ error: { code: "VALIDATION" } });
-    expect(await executeEntityOperation(fixture.app.db, writer, { operation: { id: "Task.create", intent: "create" },
-      input: { values: { title: "raw", type: "follow_up", status: "open", extensionValues: { [fields.bsn!]: "x" } } } })).toMatchObject({ error: {} });
+    expect(await createAsset(writer, { kleur: "rood" })).toMatchObject({ error: { code: "VALIDATION", violations: [expect.objectContaining({ code: "UNKNOWN_FIELD" })] } });
+    expect(await createAsset(writer, { aantal: 1.5 })).toMatchObject({ error: { code: "VALIDATION", violations: [expect.objectContaining({ field: "extensions.aantal" })] } });
+    expect(await createAsset(writer, { extensionValues: {} } as never)).toMatchObject({ error: { code: "VALIDATION" } });
+    expect(await executeEntityOperation(fixture.app.db, writer, { operation: { id: `${ENTITY}.create`, intent: "create" },
+      input: { values: { name: "raw", extensionValues: { [fields.bsn!]: "x" } } } })).toMatchObject({ error: {} });
 
     // Index rows are written with the record, by type.
     const rows = await indexRows(battery.id);
@@ -192,15 +205,15 @@ describe("tenant fields on an extensible entity", () => {
 
   test("uniqueness is claimed per tenant and released by update and delete", async () => {
     const first = await created(writer, { sku: "U-1" });
-    expect(await createTask(writer, { sku: "U-1" })).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(await createAsset(writer, { sku: "U-1" })).toMatchObject({ error: { code: "CONFLICT" } });
     // Another tenant has its own namespace (and no definitions at all).
-    expect(await createTask(writerB, { sku: "U-1" })).toMatchObject({ error: { code: "VALIDATION" } });
+    expect(await createAsset(writerB, { sku: "U-1" })).toMatchObject({ error: { code: "VALIDATION" } });
     const moved = await update(writer, first.id, { extensions: { sku: "U-2" } });
     expect("error" in moved).toBe(false);
-    expect((await sql`select value_text from erp.tasks_field_unique_values where record_id = ${first.id}::uuid`.execute(fixture.privileged.db)).rows)
+    expect((await sql`select value_text from erp.extensible_assets_field_unique_values where record_id = ${first.id}::uuid`.execute(fixture.privileged.db)).rows)
       .toEqual([{ value_text: "U-2" }]);
     const second = await created(writer, { sku: "U-1" });
-    expect(await createTask(writer, { sku: "U-2" })).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(await createAsset(writer, { sku: "U-2" })).toMatchObject({ error: { code: "CONFLICT" } });
     expect(await remove(writer, (moved as unknown as { data: { id: string; updated_at: unknown } }).data)).toMatchObject({ data: { deleted: true } });
     expect((await created(writer, { sku: "U-2" })).extensions.sku).toBe("U-2");
     expect(second.extensions.sku).toBe("U-1");
@@ -209,9 +222,9 @@ describe("tenant fields on an extensible entity", () => {
   test("references are authorized against the real target row", async () => {
     const target = await created(writer, undefined, "Doel");
     const foreign = await created(writerB, undefined, "Vreemd");
-    expect(await createTask(writer, { parent: foreign.id })).toMatchObject({ error: { code: "FORBIDDEN" } });
-    expect(await createTask(writer, { parent: randomUUID() })).toMatchObject({ error: { code: "FORBIDDEN" } });
-    expect(await createTask(writer, { parent: "not-a-uuid" })).toMatchObject({ error: { code: "VALIDATION" } });
+    expect(await createAsset(writer, { parent: foreign.id })).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(await createAsset(writer, { parent: randomUUID() })).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(await createAsset(writer, { parent: "not-a-uuid" })).toMatchObject({ error: { code: "VALIDATION" } });
     const child = await created(writer, { parent: target.id, links: [target.id] }, "Kind");
     expect(child.extensions).toMatchObject({ parent: target.id, links: [target.id] });
     expect((await indexRows(child.id, fields.links))[0]).toMatchObject({ value_ref_id: target.id, ordinal: 0 });
@@ -223,7 +236,7 @@ describe("tenant fields on an extensible entity", () => {
     const b = await created(writer, { soort: "batterij", accu: 20 }, `Q-${tag}-b`);
     const c = await created(writer, { soort: "kit" }, `Q-${tag}-c`);
     const d = await created(writer, { soort: "batterij", accu: 20, links: [a.id, c.id] }, `Q-${tag}-d`);
-    const scope = { title: `Q-${tag}` };
+    const scope = { name: `Q-${tag}` };
     expect(ids(await list(reader, { filter: { ...scope, extensions: { soort: { eq: "batterij" } } }, limit: 50 })).sort()).toEqual([a.id, b.id, d.id].sort());
     expect(ids(await list(reader, { filter: { ...scope, extensions: { accu: { gte: 10 } } } })).sort()).toEqual([b.id, d.id].sort());
     expect(ids(await list(reader, { filter: { ...scope, extensions: { capaciteit: { gt: 1 } } } }))).toEqual([a.id]);
@@ -247,8 +260,8 @@ describe("tenant fields on an extensible entity", () => {
     expect(ids(await list(writerB, { filter: scope }))).toEqual([]);
     // Nor do the side tables leak through RLS to another tenant's session.
     const leaked = await withDbSession(fixture.app.db, writerB, async (trx) => ({
-      values: (await sql<{ n: string }>`select count(*)::text as n from erp.tasks_field_values`.execute(trx)).rows[0]!.n,
-      claims: (await sql<{ n: string }>`select count(*)::text as n from erp.tasks_field_unique_values`.execute(trx)).rows[0]!.n,
+      values: (await sql<{ n: string }>`select count(*)::text as n from erp.extensible_assets_field_values`.execute(trx)).rows[0]!.n,
+      claims: (await sql<{ n: string }>`select count(*)::text as n from erp.extensible_assets_field_unique_values`.execute(trx)).rows[0]!.n,
       definitions: (await sql<{ n: string }>`select count(*)::text as n from platform.extension_field_definitions`.execute(trx)).rows[0]!.n,
     }));
     expect(leaked).toEqual({ values: "0", claims: "0", definitions: "0" });
@@ -262,7 +275,7 @@ describe("tenant fields on an extensible entity", () => {
     const extension = events.filter((event) => event.event_type === "extensionsChanged");
     expect(extension).toHaveLength(2);
     expect(extension[1]!.payload.audit).toMatchObject({
-      entityType: "Task",
+      entityType: ENTITY,
       before: { "extensions.accu": 1, "extensions.bsn": "[REDACTED]" },
       after: { "extensions.accu": 2, "extensions.bsn": "[REDACTED]" },
       changedFields: ["extensions.accu", "extensions.bsn"],
@@ -281,16 +294,26 @@ describe("tenant fields on an extensible entity", () => {
     const target = await created(writer, undefined, "Referenced");
     await created(writer, { parent: target.id });
     await created(writer, { parent: target.id, links: [target.id] });
-    const referenced = await withDbSession(fixture.app.db, reader, (trx) => executeReferencedBy(trx, reader, "Task", { id: target.id }));
+    const referenced = await withDbSession(fixture.app.db, reader, (trx) => executeReferencedBy(trx, reader, ENTITY, { id: target.id }));
     expect(referenced.items.sort((x, y) => x.fieldKey.localeCompare(y.fieldKey))).toEqual([
-      { entity: "Task", fieldId: fields.links!, fieldKey: "links", label: label("Gekoppeld"), count: 1 },
-      { entity: "Task", fieldId: fields.parent!, fieldKey: "parent", label: label("Hoofdtaak"), count: 2 },
+      { entity: ENTITY, fieldId: fields.links!, fieldKey: "links", label: label("Gekoppeld"), count: 1 },
+      { entity: ENTITY, fieldId: fields.parent!, fieldKey: "parent", label: label("Hoofdtaak"), count: 2 },
     ]);
-    const other = await withDbSession(fixture.app.db, writerB, (trx) => executeReferencedBy(trx, writerB, "Task", { id: target.id }));
+    const other = await withDbSession(fixture.app.db, writerB, (trx) => executeReferencedBy(trx, writerB, ENTITY, { id: target.id }));
     expect(other.items).toEqual([]);
     const outsider = sessionFor(tenantA, ["Nothing.At.All"]);
-    expect(await failure(withDbSession(fixture.app.db, outsider, (trx) => executeReferencedBy(trx, outsider, "Task", { id: target.id }))))
+    expect(await failure(withDbSession(fixture.app.db, outsider, (trx) => executeReferencedBy(trx, outsider, ENTITY, { id: target.id }))))
       .toMatchObject({ code: "FORBIDDEN" });
+
+    // A plain, non-extensible target: its own referencedBy read and the deletion guard.
+    const location = await createLocation(writer, "Magazijn");
+    expect(await createAsset(writer, { plek: (await createLocation(writerB, "Elders")).id })).toMatchObject({ error: { code: "FORBIDDEN" } });
+    await created(writer, { plek: location.id });
+    const atLocation = await withDbSession(fixture.app.db, reader, (trx) => executeReferencedBy(trx, reader, TARGET_ENTITY, { id: location.id }));
+    expect(atLocation.items).toEqual([{ entity: ENTITY, fieldId: fields.plek!, fieldKey: "plek", label: label("Plek"), count: 1 }]);
+    const refused = await executeEntityOperation(fixture.app.db, writer, { operation: { id: `${TARGET_ENTITY}.delete`, intent: "delete" },
+      input: { id: location.id, confirmed: true, expectedVersion: String(location.updated_at) } });
+    expect(refused).toMatchObject({ error: { code: "OPERATION_REFUSED", message: expect.stringContaining("plek") } });
   });
 
   test("the deletion guard restricts or unlinks, and orphans are reported", async () => {
@@ -305,12 +328,12 @@ describe("tenant fields on an extensible entity", () => {
     expect((await indexRows(source.id, fields.links)).map((row) => row.value_ref_id)).toEqual([restricted.id]);
 
     const ghost = randomUUID();
-    await sql`insert into erp.tasks_field_values (tenant_id, record_id, field_id, ordinal, value_ref_id)
+    await sql`insert into erp.extensible_assets_field_values (tenant_id, record_id, field_id, ordinal, value_ref_id)
       values (${tenantA}::uuid, ${source.id}::uuid, ${fields.parent!}::uuid, 1, ${ghost}::uuid)`.execute(fixture.privileged.db);
     const orphans = await withDbSession(fixture.app.db, writer, (trx) => findExtensionReferenceOrphans(trx, writer));
-    expect(orphans).toEqual([{ entity: "Task", fieldKey: "parent", recordId: source.id, targetEntity: "Task", targetId: ghost }]);
+    expect(orphans).toEqual([{ entity: ENTITY, fieldKey: "parent", recordId: source.id, targetEntity: ENTITY, targetId: ghost }]);
     expect(await withDbSession(fixture.app.db, writerB, (trx) => findExtensionReferenceOrphans(trx, writerB))).toEqual([]);
-    await sql`delete from erp.tasks_field_values where value_ref_id = ${ghost}::uuid`.execute(fixture.privileged.db);
+    await sql`delete from erp.extensible_assets_field_values where value_ref_id = ${ghost}::uuid`.execute(fixture.privileged.db);
   });
 
   test("lifecycle: rename, widening retype as a backfill under the worker role, refusals", async () => {
@@ -346,16 +369,16 @@ describe("tenant fields on an extensible entity", () => {
       defaultValue: 1, unique: true, classification: { sensitivity: "public" } } }) as { state: string; backfill?: { state: string } };
     expect(unique).toMatchObject({ state: "updating", backfill: { state: "queued" } });
     await drainJobs();
-    expect((await sql`select record_id from erp.tasks_field_unique_values where field_id = ${fields.aantal!}::uuid and value_text = '77'`
+    expect((await sql`select record_id from erp.extensible_assets_field_unique_values where field_id = ${fields.aantal!}::uuid and value_text = '77'`
       .execute(fixture.privileged.db)).rows).toEqual([{ record_id: claimed.id }]);
-    expect(await createTask(writer, { stuks: 77 })).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(await createAsset(writer, { stuks: 77 })).toMatchObject({ error: { code: "CONFLICT" } });
   });
 
   test("lifecycle: deprecate, restore and delete with a confirmed, resumable, idempotent backfill", async () => {
     const records = [await created(writer, { bsn: "1" }), await created(writer, { bsn: "2" }), await created(writer, { bsn: "3" })];
     expect(await failure(define(manager, "delete", { fieldId: fields.bsn, confirmAffectedRecords: 0 }))).toMatchObject({ message: expect.stringContaining("deprecated") });
     await define(manager, "deprecate", { fieldId: fields.bsn });
-    expect(await createTask(writer, { bsn: "4" })).toMatchObject({ error: { violations: [expect.objectContaining({ code: "DEPRECATED_FIELD" })] } });
+    expect(await createAsset(writer, { bsn: "4" })).toMatchObject({ error: { violations: [expect.objectContaining({ code: "DEPRECATED_FIELD" })] } });
     expect((await get(writer, records[0]!.id))!.extensions.bsn).toBe("1");
     expect((await get(writer, records[0]!.id))!.extensionsMeta.bsn).toMatchObject({ deprecated: true });
     expect(((await define(reader, "list")) as { items: Array<{ key: string }> }).items.map((item) => item.key)).not.toContain("bsn");
@@ -380,9 +403,9 @@ describe("tenant fields on an extensible entity", () => {
     await drainJobs();
     const state = await sql<{ state: string; processed: number }>`select state, processed from platform.extension_field_backfills where id = ${backfillId}::uuid`.execute(fixture.privileged.db);
     expect(state.rows[0]).toMatchObject({ state: "done", processed: count });
-    const remaining = await sql<{ n: string }>`select count(*)::text as n from erp.tasks where extension_values ? ${fields.bsn!}`.execute(fixture.privileged.db);
+    const remaining = await sql<{ n: string }>`select count(*)::text as n from erp.extensible_assets where extension_values ? ${fields.bsn!}`.execute(fixture.privileged.db);
     expect(remaining.rows[0]!.n).toBe("0");
-    expect(await sql`select 1 from erp.tasks_field_values where field_id = ${fields.bsn!}::uuid`.execute(fixture.privileged.db).then((r) => r.rows)).toEqual([]);
+    expect(await sql`select 1 from erp.extensible_assets_field_values where field_id = ${fields.bsn!}::uuid`.execute(fixture.privileged.db).then((r) => r.rows)).toEqual([]);
     // Idempotent: running it again changes nothing.
     expect(await withDbSession(fixture.worker.db, manager, (trx) => runBackfillBatch(trx, manager, backfillId)))
       .toMatchObject({ state: "done", more: false, processed: count });
@@ -395,66 +418,78 @@ describe("tenant fields on an extensible entity", () => {
       classification: { sensitivity: "internal" }, retention: { days: 30, from: "createdAt" } } }) as { fieldId: string };
     const old = await created(writer, { sku: "R-old" });
     const fresh = await created(writer, { sku: "R-new" });
-    await sql`update erp.tasks set created_at = now() - interval '40 days' where id = ${old.id}::uuid`.execute(fixture.privileged.db);
-    const result = await withDbSession(fixture.worker.db, manager, (trx) => applyExtensionRetention(trx, manager, "Task"));
+    await sql`update erp.extensible_assets set created_at = now() - interval '40 days' where id = ${old.id}::uuid`.execute(fixture.privileged.db);
+    const result = await withDbSession(fixture.worker.db, manager, (trx) => applyExtensionRetention(trx, manager, ENTITY));
     expect(result.cleared).toBeGreaterThanOrEqual(1);
     expect((await get(writer, old.id))!.extensions.sku).toBeNull();
     expect((await get(writer, fresh.id))!.extensions.sku).toBe("R-new");
     expect(await indexRows(old.id, field.fieldId)).toEqual([]);
-    expect((await sql`select 1 from erp.tasks_field_unique_values where record_id = ${old.id}::uuid`.execute(fixture.privileged.db)).rows).toEqual([]);
+    expect((await sql`select 1 from erp.extensible_assets_field_unique_values where record_id = ${old.id}::uuid`.execute(fixture.privileged.db)).rows).toEqual([]);
   });
 
   test("MCP: the listed schema and the dispatch agree on this tenant's fields", async () => {
     expect(hasExtensibleEntities()).toBe(true);
     await primeSessionExtensions(fixture.app.db, writer);
-    const listTool = catalog.tools.find((tool) => tool.entity === "Task" && tool.operation === "list")!;
+    const tool = (operation: string) => catalog.tools.find((candidate) => candidate.entity === ENTITY && candidate.operation === operation)!;
+    const listTool = tool("list");
     const described = describeTool(listTool, undefined, fixture.table, writer) as unknown as { inputSchema: { properties: Record<string, any> } };
     expect(Object.keys(described.inputSchema.properties.filter.properties.extensions.properties)).toContain("accu");
     expect(described.inputSchema.properties.filter.properties.extensions.properties.bsn).toBeUndefined();
     expect(described.inputSchema.properties.sortField.enum).toContain("extensions.accu");
     expect(described.inputSchema.properties.sortField.enum).not.toContain("extensions.links");
+    // The raw source column is no field of the compiled tools, statically or per session.
+    for (const operation of ["list", "get", "create", "update", "delete"]) expect(JSON.stringify(tool(operation))).not.toContain("extensionValues");
+    expect(JSON.stringify(described)).not.toContain("extensionValues");
     // Tenant B has no fields: its schema is the static one.
     await primeSessionExtensions(fixture.app.db, writerB);
     const other = describeTool(listTool, undefined, fixture.table, writerB) as unknown as { inputSchema: { properties: Record<string, any> } };
     expect(other.inputSchema.properties.filter.properties.extensions.properties).toEqual({});
 
-    const createTool = { ...listTool, name: "task_create", operation: "create", operationId: "Task.create",
-      inputSchema: { type: "object", additionalProperties: false, properties: { title: { type: "string" }, type: { type: "string" }, status: { type: "string" } } } } as typeof listTool;
+    // The compiled create tool carries `extensions` as an open object; the session closes and types it.
+    const createTool = tool("create");
+    expect((createTool.inputSchema as { properties: Record<string, any> }).properties.extensions).toMatchObject({ type: "object", additionalProperties: true });
     const enriched = withExtensionTool(createTool, fixture.table, writer);
     const extensions = (enriched.inputSchema as { properties: Record<string, any> }).properties.extensions;
+    expect(extensions).toMatchObject({ additionalProperties: false });
     expect(extensions.properties.accu).toMatchObject({ type: ["number", "string"] });
     expect(extensions.properties.soort.enum).toEqual(["batterij", "kit"]);
     const tables = new Map([[fixture.table.name, fixture.table]]);
-    const args = { title: "MCP", type: "follow_up", status: "open", extensions: { soort: "kit", stuks: 4 } };
-    await expect(invokeTool(createTool, undefined, fixture.table, tables, fixture.app.db, writer, args)).rejects.toMatchObject({ code: "BAD_USER_INPUT" });
-    const created = await invokeTool(enriched, undefined, fixture.table, tables, fixture.app.db, writer, args) as unknown as { structuredContent?: { data: { extensions: Record<string, unknown> } } };
+    await expect(invokeTool(enriched, undefined, fixture.table, tables, fixture.app.db, writer, { name: "MCP", extensions: { kleur: "rood" } }))
+      .rejects.toThrow("tenant field values do not satisfy their definitions");
+    await expect(invokeTool(enriched, undefined, fixture.table, tables, fixture.app.db, writer, { name: "MCP", extensionValues: {} }))
+      .rejects.toMatchObject({ code: "BAD_USER_INPUT" });
+    const args = { name: "MCP", extensions: { soort: "kit", stuks: 4 } };
+    const created = await invokeTool(enriched, undefined, fixture.table, tables, fixture.app.db, writer, args) as unknown as { structuredContent?: { data: Record<string, unknown> & { extensions: Record<string, unknown> } } };
     expect(created.structuredContent?.data.extensions).toMatchObject({ soort: "kit", stuks: 4 });
+    expect(created.structuredContent?.data.extensionValues).toBeUndefined();
     const listed = await invokeTool(withExtensionTool(listTool, fixture.table, writer), undefined, fixture.table, tables, fixture.app.db, writer,
-      { filter: { title: "MCP", extensions: { stuks: { eq: 4 } } }, sortField: "extensions.stuks" }) as unknown as { structuredContent?: { data: { items: unknown[] } } };
+      { filter: { name: "MCP", extensions: { stuks: { eq: 4 } } }, sortField: "extensions.stuks" }) as unknown as { structuredContent?: { data: { items: unknown[] } } };
     expect(listed.structuredContent?.data.items).toHaveLength(1);
+    expect(JSON.stringify(listed.structuredContent)).not.toContain("extensionValues");
   });
 
   test("GraphQL: the type, inputs and filter carry extensions as JSON, never the source column", () => {
     const sdl = renderTypeDefinition(fixture.table);
-    expect(sdl).toMatch(/type Task \{[\s\S]*extensions: JSON[\s\S]*extensionsMeta: JSON/);
-    expect(sdl).toMatch(/input TaskFilter \{[\s\S]*extensions: JSON/);
-    expect(sdl).toMatch(/input CreateTaskInput \{[\s\S]*extensions: JSON/);
-    expect(sdl).toMatch(/input UpdateTaskInput \{[\s\S]*extensions: JSON/);
+    expect(sdl).toMatch(/type ExtensibleAsset \{[\s\S]*extensions: JSON[\s\S]*extensionsMeta: JSON/);
+    expect(sdl).toMatch(/input ExtensibleAssetFilter \{[\s\S]*extensions: JSON/);
+    expect(sdl).toMatch(/input CreateExtensibleAssetInput \{[\s\S]*extensions: JSON/);
+    expect(sdl).toMatch(/input UpdateExtensibleAssetInput \{[\s\S]*extensions: JSON/);
     expect(sdl).not.toContain("extensionValues");
+    expect(sdl).not.toContain("extension_values");
   });
 
-  test("the synthesized Operations dispatch to the native handler and notify MCP of a change", async () => {
-    // The shape packages/compiler/src/extension-operations.ts emits.
-    const contract = (action: string, data: "read" | "write" | "delete", roles: string[]): OperationContract => ({
-      key: `Task.fieldDefinitions.${action}`, plugin: "osf-extensions", handler: `fieldDefinitions.${action}`, intent: "invoke",
-      target: { entityId: "task", entityName: "Task", scope: "collection" },
-      title: action, description: action, auth: { mode: "session", roles }, tenancy: { mode: "required" },
-      idempotency: { mode: "none" }, effects: { data, external: "none" },
-      inputSchema: { type: "object" }, outputSchema: { type: "object" }, errors: [],
-      transports: { rest: { method: "POST", path: `/api/tasks/field-definitions/${action}`, response: { kind: "json" } },
-        mcp: { enabled: false }, graphql: { enabled: true, kind: data === "read" ? "query" : "mutation" }, typescript: { enabled: false } },
-    } as OperationContract);
-    const bound = bindOperationHandlers([], [contract("create", "write", [MANAGER_ROLE]), contract("list", "read", [READER_ROLE])], { pluginOperations: "absent" });
+  test("the compiled Operations dispatch to the native handler and notify MCP of a change", async () => {
+    // The contracts packages/compiler/src/extension-operations.ts emitted into this manifest.
+    const compiled = (rawCatalog as unknown as { operations: OperationContract[] }).operations;
+    const contract = (key: string) => compiled.find((operation) => operation.key === key)!;
+    const own = compiled.filter((operation) => operation.plugin === "osf-extensions");
+    expect(own.filter((operation) => operation.target?.entityName === ENTITY).map((operation) => operation.key).sort()).toEqual([
+      ...["affectedRecords", "create", "delete", "deprecate", "list", "reorder", "restore", "update"].map((action) => `${ENTITY}.fieldDefinitions.${action}`),
+      `${ENTITY}.referencedBy`,
+    ]);
+    expect(contract(`${TARGET_ENTITY}.referencedBy`)).toMatchObject({ handler: "referencedBy", target: { entityName: TARGET_ENTITY } });
+    const bound = bindOperationHandlers([], own, { pluginOperations: "absent" });
+    expect([...bound.keys()].sort()).toEqual(own.map((operation) => operation.key).sort());
     const platform = new ModulePlatformRuntime(fixture.app.db);
     const calls: string[] = [];
     for (const [name, tenant] of [["a", tenantA], ["b", tenantB]] as const) {
@@ -465,14 +500,16 @@ describe("tenant fields on an extensible entity", () => {
         callTool: async () => ({ result: { content: [] } }),
       } as never);
     }
-    const result = await invokeOperation(bound.get("Task.fieldDefinitions.create")!, {
+    const create = bound.get(`${ENTITY}.fieldDefinitions.create`)!;
+    const result = await invokeOperation(create, {
       key: "viaRest", definition: { osfType: "boolean", classification: { sensitivity: "public" } },
     }, { db: fixture.app.db, platform: platform.services, transport: "rest", session: manager as never });
     expect(result).toMatchObject({ value: { key: "viaRest", state: "ready" } });
     await Promise.resolve();
     expect(calls).toEqual(["a"]);
-    await expect(invokeOperation(bound.get("Task.fieldDefinitions.create")!, { key: "nope", definition: {} },
+    await expect(invokeOperation(create, { key: "nope", definition: {} },
       { db: fixture.app.db, platform: platform.services, transport: "rest", session: writer as never })).rejects.toBeDefined();
-    expect(() => bindOperationHandlers([], [{ ...contract("create", "read", [MANAGER_ROLE]) }], { pluginOperations: "absent" })).toThrow(/unsupported or incomplete binding/);
+    expect(() => bindOperationHandlers([], [{ ...contract(`${ENTITY}.fieldDefinitions.create`), effects: { data: "read", external: "none" } } as OperationContract], { pluginOperations: "absent" }))
+      .toThrow(/unsupported or incomplete binding/);
   });
 });

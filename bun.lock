@@ -51,6 +51,7 @@
         "@modelcontextprotocol/server": "2.3.0",
         "@openshapeforge/auth": "workspace:*",
         "@openshapeforge/documents": "workspace:*",
+        "@openshapeforge/formula": "workspace:*",
         "@openshapeforge/observability": "workspace:*",
         "@openshapeforge/operations": "workspace:*",
         "@openshapeforge/plugin-runtime": "workspace:*",

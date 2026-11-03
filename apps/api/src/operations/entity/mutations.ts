@@ -66,7 +66,9 @@ import {
   completeExtensionWrite,
   extensionStorageValue,
   extensionValuesColumn,
+  lockOwnerExtensionFields,
   prepareExtensionWrite,
+  recomputeOwnerFormulas,
 } from "./extensions/write.js";
 import { extensibleEntityOf, loadExtensionFields } from "./extensions/store.js";
 import { enforceExtensionReferencesOnDelete, lockExtensionReferenceSources } from "./extensions/references.js";
@@ -304,6 +306,9 @@ async function insertGeneratedRowInTransaction(
   /** Caller-facing creates pass an object (possibly empty); runtime creates none. */
   extensions?: Record<string, unknown>,
 ): Promise<GeneratedEntityRow> {
+  // An owned single child shares its owner's tenant field lock before any
+  // row lock: its write recomputes the owner's formulas below.
+  await lockOwnerExtensionFields(trx, session, table);
   const defaulted = await applyDefaultTemplates(trx, session, table, values, entityValues.tables);
   const identified = prepareProtectedFieldWrites(table, session, defaulted, "create", undefined, false);
   const entityPrepared = await prepareEntityValueWriteInTransaction(trx, session, table, identified, "create", undefined, entityValues);
@@ -417,6 +422,7 @@ async function insertGeneratedRowInTransaction(
   // public create refuses an owned child (collectionMutationError), so this
   // covers the in-transaction create the collection insert runs.
   await draftOwningHead(trx, entityValues.tables ?? getGeneratedCrudTables(), table, row);
+  await recomputeOwnerFormulas(trx, session, table, row);
   return projectGeneratedEntityRow(table, session, row, entityValues.registry);
 }
 
@@ -498,6 +504,7 @@ async function applyGeneratedRowUpdate(
     // Before the record lock: writers share the tenant field lock that a
     // definition change and a backfill batch order against (extensions/store.ts).
     if (extensibleEntityOf(table)) await loadExtensionFields(trx, session, table, { lock: "shared" });
+    await lockOwnerExtensionFields(trx, session, table);
     const current = await fetchGeneratedRowInTransaction(trx, session, table, id, true);
     if ((carriers.length || objectMergeColumn || extensions) && !current) return null;
     if (objectMergeColumn && current) {
@@ -642,6 +649,7 @@ async function applyGeneratedRowUpdate(
     if (!row) return unchangedRow();
     await completeExtensionWrite(trx, session, extensionWrite, String(row[table.primaryKey!]), row);
     await draftOwningHead(trx, entityValues.tables ?? getGeneratedCrudTables(), table, row);
+    await recomputeOwnerFormulas(trx, session, table, row);
     return projectGeneratedEntityRow(table, session, row, entityValues.registry);
   }).catch((error) => {
     throw translateDatabaseError(table, error);

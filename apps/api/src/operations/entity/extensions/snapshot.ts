@@ -11,7 +11,9 @@
  *   - `extensionDefinitions`: only for the fields frozen above, what reading
  *     that value later needs: version, key, label, osfType, currency, unit,
  *     options (with their labels), cardinality, and the default when the
- *     value is one.
+ *     value is one. A formula's result is frozen as the value it had; its
+ *     definition carries `kind: "formula"` and `formula: { text, resultType }`
+ *     (the text with the labels of that moment), never the AST.
  *
  * A definition change of a field without a value, or a new field, does not
  * change the snapshot, so it does not change the content hash either.
@@ -20,13 +22,15 @@ import type { Transaction } from "kysely";
 import type { DB } from "../../../generated/db/types.js";
 import type { DbSessionInput } from "../../../db/session.js";
 import { getGeneratedCrudTables } from "../catalog.js";
-import { evaluateCondition, extensionError, isClassified, record, type ExtensionField } from "./model.js";
+import { presentFormulaDefinition, storedFormula } from "./formulas.js";
+import { evaluateCondition, extensionError, isClassified, record, type ExtensionField, type ExtensionFieldSet } from "./model.js";
 import { conditionValues, readValue, storedExtensionSource } from "./read.js";
 import { extensionRegistry } from "./registry.js";
 import { loadExtensionFieldsFor } from "./store.js";
 
-function frozenDefinition(field: ExtensionField, usedDefault: boolean): Record<string, unknown> {
+function frozenDefinition(set: ExtensionFieldSet, field: ExtensionField, usedDefault: boolean): Record<string, unknown> {
   const definition = field.definition;
+  const formula = field.kind === "formula" ? storedFormula(presentFormulaDefinition(set, field)) : undefined;
   const currency = (definition.render as { props?: { currency?: unknown } } | undefined)?.props?.currency ?? definition.currency;
   const options = record(definition.options) && definition.options.type === "static" && Array.isArray(definition.options.items)
     ? definition.options.items : undefined;
@@ -37,6 +41,7 @@ function frozenDefinition(field: ExtensionField, usedDefault: boolean): Record<s
     ...(options ? { options } : {}),
     ...(definition.cardinality !== undefined ? { cardinality: definition.cardinality } : {}),
     ...(usedDefault ? { defaultValue: definition.defaultValue } : {}),
+    ...(formula ? { kind: "formula", formula: { text: formula.text, resultType: formula.resultType } } : {}),
   };
 }
 
@@ -59,7 +64,7 @@ export async function extensionSnapshot(
     const value = readValue(field, source, evaluateCondition(field.appliesWhen, values));
     if (value === null || value === undefined) continue;
     extensions[field.fieldId] = value;
-    extensionDefinitions[field.fieldId] = frozenDefinition(field, !Object.hasOwn(source, field.fieldId));
+    extensionDefinitions[field.fieldId] = frozenDefinition(set, field, !Object.hasOwn(source, field.fieldId));
   }
   return { extensions, extensionDefinitions };
 }

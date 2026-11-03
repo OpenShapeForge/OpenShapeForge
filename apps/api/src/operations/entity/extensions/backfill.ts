@@ -40,6 +40,7 @@ import type { ModuleJobHandler } from "../../../modules/contract.js";
 import { getGeneratedCrudTables } from "../catalog.js";
 import type { GeneratedCrudTable } from "../types.js";
 import {
+  EXTENSION_META_KEY,
   extensionError,
   extensionShape,
   indexColumnRef,
@@ -51,13 +52,14 @@ import {
   type ExtensionFieldSet,
 } from "./model.js";
 import { extensionRegistry } from "./registry.js";
+import { formulaGraph } from "./formulas.js";
 import { announceFieldDefinitionChange, forgetExtensionFields, insertFieldVersion, loadExtensionFieldsFor } from "./store.js";
-import { qualifiedTable, rewriteExtensionValues } from "./write.js";
+import { qualifiedTable, recomputeRecordFormulas, rewriteExtensionValues } from "./write.js";
 import { storedExtensionSource } from "./read.js";
 
 export const EXTENSION_BACKFILL_KIND = "extensions.backfill";
 export const EXTENSION_RETENTION_KIND = "extensions.retention";
-export type BackfillOperation = "retype" | "delete" | "unique" | "rebuild";
+export type BackfillOperation = "retype" | "delete" | "unique" | "rebuild" | "formula";
 export const BACKFILL_BATCH_SIZE = 500;
 
 export type BackfillRow = {
@@ -100,13 +102,25 @@ export async function recordsWithField(trx: Transaction<DB>, session: DbSessionI
   });
 }
 
+/** Every record of the tenant, counted across the tenant: what a formula backfill computes. */
+async function recordsOfTenant(trx: Transaction<DB>, session: DbSessionInput, entity: string): Promise<number> {
+  const entry = extensionRegistry.entity(entity)!;
+  return acrossTenant(trx, session, `count records of ${entity} for a formula`, async () => {
+    const total = await sql<{ total: string }>`select count(*)::text as total from ${qualifiedTable(entry.table)}
+      where tenant_id = ${session.tenantId}::uuid`.execute(trx);
+    return Number(total.rows[0]?.total ?? 0);
+  });
+}
+
 /** Start a backfill for one field version, inside the definition change's transaction. */
 export async function startBackfill(
   trx: Transaction<DB>,
   session: DbSessionInput,
   input: { entity: string; field: ExtensionField; operation: BackfillOperation },
 ): Promise<BackfillRow> {
-  const total = await recordsWithField(trx, session, input.entity, input.field.fieldId);
+  const total = input.operation === "formula"
+    ? await recordsOfTenant(trx, session, input.entity)
+    : await recordsWithField(trx, session, input.entity, input.field.fieldId);
   const id = randomUUID();
   const row = await sql<BackfillRow>`insert into platform.extension_field_backfills
       (tenant_id, id, entity, field_id, definition_version, operation, state, processed, total, cursor, error, created_at, updated_at)
@@ -256,13 +270,15 @@ export async function runBackfillBatch(
   const set = await loadExtensionFieldsFor(trx, session, row!.entity, entry!, { lock: "shared" });
   const field = set.byId.get(row!.field_id);
   if (!field) extensionError("The backfill's field does not exist.", "INVALID_DEFINITION");
-  // A retype or unique backfill works for one version; a later version (a
-  // deprecation, unique turned off again) supersedes it.
-  if ((row!.operation === "retype" || row!.operation === "unique") && field!.version !== Number(row!.definition_version)) {
+  // A retype, unique or formula backfill works for one version; a later
+  // version (a deprecation, unique turned off again, another formula)
+  // supersedes it.
+  if ((row!.operation === "retype" || row!.operation === "unique" || row!.operation === "formula") && field!.version !== Number(row!.definition_version)) {
     await failBackfill(trx, tenantId, row!, { code: "SUPERSEDED", message: `${field!.key} changed while this backfill ran.` });
     return { state: "failed", processed: row!.processed, cursor: row!.cursor, more: false };
   }
   const table = entityTable(row!.entity);
+  if (row!.operation === "formula") return runFormulaBatch(trx, session, { row: row!, set, field: field!, table, batchSize });
   return acrossTenant(trx, session, `tenant field ${row!.operation} backfill ${row!.id}`, async () => {
     const records = await sql<{ id: string; extension_values: unknown }>`
       select id, extension_values from ${qualifiedTable(entry!.table)}
@@ -293,6 +309,12 @@ export async function runBackfillBatch(
         case "delete": {
           const after = { ...source };
           delete after[field!.fieldId];
+          // A computed field's error code goes with its value.
+          const meta = after[EXTENSION_META_KEY];
+          if (meta && typeof meta === "object" && !Array.isArray(meta) && Object.hasOwn(meta, field!.fieldId)) {
+            const { [field!.fieldId]: _gone, ...rest } = meta as Record<string, unknown>;
+            if (Object.keys(rest).length) after[EXTENSION_META_KEY] = rest; else delete after[EXTENSION_META_KEY];
+          }
           await rewriteExtensionValues(trx, session, { table, set, recordId: record.id, before: source, after, fields: [field!] });
           break;
         }
@@ -322,6 +344,61 @@ export async function runBackfillBatch(
       where tenant_id = ${tenantId}::uuid and id = ${row!.id}::uuid`.execute(trx);
     await announceFieldDefinitionChange(trx, tenantId, row!.entity, row!.field_id, "updated");
     return { state: more ? "running" as const : "done" as const, processed, cursor, more };
+  });
+}
+
+/**
+ * One batch of a formula backfill: every record of the tenant after the
+ * cursor, in id order, recomputes the field and every formula that reads
+ * it, and its index is rewritten from the result (idempotent per record).
+ * A batch that fails is rolled back to before its first record and the
+ * field is `suspended` — never left `updating` — with the backfill failed
+ * and the reason in its error; a new version of the formula starts again.
+ */
+async function runFormulaBatch(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  input: { row: BackfillRow; set: ExtensionFieldSet; field: ExtensionField; table: GeneratedCrudTable; batchSize: number },
+): Promise<{ state: BackfillRow["state"]; processed: number; cursor: string | null; more: boolean }> {
+  const { row, set, field, table, batchSize } = input;
+  const tenantId = session.tenantId!;
+  const fields = [field, ...formulaGraph(set).affectedBy([{ entity: set.entity, field: field.fieldId }])];
+  return acrossTenant(trx, session, `tenant field formula backfill ${row.id}`, async () => {
+    await sql`savepoint formula_backfill_batch`.execute(trx);
+    try {
+      const records = await sql<{ id: string }>`select id from ${sql.id(table.schema, table.table)}
+        where tenant_id = ${tenantId}::uuid ${row.cursor ? sql`and id > ${row.cursor}::uuid` : sql``}
+        order by id limit ${batchSize}`.execute(trx);
+      for (const record of records.rows) {
+        await recomputeRecordFormulas(trx, session, { table, set, recordId: record.id, fields, rebuild: true });
+      }
+      const processed = row.processed + records.rows.length;
+      const cursor = records.rows.at(-1)?.id ?? row.cursor;
+      const more = records.rows.length === batchSize;
+      if (!more && field.state === "updating") {
+        await sql`update platform.extension_field_definitions set state = 'ready'
+          where tenant_id = ${tenantId}::uuid and id = ${field.rowId}::uuid and state = 'updating'`.execute(trx);
+        forgetExtensionFields(trx, tenantId, row.entity);
+      }
+      await sql`update platform.extension_field_backfills
+        set state = ${more ? "running" : "done"}, processed = ${processed}, cursor = ${cursor}, updated_at = now()
+        where tenant_id = ${tenantId}::uuid and id = ${row.id}::uuid`.execute(trx);
+      await sql`release savepoint formula_backfill_batch`.execute(trx);
+      await announceFieldDefinitionChange(trx, tenantId, row.entity, row.field_id, "updated");
+      return { state: more ? "running" as const : "done" as const, processed, cursor, more };
+    } catch {
+      // The reason stays out of the backfill row: a database message may
+      // quote values of records the designer cannot read.
+      await sql`rollback to savepoint formula_backfill_batch`.execute(trx);
+      await sql`update platform.extension_field_definitions set state = 'suspended'
+        where tenant_id = ${tenantId}::uuid and id = ${field.rowId}::uuid and state = 'updating'`.execute(trx);
+      forgetExtensionFields(trx, tenantId, row.entity);
+      await failBackfill(trx, tenantId, row, {
+        code: "FORMULA_BACKFILL_FAILED",
+        message: `${field.key} could not be computed for every record and is suspended; save the formula again to retry.`,
+      });
+      return { state: "failed" as const, processed: row.processed, cursor: row.cursor, more: false };
+    }
   });
 }
 

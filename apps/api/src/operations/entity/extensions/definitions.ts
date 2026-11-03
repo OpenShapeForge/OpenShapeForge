@@ -38,6 +38,7 @@ import {
   type ExtensionState,
 } from "./model.js";
 import { extensionRegistry } from "./registry.js";
+import { presentFormulaDefinition, storedFormula, validateFormulaDefinition, type FormulaDependency } from "./formulas.js";
 import {
   announceFieldDefinitionChange,
   FIELD_DEFINITION_RESOURCE_SUFFIX,
@@ -79,7 +80,7 @@ const UNSUPPORTED_PROPERTIES = [
   "children", "shape", "item", "allowedDefinitions", "childAuthorization", "childLock", "writeSource",
   "defaultTemplate", "transform", "suggestions", "runtime", "localized",
 ];
-const UNAVAILABLE_KINDS = new Set(["formula", "lookup", "rollup"]);
+const UNAVAILABLE_KINDS = new Set(["lookup", "rollup"]);
 
 function tableOf(entity: string): GeneratedCrudTable {
   const tables = getGeneratedCrudTables().filter((table) => table.source?.authoringEntityName === entity && !table.subtype);
@@ -133,7 +134,7 @@ function appliesWhenForCaller(set: ExtensionFieldSet, appliesWhen: unknown): unk
 function toRecord(set: ExtensionFieldSet, field: ExtensionField, backfill?: BackfillRow): FieldDefinitionRecord {
   return {
     fieldId: field.fieldId, key: field.key, version: field.version, kind: field.kind,
-    definition: field.definition, appliesWhen: appliesWhenForCaller(set, field.appliesWhen), state: field.state, position: field.position,
+    definition: presentFormulaDefinition(set, field), appliesWhen: appliesWhenForCaller(set, field.appliesWhen), state: field.state, position: field.position,
     ...(backfill ? { backfill: { id: backfill.id, state: backfill.state, processed: Number(backfill.processed), total: Number(backfill.total) } } : {}),
   };
 }
@@ -152,14 +153,14 @@ function typeLabel(definition: ExtensionDefinition): string {
 export function validateFieldDefinition(
   set: ExtensionFieldSet,
   table: GeneratedCrudTable,
-  input: { key: string; kind?: unknown; definition: unknown; appliesWhen?: unknown },
+  input: { fieldId: string; key: string; kind?: unknown; definition: unknown; appliesWhen?: unknown },
   existing?: ExtensionField,
-): { kind: ExtensionKind; definition: ExtensionDefinition; appliesWhen: unknown; dependsOn: Array<{ field: string }> } {
+): { kind: ExtensionKind; definition: ExtensionDefinition; appliesWhen: unknown; dependsOn: Array<FormulaDependency | { field: string }> } {
   const kind = input.kind ?? "stored";
   if (typeof kind === "string" && UNAVAILABLE_KINDS.has(kind)) {
     extensionError(`Fields of kind ${kind} are not available yet (nog niet beschikbaar).`, "NOT_AVAILABLE");
   }
-  if (kind !== "stored") extensionError(`Unknown field kind ${String(kind)}.`);
+  if (kind !== "stored" && kind !== "formula") extensionError(`Unknown field kind ${String(kind)}.`);
   if (typeof input.key !== "string" || !EXTENSION_KEY.test(input.key)) {
     extensionError("A field key starts with a lowercase letter and holds letters and digits only (at most 63).");
   }
@@ -168,6 +169,20 @@ export function validateFieldDefinition(
   if (!record(input.definition)) extensionError("A field definition is an object.");
   const definition = { ...input.definition as ExtensionDefinition };
   delete definition.key;
+  if (kind === "formula") {
+    // The result type follows from the formula; whatever osfType came along
+    // (a definition read back and sent again) is the server's to set.
+    delete definition.osfType;
+    for (const property of UNSUPPORTED_PROPERTIES) {
+      if (definition[property] !== undefined) extensionError(`Tenant fields do not support ${property}.`);
+    }
+    if (!SENSITIVITIES.includes((record(definition.classification) ? definition.classification.sensitivity : undefined) as typeof SENSITIVITIES[number])) {
+      extensionError("A tenant field declares its classification (public, internal, confidential, pii or bsn).");
+    }
+    const valid = validateFormulaDefinition(set, { fieldId: input.fieldId, key: input.key, definition, appliesWhen: input.appliesWhen });
+    return { kind: "formula", definition: valid.definition, appliesWhen: null, dependsOn: valid.dependsOn };
+  }
+  if (definition.formula !== undefined) extensionError("Only a field of kind formula carries a formula.");
   const osfType = definition.osfType;
   const entry = set.entry;
   if (typeof osfType !== "string" || !(entry.allowedOsfTypes.includes(osfType) || entry.targets.some((target) => target.entity === osfType))) {
@@ -254,15 +269,23 @@ const insertVersion = insertFieldVersion;
 
 /**
  * The fields this one depends on: rewritten with every
- * version, in `platform.extension_field_dependencies` (1a: `appliesWhen`;
- * formulas, lookups and rollups add theirs in 1b/1c).
+ * version, in `platform.extension_field_dependencies` — what `appliesWhen`
+ * names, and what a formula reads (an owned child's field on the child
+ * entity, `via` its relation). Lookups and rollups add theirs the same way.
  */
-async function writeDependencies(trx: Transaction<DB>, session: DbSessionInput, entity: string, fieldId: string, dependsOn: readonly { field: string }[]): Promise<void> {
+async function writeDependencies(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  entity: string,
+  fieldId: string,
+  dependsOn: readonly { entity?: string; field: string; via?: string | null }[],
+): Promise<void> {
   await sql`delete from platform.extension_field_dependencies
     where tenant_id = ${session.tenantId}::uuid and field_id = ${fieldId}::uuid`.execute(trx);
-  for (const dependency of dependsOn) {
+  const unique = new Map(dependsOn.map((item) => [JSON.stringify([item.entity ?? entity, item.field, item.via ?? null]), item]));
+  for (const dependency of unique.values()) {
     await sql`insert into platform.extension_field_dependencies (tenant_id, field_id, depends_on_entity, depends_on_field, via_field)
-      values (${session.tenantId}::uuid, ${fieldId}::uuid, ${entity}, ${dependency.field}, null)`.execute(trx);
+      values (${session.tenantId}::uuid, ${fieldId}::uuid, ${dependency.entity ?? entity}, ${dependency.field}, ${dependency.via ?? null})`.execute(trx);
   }
 }
 
@@ -271,7 +294,7 @@ function assertNoDependents(set: ExtensionFieldSet, field: ExtensionField, depen
   const names = dependents.map((id) => set.byId.get(id)).filter((candidate): candidate is ExtensionField =>
     candidate !== undefined && candidate.state !== "deleted" && candidate.fieldId !== field.fieldId).map((candidate) => candidate.key).sort();
   if (names.length) {
-    extensionError(`${field.key} cannot be ${action}: ${names.join(", ")} depend${names.length === 1 ? "s" : ""} on it (appliesWhen).`, "CONFLICT");
+    extensionError(`${field.key} cannot be ${action}: ${names.join(", ")} depend${names.length === 1 ? "s" : ""} on it (appliesWhen or formula).`, "CONFLICT");
   }
 }
 
@@ -383,6 +406,33 @@ async function typeChange(
     "create a new field, copy the values and delete this one.");
 }
 
+/**
+ * A new version of a formula field. Classification never changes; a new
+ * formula (another AST or result type), or one that was suspended, is
+ * `updating` until its backfill has recomputed every record and every
+ * formula that reads it. A new label or key alone recomputes nothing.
+ */
+async function updateFormula(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  set: ExtensionFieldSet,
+  field: ExtensionField,
+  change: { key: string; definition: ExtensionDefinition; dependsOn: Parameters<typeof writeDependencies>[4] },
+): Promise<[ExtensionField, BackfillRow | undefined]> {
+  if (!isDeepStrictEqual(field.definition.classification, change.definition.classification)) {
+    extensionError(`${field.key}: its classification never changes once the field exists; create a new field, copy the values and delete this one.`);
+  }
+  const before = storedFormula(field.definition);
+  const after = storedFormula(change.definition)!;
+  const recompute = field.state === "suspended" || !before || before.resultType !== after.resultType || !isDeepStrictEqual(before.ast, after.ast);
+  const next = await insertVersion(trx, session, set.entity, {
+    fieldId: field.fieldId, key: change.key, version: field.version + 1, kind: "formula", definition: change.definition,
+    appliesWhen: null, state: recompute ? "updating" : field.state, position: field.position,
+  });
+  await writeDependencies(trx, session, set.entity, field.fieldId, change.dependsOn);
+  return [next, recompute ? await startBackfill(trx, session, { entity: set.entity, field: next, operation: "formula" }) : undefined];
+}
+
 // ---------------------------------------------------------------------------
 // The Operations
 
@@ -411,14 +461,18 @@ export async function executeFieldDefinitionAction(
     case "create": {
       const live = set.fields.filter((field) => field.state !== "deleted");
       if (live.length >= entry.limits.fields) extensionError(`${entity} holds at most ${entry.limits.fields} tenant fields.`, "LIMIT_EXCEEDED");
-      const valid = validateFieldDefinition(set, table, { key: input.key as string, kind: input.kind, definition: input.definition, appliesWhen: input.appliesWhen });
+      const fieldId = randomUUID();
+      const valid = validateFieldDefinition(set, table, { fieldId, key: input.key as string, kind: input.kind, definition: input.definition, appliesWhen: input.appliesWhen });
+      // A formula is `updating` until its backfill has computed every record.
+      const formula = valid.kind === "formula";
       const field = await insertVersion(trx, session, entity, {
-        fieldId: randomUUID(), key: input.key as string, version: 1, kind: valid.kind, definition: valid.definition,
-        appliesWhen: valid.appliesWhen, state: "ready", position: Math.max(-1, ...set.fields.map((item) => item.position)) + 1,
+        fieldId, key: input.key as string, version: 1, kind: valid.kind, definition: valid.definition,
+        appliesWhen: valid.appliesWhen, state: formula ? "updating" : "ready", position: Math.max(-1, ...set.fields.map((item) => item.position)) + 1,
       });
       await writeDependencies(trx, session, entity, field.fieldId, valid.dependsOn);
+      const started = formula ? await startBackfill(trx, session, { entity, field, operation: "formula" }) : undefined;
       if (valid.definition.retention) await scheduleExtensionRetention(trx, session, entity);
-      return toRecord(set, field);
+      return toRecord(set, field, started);
     }
     case "update": {
       const field = requireField(set, input.fieldId);
@@ -426,13 +480,18 @@ export async function executeFieldDefinitionAction(
       // A deprecated field is changed only once it is back: a retype or
       // unique would otherwise bring it back silently.
       if (field.state === "deprecated") extensionError(`${field.key} is deprecated; restore it before changing it.`, "CONFLICT");
+      if (input.kind !== undefined && input.kind !== field.kind) {
+        extensionError(`${field.key} is a ${field.kind} field; its kind never changes. Create a new field instead.`);
+      }
       const key = input.key === undefined ? field.key : input.key as string;
-      const definition = input.definition === undefined ? field.definition : input.definition;
+      const definition = input.definition === undefined ? presentFormulaDefinition(set, field) : input.definition;
       const appliesWhen = input.appliesWhen === undefined ? appliesWhenForCaller(set, field.appliesWhen) : input.appliesWhen;
-      const valid = validateFieldDefinition(set, table, { key, kind: field.kind, definition, appliesWhen }, field);
-      if (key === field.key && isDeepStrictEqual(valid.definition, field.definition) && isDeepStrictEqual(valid.appliesWhen, field.appliesWhen)) {
+      const valid = validateFieldDefinition(set, table, { fieldId: field.fieldId, key, kind: field.kind, definition, appliesWhen }, field);
+      if (key === field.key && isDeepStrictEqual(valid.definition, presentFormulaDefinition(set, field)) && isDeepStrictEqual(valid.appliesWhen, field.appliesWhen) &&
+          field.state !== "suspended") {
         return toRecord(set, field);
       }
+      if (field.kind === "formula") return toRecord(set, ...await updateFormula(trx, session, set, field, { key, definition: valid.definition, dependsOn: valid.dependsOn }));
       let backfill = await typeChange(trx, session, set, field.definition, valid.definition, field);
       if (valid.definition.unique === true && field.definition.unique !== true) {
         // Counted across the tenant, normalized as claims compare; the values
@@ -472,11 +531,16 @@ export async function executeFieldDefinitionAction(
       const field = requireField(set, input.fieldId);
       // A field in `updating` can always be deprecated, then deleted: a
       // backfill that never finishes must not trap it.
-      const from: ExtensionState[] = action === "deprecate" ? ["ready", "updating"] : ["deprecated"];
+      const from: ExtensionState[] = action === "deprecate" ? ["ready", "updating", "suspended"] : ["deprecated"];
       if (!from.includes(field.state)) extensionError(`${field.key} is ${field.state}; only a ${from.join(" or ")} field can be ${action}d.`, "CONFLICT");
       if (action === "deprecate") assertNoDependents(set, field, await dependentsOf(trx, session, entity, field.fieldId), "deprecated");
-      const next = await insertVersion(trx, session, entity, { ...field, version: field.version + 1, state: action === "deprecate" ? "deprecated" : "ready" });
-      return toRecord(set, next);
+      // A restored formula was not computed while it was deprecated: its
+      // backfill brings every record up to date again.
+      const recompute = action === "restore" && field.kind === "formula";
+      const next = await insertVersion(trx, session, entity, { ...field, version: field.version + 1,
+        state: action === "deprecate" ? "deprecated" : recompute ? "updating" : "ready" });
+      const started = recompute ? await startBackfill(trx, session, { entity, field: next, operation: "formula" }) : undefined;
+      return toRecord(set, next, started);
     }
     case "affectedRecords": {
       const field = requireField(set, input.fieldId);
@@ -504,7 +568,7 @@ export async function executeFieldDefinitionAction(
       // The index and the claims are derived: rebuilt from the source,
       // per field, as backfills over every record of the tenant.
       const fields = input.fieldId === undefined
-        ? set.fields.filter((field) => field.state !== "deleted" && field.kind === "stored")
+        ? set.fields.filter((field) => field.state !== "deleted" && (field.kind === "stored" || field.kind === "formula"))
         : [requireField(set, input.fieldId)];
       const backfills: Array<{ fieldId: string; backfillId: string }> = [];
       for (const field of fields) {

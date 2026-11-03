@@ -112,7 +112,7 @@ describe("tenant fields on an extensible entity", () => {
   test("definitions are validated, authorized and limited", async () => {
     expect(await failure(define(writer, "create", { key: "x", definition: { osfType: "string", classification: { sensitivity: "public" } } })))
       .toMatchObject({ code: "FORBIDDEN" });
-    expect(await failure(define(manager, "create", { key: "f", kind: "formula", definition: { osfType: "number", classification: { sensitivity: "public" } } })))
+    expect(await failure(define(manager, "create", { key: "f", kind: "lookup", definition: { osfType: "number", classification: { sensitivity: "public" } } })))
       .toMatchObject({ code: "NOT_AVAILABLE" });
     expect(await failure(define(manager, "create", { key: "x", definition: { osfType: "string" } })))
       .toMatchObject({ code: "VALIDATION", message: expect.stringContaining("classification") });

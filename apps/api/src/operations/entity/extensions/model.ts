@@ -4,6 +4,7 @@
  * pure functions: what a stored definition means for validation, the index,
  * redaction and `appliesWhen`. Database access lives in store.ts.
  */
+import { isDeepStrictEqual } from "node:util";
 import { sql, type RawBuilder } from "kysely";
 import type { RuntimeExtensibleEntity, RuntimeExtensionIndexColumn } from "@openshapeforge/plugin-runtime";
 import { operationFailure, type OperationFieldBaseType } from "@openshapeforge/operations";
@@ -74,6 +75,18 @@ export const record = (value: unknown): value is Record<string, unknown> =>
 
 export function extensionError(message: string, code = "VALIDATION", detail?: string): never {
   throw operationFailure({ code, message, ...(detail ? { detail } : {}), retryable: false });
+}
+
+/** A field's own entry in the source's `$meta`. */
+export function fieldMeta(source: Readonly<Record<string, unknown>>, fieldId: string): unknown {
+  const meta = source[EXTENSION_META_KEY];
+  return record(meta) ? meta[fieldId] : undefined;
+}
+
+/** Whether a write changes a field: its value, or for a computed field also its `$meta` (an error code). */
+export function fieldChanged(field: Pick<ExtensionField, "fieldId" | "kind">, before: Readonly<Record<string, unknown>>, after: Readonly<Record<string, unknown>>): boolean {
+  return !isDeepStrictEqual(before[field.fieldId], after[field.fieldId]) ||
+    (field.kind !== "stored" && !isDeepStrictEqual(fieldMeta(before, field.fieldId), fieldMeta(after, field.fieldId)));
 }
 
 export function isCollection(definition: ExtensionDefinition): boolean {

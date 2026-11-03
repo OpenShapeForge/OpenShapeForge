@@ -26,6 +26,7 @@
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@openshapeforge/auth": "workspace:*",
     "@openshapeforge/documents": "workspace:*",
+    "@openshapeforge/formula": "workspace:*",
     "@openshapeforge/observability": "workspace:*",
     "@openshapeforge/operations": "workspace:*",
     "@openshapeforge/plugin-runtime": "workspace:*",

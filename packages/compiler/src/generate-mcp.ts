@@ -35,15 +35,12 @@ import {
   editLeaseToolDefinitions,
   personalizationHelperTool,
   searchableOperationToolDefinitions,
-  type GenericToolBranch,
   type McpToolShape,
 } from "@openshapeforge/operations";
 import { withBlueprintCreate } from "./blueprint-create-schema.js";
 import { pluralize } from "./authoring/compiler/helpers.js";
 import type {
-  CompiledColumn,
   CompiledEntityContract,
-  CompiledEntityOperation,
   CompiledField,
   CompiledRelationship,
 } from "./authoring/types.js";
@@ -60,17 +57,13 @@ import {
   entityValuesSchema,
   withEntityBindingControls,
   withEntityOperationControls,
-  writableEntityFields,
 } from "./entity-operation-json-schema.js";
 import type { PluginExecutionCompatibility } from "./plugins.js";
 import { resolveDerivedExecution } from "./derived-execution.js";
 import {
   compiledFieldSchema,
-  compiledFieldSchemaWithoutDefinitions,
-  compiledObjectSchema,
   describeCompiledField,
   localizedText,
-  splitBundledDefinitions,
 } from "./field-json-schema.js";
 
 type JsonObject = Record<string, unknown>;

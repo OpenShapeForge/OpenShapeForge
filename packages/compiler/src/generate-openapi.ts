@@ -24,13 +24,7 @@ import type {
 } from "./authoring/types.js";
 import type { RestApiDocumentation } from "./authoring/layers.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
-import {
-  compiledFieldSchema,
-  describeCompiledField,
-  localizedText,
-  rebaseJsonSchemaReferences,
-  splitBundledDefinitions,
-} from "./field-json-schema.js";
+import { describeCompiledField, localizedText, rebaseJsonSchemaReferences } from "./field-json-schema.js";
 import type {
   PlatformSchemaManifest,
   ScalarType,

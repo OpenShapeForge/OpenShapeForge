@@ -19,7 +19,7 @@
  *   property the contract gains later arrives here by itself.
  */
 import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 const GROUP_DEPTH = 2;
 type Json = Record<string, unknown>;

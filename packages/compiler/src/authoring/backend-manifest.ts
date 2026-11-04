@@ -1,7 +1,7 @@
 import { validateDefaultTemplates } from "./compiler/default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { sortablePositionColumn } from "./sortable-position.js";
-import { join, relative } from "node:path";
+import { relative } from "node:path";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { compile } from "./compiler/index.js";

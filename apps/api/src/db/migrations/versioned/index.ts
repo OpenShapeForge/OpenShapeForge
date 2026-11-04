@@ -19,6 +19,7 @@ import { migrationFileChecksum, type VersionedMigration } from "../versioned-run
 import { sql } from "kysely";
 import m0020LegacySealedTenantSettings, { upgradeLegacySealedTenantSettings } from "./0020_legacy-sealed-tenant-settings.js";
 // migration-registry:imports — `bun run db:migration:new` inserts imports below this line.
+import m0024RemoveTaskForm from "./0024_remove-task-form.js";
 import m0023UniqueConfigurationCodes from "./0023_unique-configuration-codes.js";
 import m0022MembershipRelationNullability from "./0022_membership-relation-nullability.js";
 import m0021RelationRequiredColumns from "./0021_relation-required-columns.js";
@@ -45,5 +46,6 @@ export const versionedMigrations: VersionedMigration[] = [
   m0021RelationRequiredColumns,
   m0022MembershipRelationNullability,
   m0023UniqueConfigurationCodes,
+  m0024RemoveTaskForm,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

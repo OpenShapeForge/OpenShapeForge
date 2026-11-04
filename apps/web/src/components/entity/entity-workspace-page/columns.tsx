@@ -165,7 +165,6 @@ export function buildRelatedColumn({ entry, config, lang, entity }: {
             entity={entity}
             lang={lang}
             config={config.related}
-            persistTaskOutput={entry.entityName === "Task"}
           />
         ) : (
           <WorkspaceEmptyState

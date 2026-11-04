@@ -150,36 +150,7 @@ export const FIELD_AUTHORING_PROFILES: Record<
       osfType: "string",
     }),
   },
-  formDefinitionField: {
-    id: "formDefinitionField",
-    label: profileLabel("formDefinitionField", {
-      nl: "Formulierveld",
-      en: "Form definition field",
-    }),
-    keyBehavior: "generatedFromLabel",
-    excludedFieldTypes: profileExcludedFieldTypes("formDefinitionField", []),
-    typePickerUsage: profileTypePickerUsage(
-      "formDefinitionField",
-      "internalSchema",
-    ),
-    controls: profileControls("formDefinitionField", {
-      label: true,
-      description: true,
-      type: "combined",
-      cardinality: false,
-      sortable: false,
-      shape: true,
-      options: true,
-      render: false,
-      aiHint: true,
-      defaultValue: true,
-      value: false,
-      validation: true,
-      layout: true,
-      persistence: false,
-    }),
-    createEmptyField: createBaseField,
-  },
+
 };
 
 export function getFieldAuthoringProfile(profileId: FieldAuthoringProfileId) {

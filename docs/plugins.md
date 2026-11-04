@@ -203,6 +203,161 @@ executionCompatibility: {
 }
 ```
 
+### Binding a run to one provider account
+
+A Service invoked from a canonical Operation
+(`context.invokeDeclarativeService`) runs against whichever Connection the live
+session is authorized for **now**. For a plugin that synchronizes records that
+is not enough: the provider ids it queued mean something in exactly one
+account, and an administrator may retire, replace or add a Connection between
+the first page of a run and the last. Writing a queued record's provider ids
+through a replacement would address the wrong account with working
+credentials.
+
+Two halves of one contract close that, and neither selects a Connection:
+
+- **`connectionUse`** on a SUCCESSFUL result says what the invocation actually
+  obtained provider credentials from, as core observed it at each credential
+  boundary. `{ outcome: "one-connection", expectedConnection }` — every
+  provider call used one Connection, and here is the expectation that names it.
+  `{ outcome: "no-single-connection" }` — credentials came from more than one
+  Connection (two Adapters, say, or a personal plus an organization
+  Connection), or from one core cannot name for this session. `{ outcome:
+  "no-provider-call" }` — every binding that ran was the platform-owned native
+  transport, so nothing external was addressed. A failure, including a
+  composition that stopped part-way, carries no `connectionUse` at all.
+- **`expectedConnection`** on a request refuses the invocation unless every
+  binding that obtains Connection credentials obtains them from exactly the
+  Connection it names. It is a refusal, never a selection: core authorizes
+  Connections exactly as it would without it, then compares. It is verified per
+  binding where the credentials are read, so a replacement that lands mid-call
+  fails closed rather than reaching the new account, and a composed call is
+  checked over all its captured steps before the first binding runs. A binding
+  the Service declares `optional` does not absorb it either: `optional` means a
+  source may be unavailable, and this says the step would have run in another
+  account — so it fails the invocation rather than being reported as a skipped
+  step. The one answer is `EXPECTED_CONNECTION_UNAVAILABLE` (409), deliberately
+  the same whether the Connection was retired, replaced, deleted with nothing
+  in its place, never this session's to use, or named by a value this session
+  cannot resolve at all.
+
+The reference is core-minted, opaque and not constructible: it commits the
+tenant, the scope, the acting person for a personal scope, the connection table
+and the connection ROW. A replacement holding byte-identical credentials is a
+different row, and therefore refused.
+
+A caller may also name the Connection by its own id instead; see *Binding the
+first call* below for when that is the right one to set.
+
+Both halves cover the whole invocation, not only the Service's own bindings. A
+binding on the platform-owned native transport runs a canonical Operation
+in-process, and that Operation may open a Connection's credentials
+(`platform.secrets.resolveConnectionValues`) or invoke a further declarative
+Service. Those are credential boundaries of the same invocation: each is held
+to the same expectation and recorded into the same capture. So a Service that
+reads from one account and synchronizes through an Operation that reaches a
+second is reported as `no-single-connection` rather than as either of them, and
+a nested invocation may confirm the inherited expectation — by presenting the
+same value, or by naming the same Connection the other way — but cannot replace
+it with another Connection. What no expectation covers is work a nested
+Operation *defers* rather than performs: a durable job or queued outbox entry
+runs later under its own invocation and carries no expectation from this one.
+
+So a paginated run wires up as: invoke the first page bound to the id of the
+Connection it was planned against (below), require
+`connectionUse.outcome === "one-connection"`, persist that `expectedConnection`
+with the queue state, and present it verbatim on every
+later page. From the second call onwards the run is bound to one account, and
+the moment that account's Connection is no longer the one in use the run fails
+closed instead of continuing in another. A run that cannot get a single
+identity — `no-single-connection` or `no-provider-call` — has nothing to bind
+to and should refuse rather than pick one.
+
+Neither half discloses anything. A reference naming no Connection this session
+may use refuses with the same answer as one that was replaced, and
+`connectionUse` only ever names a Connection the invocation already used under
+the caller's own authority.
+
+#### Binding the first call, before there is a reference
+
+"From the second call onwards" is a gap, and the first call is where a run's
+records are captured. A sync reads the Connection it means to synchronize from,
+holds that Connection's id, and only then invokes the Service — and an
+administrator may replace the Connection in between. The first page then runs
+against the replacement and stores its records under the id of the Connection
+the sync believed it read.
+
+So `expectedConnection` may instead carry the Connection's own id, scoped to
+the tenant of the session that presents it:
+
+```ts
+// First page: bind to the Connection this run was planned against.
+const first = await context.invokeDeclarativeService({
+  definition, input,
+  expectedConnection: { connectionId, appliesTo: "every-provider-call" },
+});
+// Later pages: present what core captured, which commits more than an id does.
+```
+
+Same control, same refusal, one call earlier — and the same scope, so a nested
+invocation and anything a native binding's Operation opens are held to it too.
+It authorizes nothing and selects nothing: an id naming a Connection this
+session may not use refuses identically to one that was replaced, so it
+discloses nothing either, and a malformed id refuses rather than matching
+loosely.
+
+The two representations are mutually exclusive by shape — exactly `appliesTo`
+plus exactly one of `sourceReference` and `connectionId` — and core checks
+that, so a caller cannot present an id a host reads next to a reference it
+ignores. Where both end up in force (an invocation bound by id that nests one
+presenting the reference, or the reverse) the invocation is held to **both**:
+each is resolved against the row at every credential boundary, and a row that
+is not the one each of them names refuses. Neither is dropped and neither is
+preferred.
+
+Prefer the captured reference wherever a run has one. The id commits the tenant
+and the row; the reference also commits the scope and the connection table, and
+cannot be constructed by a caller at all.
+
+#### Check that the host enforces it, first
+
+`expectedConnection` is a refusal, so a host that did not implement it would
+ignore the property, run the invocation against whichever Connection the live
+session is authorized for, and answer an ordinary success — in the wrong
+account. A result cannot tell the two apart, and `connectionUse` is core's
+observation of the call just made, not proof that the control was armed before
+it. So ask before invoking:
+
+```ts
+const enforced = context.declarativeServiceCapabilities?.expectedConnection;
+if (!enforced?.includes("every-provider-call")) {
+  return refuseThisPage();            // core is never asked
+}
+return context.invokeDeclarativeService({ definition, input, expectedConnection });
+```
+
+`declarativeServiceCapabilities` (`RuntimeDeclarativeServiceCapabilities`) is on
+the `RuntimeOperationExecutionContext` a record-derived Operation provider is
+handed, and on `platform` (`PluginPlatformServices.declarativeServiceCapabilities`)
+for a canonical Operation handler, which holds `platform` rather than that
+context. One frozen object from one source: the host's registered declarative
+engine states what it enforces on itself, core narrows that claim to the checks
+it actually performs, and the platform slot is a setter-less, non-configurable
+accessor — so no module, plugin or MCP interceptor can claim, widen or withdraw
+the signal, for itself or for anybody else.
+
+Read it as a list, and fail closed. The whole property is absent on an OSF that
+predates the control and reads `undefined` on a runtime with no declarative
+engine; either way a plugin that needs the control must refuse rather than
+invoke the Service and hope. A scope missing from the list is not enforced, and
+an invocation that sets one is refused by the same parser rather than run with
+a weaker expectation than it believes it set.
+
+The signal advertises capability only. It says nothing about which Connections
+or Services the caller may reach: a denied invocation is denied identically on a
+host that advertises everything, and a reference naming a Connection this
+session may not use still answers `EXPECTED_CONNECTION_UNAVAILABLE`.
+
 ## The compiler half
 
 ### The contract

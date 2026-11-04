@@ -4,6 +4,13 @@
  * generated-mcp-server.ts, verbatim.
  */
 import { deriveToolName } from "./derived-tools.js";
+import {
+  type ConnectionControls,
+  type ConnectionUse,
+  inheritConnectionControls,
+  parseConnectionExpectation,
+  withConnectionControls,
+} from "./connection-expectation.js";
 import { HttpError } from "../rest/http-error.js";
 import { compatibilityOperationByKey } from "./catalog.js";
 import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "../operations/session-authorization.js";
@@ -15,8 +22,28 @@ import {
   runtimeHostOperationExecutors,
   runtimeOperationResult,
 } from "./tool-results.js";
+import type { RuntimeDeclarativeServiceConnectionUse } from "@openshapeforge/plugin-runtime";
 import type { ServerScope } from "./server-scope.js";
 import type { DispatchTool } from "./tool-dispatch.js";
+
+/**
+ * Project what core observed into the published answer. The one Connection
+ * case is handed back in the expectation's own shape, with the only scope
+ * core can vouch for: it saw every credential boundary of this invocation,
+ * and they were all this Connection.
+ */
+function declarativeConnectionUse(
+  use: ConnectionUse,
+): RuntimeDeclarativeServiceConnectionUse {
+  if (use.outcome !== "one-connection") return use;
+  return {
+    outcome: "one-connection",
+    expectedConnection: {
+      sourceReference: use.sourceReference,
+      appliesTo: "every-provider-call",
+    },
+  };
+}
 
 /**
  * The executors the Operation runtime calls back into this session with: a
@@ -73,20 +100,56 @@ export function registerSessionExecutors(
           expectedDefinition: definition,
         }
       : undefined;
-    const outcome = await dispatchTool(
-      toolName,
-      request.input ?? {},
-      requestId,
-      true,
-      selectedOptions,
-      assertInvocationActive,
-      signal,
-      true,
-      request.idempotencyKey,
-      false,
-      current,
+    // The caller's opt-in expected Connection, read here under this session —
+    // which is what scopes a presented Connection id to its tenant — and
+    // composed with the controls of the invocation this one may be nested
+    // inside. A malformed or unrecognised expectation refuses instead of
+    // running without one, and a nested caller can only confirm the inherited
+    // expectation or add a second way of naming the same row, never replace it
+    // — both refusals land here, before any provider effect of this call.
+    let controls: ConnectionControls;
+    try {
+      controls = inheritConnectionControls(
+        parseConnectionExpectation(request.expectedConnection, session),
+      );
+    } catch (error) {
+      return runtimeOperationResult(failed(error));
+    }
+    // Core's record of what this invocation uses. Created here and read back
+    // here: the recorder itself never crosses into module code, so the answer
+    // below is core's own observation of its own credential boundaries. It
+    // also feeds the enclosing invocation's recorder, so a Service reached
+    // through a native binding cannot leave the outer answer naming one
+    // Connection when two were used.
+    const recorder = controls.connectionUse!;
+    // In force for everything this invocation reaches in-process, not only for
+    // what the dispatch arguments below carry: a native binding's canonical
+    // Operation opens credentials and invokes Services through paths of its
+    // own, and each of those is a credential boundary of THIS invocation.
+    const outcome = await withConnectionControls(controls, () =>
+      dispatchTool(
+        toolName,
+        request.input ?? {},
+        requestId,
+        true,
+        selectedOptions,
+        assertInvocationActive,
+        signal,
+        true,
+        request.idempotencyKey,
+        false,
+        current,
+        controls,
+      ),
     );
-    return runtimeOperationResult(outcome.result);
+    const result = runtimeOperationResult(outcome.result);
+    // A failure — including a composition that stopped part-way — hands out no
+    // identity: there is nothing a caller should bind its next call to.
+    if ("error" in result) return result;
+    return {
+      ...result,
+      connectionUse: declarativeConnectionUse(recorder.used()),
+    };
   };
   runtimeDeclarativeServiceExecutors.set(server, executeDeclarativeService);
 

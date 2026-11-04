@@ -3767,13 +3767,18 @@
           "key": "code",
           "osfType": "string",
           "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
           "label": {
             "en": "Code",
             "nl": "Code"
           },
           "description": {
-            "en": "Tenant-unique component-type code.",
-            "nl": "Tenant-unieke componenttypecode."
+            "en": "Tenant-unique component-type code, made from the name when the type is created.",
+            "nl": "Tenant-unieke componenttypecode, bij het aanmaken gemaakt uit de naam."
           },
           "validation": {
             "minLength": 1,
@@ -7607,6 +7612,11 @@
           "key": "key",
           "osfType": "string",
           "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
           "label": {
             "en": "Code",
             "nl": "Code"
@@ -11986,6 +11996,11 @@
           "key": "code",
           "osfType": "string",
           "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
           "label": {
             "en": "Code",
             "nl": "Code"
@@ -13524,6 +13539,11 @@
           "key": "code",
           "osfType": "string",
           "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
           "label": {
             "en": "Code",
             "nl": "Code"
@@ -13826,6 +13846,11 @@
           "key": "code",
           "osfType": "string",
           "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
           "label": {
             "en": "Code",
             "nl": "Code"
@@ -14016,13 +14041,18 @@
           "key": "key",
           "osfType": "string",
           "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
           "label": {
             "en": "Variable key",
             "nl": "Variabele-sleutel"
           },
           "description": {
-            "en": "Stable lower-case key used in templates as `{{chips.<key>}}`, for example `general.phone`.",
-            "nl": "Stabiele sleutel in kleine letters die in templates wordt gebruikt als `{{chips.<key>}}`, bijvoorbeeld `general.phone`."
+            "en": "Key used in templates as `{{chips.<key>}}`, made from the name when the chip is created (`Phone number` becomes `phone-number`) and unchanged when the name is edited later.",
+            "nl": "Sleutel die in templates wordt gebruikt als `{{chips.<key>}}`, bij het aanmaken gemaakt uit de naam (`Telefoonnummer` wordt `telefoonnummer`) en onveranderd als de naam later wijzigt."
           },
           "validation": {
             "minLength": 1,
@@ -18651,6 +18681,11 @@
           "key": "code",
           "osfType": "string",
           "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
           "label": {
             "en": "Code",
             "nl": "Code"
@@ -37072,6 +37107,11 @@
           "key": "code",
           "osfType": "string",
           "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
           "label": {
             "en": "Code",
             "nl": "Code"
@@ -42667,6 +42707,11 @@
           "key": "key",
           "osfType": "string",
           "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
           "label": {
             "en": "Key",
             "nl": "Sleutel"

@@ -117,6 +117,10 @@ import {
   registerEntityPluginExecutor,
   verifiedSession,
 } from "../operations/entity/plugin-executor.js";
+import {
+  registerEntityOperationOverrides,
+  runtimeOperationOverrides,
+} from "../operations/entity/operation-overrides.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -440,6 +444,27 @@ export function createApiApp(options: {
     });
     modulePlatform?.registerArtifactStorage(initialised.loaded);
     modulePlatform?.registerOperationProviders(initialised.loaded);
+    // Operation overrides take generated record-scoped update/delete calls on
+    // every interface that reaches the canonical entity runtime. Their code
+    // runs under the caller's live module session, as an entity plugin
+    // handler does; a build without one leaves every write unchanged.
+    if (databaseRuntime && modulePlatform) {
+      const platform = modulePlatform;
+      registerEntityOperationOverrides(databaseRuntime.db, {
+        overrides: runtimeOperationOverrides(initialised.loaded),
+        accepts: (session) => {
+          try {
+            verifiedSession(session);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        activate: (session, work) => platform.withActiveOperationSession(verifiedSession(session), work),
+        execute: (session, request, options) =>
+          platform.services.operations.execute(session as never, request, options),
+      });
+    }
     // Host-wide execution admission, bound once from the modules that
     // actually initialised. A build with no contribution leaves every
     // execution path unchanged; a module that was configured to contribute a

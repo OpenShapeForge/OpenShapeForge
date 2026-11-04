@@ -19,6 +19,7 @@ import {
 } from "../../generated-crud.js";
 import fieldAuthoringRegistry from "../../../generated/compiler/field-authoring-registry.json" with { type: "json" };
 import { EXTENSION_VALUES_COLUMN } from "../../../operations/entity/extensions/model.js";
+import { fieldNameForColumn } from "../../../operations/entity/columns.js";
 import { createGeneratedEntityForTable } from "../../../operations/entity/mutations.js";
 import { createDoc, expectOperationData } from "./gql-shapes.js";
 import {
@@ -309,9 +310,21 @@ async function referencedValue(
     throw new Error(`Reference targets unknown entity ${reference.entity}`);
   }
   if (!reference.valueField) return createRow(target, identity, {}, depth + 1);
+  const column = target.columns.find(
+    (candidate) => fieldNameForColumn(candidate as never) === reference.valueField || candidate.name === reference.valueField,
+  );
+  // A code the server derives on create (from the name) cannot be supplied:
+  // the reference is to whatever value the created row carries.
+  const derived = Boolean((column as { deriveOnCreate?: unknown } | undefined)?.deriveOnCreate);
   const value = `e2e-${nextMarker()}-${reference.valueField}`;
-  await createRow(target, identity, { [reference.valueField]: value }, depth + 1);
-  return value;
+  const id = await createRow(target, identity, derived ? {} : { [reference.valueField]: value }, depth + 1);
+  if (!derived) return value;
+  const row = await getGeneratedEntity(getRuntime().db, identity, { table: target.name, id });
+  const stored = row?.[column!.name];
+  if (typeof stored !== "string" || !stored) {
+    throw new Error(`Created ${reference.entity} carries no derived ${reference.valueField}`);
+  }
+  return stored;
 }
 
 /**

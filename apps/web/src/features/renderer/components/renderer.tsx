@@ -315,6 +315,11 @@ export function Renderer({
   const rendersFormElement = definition.presentation?.surface !== "embedded";
   const formContent = (
     <>
+      {rendererForm.form.formNotice ? (
+        <p className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground" role="status">
+          {rendererForm.form.formNotice}
+        </p>
+      ) : null}
       {rendererForm.form.formError ? (
         <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {rendererForm.form.formError}

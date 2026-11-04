@@ -80,9 +80,28 @@ export async function resolveDerivedConnection(
       ownedByActingRelation(selectedConnection?.ownerUserId, session));
   const effectiveScope = personalExecution ? "user" : "tenant";
 
+  // Both Connection controls govern the provider calls of a Service — the
+  // bindings that obtain Connection credentials and send them to a provider.
+  // The platform-owned native transport obtains none: it runs the generated
+  // Operation in-process under the caller's own session, inside this tenant,
+  // and its connection row exists to declare scope rather than to carry an
+  // account. A sync Service that reads from a provider and writes here must
+  // stay expressible, so neither the expectation nor the capture reaches this
+  // ROW: the native row is not refused, and it is not reported as an account
+  // used.
+  //
+  // What the Operation itself then reaches is a different question, and not
+  // exempt. The controls remain in force for the whole invocation
+  // (connection-expectation.ts), so a Connection that Operation opens, or a
+  // declarative Service it invokes, is checked and recorded like any other
+  // credential boundary of this invocation.
+  const withControls: DerivedConnectionInput =
+    providerRow.transport === "native"
+      ? { ...input, controls: undefined }
+      : input;
   const resolved = personalExecution
-    ? await resolvePersonalConnection(input, elicitScope)
-    : await resolveTenantConnection(input, elicitScope);
+    ? await resolvePersonalConnection(withControls, elicitScope)
+    : await resolveTenantConnection(withControls, elicitScope);
   const { providerForExecution, connectionValues, secretScope, oauthConnectionAudit } = resolved;
 
   return { providerForExecution, connectionValues, secretScope, oauthConnectionAudit, effectiveScope };

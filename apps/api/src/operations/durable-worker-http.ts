@@ -127,9 +127,17 @@ export async function isLimiterRefusal(response: Response): Promise<boolean> {
   return body?.code === RATE_LIMITED_CODE || response.headers.has("x-ratelimit-limit");
 }
 
-/** `{ data }` or `{ error: { … } }`; a limiter's `{ error: "Too Many Requests" }` is not one. */
+/**
+ * `{ data }`, `{ error: { … } }` or an operation override's
+ * `{ accepted: { … }, operations }`; a limiter's `{ error: "Too Many Requests" }`
+ * is not one. An accepted answer is settled: the Operation was taken over and
+ * answered, so it is returned to the caller as it is, never as an uncertain write.
+ */
 export function isCanonicalResult(body: unknown): boolean {
   if (!body || typeof body !== "object") return false;
   const record = body as Record<string, unknown>;
-  return "data" in record || (!!record.error && typeof record.error === "object");
+  if ("data" in record) return true;
+  if (record.error !== undefined) return !!record.error && typeof record.error === "object";
+  return !!record.accepted && typeof record.accepted === "object" && !Array.isArray(record.accepted) &&
+    Array.isArray(record.operations);
 }

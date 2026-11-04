@@ -29,6 +29,14 @@
  * shared one — that is the difference between a personal mailbox and everyone
  * reading the first mailbox somebody connected.
  *
+ * A fourth gate applies to one case the three above cannot see: a module
+ * Operation reached through the native binding of a declarative Service whose
+ * caller bound that invocation to one exact Connection
+ * (`mcp/connection-expectation.ts`). This is a credential boundary of that
+ * invocation, so the invocation's expectation is checked and its capture
+ * records the row — otherwise the `every-provider-call` scope would stop at
+ * the engine's own bindings and mean less than it says.
+ *
  * The result also carries an opaque EGRESS GRANT (see `socket-egress.ts`). A
  * module never states its own allow-list: it hands the grant back to core,
  * which reads the Adapter's `egressHosts` again. So a connection's credentials
@@ -54,6 +62,10 @@ import type {
   ModuleConnectionSelector,
   ModuleConnectionValues,
 } from "./contract.js";
+import {
+  ambientConnectionControls,
+  assertConnectionControls,
+} from "../mcp/connection-expectation.js";
 import { mintSocketGrant } from "./socket-egress.js";
 import { liveConnectionValues, secretKeysOf } from "./connection-oauth-liveness.js";
 
@@ -328,6 +340,23 @@ export async function resolveConnectionValues(
   } else if (row.owner !== null && row.owner !== input.session.userId) {
     return refuse("NOT_FOUND", "No Connection to that Adapter is available to you.");
   }
+
+  // Gate 4, and a no-op unless this resolution happens INSIDE a declarative
+  // Service invocation: a native binding runs a canonical Operation
+  // in-process, and this is where that Operation obtains provider credentials.
+  // Without the check here the invocation's scope would stop at the engine's
+  // own bindings, so `every-provider-call` would be a promise the host does not
+  // keep — and the capture could name one Connection for a run that opened
+  // two. It is a refusal, never a selection: the three gates above have
+  // already decided this row, and nothing about it changes. No I/O and no
+  // transaction of its own, so it is safe before the token refresh below and
+  // inside the caller's share-locked read alike.
+  assertConnectionControls({
+    controls: ambientConnectionControls(),
+    session: input.session,
+    connectionTable: execution.connectionTable,
+    connection: { id: row.id, ownerUserId: row.owner },
+  });
 
   const keyring = input.keyring ?? keyringFromEnv(process.env[KEYRING_ENV]);
   const elicitScope =

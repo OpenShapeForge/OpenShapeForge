@@ -339,4 +339,28 @@ describe("tenant fields over REST, GraphQL and MCP", () => {
     const listed = await list(reader, { filter: { name: { eq: `text ${tag}` } } });
     expect(listed.body.data.items[0].data.extensions.accu).toBe(60);
   });
+
+  test.skipIf(!available)("a transaction the database gave up on is a retryable 409 on REST and on MCP, on any entity write", async () => {
+    const created = await http(writer, "POST", ASSETS, { name: `deadlock ${tag}` });
+    expect(created.status).toBe(201);
+    const id = created.body.data.id as string;
+    const db = getSeedRuntime().db;
+    const name = `e2e_deadlock_${randomUUID().replaceAll("-", "")}`;
+    await sql.raw(`create function ${name}() returns trigger language plpgsql as $$ begin
+      if new.id = '${id}'::uuid then raise exception 'deadlock detected' using errcode = '40P01'; end if; return new; end $$`).execute(db);
+    await sql.raw(`create trigger ${name} before update on erp.extensible_assets for each row execute function ${name}()`).execute(db);
+    try {
+      const refused = await http(writer, "PATCH", `${ASSETS}/${id}`, { name: "other", expectedVersion: created.body.data.updatedAt });
+      expect(refused).toMatchObject({ status: 409, body: { error: { code: "CONFLICT", retryable: true } } });
+      expect(refused.body.error.message).not.toContain("deadlock detected");
+      const mcp = await rpc(writer, "tools/call", { name: "osf_execute_operation",
+        arguments: { operationId: `${ENTITY}.update`, input: { id, values: { name: "other" }, expectedVersion: created.body.data.updatedAt } } });
+      expect(mcp.body.result.isError).toBe(true);
+      expect(mcp.body.result.structuredContent).toMatchObject({ error: { code: "CONFLICT", retryable: true } });
+    } finally {
+      await sql.raw(`drop trigger ${name} on erp.extensible_assets`).execute(db);
+      await sql.raw(`drop function ${name}()`).execute(db);
+    }
+    expect((await http(writer, "PATCH", `${ASSETS}/${id}`, { name: "other", expectedVersion: created.body.data.updatedAt })).status).toBe(200);
+  });
 });

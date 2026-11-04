@@ -165,7 +165,8 @@ async function withSetNullKey<T>(table: string, column: string, target: string, 
     return await run();
   } finally {
     await alter(`drop constraint "${key!.name}"`);
-    await alter(`add constraint "${key!.name}" ${key!.definition}`);
+    // Not valid: other tests of this database leave orphans on purpose.
+    await alter(`add constraint "${key!.name}" ${key!.definition} not valid`);
   }
 }
 /** Manage one entity's reads under the tenant's profiles, past the ceiling's guard, then write the profile model the way an administrator does. */

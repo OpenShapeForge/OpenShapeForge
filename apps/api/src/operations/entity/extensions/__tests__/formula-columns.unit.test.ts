@@ -7,7 +7,6 @@
  * the migration chain applies.
  */
 import { describe, expect, test } from "bun:test";
-import type { RuntimeExtensionRegistryManifest } from "@openshapeforge/plugin-runtime";
 import manifest from "../../../../generated/db/manifest.json" with { type: "json" };
 import { extensionWorkerGrants } from "../../../../db/migrations/worker-role.js";
 import { getGeneratedCrudTables } from "../../catalog.js";
@@ -84,8 +83,9 @@ describe("the worker's column grants", () => {
 
   /** The compiled registry, narrowed to one route of a test; the group's readers widened so that its own lookups prove nothing. */
   const GROUP = "ExtensibleAssetGroup", GROUP_TABLE = "erp.extensible_asset_groups", LOCATION_TABLE = "erp.extensible_asset_locations";
-  const registryWith = (edit: (registry: RuntimeExtensionRegistryManifest & Record<string, any>) => void) => {
-    const registry = structuredClone(manifest.extensionRegistry) as unknown as RuntimeExtensionRegistryManifest & { entities: Record<string, any>; readAccess: Record<string, any>; childRelations: Record<string, any> };
+  type EditableRegistry = { entities: Record<string, any>; readAccess: Record<string, any>; childRelations: Record<string, any> };
+  const registryWith = (edit: (registry: EditableRegistry) => void) => {
+    const registry = structuredClone(manifest.extensionRegistry) as unknown as EditableRegistry;
     for (const entry of Object.values(registry.entities)) { entry.targets = []; entry.relations = []; entry.ownedSingleChildren = []; }
     registry.readAccess[GROUP].roles.push("Test.Wider.Read");
     edit(registry);

@@ -97,6 +97,9 @@ describe("document content authorization against PostgreSQL", () => {
     const emptyInput = { ...input, document: { ...input.document, title: `template-empty-${crypto.randomUUID()}` }, content: { ...input.content,
       blocks: [{ definitionKey: "TemplateBlock", values: { version: emptyVersion, parameters: {} } }] } };
     expect((await setup.handlers.createDocument!(emptyInput, setup.context)).value).toHaveProperty("id");
+    const unexpectedInput = { ...emptyInput, document: { ...emptyInput.document, title: `template-empty-invalid-${crypto.randomUUID()}` }, content: { ...emptyInput.content,
+      blocks: [{ definitionKey: "TemplateBlock", values: { version: emptyVersion, parameters: { name: "Ada" } } }] } };
+    await fails(setup.handlers.createDocument!(unexpectedInput, setup.context), "VALIDATION_FAILED");
   });
 
   test("a document editor edits document blocks only through the variant, never template blocks", async () => {

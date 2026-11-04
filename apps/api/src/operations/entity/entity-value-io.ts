@@ -180,8 +180,7 @@ export async function prepareEntityValueWriteInTransaction(
     const row = (await sql<{ snapshot: unknown }>`select ${sql.id(snapshotColumn.name)} as snapshot from ${sql.id(target.schema, target.table)}
       where id=${dynamic.id}::uuid and tenant_id=${session.tenantId}::uuid`.execute(trx)).rows[0];
     const snapshot = row?.snapshot as { schemaVersion?: unknown; entity?: unknown; head?: { row?: Record<string, unknown> } } | undefined;
-    // Older published records may have no field-definition collection. It is
-    // semantically empty, just as an explicit empty collection is.
+    // A nullable, unset field-definition collection is semantically empty.
     const head = snapshot?.head?.row;
     const fields = head?.[dynamic.snapshotColumn] === null ? [] : head?.[dynamic.snapshotColumn];
     if (snapshot?.schemaVersion !== 1 || snapshot.entity !== dynamic.headEntity || !head || !Object.hasOwn(head, dynamic.snapshotColumn) || !Array.isArray(fields)) throw generatedCrudError("The frozen field definitions are unavailable.", "INVALID_DEFINITION");

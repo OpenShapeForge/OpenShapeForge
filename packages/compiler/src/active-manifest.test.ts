@@ -26,6 +26,7 @@ test("active composition carries the extension registry into manifest.json, and 
   const extensionRegistry = {
     entities: {}, indexProjections: { measurement: { number: "value", text: "unit" } },
     referencedBy: { Product: [{ sourceEntity: "Product", valuesTable: "erp.products_field_values" }] },
+    childRelations: {},
     readAccess: { Product: { table: "erp.products", roles: ["Catalogue.Read"] } },
   };
   const base: PlatformSchemaManifest = { version: 1, tables: [] };

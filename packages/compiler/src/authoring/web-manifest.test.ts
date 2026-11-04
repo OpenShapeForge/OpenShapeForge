@@ -2279,6 +2279,7 @@ test("an extensible entity offers its tenant-field routes, and a target its refe
       Product: [{ sourceEntity: "Product", valuesTable: "erp.products_field_values" }],
       Supplier: [{ sourceEntity: "Product", valuesTable: "erp.products_field_values" }],
     },
+    childRelations: {},
     readAccess: {
       Product: { table: "erp.products", roles: ["Catalogue.Read"] },
       Supplier: { table: "erp.suppliers", roles: ["Catalogue.Read"] },

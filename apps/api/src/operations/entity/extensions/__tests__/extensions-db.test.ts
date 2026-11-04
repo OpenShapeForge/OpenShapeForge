@@ -16,6 +16,8 @@ import { executeEntityOperation } from "../../runtime.js";
 import { serializeEntityRow } from "../../serialize-result.js";
 import { executeFieldDefinitionAction, executeReferencedBy, type FieldDefinitionAction } from "../definitions.js";
 import { findExtensionReferenceOrphans } from "../references.js";
+import { jsonbLiteral } from "../../../../db/sql-helpers.js";
+import { extensionSnapshot } from "../snapshot.js";
 import { loadExtensionFields } from "../store.js";
 import { extensionFilterCondition, extensionPredicateRank } from "../query.js";
 import { EXTENSION_BACKFILL_KIND, EXTENSION_RETENTION_KIND, applyExtensionRetention, extensionBackfillJobHandler, extensionRetentionJobHandler, runBackfillBatch } from "../backfill.js";
@@ -36,6 +38,7 @@ const manager = sessionFor(tenantA, [MANAGER_ROLE, WRITER_ROLE, READER_ROLE]);
 const writer = sessionFor(tenantA, [WRITER_ROLE]);
 const reader = sessionFor(tenantA, [READER_ROLE]);
 const writerB = sessionFor(tenantB, [WRITER_ROLE, MANAGER_ROLE]);
+const reader_ = (tenant: string) => sessionFor(tenant, [READER_ROLE]);
 const fields: Record<string, string> = {};
 const silent = { info() {}, warn() {}, error() {} };
 const handlers = composeJobHandlers([{ name: "test-extensions", jobHandlers: {
@@ -603,5 +606,113 @@ describe("tenant fields on an extensible entity", () => {
       { db: fixture.app.db, platform: platform.services, transport: "rest", session: writer as never })).rejects.toBeDefined();
     expect(() => bindOperationHandlers([], [{ ...contract(`${ENTITY}.fieldDefinitions.create`), effects: { data: "read", external: "none" } } as OperationContract], { pluginOperations: "absent" }))
       .toThrow(/unsupported or incomplete binding/);
+  });
+  test("a number is a number: text from a form is stored as one, text stored before reads as one, and what is no number stays refused", async () => {
+    const tenant = randomUUID();
+    await fixture.addTenants(tenant);
+    const designer = sessionFor(tenant, [MANAGER_ROLE, WRITER_ROLE, READER_ROLE]);
+    const pub = { classification: { sensitivity: "public" } };
+    const ids: Record<string, string> = {};
+    for (const [key, definition] of [
+      ["kwh", { osfType: "integer", label: label("Kwh"), ...pub }],
+      ["prijs", { osfType: "money", label: label("Prijs"), ...pub }],
+      ["ratio", { osfType: "number", label: label("Ratio"), ...pub }],
+      ["gewicht", { osfType: "measurement", label: label("Gewicht"), ...pub }],
+      ["standaard", { osfType: "integer", label: label("Standaard"), defaultValue: "3", ...pub }],
+      ["code", { osfType: "string", label: label("Code"), ...pub }],
+      ["dubbel", { label: label("Dubbel"), ...pub, formula: { text: "{Kwh} * 2" } }],
+      ["tekst", { label: label("Tekst"), ...pub, formula: { text: "{Prijs} & \" euro\"" } }],
+    ] as const) {
+      const made = await define(designer, "create", { key, definition, ...("formula" in definition ? { kind: "formula" } : {}) }) as { fieldId: string };
+      ids[key] = made.fieldId;
+    }
+    await drainJobs();
+    const stored = async (id: string) => (await sql<{ source: Record<string, unknown> }>`select extension_values as source from erp.extensible_assets where id = ${id}::uuid`.execute(fixture.privileged.db)).rows[0]!.source;
+
+    const asset = await created(designer, { kwh: "60", prijs: "12.50", ratio: "-0.25", gewicht: { value: "7.5", unit: "kg" }, code: "60" });
+    const expected = { kwh: 60, prijs: 12.5, ratio: -0.25, gewicht: { value: 7.5, unit: "kg" }, standaard: 3, code: "60", dubbel: 120 };
+    expect(asset.extensions).toMatchObject(expected);
+    const source = await stored(asset.id);
+    expect(source).toMatchObject({ [ids.kwh!]: 60, [ids.prijs!]: 12.5, [ids.ratio!]: -0.25, [ids.gewicht!]: { value: 7.5, unit: "kg" }, [ids.standaard!]: 3, [ids.code!]: "60" });
+    await update(designer, asset.id, { extensions: { kwh: "61" } });
+    expect((await stored(asset.id))[ids.kwh!]).toBe(61);
+    expect((await get(reader_(tenant), asset.id))!.extensions.dubbel).toBe(122);
+
+    for (const value of ["veel", "", "12,5", "1e3"]) {
+      expect(await createAsset(designer, { kwh: value })).toMatchObject({ error: { code: "VALIDATION" } });
+    }
+    expect(await createAsset(designer, { kwh: "1.5" })).toMatchObject({ error: { code: "VALIDATION" } });
+    // A JSON number cannot hold these digits; nothing rounds them.
+    const refused = await createAsset(designer, { prijs: "9007199254740993.995" });
+    expect(refused).toMatchObject({ error: { code: "VALIDATION", violations: [expect.objectContaining({ field: "extensions.prijs", code: "NOT_REPRESENTABLE" })] } });
+
+    // Written as text before: no migration, and every reader gets the number.
+    const older = await created(designer, {});
+    const textual = { [ids.kwh!]: "60", [ids.prijs!]: "60.50", [ids.gewicht!]: { value: "5", unit: "kg" }, [ids.code!]: "07" };
+    await sql`update erp.extensible_assets set extension_values = extension_values || ${jsonbLiteral(textual)} where id = ${older.id}::uuid`.execute(fixture.privileged.db);
+    expect((await get(reader_(tenant), older.id))!.extensions).toMatchObject({ kwh: 60, gewicht: { value: 5, unit: "kg" }, code: "07" });
+    const frozen = await withDbSession(fixture.app.db, designer, async (trx) => {
+      const row = (await sql<{ row: Record<string, unknown> }>`select to_jsonb(a.*) as row from erp.extensible_assets a where id = ${older.id}::uuid`.execute(trx)).rows[0]!.row;
+      await loadExtensionFields(trx, designer, fixture.table, { lock: "shared" });
+      return extensionSnapshot(trx, designer, ENTITY, row);
+    });
+    expect(frozen.extensions).toMatchObject({ [ids.kwh!]: 60, [ids.gewicht!]: { value: 5, unit: "kg" } });
+    // A formula reads it as a number as well, and a write of another field leaves it as it is.
+    await define(designer, "update", { fieldId: ids.dubbel, definition: { label: label("Dubbel"), ...pub, formula: { text: "2 * {Kwh}" } } });
+    await define(designer, "update", { fieldId: ids.tekst, definition: { label: label("Tekst"), ...pub, formula: { text: "{Prijs} & \" EUR\"" } } });
+    await drainJobs();
+    expect((await get(reader_(tenant), older.id))!.extensions).toMatchObject({ dubbel: 120, tekst: "60.5 EUR" });
+    await update(designer, older.id, { extensions: { code: "08" } });
+    expect((await stored(older.id))[ids.kwh!]).toBe("60");
+  });
+  test("a default no JSON number holds is refused when the definition is saved", async () => {
+    const tenant = randomUUID();
+    await fixture.addTenants(tenant);
+    const designer = sessionFor(tenant, [MANAGER_ROLE, WRITER_ROLE, READER_ROLE]);
+    const pub = { classification: { sensitivity: "public" } };
+    const refused = { code: "VALIDATION", violations: [expect.objectContaining({ field: "definition.defaultValue", code: "NOT_REPRESENTABLE" })] };
+    const money = (defaultValue: unknown) => ({ osfType: "money", label: label("Prijs"), defaultValue, ...pub });
+    expect(await failure(define(designer, "create", { key: "prijs", definition: money("9007199254740993.995") }))).toMatchObject(refused);
+    expect(await failure(define(designer, "create", { key: "gewicht", definition: { osfType: "measurement", label: label("Gewicht"), defaultValue: { value: "9007199254740993.995", unit: "kg" }, ...pub } }))).toMatchObject(refused);
+    const made = await define(designer, "create", { key: "prijs", definition: money("12.50") }) as { fieldId: string };
+    expect(await failure(define(designer, "update", { fieldId: made.fieldId, definition: money("9007199254740993.995") }))).toMatchObject(refused);
+    expect((await created(designer, {})).extensions.prijs).toBe(12.5);
+  });
+  test("text beyond the range of a double is refused, in a value and in a default, and not kept as text", async () => {
+    const tenant = randomUUID();
+    await fixture.addTenants(tenant);
+    const designer = sessionFor(tenant, [MANAGER_ROLE, WRITER_ROLE, READER_ROLE]);
+    const pub = { classification: { sensitivity: "public" } };
+    const beyond = `1${"0".repeat(400)}`;
+    await define(designer, "create", { key: "prijs", definition: { osfType: "number", label: label("Prijs"), ...pub } });
+    await define(designer, "create", { key: "gewicht", definition: { osfType: "measurement", label: label("Gewicht"), ...pub } });
+    for (const [key, value] of [["prijs", beyond], ["prijs", `-${beyond}`], ["gewicht", { value: beyond, unit: "kg" }]] as const) {
+      expect(await createAsset(designer, { [key]: value })).toMatchObject({ error: { code: "VALIDATION",
+        violations: [expect.objectContaining({ field: `extensions.${key}`, code: "NOT_REPRESENTABLE" })] } });
+    }
+    expect(await failure(define(designer, "create", { key: "standaard", definition: { osfType: "number", label: label("Standaard"), defaultValue: beyond, ...pub } })))
+      .toMatchObject({ code: "VALIDATION", violations: [expect.objectContaining({ field: "definition.defaultValue", code: "NOT_REPRESENTABLE" })] });
+  });
+  test("text stored before that a JSON number cannot hold exactly is delivered as stored, never rounded", async () => {
+    const tenant = randomUUID();
+    await fixture.addTenants(tenant);
+    const designer = sessionFor(tenant, [MANAGER_ROLE, WRITER_ROLE, READER_ROLE]);
+    const pub = { classification: { sensitivity: "public" } };
+    const ids: Record<string, string> = {};
+    for (const [key, osfType] of [["prijs", "money"], ["bereik", "number"], ["gewicht", "measurement"], ["kwh", "integer"]] as const) {
+      ids[key] = (await define(designer, "create", { key, definition: { osfType, label: label(key), ...pub } }) as { fieldId: string }).fieldId;
+    }
+    const exact = "9007199254740993.995", beyond = `1${"0".repeat(400)}`;
+    const asset = await created(designer, {});
+    const stored = { [ids.prijs!]: exact, [ids.bereik!]: beyond, [ids.gewicht!]: { value: exact, unit: "kg" }, [ids.kwh!]: "60" };
+    await sql`update erp.extensible_assets set extension_values = extension_values || ${jsonbLiteral(stored)} where id = ${asset.id}::uuid`.execute(fixture.privileged.db);
+    const expected = { prijs: exact, bereik: beyond, gewicht: { value: exact, unit: "kg" }, kwh: 60 };
+    expect((await get(reader_(tenant), asset.id))!.extensions).toMatchObject(expected);
+    const frozen = await withDbSession(fixture.app.db, designer, async (trx) => {
+      const row = (await sql<{ row: Record<string, unknown> }>`select to_jsonb(a.*) as row from erp.extensible_assets a where id = ${asset.id}::uuid`.execute(trx)).rows[0]!.row;
+      await loadExtensionFields(trx, designer, fixture.table, { lock: "shared" });
+      return extensionSnapshot(trx, designer, ENTITY, row);
+    });
+    expect(frozen.extensions).toMatchObject({ [ids.prijs!]: exact, [ids.gewicht!]: { value: exact, unit: "kg" } });
   });
 });

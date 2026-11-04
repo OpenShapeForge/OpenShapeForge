@@ -5,7 +5,7 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
 import type { RuntimeExtensionRegistry } from "@openshapeforge/plugin-runtime";
 import { extensionRegistry } from "../../operations/entity/extensions/registry.js";
 import { formulaColumns } from "../../operations/entity/extensions/formula-columns.js";
-import { narrowerReadAccess } from "../../operations/entity/extensions/read-access.js";
+import { lookupForeignKeys, narrowerReadAccess, readableForeignKey, stepRelations } from "../../operations/entity/extensions/read-access.js";
 import { draftRule } from "../../operations/entity/versioned-head.js";
 import type { GeneratedCrudTable } from "../../operations/entity/types.js";
 
@@ -384,7 +384,13 @@ export async function applyWorkerRoleGrants(db: OpenShapeForgeDatabase) {
  *     than the source by the compiled contract, read-access.ts), SELECT of
  *     its id, tenant, clocks, the foreign key of that relation and the columns
  *     a computed field may read (formula-columns.ts) — and nothing else of it;
- *     a classified or field-policed column never is. This rule reaches no
+ *     a classified or field-policed column never is. The same across a single
+ *     relation of a collection's child, extensible or not, or a tenant reference
+ *     of an extensible one, which `rollup.of` may follow, with that relation's
+ *     foreign key on the child. Only along a route whose every link holds, proven
+ *     from the source: a foreign key that fails it is not selected, and a table
+ *     no route reaches is not granted.
+ *     This rule reaches no
  *     other business table; what the worker holds on a table that declares
  *     `workerDml` itself (`erp.tasks`, `erp.comments`) comes from that
  *     declaration, not from here;
@@ -415,23 +421,13 @@ export function extensionWorkerGrants(
 ): ExtensionWorkerGrant[] {
   const entities = registry.entityNames().map((name) => registry.entity(name)!);
   if (!entities.length) return [];
-  const sourceGrants = entities.map((entry): ExtensionWorkerGrant => {
-    const [schema, name] = entry.table.split(".");
-    const table = tables.find((candidate) => candidate.schema === schema && candidate.table === name);
-    const present = new Set(table?.columns.map((column) => column.name) ?? []);
-    const draft = table ? draftRule(table)?.column : undefined;
-    const update = ["extension_values", "updated_at", ...(draft ? [draft] : [])].filter((column) => present.has(column));
-    const readable = table ? formulaColumns(table).map((column) => column.name) : [];
-    // A lookup follows the foreign key of an authored single relation, never a classified or field-policed one.
-    const references = entry.relations.filter((relation) => relation.kind === "belongsTo").map((relation) => relation.foreignKey)
-      .filter((name) => { const column = table?.columns.find((candidate) => candidate.name === name); return !column?.classification && !column?.fieldPolicy; });
-    const select = [...new Set(["id", "tenant_id", "created_at", ...update, ...readable, ...references])].filter((column) => present.has(column)).sort();
-    return { table: entry.table, select, update };
-  });
+  const tableOf = (name: string) => {
+    const [schema, table] = name.split(".");
+    return tables.find((candidate) => candidate.schema === schema && candidate.table === table);
+  };
   const childGrants = new Map<string, Set<string>>();
   for (const child of entities.flatMap((entry) => entry.ownedSingleChildren)) {
-    const [schema, name] = child.table.split(".");
-    const table = tables.find((candidate) => candidate.schema === schema && candidate.table === name);
+    const table = tableOf(child.table);
     if (!table) continue;
     const present = new Set(table.columns.map((column) => column.name));
     const columns = childGrants.get(child.table) ?? new Set<string>();
@@ -440,31 +436,64 @@ export function extensionWorkerGrants(
     }
     childGrants.set(child.table, columns);
   }
-  // What a lookup or rollup reads on the entities it reaches. An entity no
-  // lookup or rollup of this source can be proven against stays out: the
-  // worker never needs it.
+  // What a lookup or rollup reads on the entities it reaches, route by route
+  // from each source. A route counts when every link on it does: the foreign
+  // key is neither classified nor field-policed, and what it leads to is proven
+  // against the source itself, never against the child in between. What no
+  // route of any source reaches stays out, table and foreign key alike.
   const sources = new Set(entities.map((entry) => entry.table));
+  const foreignKeys = new Map<string, Set<string>>();
+  const reach = (name: string, foreignKey?: string) => {
+    if (foreignKey) foreignKeys.set(name, (foreignKeys.get(name) ?? new Set<string>()).add(foreignKey));
+    const table = sources.has(name) ? undefined : tableOf(name);
+    if (!table) return;
+    const present = new Set(table.columns.map((column) => column.name));
+    const columns = childGrants.get(name) ?? new Set<string>();
+    for (const column of ["id", "tenant_id", "created_at", ...formulaColumns(table).map((item) => item.name)]) {
+      if (present.has(column)) columns.add(column);
+    }
+    childGrants.set(name, columns);
+  };
   for (const source of registry.entityNames()) {
     const entry = registry.entity(source)!;
-    const reached = [
-      ...entry.targets.map((target) => ({ entity: target.entity, table: target.table, foreignKey: undefined as string | undefined, owned: false })),
-      ...entry.relations.map((relation) => ({ entity: relation.entity, table: relation.table,
-        foreignKey: relation.kind === "hasMany" ? relation.foreignKey : undefined,
-        owned: relation.ownership === "owned" && relation.childAuthorization === "owner" })),
-    ];
-    for (const { entity, table: name, foreignKey, owned } of reached) {
-      if (sources.has(name) || narrowerReadAccess(source, entity, registry.readAccess(source), registry.readAccess(entity), owned)) continue;
-      const [schema, tableName] = name.split(".");
-      const table = tables.find((candidate) => candidate.schema === schema && candidate.table === tableName);
-      if (!table) continue;
-      const present = new Set(table.columns.map((column) => column.name));
-      const columns = childGrants.get(name) ?? new Set<string>();
-      const link = table.columns.find((column) => column.name === foreignKey);
-      for (const column of ["id", "tenant_id", "created_at", ...(link && !link.classification && !link.fieldPolicy ? [link.name] : []), ...formulaColumns(table).map((item) => item.name)]) {
-        if (present.has(column)) columns.add(column);
-      }
-      childGrants.set(name, columns);
+    const proven = (entity: string, owned = false) => !narrowerReadAccess(source, entity, registry.readAccess(source), registry.readAccess(entity), owned);
+    const readable = (table: string, foreignKey: string) => readableForeignKey(tableOf(table)?.columns, foreignKey);
+    for (const target of entry.targets) {
+      if (proven(target.entity)) reach(target.table);
     }
+    for (const relation of entry.relations.filter((candidate) => candidate.kind === "belongsTo")) {
+      if (readable(entry.table, relation.foreignKey) && proven(relation.entity)) reach(relation.table);
+    }
+    const collections = entry.relations.filter((relation) => relation.kind === "hasMany" && readable(relation.table, relation.foreignKey) &&
+      proven(relation.entity, relation.ownership === "owned" && relation.childAuthorization === "owner"));
+    for (const collection of collections) reach(collection.table, collection.foreignKey);
+    // The children a rollup of this source can aggregate, and what `rollup.of`
+    // reaches from them: their single relations, the targets of their tenant references.
+    const referring = registry.entityNames().filter((name) => registry.entity(name)!.targets.some((target) => target.entity === source) && proven(name));
+    for (const child of [...collections, ...referring.map((name) => ({ entity: name, table: registry.entity(name)!.table }))]) {
+      for (const relation of stepRelations(registry, child.entity)) {
+        if (!readable(child.table, relation.foreignKey) || !proven(relation.entity)) continue;
+        reach(child.table, relation.foreignKey);
+        reach(relation.table);
+      }
+      for (const target of registry.entity(child.entity)?.targets ?? []) {
+        if (proven(target.entity)) reach(target.table);
+      }
+    }
+  }
+  const sourceGrants = registry.entityNames().map((name): ExtensionWorkerGrant => {
+    const entry = registry.entity(name)!;
+    const table = tableOf(entry.table);
+    const present = new Set(table?.columns.map((column) => column.name) ?? []);
+    const draft = table ? draftRule(table)?.column : undefined;
+    const update = ["extension_values", "updated_at", ...(draft ? [draft] : [])].filter((column) => present.has(column));
+    const readable = table ? formulaColumns(table).map((column) => column.name) : [];
+    const references = lookupForeignKeys(registry, name, table?.columns);
+    const select = [...new Set(["id", "tenant_id", "created_at", ...update, ...readable, ...references, ...foreignKeys.get(entry.table) ?? []])].filter((column) => present.has(column)).sort();
+    return { table: entry.table, select, update };
+  });
+  for (const [name, columns] of childGrants) {
+    for (const column of foreignKeys.get(name) ?? []) columns.add(column);
   }
   const grants: ExtensionWorkerGrant[] = [
     ...[...new Set(entities.flatMap((entry) => [entry.valuesTable, entry.uniqueTable]))]

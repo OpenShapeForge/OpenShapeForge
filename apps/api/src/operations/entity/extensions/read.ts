@@ -18,6 +18,7 @@ import {
   EXTENSION_VALUES_COLUMN,
   evaluateCondition,
   isClassified,
+  numericValue,
   proofLost,
   record,
   type ExtensionField,
@@ -48,7 +49,7 @@ export function conditionValues(
   return (path) => {
     if (path.startsWith("extensions.")) {
       const field = set.byId.get(path.slice("extensions.".length));
-      return field ? source[field.fieldId] ?? field.definition.defaultValue ?? null : null;
+      return field ? numericValue(field.definition, source[field.fieldId] ?? field.definition.defaultValue ?? null) : null;
     }
     const column = columns.get(path);
     return column ? row[column] ?? null : null;
@@ -63,7 +64,7 @@ export function conditionValues(
  */
 export function readValue(field: ExtensionField, source: Readonly<Record<string, unknown>>, applicable: boolean): unknown {
   const stored = Object.hasOwn(source, field.fieldId) ? source[field.fieldId] : undefined;
-  return stored !== undefined ? stored : applicable ? field.definition.defaultValue ?? null : null;
+  return numericValue(field.definition, stored !== undefined ? stored : applicable ? field.definition.defaultValue ?? null : null);
 }
 
 /** The source map of a stored row, never anything but an object. */

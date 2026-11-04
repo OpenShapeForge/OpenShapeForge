@@ -109,6 +109,9 @@ jobs:
       - name: Build the web and admin apps
         run: bun run build:apps
 
+      - name: Verify standalone startup and static assets
+        run: bun scripts/check-next-standalone.mjs
+
       - name: Compiler unit tests
         run: bun test packages/compiler
 

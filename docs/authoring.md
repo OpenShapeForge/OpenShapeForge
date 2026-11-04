@@ -763,6 +763,12 @@ a formula's, and read-only on every transport. The server sets `osfType`.
   "rollup": { "collection": "parts", "aggregate": "sum", "of": "quantity",
     "where": { "kind": "rule", "operator": "greaterThan",
       "left": { "kind": "path", "path": "quantity" }, "right": { "kind": "literal", "value": 2 } } } } }
+
+// A rollup over a collection whose records point at what counts: membership as
+// an entity of its own, with the number on the record it points at.
+{ "key": "capacity", "kind": "rollup", "definition": {
+  "label": { "en": "Capacity" }, "classification": { "sensitivity": "public" },
+  "rollup": { "collection": "items", "aggregate": "sum", "of": "item.capacity" } } }
 ```
 
 - `via` is a tenant reference field (`extensions.<key>`, single, not
@@ -774,6 +780,17 @@ a formula's, and read-only on every transport. The server sets `osfType`.
   `extensions.<key>` of the target. A tenant field may itself be a formula,
   lookup or rollup. Fields a formula may not read (classified, references,
   platform-kept columns) are out of reach here too.
+- `of` may follow one relation of the child first: `<relation>.<field>`.
+  `<relation>` is a single authored relation of the child by its field key, or
+  `extensions.<key>`, a single tenant reference (the child is extensible then);
+  `<field>` is an authored field or `extensions.<key>` of what it points at,
+  under the rules above. This is for a collection whose records say that two
+  records belong together, such as a membership owned by its parent: an owned
+  child has no tenant fields of its own and the number lives on the record it
+  points at. One step: anything longer is refused with the reason, and a
+  lookup or formula on the target is the way to go further, up to
+  `limits.formulaDepth` over the chain. `where` stays on the child: a path that
+  leaves it is refused.
 - `collection` is an authored inverse relation by its key, or
   `<Entity>.extensions.<key>`: the records of another extensible entity whose
   single tenant reference names this record.
@@ -782,9 +799,11 @@ a formula's, and read-only on every transport. The server sets `osfType`.
   `of`), `countAll` (every record) or `arrayUnique` (the distinct values of
   `of`, sorted, as text). `where` is a `condition` over the child's fields,
   the subset `appliesWhen` takes. An empty collection sums and counts to 0; its
-  `avg`, `min` and `max` are blank. Blank values do not count.
+  `avg`, `min` and `max` are blank. Blank values do not count, and a child whose
+  relation points at nothing has none, not even a default.
 - A rollup is one SQL aggregate over the child's columns and the typed index,
-  under a lock on the parent; it never reads the collection into memory. So
+  and those of the record `of` steps to, within the tenant, under a lock on the
+  parent; it never reads the collection into memory. So
   `of` and `where` must say something SQL can: a single value of a scalar type,
   and for `where` a literal of the field's type (`contains` on text only, no
   order on a boolean). A tenant field whose default depends on `appliesWhen`
@@ -823,7 +842,12 @@ its rows and the fields with read roles of their own. For every link:
   always counts as narrower: a subject granted the source by a profile alone
   would read target data. A managed subtype counts for its base entity;
 - a target field that is itself computed is `ready` or `updating`, and was
-  proven link by link when it was saved.
+  proven link by link when it was saved;
+- the step of a rollup's `of` is a link of its own: all of this holds from the
+  source to the record it steps to, as well as to the child. An owner lends its
+  readers to its owned children, not to what they point at. The relation is
+  neither classified nor field-policed, and the proof is repeated for it with
+  the rest.
 
 Otherwise the definition is refused (`FORBIDDEN`) with the role that makes the
 difference: "ExtensibleAssetBooking is readable for Test.Bookings.Read,
@@ -866,17 +890,20 @@ Definition changes of one tenant run one at a time.
 **Recomputation.** A write of a record finds what reads it through the graph,
 under an audited tenant bypass, so row policies of the writer do not leave a
 record behind. A rollup is recomputed on the record's old and new parent, on
-create, update, a move and delete. A lookup is recomputed on the records that
-refer to the record. Formulas over either follow, and the recompute carries on
-along the chain. A record's lookup is computed in its own write when its
+create, update, a move and delete, and when its child points somewhere else. A
+write of the record a rollup's `of` steps to recomputes the parents of the
+children that point at it, as a lookup its referring records. A lookup is
+recomputed on the records that refer to the record. Formulas over either follow,
+and the recompute carries on along the chain. A record's lookup is computed in its own write when its
 reference changes. A write through a subtype counts as a write of its base.
 
 All of that happens in the transaction of the write, up to one budget for the
 whole transaction: `limits.syncFanOut` records, along every chain and on every
 path, the delete of a target and the `setNull` of its references included.
 Beyond it, the write leaves one row per (field, record) in
-`platform.extension_field_recomputes`; further writes of that record coalesce on
-it, and the `extensions.recompute` job drains it in batches of 200 after a
+`platform.extension_field_recomputes`, for a lookup or a rollup's step on the
+record written, for any other rollup on its parent; further writes of that
+record coalesce on it, and the `extensions.recompute` job drains it in batches of 200 after a
 debounce of one second. A pass over the referring records runs to its end
 whatever is written meanwhile, and a new pass then settles the latest
 generation. A job that fails is retried; a row left without a live job gets a
@@ -886,8 +913,9 @@ the record itself puts it back to draft.
 
 Before its first row write, a write locks what it will recompute, in one order
 (table, then id) and at once at the strength it needs: `for key share` for a
-reference target, `for share` for a lookup's target, `for no key update` for a
-record to recompute. Writers under one parent take turns; they do not deadlock.
+reference target, `for share` for a lookup's target and for the target of a
+rollup's step that a child's write names, `for no key update` for a record to
+recompute. Writers under one parent take turns; they do not deadlock.
 
 A change of a field's `defaultValue`, `appliesWhen` or formula starts a backfill
 for every lookup and rollup that reads it, on any entity. A formula typed again
@@ -903,7 +931,8 @@ a rebuild of a field also starts the lookups and rollups that read it.
 **Stale values.** Until the journal row is gone, the records it covers keep the
 last known value in source and index, so a filter on it is briefly behind: that
 is the price of materializing. Readers see `extensionsMeta.<key>.stale: true`,
-also on a formula over the lookup, derived from the open journal rows in one
+also on a formula over the lookup and on a rollup whose step reaches a record
+with an open row, derived from the open journal rows in one
 query per page and never stored per record. Staleness does not cross entities:
 a field that reads a stale value on another record is not marked. Each record
 the worker recomputes emits the usual realtime `updated` event, so a screen
@@ -913,7 +942,10 @@ refreshes when its value lands.
 refuses while a record points at the target, `setNull` clears the reference, the
 lookups through it and every rollup over them, through the existing deletion
 guard. An authored relation follows its foreign key; the lookups on records that
-remain are recomputed. Deleting a child recomputes the rollup of its parent.
+remain are recomputed. Deleting a child recomputes the rollup of its parent. The
+step of a rollup's `of` follows the same rules: an authored relation's foreign
+key refuses the delete while a child points at the target, a tenant reference
+does what its `onDelete` says, and a child it clears recomputes its parent.
 
 **Snapshots.** A snapshot freezes a lookup or rollup as it does a formula: the
 value with its definition (`kind`, `lookup` or `rollup`) only while the field is

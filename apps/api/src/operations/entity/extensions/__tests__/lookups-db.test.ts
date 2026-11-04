@@ -916,6 +916,37 @@ describe("tenant lookups and rollups", () => {
       .toMatchObject({ code: "CONFLICT", message: expect.stringContaining(`${GROUP}.sum`) });
   });
 
+  test("a change of what a field means for every record reaches its readers on other entities", async () => {
+    const t = await tenant();
+    await field(t, "group", reference(GROUP, "Group"));
+    const size = await field(t, "size", number("Size"), undefined, GROUP);
+    const twice = await field(t, "twice", formula("{Size} * 2", "Twice"), "formula", GROUP);
+    await field(t, "groupSize", lookup("extensions.group", "extensions.size", "Group size"), "lookup");
+    await field(t, "groupTwice", lookup("extensions.group", "extensions.twice", "Group twice"), "lookup");
+    const group = await create(t.writer, GROUP, { name: "G", extensions: { size: null } });
+    const assets = await Promise.all([1, 2, 3, 4].map((n) => create(t.writer, ENTITY, { name: `a${n}`, extensions: { group: group.id } })));
+    expect(assets[0]!.extensions.groupSize).toBeNull();
+    await sql`update erp.extensible_asset_groups set extension_values = extension_values - ${size} where id = ${group.id}::uuid`.execute(fixture.privileged.db);
+    await define(t.manager, "update", { fieldId: size, definition: { osfType: "number", label: label("Size"), ...pub, defaultValue: 7 } }, GROUP);
+    await drainJobs();
+    for (const asset of assets) expect((await get(t.reader, asset.id)).extensions).toMatchObject({ groupSize: 7, groupTwice: 14 });
+    await define(t.manager, "update", { fieldId: twice, definition: formula("{Size} * 3", "Twice") }, GROUP);
+    await drainJobs();
+    for (const asset of assets) expect((await get(t.reader, asset.id)).extensions.groupTwice).toBe(21);
+  });
+
+  test("a formula retyped along a change cannot sit under a lookup: the change is refused, naming the lookup", async () => {
+    const t = await tenant();
+    await field(t, "group", reference(GROUP, "Group"));
+    await field(t, "size", number("Size"), undefined, GROUP);
+    const base = await field(t, "base", formula("{Size} * 2", "Base"), "formula", GROUP);
+    await field(t, "same", formula("{Base}", "Same"), "formula", GROUP);
+    await field(t, "groupSame", lookup("extensions.group", "extensions.same", "Group same"), "lookup");
+    expect(await failure(define(t.manager, "update", { fieldId: base, definition: formula('{Size} & ""', "Base") }, GROUP)))
+      .toMatchObject({ code: "CONFLICT", message: expect.stringContaining(`${ENTITY}.groupSame`) });
+    expect((await listed(t, "base", GROUP)).definition.formula.resultType).toBe("number");
+  });
+
   test("a tenant that cannot be proven is suspended, fail closed; the chain goes on and reports it", async () => {
     const broken = await tenant();
     const healthy = await tenant();
@@ -1029,6 +1060,23 @@ describe("tenant lookups and rollups", () => {
     } finally {
       restore();
     }
+  });
+
+  test("rebuildIndex is the way back from a write behind the runtime: it computes lookups again and settles their journal", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    const placeName = await field(t, "placeName", lookup("extensions.place", "name"), "lookup");
+    const location = await create(t.writer, TARGET_ENTITY, { name: "Stored" });
+    const assets = await Promise.all([1, 2, 3, 4].map((n) => create(t.writer, ENTITY, { name: `a${n}`, extensions: { place: location.id } })));
+    await update(t.writer, TARGET_ENTITY, location.id, { name: "Journaled" });
+    expect(await journal(t.id)).toHaveLength(1);
+    await sql`update erp.extensible_asset_locations set name = 'Raw' where id = ${location.id}::uuid`.execute(fixture.privileged.db);
+    await define(t.manager, "rebuildIndex", { fieldId: placeName });
+    expect(await journal(t.id)).toEqual([]);
+    await drainJobs();
+    for (const asset of assets) expect((await get(t.reader, asset.id)).extensions.placeName).toBe("Raw");
+    expect(await privileged(sql<{ value_text: string }>`select value_text from erp.extensible_assets_field_values
+      where record_id = ${assets[0]!.id}::uuid and field_id = ${placeName}::uuid`)).toEqual([{ value_text: "Raw" }]);
   });
 
   test("a deadlock in a formula backfill is a retry, not a suspended field", async () => {

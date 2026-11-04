@@ -580,20 +580,51 @@ function resultTypeOf(resolved: ResolvedLookup | ResolvedRollup): ComputedResult
   }
 }
 
+/** The lookups and rollups of the tenant that read a field directly, each with its entity and key. */
+async function linkedReadersOfField(trx: Transaction<DB>, tenantId: string, entity: string, fieldId: string) {
+  const readers = await sql<{ entity: string; key: string; kind: string; field_id: string; state: string }>`
+    select distinct f.entity, f.key, f.kind, f.field_id::text as field_id, f.state
+    from platform.extension_field_dependencies d
+    join platform.extension_field_definitions f on f.tenant_id = d.tenant_id and f.field_id = d.field_id and f.is_current
+      and f.state <> 'deleted' and f.kind in ('lookup', 'rollup')
+    where d.tenant_id = ${tenantId}::uuid and d.depends_on_entity = ${entity} and d.depends_on_field = ${fieldId}
+    order by 1, 2`.execute(trx);
+  return readers.rows;
+}
+
 /**
  * Refuse a change of a field's result type while a lookup or rollup of the
  * tenant reads it, naming them: their stored result type and index column
  * were fixed against the old one. Create a new field instead.
  */
 export async function assertNoLinkedReaders(trx: Transaction<DB>, session: DbSessionInput, entity: string, field: Pick<ExtensionField, "fieldId" | "key">): Promise<void> {
-  const readers = await sql<{ name: string }>`select distinct f.entity || '.' || f.key as name
-    from platform.extension_field_dependencies d
-    join platform.extension_field_definitions f on f.tenant_id = d.tenant_id and f.field_id = d.field_id and f.is_current
-      and f.state <> 'deleted' and f.kind in ('lookup', 'rollup')
-    where d.tenant_id = ${session.tenantId}::uuid and d.depends_on_entity = ${entity} and d.depends_on_field = ${field.fieldId}
-    order by 1`.execute(trx);
-  if (readers.rows.length) {
-    extensionError(`${field.key}: its result type cannot change while ${readers.rows.map((row) => row.name).join(", ")} read${readers.rows.length === 1 ? "s" : ""} it; create a new field instead.`, "CONFLICT");
+  const readers = await linkedReadersOfField(trx, session.tenantId!, entity, field.fieldId);
+  if (readers.length) {
+    extensionError(`${field.key}: its result type cannot change while ${readers.map((row) => `${row.entity}.${row.key}`).join(", ")} read${readers.length === 1 ? "s" : ""} it; create a new field instead.`, "CONFLICT");
+  }
+}
+
+/**
+ * What a record reads of a field just changed for every record (its default,
+ * `appliesWhen` or formula): each lookup or rollup that reads it is computed
+ * again as a backfill of its own, across entities, with what a reader of that
+ * sees following from the writes the backfill makes.
+ */
+export async function recomputeLinkedReaders(trx: Transaction<DB>, session: DbSessionInput, entity: string, fieldId: string, started = new Set<string>()): Promise<void> {
+  for (const reader of await linkedReadersOfField(trx, session.tenantId!, entity, fieldId)) {
+    if ((reader.state !== "ready" && reader.state !== "updating") || started.has(reader.field_id)) continue;
+    started.add(reader.field_id);
+    const set = await loadExtensionFieldsFor(trx, session, reader.entity, extensionRegistry.entity(reader.entity)!);
+    const field = set.byId.get(reader.field_id);
+    if (field) await startBackfill(trx, session, { entity: reader.entity, field, operation: field.kind as BackfillOperation });
+  }
+}
+
+/** Refuse a `defaultValue` under `appliesWhen` on a field a rollup reads: it could no longer be computed in SQL (fieldSql). */
+export async function assertRollupsCanRead(trx: Transaction<DB>, session: DbSessionInput, entity: string, field: Pick<ExtensionField, "fieldId" | "key">): Promise<void> {
+  const readers = (await linkedReadersOfField(trx, session.tenantId!, entity, field.fieldId)).filter((reader) => reader.kind === "rollup");
+  if (readers.length) {
+    extensionError(`${field.key}: a default under appliesWhen cannot be computed by ${readers.map((row) => `${row.entity}.${row.key}`).join(", ")}, which read${readers.length === 1 ? "s" : ""} it.`, "CONFLICT");
   }
 }
 

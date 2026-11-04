@@ -60,10 +60,13 @@ import {
 import { qualifiedTable } from "./write.js";
 import {
   assertNoLinkedReaders,
+  assertRollupsCanRead,
   assertTenantGraph,
   isLinkedKind,
   lockExtensionGraph,
   presentLinkedDefinition,
+  recomputeLinkedReaders,
+  refuseProof,
   tenantFieldNames,
   validateLinkedDefinition,
 } from "./linked.js";
@@ -506,6 +509,7 @@ async function updateFormula(
   const before = storedFormula(field.definition);
   const after = storedFormula(change.definition)!;
   if (before && before.resultType !== after.resultType) await assertNoLinkedReaders(trx, session, set.entity, field);
+  await assertRetypedReadersUnread(trx, session, set, change.readers);
   const recompute = field.state === "suspended" || !before || before.resultType !== after.resultType || !isDeepStrictEqual(before.ast, after.ast);
   const next = await insertVersion(trx, session, set.entity, {
     fieldId: field.fieldId, key: change.key, version: field.version + 1, kind: "formula", definition: change.definition,
@@ -514,6 +518,7 @@ async function updateFormula(
   await writeDependencies(trx, session, set.entity, field.fieldId, change.dependsOn);
   const started = recompute ? await startBackfill(trx, session, { entity: set.entity, field: next, operation: "formula" }) : undefined;
   await storeRetypedReaders(trx, session, set, change.readers);
+  if (recompute) await recomputeLinkedReaders(trx, session, set.entity, field.fieldId);
   return [next, started];
 }
 
@@ -565,10 +570,24 @@ async function storeRetypedReaders(trx: Transaction<DB>, session: DbSessionInput
 }
 
 /**
+ * A formula typed again along a change must have no lookup or rollup over it:
+ * the guard on the changed formula holds for its whole set of readers, or the
+ * backfill would write a text into what a lookup stores as a number.
+ */
+async function assertRetypedReadersUnread(trx: Transaction<DB>, session: DbSessionInput, set: ExtensionFieldSet, readers: readonly RetypedReader[]): Promise<void> {
+  for (const reader of readers) {
+    if (storedFormula(reader.field.definition)?.resultType !== storedFormula(reader.definition)?.resultType) {
+      await assertNoLinkedReaders(trx, session, set.entity, reader.field);
+    }
+  }
+}
+
+/**
  * A stored field's default or `appliesWhen` changed: what a record without a
  * value reads changes with it (read.ts `readValue`), and so does every
- * formula over it. Each computed formula that reads the field directly is
- * backfilled; that backfill computes the formulas over it in turn.
+ * computed field over it. Each formula that reads the field directly is
+ * backfilled, and computes the formulas over it in turn; each lookup and
+ * rollup that reads it, on any entity, is backfilled as well.
  */
 async function recomputeFormulaReaders(trx: Transaction<DB>, session: DbSessionInput, set: ExtensionFieldSet, field: ExtensionField): Promise<void> {
   const node = { entity: set.entity, field: field.fieldId };
@@ -577,6 +596,7 @@ async function recomputeFormulaReaders(trx: Transaction<DB>, session: DbSessionI
     if (!formulaDependencies(set, reads.ast).some((dependency) => dependency.via === null && dependency.field === field.fieldId)) continue;
     await startBackfill(trx, session, { entity: set.entity, field: reader, operation: "formula" });
   }
+  await recomputeLinkedReaders(trx, session, set.entity, field.fieldId);
 }
 
 // ---------------------------------------------------------------------------
@@ -650,6 +670,7 @@ export async function executeFieldDefinitionAction(
         return toRecord(set, ...await updateFormula(trx, session, set, field, { key, definition: valid.definition, dependsOn: valid.dependsOn, readers: valid.readers ?? [] }));
       }
       let backfill = await typeChange(trx, session, set, field.definition, valid.definition, field);
+      if (valid.definition.defaultValue !== undefined && valid.appliesWhen) await assertRollupsCanRead(trx, session, entity, field);
       if (valid.definition.unique === true && field.definition.unique !== true) {
         // Counted across the tenant, normalized as claims compare; the values
         // are shown only as mayShowValues allows, and only those of records
@@ -711,6 +732,7 @@ export async function executeFieldDefinitionAction(
       if (restored) await writeDependencies(trx, session, entity, field.fieldId, restored.dependsOn);
       const started = recompute ? await startBackfill(trx, session, { entity, field: next, operation: field.kind as BackfillOperation }) : undefined;
       if (restored) await storeRetypedReaders(trx, session, set, restored.readers ?? []);
+      if (restored) await assertRetypedReadersUnread(trx, session, set, restored.readers ?? []);
       return toRecord(set, next, started, names);
     }
     case "affectedRecords": {
@@ -737,18 +759,34 @@ export async function executeFieldDefinitionAction(
     }
     case "rebuildIndex": {
       // The index and the claims are derived: rebuilt from the source,
-      // per field, as backfills over every record of the tenant.
+      // per field, as backfills over every record of the tenant. A lookup or
+      // rollup is computed again from what it reads, which also repairs a value
+      // a write behind the runtime's back left stale, and what its journal
+      // still had open is settled along the way. What reads a rebuilt field
+      // on another entity follows. A field whose proof is lost, or a suspended
+      // lookup or rollup, is only brought back by saving it.
+      const stopped = (field: ExtensionField) => proofLost(field) || (isLinkedKind(field.kind) && field.state === "suspended");
+      if (input.fieldId !== undefined && stopped(requireField(set, input.fieldId))) {
+        extensionError(`${requireField(set, input.fieldId).key} is suspended; save it again to bring it back.`, "CONFLICT");
+      }
       const fields = input.fieldId === undefined
-        ? set.fields.filter((field) => field.state !== "deleted" && !(isLinkedKind(field.kind) && field.state === "suspended"))
+        ? set.fields.filter((field) => field.state !== "deleted" && !stopped(field))
         : [requireField(set, input.fieldId)];
       const backfills: Array<{ fieldId: string; backfillId: string }> = [];
+      const computing = new Set(fields.filter((field) => isLinkedKind(field.kind)).map((field) => field.fieldId));
       for (const field of fields) {
         // A suspended formula is computed again rather than re-indexed: the
         // index of a backfill that stopped halfway holds two generations.
         const resume = field.kind === "formula" && field.state === "suspended"
           ? await insertVersion(trx, session, entity, { ...field, version: field.version + 1, state: "updating" }) : undefined;
-        const started = await startBackfill(trx, session, { entity, field: resume ?? field, operation: resume ? "formula" : "rebuild" });
+        if (isLinkedKind(field.kind)) {
+          await sql`delete from platform.extension_field_recomputes
+            where tenant_id = ${session.tenantId}::uuid and field_id = ${field.fieldId}::uuid`.execute(trx);
+        }
+        const operation: BackfillOperation = resume ? "formula" : isLinkedKind(field.kind) && field.state !== "deprecated" ? field.kind : "rebuild";
+        const started = await startBackfill(trx, session, { entity, field: resume ?? field, operation });
         backfills.push({ fieldId: field.fieldId, backfillId: started.id });
+        await recomputeLinkedReaders(trx, session, entity, field.fieldId, computing);
       }
       return { backfills };
     }

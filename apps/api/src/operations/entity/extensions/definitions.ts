@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { sql, type Transaction } from "kysely";
-import { operationFailure } from "@openshapeforge/operations";
+import { exactNumericEquals, operationFailure } from "@openshapeforge/operations";
 import type { RuntimeExtensibleEntity } from "@openshapeforge/plugin-runtime";
 import type { DB } from "../../../generated/db/types.js";
 import type { DbSessionInput } from "../../../db/session.js";
@@ -29,6 +29,7 @@ import {
   isCollection,
   linkedResultType,
   mapConditionPaths,
+  numericValue,
   proofLost,
   record,
   schemaFieldOf,
@@ -259,6 +260,12 @@ export function validateFieldDefinition(
     const result = runtimeJsonSchemas.validate({ type: "object", properties: { value: property ?? {} } }, { value: definition.defaultValue });
     if (!result.valid) extensionError("The default value does not fit the field's type.");
     if (shape.reference) extensionError("A reference field has no default value.");
+    // Every record that takes the default stores it as a JSON number; nothing rounds it there.
+    numericValue(definition, definition.defaultValue, (text, number) => {
+      if (exactNumericEquals(text, number)) return;
+      const message = "The default value has more digits than a number holds.";
+      throw operationFailure({ code: "VALIDATION", message, violations: [{ field: "definition.defaultValue", code: "NOT_REPRESENTABLE", message }], retryable: false });
+    });
   }
   // The caller names tenant fields by key; the stored condition by field id,
   // and so do the dependencies that keep a named field from going away.

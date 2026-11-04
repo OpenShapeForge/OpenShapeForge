@@ -665,4 +665,17 @@ describe("tenant fields on an extensible entity", () => {
     await update(designer, older.id, { extensions: { code: "08" } });
     expect((await stored(older.id))[ids.kwh!]).toBe("60");
   });
+  test("a default no JSON number holds is refused when the definition is saved", async () => {
+    const tenant = randomUUID();
+    await fixture.addTenants(tenant);
+    const designer = sessionFor(tenant, [MANAGER_ROLE, WRITER_ROLE, READER_ROLE]);
+    const pub = { classification: { sensitivity: "public" } };
+    const refused = { code: "VALIDATION", violations: [expect.objectContaining({ field: "definition.defaultValue", code: "NOT_REPRESENTABLE" })] };
+    const money = (defaultValue: unknown) => ({ osfType: "money", label: label("Prijs"), defaultValue, ...pub });
+    expect(await failure(define(designer, "create", { key: "prijs", definition: money("9007199254740993.995") }))).toMatchObject(refused);
+    expect(await failure(define(designer, "create", { key: "gewicht", definition: { osfType: "measurement", label: label("Gewicht"), defaultValue: { value: "9007199254740993.995", unit: "kg" }, ...pub } }))).toMatchObject(refused);
+    const made = await define(designer, "create", { key: "prijs", definition: money("12.50") }) as { fieldId: string };
+    expect(await failure(define(designer, "update", { fieldId: made.fieldId, definition: money("9007199254740993.995") }))).toMatchObject(refused);
+    expect((await created(designer, {})).extensions.prijs).toBe(12.5);
+  });
 });

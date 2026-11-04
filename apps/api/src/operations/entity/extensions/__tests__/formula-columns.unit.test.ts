@@ -7,12 +7,14 @@
  * the migration chain applies.
  */
 import { describe, expect, test } from "bun:test";
+import type { RuntimeExtensionRegistryManifest } from "@openshapeforge/plugin-runtime";
+import manifest from "../../../../generated/db/manifest.json" with { type: "json" };
 import { extensionWorkerGrants } from "../../../../db/migrations/worker-role.js";
 import { getGeneratedCrudTables } from "../../catalog.js";
 import type { GeneratedCrudTable } from "../../types.js";
 import { formulaColumns, outOfScopeFormulaColumns } from "../formula-columns.js";
-import { extensionRegistry } from "../registry.js";
-import { acceptanceTable, TABLE } from "./fixture.js";
+import { createExtensionRegistry, extensionRegistry } from "../registry.js";
+import { acceptanceTable, ENTITY, TABLE, TARGET_ENTITY } from "./fixture.js";
 
 const names = (columns: ReadonlyArray<{ name: string }>) => columns.map((column) => column.name);
 const asset = acceptanceTable();
@@ -64,9 +66,11 @@ describe("the worker's column grants", () => {
   test("on a collection's child: the foreign keys a rollup may follow, never a classified or field-policed one", () => {
     const member = getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === "ExtensibleAssetMember" && !table.subtype)!;
     const select = grants(tables).find((grant) => grant.table === `${member.schema}.${member.table}`)!.select;
-    expect(select).toEqual(expect.arrayContaining(["asset_id", "item_id", "group_id", "location_id", "booking_id"]));
+    expect(select).toEqual(expect.arrayContaining(["asset_id", "item_id", "group_id", "location_id"]));
     expect(select).not.toContain("confidential_location_id");
     expect(select).not.toContain("restricted_location_id");
+    // Its target is out of reach of the owner's readers: no rollup follows it, so nothing reads this key.
+    expect(select).not.toContain("booking_id");
   });
 
   test("across such a foreign key: what no rollup of the source can be proven against stays out", () => {
@@ -76,5 +80,100 @@ describe("the worker's column grants", () => {
     expect(select).not.toContain("contact_email");
     expect(select).not.toContain("certified_capacity");
     expect(grants(tables).find((grant) => grant.table === "erp.extensible_asset_bookings")).toBeUndefined();
+  });
+
+  /** The compiled registry, narrowed to one route of a test; the group's readers widened so that its own lookups prove nothing. */
+  const GROUP = "ExtensibleAssetGroup", GROUP_TABLE = "erp.extensible_asset_groups", LOCATION_TABLE = "erp.extensible_asset_locations";
+  const registryWith = (edit: (registry: RuntimeExtensionRegistryManifest & Record<string, any>) => void) => {
+    const registry = structuredClone(manifest.extensionRegistry) as unknown as RuntimeExtensionRegistryManifest & { entities: Record<string, any>; readAccess: Record<string, any>; childRelations: Record<string, any> };
+    for (const entry of Object.values(registry.entities)) { entry.targets = []; entry.relations = []; entry.ownedSingleChildren = []; }
+    registry.readAccess[GROUP].roles.push("Test.Wider.Read");
+    edit(registry);
+    return createExtensionRegistry(registry);
+  };
+  const location = { key: "location", kind: "belongsTo", entity: TARGET_ENTITY, table: LOCATION_TABLE, foreignKey: "location_id", ownership: "reference" };
+  const selectOf = (registry: ReturnType<typeof createExtensionRegistry>, table: string, from = tables) => extensionWorkerGrants(registry, from).find((grant) => grant.table === table)?.select;
+
+  describe("along a rollup's step from a child that is extensible itself", () => {
+    test("a tenant reference to the source: the child's relation and what it leads to", () => {
+      const registry = registryWith((edit) => {
+        edit.entities[GROUP].targets = [{ entity: ENTITY, table: TABLE }];
+        edit.entities[GROUP].relations = [location];
+      });
+      expect(selectOf(registry, LOCATION_TABLE)).toContain("capacity");
+      expect(selectOf(registry, GROUP_TABLE)).toContain("location_id");
+    });
+
+    test("a tenant reference of the child leads there as well", () => {
+      const registry = registryWith((edit) => {
+        edit.entities[GROUP].targets = [{ entity: ENTITY, table: TABLE }, { entity: TARGET_ENTITY, table: LOCATION_TABLE }];
+      });
+      expect(selectOf(registry, LOCATION_TABLE)).toContain("capacity");
+    });
+
+    test("an inverse relation to it, with the foreign key that names the parent", () => {
+      const widened = tables.map((table) => table.source?.authoringEntityName === GROUP && !table.subtype
+        ? { ...table, columns: [...table.columns, { name: "asset_id", type: "uuid", required: false, primaryKey: false, generated: null }] } : table);
+      const registry = registryWith((edit) => {
+        edit.entities[ENTITY].relations = [{ key: "groups", kind: "hasMany", entity: GROUP, table: GROUP_TABLE, foreignKey: "asset_id", ownership: "reference" }];
+        edit.entities[GROUP].relations = [location];
+      });
+      expect(selectOf(registry, LOCATION_TABLE, widened)).toContain("capacity");
+      expect(selectOf(registry, GROUP_TABLE, widened)).toEqual(expect.arrayContaining(["asset_id", "location_id"]));
+    });
+
+    test("no link without its proof: the child's readers do not lend the target to the source", () => {
+      const registry = registryWith((edit) => {
+        edit.entities[GROUP].targets = [{ entity: ENTITY, table: TABLE }];
+        edit.entities[GROUP].relations = [location];
+        edit.readAccess[TARGET_ENTITY].roles = ["Test.Narrow.Read"];
+      });
+      expect(selectOf(registry, LOCATION_TABLE)).toBeUndefined();
+      expect(selectOf(registry, GROUP_TABLE)).not.toContain("location_id");
+    });
+
+    test("a source that does not reach the child proves nothing about what the child reaches", () => {
+      const registry = registryWith((edit) => {
+        edit.entities[GROUP].targets = [{ entity: ENTITY, table: TABLE }];
+        edit.entities[GROUP].relations = [location];
+        edit.readAccess[GROUP].roles = ["Test.Narrow.Read"];
+      });
+      expect(selectOf(registry, LOCATION_TABLE)).toBeUndefined();
+    });
+  });
+
+  describe("only along a route the proof holds for", () => {
+    const part = (extra: Record<string, unknown>) => ({ kind: "hasMany", entity: "ExtensibleAssetPart", table: "erp.extensible_asset_parts", ownership: "reference", ...extra });
+
+    test("a table reached through a classified foreign key alone stays out, on either side of the relation", () => {
+      const single = registryWith((edit) => {
+        edit.entities[GROUP].relations = [{ ...location, key: "confidentialLocation", foreignKey: "confidential_location_id" }];
+      });
+      expect(selectOf(single, LOCATION_TABLE)).toBeUndefined();
+      const inverse = registryWith((edit) => { edit.entities[ENTITY].relations = [part({ key: "auditedParts", foreignKey: "audited_asset_id" })]; });
+      expect(selectOf(inverse, "erp.extensible_asset_parts")).toBeUndefined();
+    });
+
+    test("so does one reached through a field-policed one", () => {
+      const inverse = registryWith((edit) => { edit.entities[ENTITY].relations = [part({ key: "restrictedParts", foreignKey: "restricted_asset_id" })]; });
+      expect(selectOf(inverse, "erp.extensible_asset_parts")).toBeUndefined();
+    });
+
+    test("a step whose foreign key is classified leaves its target out, though the collection is in reach", () => {
+      const registry = registryWith((edit) => {
+        edit.entities[ENTITY].relations = [{ key: "members", kind: "hasMany", entity: "ExtensibleAssetMember", table: "erp.extensible_asset_members", foreignKey: "asset_id", ownership: "owned", childAuthorization: "owner" }];
+        edit.childRelations.ExtensibleAssetMember = [{ ...location, key: "confidentialLocation", foreignKey: "confidential_location_id" }];
+      });
+      expect(selectOf(registry, "erp.extensible_asset_members")).toContain("asset_id");
+      expect(selectOf(registry, LOCATION_TABLE)).toBeUndefined();
+    });
+
+    test("an extensible entity's own foreign key goes with the proof of its lookup", () => {
+      const registry = registryWith((edit) => {
+        edit.entities[GROUP].relations = [location];
+        edit.readAccess[TARGET_ENTITY].roles = ["Test.Narrow.Read"];
+      });
+      expect(selectOf(registry, GROUP_TABLE)).not.toContain("location_id");
+    });
   });
 });

@@ -95,7 +95,7 @@ import {
   type RollupAggregate,
   type StoredRollup,
 } from "./model.js";
-import { AUTHORIZATION_MODEL, narrowerReadAccess } from "./read-access.js";
+import { AUTHORIZATION_MODEL, narrowerReadAccess, stepRelations } from "./read-access.js";
 import { conditionValues, readValue, storedExtensionSource } from "./read.js";
 import { unlinkReferences } from "./references.js";
 import { extensionRegistry } from "./registry.js";
@@ -339,16 +339,13 @@ async function resolveLookup(sets: Sets, set: ExtensionFieldSet, lookup: Record<
   return { kind: "lookup", via: resolvedVia, target, field };
 }
 
-/** The single relations `rollup.of` may follow from a child: an extensible child's own, or those the registry keeps for it. */
-function stepRelations(child: string): readonly RuntimeExtensionRelation[] {
-  return extensionRegistry.entity(child)?.relations.filter((relation) => relation.kind === "belongsTo") ?? extensionRegistry.childRelations(child);
-}
+const stepRelationsOf = (child: string) => stepRelations(extensionRegistry, child);
 
 /** A stored step as a recompute follows it; undefined when it names nothing any more (a revalidation refuses that). */
 function storedStep(child: string, childSet: ExtensionFieldSet | undefined, via: string): RollupStep | undefined {
   const id = tenantPathId(via);
   if (id === undefined) {
-    const relation = stepRelations(child).find((candidate) => candidate.key === via);
+    const relation = stepRelationsOf(child).find((candidate) => candidate.key === via);
     const column = tableOf(child)?.columns.find((candidate) => candidate.name === relation?.foreignKey);
     return relation && column ? { path: via, label: `${child}.${via}`, link: fieldNameForColumn(column), target: relation.entity, table: relation.table, relation } : undefined;
   }
@@ -361,7 +358,7 @@ function storedStep(child: string, childSet: ExtensionFieldSet | undefined, via:
 async function resolveStep(sets: Sets, child: string, via: string, stored: boolean): Promise<RollupStep> {
   const tenant = tenantPathId(via);
   if (tenant === undefined) {
-    const relation = stepRelations(child).find((candidate) => candidate.key === via);
+    const relation = stepRelationsOf(child).find((candidate) => candidate.key === via);
     if (!relation) extensionError(`rollup.of: ${via} is neither a tenant reference field (extensions.<key>) nor a single relation of ${child}.`);
     assertRelationReadable(tableOf(child)?.columns.find((candidate) => candidate.name === relation!.foreignKey), "rollup.of", `${child}.${relation!.key}`);
     const step = storedStep(child, undefined, via);
@@ -1295,7 +1292,7 @@ function childrenOf(entity: string): string[] {
 
 /** The entities `rollup.of` may step to from a child. */
 function reachedFrom(child: string): string[] {
-  return [...stepRelations(child).map((relation) => relation.entity), ...(extensionRegistry.entity(child)?.targets.map((target) => target.entity) ?? [])];
+  return [...stepRelationsOf(child).map((relation) => relation.entity), ...(extensionRegistry.entity(child)?.targets.map((target) => target.entity) ?? [])];
 }
 
 type Change = {

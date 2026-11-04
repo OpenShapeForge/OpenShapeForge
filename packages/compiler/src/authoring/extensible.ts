@@ -277,9 +277,22 @@ export const EXTENSION_TARGET_DENYLIST: readonly string[] = [
 ];
 
 /**
+ * Whether some interface projects the entity's own `get`. An entity without
+ * one is hidden from every reader, as a host does with `interfaces: { rest:
+ * null, graphql: null, mcp: null, web: null }`, so tenant fields stay away from
+ * it: a reference, lookup or rollup would show what the host took off every
+ * surface, and `referencedBy` would put it back on REST and GraphQL.
+ */
+export function hasReadableGet(contract: CompiledEntityContract): boolean {
+  if (!contract.entityOperations.get) return false;
+  return Boolean(contract.rest?.operations.get || contract.mcp?.operations.get ||
+    contract.graphql.operations?.get || contract.interfaces?.web?.operations.get);
+}
+
+/**
  * Whether a tenant reference field may point at this entity at all, and so
  * whether it carries `referencedBy`: a stored, tenant-scoped record a reader
- * can resolve through its own `get`. Never, by rule:
+ * can resolve through its own `get` (hasReadableGet). Never, by rule:
  *
  *   - a table in the `platform` schema;
  *   - a tenant registry, whose row IS its tenant (`CHECK (id = tenant_id)`,
@@ -300,7 +313,7 @@ export function isExtensionTargetCandidate(
   table?: Pick<TableDefinition, "schema" | "tenantScoped" | "domainInternal" | "generatedCrudEligible" | "constraints" | "tenantIdentityColumn">,
 ): boolean {
   if (!contract.authorization || contract.source || contract.subtype || contract.entity.valueDefinition) return false;
-  if (!contract.entityOperations.get) return false;
+  if (!hasReadableGet(contract)) return false;
   if (EXTENSION_TARGET_DENYLIST.includes(contract.entity.name)) return false;
   const operations = contract.entityOperations;
   if (!operations.create && !operations.update && !operations.delete) return false;
@@ -413,9 +426,9 @@ function uniqueValuesTable(entity: string, table: TableDefinition): TableDefinit
  *
  * This list is what a tenant formula may read beside its own record, and a
  * formula's result is read with the owner's rights. So a child is listed only
- * when it is provably authorized through its owner (childAuthorizedByOwner);
- * any other child stays out, and a formula naming it is refused as out of
- * scope.
+ * when some interface reads it (hasReadableGet) and it is provably authorized
+ * through its owner (childAuthorizedByOwner); any other child stays out, and a
+ * formula naming it is refused as out of scope.
  */
 function ownedSingleChildren(
   owner: { contract: CompiledEntityContract; table: TableDefinition },
@@ -432,6 +445,7 @@ function ownedSingleChildren(
       [`tenant_id,${foreignKey}`, foreignKey].includes(index.columns.join(",")));
     const bounded = typeof relationship.cardinality === "object" && relationship.cardinality.max === 1;
     if (!keyed && !bounded) continue;
+    if (!hasReadableGet(child.contract)) continue;
     if (!childAuthorizedByOwner(owner, child, relationship.childAuthorization === "owner")) continue;
     children.push({ relation: relationship.key, entity: relationship.target, table: qualified(child.table), foreignKey });
   }
@@ -471,9 +485,10 @@ function childAuthorizedByOwner(
  * aggregate: a single reference the entity holds (`belongsTo`, its foreign key
  * on the entity's table) and an inverse collection (`hasMany`, the foreign key
  * on the related table), each to a stored, tenant-scoped entity with a uuid
- * id. Through-, via- and provider-backed relations have no foreign key to
- * follow and stay out. Of an extensible entity's collection the single
- * relations count too: `rollup.of` may follow one.
+ * id that some interface reads (hasReadableGet). Through-, via- and
+ * provider-backed relations have no foreign key to follow and stay out. Of an
+ * extensible entity's collection the single relations count too: `rollup.of`
+ * may follow one.
  */
 function extensionRelations(
   owner: { contract: CompiledEntityContract; table: TableDefinition },
@@ -484,6 +499,7 @@ function extensionRelations(
     if (relationship.through || relationship.provider || relationship.via || !relationship.foreignKey) continue;
     const related = byEntity.get(relationship.target);
     if (!related || !related.table.tenantScoped || related.contract.source || related.contract.subtype) continue;
+    if (!hasReadableGet(related.contract)) continue;
     const id = related.table.columns.find((column) => column.name === "id");
     if (!id || id.type !== "uuid" || !id.primaryKey) continue;
     const holder = relationship.kind === "belongsTo" ? owner.table : related.table;

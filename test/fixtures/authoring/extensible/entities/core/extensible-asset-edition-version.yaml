@@ -1,0 +1,62 @@
+# Test fixture — the immutable snapshots of extensible-asset-edition.yaml. Only
+# in the test composition.
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ExtensibleAssetEditionVersion
+title: Extensible asset edition version
+description: An immutable snapshot of one extensible test edition.
+language: en
+displayTemplate: "{{versionNumber}}"
+labels: { en: Asset edition version, nl: Objecteditieversie }
+pluralLabels: { en: Asset edition versions, nl: Objecteditieversies }
+domains: [relations]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite]
+    create: [General.All.ReadWrite]
+    update: [General.All.ReadWrite]
+    delete: [General.All.ReadWrite]
+indexes:
+  - { name: extensible_asset_edition_versions_number_uidx, fields: [tenantId, edition, versionNumber], unique: true }
+fields:
+  - key: edition
+    osfType: ExtensibleAssetEdition
+    required: true
+    immutable: true
+    relationship:
+      inverse:
+        key: versions
+        label: { en: Versions, nl: Versies }
+        ownership: owned
+  - key: versionNumber
+    osfType: integer
+    required: true
+    immutable: true
+    validation: { min: 1 }
+    label: { en: Version, nl: Versie }
+    persisted: { column: version_number, storageClass: core }
+  - key: snapshot
+    osfType: object
+    required: true
+    immutable: true
+    label: { en: Frozen content, nl: Vastgelegde inhoud }
+    persisted: { column: snapshot, storageClass: core }
+operations:
+  list:
+    name: List asset edition versions
+    description: Read accessible asset edition versions.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read asset edition version
+    description: Read one accessible asset edition version.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}

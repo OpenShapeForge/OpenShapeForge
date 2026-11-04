@@ -29,9 +29,27 @@ export type ExtensionField = {
   readonly appliesWhen: unknown;
   readonly state: ExtensionState;
   readonly position: number;
+  /** Why the field is suspended, when it is or was before a deprecation: a lost proof redacts its values. */
+  readonly suspendedReason?: string;
 };
 
-/** The current definitions of one (tenant, entity), loaded under its hash. */
+/**
+ * The reason a lookup or rollup is suspended when the authorization proof it
+ * was saved under no longer holds, and the reason of everything that reads
+ * it. Its stored values are target data a reader may no longer see, so the
+ * read projection redacts them (read.ts); every other reason keeps them.
+ */
+export const AUTHORIZATION_PROOF_LOST = "AUTHORIZATION_PROOF_LOST";
+
+/** Whether a field's stored values are redacted from readers: its proof is lost, whatever state it is in now. */
+export function proofLost(field: Pick<ExtensionField, "state" | "suspendedReason">): boolean {
+  return field.suspendedReason === AUTHORIZATION_PROOF_LOST && (field.state === "suspended" || field.state === "deprecated");
+}
+
+/** The reason of a field that reads a suspended one: a lost proof is inherited, anything else stays a reason to keep the value. */
+export function inheritedSuspension(input: Pick<ExtensionField, "suspendedReason">): string {
+  return input.suspendedReason === AUTHORIZATION_PROOF_LOST ? AUTHORIZATION_PROOF_LOST : "DEPENDENCY_SUSPENDED";
+}
 export type ExtensionFieldSet = {
   readonly entity: string;
   readonly entry: RuntimeExtensibleEntity;

@@ -293,6 +293,9 @@ tables:
       - { name: is_current, type: boolean, required: true }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: created_by, type: uuid }
+      # Why a `suspended` definition is suspended. AUTHORIZATION_PROOF_LOST
+      # redacts its values from readers; a deprecation carries the reason along.
+      - { name: suspended_reason, type: text }
     indexes:
       - name: extension_field_definitions_version_uidx
         columns: [tenant_id, field_id, version]
@@ -402,14 +405,19 @@ tables:
   # record) here instead of recomputing them in its own transaction. Further
   # writes of the same record coalesce on the unique key (`generation` counts
   # them); the journal worker recomputes the referring records in batches and
-  # removes the row once a pass saw its latest generation. A reader derives
+  # removes the row once a pass saw its latest generation. A rollup's row names
+  # the record to recompute itself, and a reference field's row the deleted
+  # target whose references are still to be unlinked. A reader derives
   # `extensionsMeta.<key>.stale` from the open rows of its page. The worker
-  # holds full DML on it (db/migrations/worker-role.ts).
+  # holds full DML on it (db/migrations/worker-role.ts), and its sweep reads it
+  # across tenants: a row whose job died gets a new one, under the session of
+  # the write that last asked for it.
   - schema: platform
     name: extension_field_recomputes
     tenantScoped: true
     domainInternal: true
     generatedCrudEligible: false
+    workerAccess: job-worker
     columns:
       - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
       - { name: tenant_id, type: uuid, required: true }
@@ -423,6 +431,8 @@ tables:
       - { name: pass_generation, type: integer }
       - { name: cursor, type: text }
       - { name: requested_at, type: timestamptz, required: true, default: now() }
+      - { name: actor_id, type: uuid, required: true }
+      - { name: actor_session, type: jsonb, required: true, default: "'{}'::jsonb" }
       - { name: created_at, type: timestamptz, required: true, default: now() }
     indexes:
       - name: extension_field_recomputes_target_uidx

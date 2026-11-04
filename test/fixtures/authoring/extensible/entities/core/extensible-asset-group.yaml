@@ -37,6 +37,16 @@ fields:
     label: { en: Location, nl: Locatie }
     relationship:
       ownership: reference
+      inverse: false
+  # A lookup through this one would show what it points at to a reader who may
+  # not see the relation itself, so it is refused.
+  - key: confidentialLocation
+    osfType: ExtensibleAssetLocation
+    label: { en: Confidential location, nl: Vertrouwelijke locatie }
+    classification: { sensitivity: confidential, category: operational }
+    relationship:
+      ownership: reference
+      inverse: false
 operations:
   list:
     name: List asset groups

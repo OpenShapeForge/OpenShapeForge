@@ -31,6 +31,29 @@ fields:
         label: { en: Parts, nl: Onderdelen }
         ownership: owned
         childAuthorization: owner
+  # Rollups over these two inverses are refused: the relation itself is out of
+  # a reader's reach.
+  - key: auditedAsset
+    osfType: ExtensibleAsset
+    label: { en: Audited asset, nl: Geaudit object }
+    classification: { sensitivity: confidential, category: operational }
+    relationship:
+      ownership: reference
+      inverse:
+        key: auditedParts
+        label: { en: Audited parts, nl: Geauditte onderdelen }
+  - key: restrictedAsset
+    osfType: ExtensibleAsset
+    label: { en: Restricted asset, nl: Afgeschermd object }
+    authorization:
+      roles:
+        read: [Test.Fields.Manage]
+        write: [General.All.ReadWrite]
+    relationship:
+      ownership: reference
+      inverse:
+        key: restrictedParts
+        label: { en: Restricted parts, nl: Afgeschermde onderdelen }
   - key: quantity
     osfType: number
     label: { en: Quantity, nl: Aantal }

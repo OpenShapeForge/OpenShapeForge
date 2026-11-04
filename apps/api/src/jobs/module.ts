@@ -30,6 +30,7 @@ import {
   extensionBackfillJobHandler,
   extensionRetentionJobHandler,
 } from "../operations/entity/extensions/backfill.js";
+import { EXTENSION_RECOMPUTE_KIND, extensionRecomputeJobHandler } from "../operations/entity/extensions/linked.js";
 
 export { JOBS_PLUGIN, JOB_WORKER_ROLE };
 
@@ -110,6 +111,7 @@ export function createJobsRuntimeModule(options: JobsRuntimeModuleOptions): Runt
     // Tenant field backfills and retention (operations/entity/extensions).
     [EXTENSION_BACKFILL_KIND]: extensionBackfillJobHandler,
     [EXTENSION_RETENTION_KIND]: extensionRetentionJobHandler,
+    [EXTENSION_RECOMPUTE_KIND]: extensionRecomputeJobHandler,
   };
   const module: RuntimeModule = {
     name: JOBS_PLUGIN,

@@ -59,7 +59,9 @@ import { storedExtensionSource } from "./read.js";
 
 export const EXTENSION_BACKFILL_KIND = "extensions.backfill";
 export const EXTENSION_RETENTION_KIND = "extensions.retention";
-export type BackfillOperation = "retype" | "delete" | "unique" | "rebuild" | "formula";
+export type BackfillOperation = "retype" | "delete" | "unique" | "rebuild" | "formula" | "lookup" | "rollup";
+/** A backfill that computes a field (and what reads it) on every record, rather than rewriting stored values. */
+const COMPUTING: ReadonlySet<BackfillOperation> = new Set(["formula", "lookup", "rollup"]);
 export const BACKFILL_BATCH_SIZE = 500;
 
 export type BackfillRow = {
@@ -118,7 +120,7 @@ export async function startBackfill(
   session: DbSessionInput,
   input: { entity: string; field: ExtensionField; operation: BackfillOperation },
 ): Promise<BackfillRow> {
-  const total = input.operation === "formula"
+  const total = COMPUTING.has(input.operation)
     ? await recordsOfTenant(trx, session, input.entity)
     : await recordsWithField(trx, session, input.entity, input.field.fieldId);
   const id = randomUUID();
@@ -273,12 +275,12 @@ export async function runBackfillBatch(
   // A retype, unique or formula backfill works for one version; a later
   // version (a deprecation, unique turned off again, another formula)
   // supersedes it.
-  if ((row!.operation === "retype" || row!.operation === "unique" || row!.operation === "formula") && field!.version !== Number(row!.definition_version)) {
+  if ((row!.operation === "retype" || row!.operation === "unique" || COMPUTING.has(row!.operation)) && field!.version !== Number(row!.definition_version)) {
     await failBackfill(trx, tenantId, row!, { code: "SUPERSEDED", message: `${field!.key} changed while this backfill ran.` });
     return { state: "failed", processed: row!.processed, cursor: row!.cursor, more: false };
   }
   const table = entityTable(row!.entity);
-  if (row!.operation === "formula") return runFormulaBatch(trx, session, { row: row!, set, field: field!, table, batchSize });
+  if (COMPUTING.has(row!.operation)) return runFormulaBatch(trx, session, { row: row!, set, field: field!, table, batchSize });
   return acrossTenant(trx, session, `tenant field ${row!.operation} backfill ${row!.id}`, async () => {
     const records = await sql<{ id: string; extension_values: unknown }>`
       select id, extension_values from ${qualifiedTable(entry!.table)}
@@ -401,7 +403,7 @@ async function runFormulaBatch(
       forgetExtensionFields(trx, tenantId, row.entity);
       await failBackfill(trx, tenantId, row, {
         code: "FORMULA_BACKFILL_FAILED",
-        message: `${field.key} could not be computed for every record and is suspended; save the formula again or rebuild its index to resume.`,
+        message: `${field.key} could not be computed for every record and is suspended; save the ${field.kind} again or rebuild its index to resume.`,
       });
       return { state: "failed" as const, processed: row.processed, cursor: row.cursor, more: false };
     }

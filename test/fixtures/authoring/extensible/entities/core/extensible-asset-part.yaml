@@ -1,8 +1,9 @@
 # Test fixture — an owned collection of extensible-asset.yaml (any number of
 # parts per asset), authorized through its owner: what a tenant rollup over an
-# owned collection aggregates. Only in the test composition. Read-only for the
-# same reason as extensible-asset-spec.yaml: the engine refuses a generic
-# create, update and delete of an owned child.
+# owned collection aggregates. Only in the test composition. Its create,
+# update and delete are what the owner's collection mutations run (the engine
+# refuses them as generic writes of an owned child); without an MCP interface,
+# so the generic tool sweeps never offer them.
 schemaVersion: 3
 kind: coreEntity
 module: core
@@ -54,7 +55,28 @@ operations:
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
+  create:
+    name: Create extensible asset part
+    description: Create extensible asset part.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update extensible asset part
+    description: Update extensible asset part.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  delete:
+    name: Delete extensible asset part
+    description: Delete extensible asset part.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
 interfaces:
   rest: {}
   graphql: {}
-  mcp: { tools: generic }

@@ -28,6 +28,7 @@ import { subtypeScopeWhere } from "./subtype-scope.js";
 import { assertAdmittedBeforeEffects, assertEffectsWereAdmitted } from "../execution-policy.js";
 import { loadExtensionFields } from "./extensions/store.js";
 import { recomputeOwnerFormulas } from "./extensions/write.js";
+import { propagateRecordChange } from "./extensions/linked.js";
 
 /** Compiler/boot-owned binding, never a request-selected table or FK. */
 export type CollectionMutationBinding = { entityName: string; field: string; action: "insert" | "move" | "update" | "remove" };
@@ -311,6 +312,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
             if (row) {
               changed = true;
               await recomputeOwnerFormulas(trx, session, target, row);
+              await propagateRecordChange(trx, session, target, { before: current, after: row });
             } else if (!(await sql<{ id: string }>`select id from ${sql.id(target.schema, target.table)} where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid`.execute(trx)).rows[0]) {
               throw generatedCrudError("Child update was refused.", "FORBIDDEN");
             }
@@ -324,6 +326,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
           if (!row) throw generatedCrudError("Child removal was refused.", "FORBIDDEN");
           // An owner formula over this child now reads none.
           await recomputeOwnerFormulas(trx, session, target, row);
+          await propagateRecordChange(trx, session, target, { before: row });
           ordered.splice(ordered.indexOf(childId), 1);
           changed = true;
         }

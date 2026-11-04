@@ -61,7 +61,9 @@ function fieldFor(set: ExtensionFieldSet, key: string): { field: ExtensionField;
   refuseClassified(field!, shape, set.entity);
   // Its index holds values of two formula generations: no answer from it would be right.
   if (field!.state === "suspended") {
-    extensionError(`extensions.${key} is suspended: its backfill stopped halfway, so it cannot be filtered or sorted on until the formula is saved again or its index rebuilt.`, "BAD_USER_INPUT");
+    extensionError(field!.kind === "lookup" || field!.kind === "rollup"
+      ? `extensions.${key} is suspended: its authorization proof no longer holds, so it cannot be filtered or sorted on until it is saved again.`
+      : `extensions.${key} is suspended: its backfill stopped halfway, so it cannot be filtered or sorted on until the formula is saved again or its index rebuilt.`, "BAD_USER_INPUT");
   }
   return { field: field!, shape };
 }

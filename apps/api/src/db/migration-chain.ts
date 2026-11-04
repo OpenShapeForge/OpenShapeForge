@@ -78,7 +78,7 @@ import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
  * NOTE: the whole chain runs as the PRIVILEGED migrate role
  * (OPENSHAPEFORGE_MIGRATE_DATABASE_URL) — DDL and GRANT require it.
  */
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { seedTenantOwnRelations } from "../control/tenant-own-relation.js";
 import { fileURLToPath } from "node:url";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
@@ -129,6 +129,8 @@ import { runRegisteredSeedJob, type InitializedMaintenanceOwner } from "../modul
 import type { RuntimeModule } from "../modules/contract.js";
 import type { ModuleSeed } from "../modules/contract.js";
 import type { CatalogSeedResult } from "./migrations/catalog-seed.js";
+import { revalidateLinkedFieldsOfEveryTenant } from "../operations/entity/extensions/linked.js";
+import { extensionRegistry } from "../operations/entity/extensions/registry.js";
 
 export type MigrationChainOptions = {
   /** Override compiler-plugin invariant DDL (used by tests). */
@@ -159,6 +161,8 @@ export type MigrationChainResult = GeneratedSchemaMigrationResult & {
   pageConfigs: EntityPageConfigsSeedResult;
   /** Outcome of each module-contributed seed, keyed by its reporting name. */
   moduleSeeds: Record<string, CatalogSeedResult>;
+  /** Tenant lookups and rollups this run suspended because their authorization proof no longer holds. */
+  linkedFieldsSuspended: number;
 };
 
 export async function runMigrationChain(
@@ -252,12 +256,30 @@ export async function runMigrationChain(
     } finally { active = false; await Promise.allSettled(pending.map(job => job.work)); }
   }
   await seedTenantOwnRelations(db);
+  const linkedFieldsSuspended = await revalidateLinkedFields(db);
   return {
     ...generated,
+    linkedFieldsSuspended,
     versioned,
     pluginMigrationsApplied: pluginMigrations.applied,
     pluginConstraintsRemoved: pluginMigrations.removed,
     pageConfigs,
     moduleSeeds,
   };
+}
+
+/**
+ * Authorization is a compile-time contract, so every migration proves the
+ * tenants' lookups and rollups again against the manifest it installed
+ * (operations/entity/extensions/linked.ts); one that no longer holds is
+ * suspended. Each tenant in a transaction of its own, scoped to it.
+ */
+async function revalidateLinkedFields(db: Kysely<DB>): Promise<number> {
+  if (!extensionRegistry.entityNames().length) return 0;
+  const tenants = await sql<{ tenant_id: string }>`select distinct tenant_id::text as tenant_id from platform.extension_field_definitions
+    where is_current and kind in ('lookup', 'rollup') and state in ('ready', 'updating') order by 1`.execute(db);
+  return revalidateLinkedFieldsOfEveryTenant((tenantId, work) => db.transaction().execute(async (trx) => {
+    await sql`select set_config('app.tenant_id', ${tenantId}, true), set_config('app.bypass_rls', 'true', true)`.execute(trx);
+    return work(trx);
+  }), tenants.rows.map((row) => row.tenant_id));
 }

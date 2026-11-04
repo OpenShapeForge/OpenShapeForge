@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
+import Ajv2020 from "ajv/dist/2020.js";
+
 /** Presentation paths never remove inputs from the canonical Operation. */
-export function operationForm(form: { groups: Array<{ title: { en?: string; nl?: string }; fields: string[]; collapsed?: boolean }> } | undefined, schema: Readonly<Record<string, unknown>>, origin: string) {
+export function operationForm(form: { showOnlyGroupedFields?: boolean; defaults?: Record<string, unknown>; groups: Array<{ title: { en?: string; nl?: string }; fields: string[]; collapsed?: boolean }> } | undefined, schema: Readonly<Record<string, unknown>>, origin: string, controlFields: readonly (string | undefined)[] = []) {
   if (!form) return undefined;
   if (form.groups.some(group => !group.title.en && !group.title.nl)) throw new Error(`${origin}: form group requires an English or Dutch title.`);
   const used: string[] = [];
@@ -20,6 +22,36 @@ export function operationForm(form: { groups: Array<{ title: { en?: string; nl?:
     used.push(path);
     return path;
   }) }));
-  return { groups };
+  if (form.defaults) {
+    const checkDefaults = (node: any, value: unknown, path: string) => {
+      if (!node || !value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${origin}: invalid form defaults at ${path || "root"}.`);
+      for (const [key, entry] of Object.entries(value)) {
+        const child = node.properties?.[key];
+        if (!child) throw new Error(`${origin}: unknown form default ${path}${key}.`);
+        if (entry && typeof entry === "object" && !Array.isArray(entry) && child.properties) checkDefaults(child, entry, `${path}${key}.`);
+        else {
+          const ajv = new Ajv2020.default({ strict: false, validateFormats: false });
+          if (!ajv.validate(child, entry)) throw new Error(`${origin}: invalid form default ${path}${key}.`);
+        }
+      }
+    };
+    checkDefaults(schema, form.defaults, "");
+  }
+  if (form.showOnlyGroupedFields) {
+    const checkRequired = (node: any, defaults: any, path: string) => {
+      for (const key of node.required ?? []) {
+        if (!path && controlFields.includes(key)) continue;
+        const field = node.properties?.[key];
+        const current = path ? `${path}.${key}` : key;
+        if (used.some(item => item === current || current.startsWith(`${item}.`))) continue;
+        if (field?.const !== undefined || field?.default !== undefined) continue;
+        if (field?.properties && (defaults?.[key] !== undefined || used.some(item => item.startsWith(`${current}.`)))) { checkRequired(field, defaults?.[key], current); continue; }
+        if (defaults?.[key] !== undefined) continue;
+        throw new Error(`${origin}: required form field ${current} is hidden without a default.`);
+      }
+    };
+    checkRequired(schema, form.defaults, "");
+  }
+  return { ...(form.showOnlyGroupedFields ? { showOnlyGroupedFields: true } : {}), ...(form.defaults ? { defaults: form.defaults } : {}), groups };
 }
 

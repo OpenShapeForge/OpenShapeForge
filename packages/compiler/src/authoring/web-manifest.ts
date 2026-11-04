@@ -174,7 +174,7 @@ function operation(
       }),
     },
     output: source.output,
-    ...(source.interfaces?.web && source.interfaces.web.form ? { form: operationForm(source.interfaces.web.form, source.input.schema, source.id) } : {}),
+    ...(source.interfaces?.web && source.interfaces.web.form ? { form: operationForm(source.interfaces.web.form, source.input.schema, source.id, source.reliability.idempotency.mode === "keyed" ? [source.reliability.idempotency.inputField] : []) } : {}),
     effects: source.effects,
     reliability: source.reliability,
     ...(source.concurrency ? { concurrency: source.concurrency } : {}),
@@ -233,7 +233,7 @@ function customOperation(
     input: { kind: "json-schema", schema: withOperationControls(definition.input.schema, definition) },
     output: { kind: "json-schema", schema: definition.output.schema },
     ...(source.interfaces.web?.resultRenderer ? { resultRenderer: source.interfaces.web.resultRenderer } : {}),
-    ...(source.interfaces.web?.form ? { form: operationForm(source.interfaces.web.form, definition.input.schema, source.id) } : {}),
+    ...(source.interfaces.web?.form ? { form: operationForm(source.interfaces.web.form, definition.input.schema, source.id, definition.reliability.idempotency.mode === "keyed" ? [definition.reliability.idempotency.inputField] : []) } : {}),
     effects: definition.effects,
     ...(definition.auth ? { auth: standaloneAuth({ auth: definition.auth } as CompiledPluginOperation) } : {}),
     reliability: {

@@ -645,16 +645,13 @@ interfaces:
       materialize: { resultRenderer: document.content }
       create:
         form:
+          showOnlyGroupedFields: true
+          defaults:
+            document: { status: draft }
+            version: { versionLabel: "1", status: draft }
           groups:
             - title: { en: Document, nl: Document }
-              fields: [document.title, document.documentType, document.status]
-            - title: { en: Content, nl: Inhoud }
-              fields: [content, artifact]
-            - title: { en: Version, nl: Versie }
-              fields: [version.versionLabel, version.status]
-            - title: { en: Additional details, nl: Overige gegevens }
-              collapsed: true
-              fields: [document.code, document.description, document.confidentiality, document.source, document.author, document.isExternal, document.registeredAt, document.receivedAt, document.publishedAt, document.caseFileId, document.caseId, document.relationId, version.isMajorVersion, version.changeSummary, version.accountId]
+              fields: [document.title, document.documentType]
     views:
       quotePreview:
         kind: record

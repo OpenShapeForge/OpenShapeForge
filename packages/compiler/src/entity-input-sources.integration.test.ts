@@ -206,7 +206,7 @@ test("authored document form reaches the web artifact with resolved input paths"
   expect(entry).toBeDefined();
   const web = JSON.parse(entry!.contents as string);
   const create = web.entities.Document.operations.create;
-  expect(create.form.groups.map((group: { fields: string[] }) => group.fields)).toContainEqual(["document.title", "document.documentType", "document.status"]);
+  expect(create.form.groups.map((group: { fields: string[] }) => group.fields)).toContainEqual(["document.title", "document.documentType"]);
   expect(create.input.schema.properties.document.properties.title).toBeDefined();
   expect(JSON.stringify(create.input.schema)).not.toContain("x-osf-entityInput");
 }, 30_000);

@@ -1046,7 +1046,7 @@
               "instructions": { "$ref": "#/$defs/localizedOrString" },
               "form": {
                 "type": "object", "additionalProperties": false, "required": ["groups"],
-                "properties": { "groups": { "type": "array", "minItems": 1, "items": {
+                "properties": { "showOnlyGroupedFields": { "type": "boolean" }, "defaults": { "type": "object" }, "groups": { "type": "array", "minItems": 1, "items": {
                   "type": "object", "additionalProperties": false, "required": ["title", "fields"],
                   "properties": { "title": { "$ref": "#/$defs/localizedText" }, "fields": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*$" } }, "collapsed": { "type": "boolean" } }
                 } } }

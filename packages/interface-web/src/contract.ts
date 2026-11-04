@@ -77,7 +77,7 @@ export type WebSchemaOperationRef<
   /** Opaque result presentation key; absent uses structured schema rendering. */
   resultRenderer?: WebRendererKey;
   /** Presentation only; every input not named here remains available. */
-  form?: { groups: Array<{ title: LocalizedText; fields: string[]; collapsed?: boolean }> };
+  form?: { showOnlyGroupedFields?: boolean; defaults?: Record<string, unknown>; groups: Array<{ title: LocalizedText; fields: string[]; collapsed?: boolean }> };
   effects: {
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";

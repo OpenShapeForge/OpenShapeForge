@@ -19,3 +19,17 @@ test("form groups project logical paths without changing the input contract", ()
   expect(() => operationForm({ groups: [{ title, fields: ["record.title"] }] }, choice, "Thing.create")).toThrow("traverses a choice");
   expect(() => operationForm({ groups: [{ title: {}, fields: ["record.title"] }] }, schema, "Thing.create")).toThrow("requires an English or Dutch title");
 });
+
+test("compact create forms require valid defaults for hidden required inputs", () => {
+  const input = { type: "object", required: ["record", "version", "requestKey"], properties: {
+    record: { type: "object", required: ["title", "status"], properties: { title: { type: "string" }, status: { type: "string", enum: ["draft"] }, note: { type: "string" } } },
+    version: { type: "object", required: ["label", "status"], properties: { label: { type: "string" }, status: { type: "string", enum: ["draft"] } } },
+    requestKey: { type: "string" },
+  } };
+  const groups = [{ title, fields: ["record.title"] }];
+  const defaults = { record: { status: "draft" }, version: { label: "1", status: "draft" } };
+  expect(operationForm({ showOnlyGroupedFields: true, defaults, groups }, input, "Thing.create", ["requestKey"])).toEqual({ showOnlyGroupedFields: true, defaults, groups });
+  expect(() => operationForm({ showOnlyGroupedFields: true, defaults: { record: { status: "draft" }, version: { label: "1" } }, groups }, input, "Thing.create", ["requestKey"])).toThrow("version.status");
+  expect(() => operationForm({ showOnlyGroupedFields: true, defaults: { record: { status: "published" }, version: defaults.version }, groups }, input, "Thing.create", ["requestKey"])).toThrow("invalid form default");
+  expect(() => operationForm({ showOnlyGroupedFields: true, defaults: { ...defaults, missing: 1 }, groups }, input, "Thing.create", ["requestKey"])).toThrow("unknown form default");
+});

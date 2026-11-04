@@ -64,6 +64,7 @@ function fixture(options: {
   templateVersionId?: string | null;
   parameters?: unknown;
   withInclusion?: boolean;
+  twoInclusions?: boolean;
   aggregateBlockOverflow?: boolean;
   inclusionDepth?: number;
   amplifyVariable?: boolean;
@@ -81,7 +82,8 @@ function fixture(options: {
   };
   const ordinaryBlocks = () => [
     { id: ids.first, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 0, variant_id: null, origin: "template", template_block_id: ids.templateBlock, diverged: true, locked: false, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.firstText }, include_version_id: null },
-    ...(options.withInclusion || options.inclusionDepth ? [{ id: ids.include, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 1, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "IncludeBlock", definition_version: 1, values: { parameters: {} }, include_version_id: options.inclusionDepth ? numberedId(8100, 0) : ids.included }] : []),
+    ...(options.withInclusion || options.inclusionDepth || options.twoInclusions ? [{ id: ids.include, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 1, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "IncludeBlock", definition_version: 1, values: { parameters: options.twoInclusions ? { name: "Ada" } : {} }, include_version_id: options.inclusionDepth ? numberedId(8100, 0) : ids.included }] : []),
+    ...(options.twoInclusions ? [{ id: numberedId(8200, 1), tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 2, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "IncludeBlock", definition_version: 1, values: { parameters: { name: "Grace" } }, include_version_id: ids.included }] : []),
     { id: ids.second, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 2, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.secondText }, include_version_id: null },
   ];
   const documentBlocks = () => !options.aggregateBlockOverflow ? ordinaryBlocks() : Array.from(
@@ -226,6 +228,16 @@ describe("Document.materialize", () => {
     const changed = (await materializeDocument(request, f.context) as any).value;
     expect(changed.compositionHash).not.toBe(snapshot.compositionHash);
     expect(f.reads).toEqual([]);
+  });
+  test("two inclusions of the same frozen template retain independent local values in a standalone document", async () => {
+    const f = fixture({ templateVersionId: null, parameters: {}, twoInclusions: true });
+    f.data.firstText = "Introduction";
+    const snapshot = (await materializeDocument(request, f.context) as any).value;
+    const rendered = JSON.stringify(snapshot.blocks);
+    expect(rendered).toContain("Included Ada");
+    expect(rendered).toContain("Included Grace");
+    expect(f.validated).toContainEqual({ name: "Ada" });
+    expect(f.validated).toContainEqual({ name: "Grace" });
   });
   test("materializes the root from the document's live variants and blocks, not the frozen snapshot", async () => {
     const f = fixture();

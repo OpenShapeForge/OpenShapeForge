@@ -443,7 +443,7 @@ describe("extensible: platform tables", () => {
     expect(definitions.columns.map((column) => `${column.name}:${column.type}${column.required ? "!" : ""}`)).toEqual([
       "id:uuid", "tenant_id:uuid!", "field_id:uuid!", "entity:text!", "key:text!", "version:integer!", "kind:text!",
       "definition:jsonb!", "applies_when:jsonb", "state:text!", "position:integer!", "is_current:boolean!",
-      "created_at:timestamptz!", "created_by:uuid",
+      "created_at:timestamptz!", "created_by:uuid", "suspended_reason:text",
     ]);
     expect(definitions.indexes).toEqual([
       { name: "extension_field_definitions_version_uidx", columns: ["tenant_id", "field_id", "version"], unique: true },

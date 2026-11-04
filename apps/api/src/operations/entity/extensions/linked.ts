@@ -1400,7 +1400,8 @@ export async function propagateRecordChange(
         continue;
       }
       const rollup = storedRollup(field.definition)!;
-      // A new target is reached by no child yet; a deleted one is left by its foreign key or the deletion guard, through a write of the child.
+      // A new target is reached by no child yet. A deleted one is refused by its foreign key while a child names it, or left through a write of the child
+      // (the deletion guard). A foreign key of a handwritten manifest that says SET NULL or CASCADE writes the child behind the runtime: rebuildIndex repairs that.
       if (!created && !deleted && touched(dependent.stepReads)) {
         const parents = await parentsThroughStep(trx, tenantId, sets, set, rollup, recordId, undefined, set.entry.limits.syncFanOut + 1);
         if (withinBudget(budget, set, parents)) {

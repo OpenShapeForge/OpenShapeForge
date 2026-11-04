@@ -153,6 +153,21 @@ async function failWrites(table: string, sqlstate: string) {
     await sql.raw(`drop function ${name}()`).execute(fixture.privileged.db);
   };
 }
+/** Run with a foreign key as only a handwritten manifest has it: `on delete set null`. */
+async function withSetNullKey<T>(table: string, column: string, target: string, run: () => Promise<T>): Promise<T> {
+  const [key] = await privileged(sql<{ name: string; definition: string }>`select conname as name, pg_get_constraintdef(oid) as definition from pg_constraint
+    where contype = 'f' and conrelid = ${table}::regclass and confrelid = ${target}::regclass
+      and (select attnum from pg_attribute where attrelid = conrelid and attname = ${column}) = any(conkey)`);
+  const alter = (action: string) => sql.raw(`alter table ${table} ${action}`).execute(fixture.privileged.db);
+  await alter(`drop constraint "${key!.name}"`);
+  await alter(`add constraint "${key!.name}" foreign key (${column}) references ${target} (id) on delete set null`);
+  try {
+    return await run();
+  } finally {
+    await alter(`drop constraint "${key!.name}"`);
+    await alter(`add constraint "${key!.name}" ${key!.definition}`);
+  }
+}
 /** Manage one entity's reads under the tenant's profiles, past the ceiling's guard, then write the profile model the way an administrator does. */
 async function manage(t: Tenant, entity: string) {
   await fixture.privileged.db.transaction().execute(async (trx) => {
@@ -1692,6 +1707,22 @@ describe("tenant lookups and rollups", () => {
     });
   });
 
+  test("a foreign key of a handwritten manifest that sets null: a rollup's step keeps its value until a rebuild, as the documentation says", async () => {
+    const t = await tenant();
+    const total = await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }), "rollup");
+    const asset = await create(t.writer, ENTITY, { name: "A" });
+    const location = await create(t.writer, TARGET_ENTITY, { name: "L", capacity: 5 });
+    await member(t.writer, { asset: asset.id, location: location.id });
+    expect((await get(t.reader, asset.id)).extensions.total).toBe(5);
+    await withSetNullKey("erp.extensible_asset_members", "location_id", "erp.extensible_asset_locations", async () => {
+      await remove(t.writer, TARGET_ENTITY, location.id);
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(5);
+      await define(t.manager, "rebuildIndex", { fieldId: total });
+      await drainJobs();
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(0);
+    });
+  });
+
   describe("removing an owned child through its collection", () => {
     const inserted = async (t: Tenant, asset: Row, values: Record<string, unknown>) =>
       (await parts(t.writer, "insert", { id: asset.id, expectedVersion: String((await get(t.reader, asset.id)).updated_at), values })).childId;
@@ -1743,17 +1774,10 @@ describe("tenant lookups and rollups", () => {
       const child = await inserted(t, asset, { quantity: 2 });
       const group = await create(t.writer, GROUP, { name: "G", part: child });
       expect(group.extensions.partQuantity).toBe(2);
-      const [constraint] = await privileged(sql<{ name: string }>`select conname as name from pg_constraint
-        where conrelid = 'erp.extensible_asset_groups'::regclass and confrelid = 'erp.extensible_asset_parts'::regclass`);
-      await sql.raw(`alter table erp.extensible_asset_groups drop constraint "${constraint!.name}"`).execute(fixture.privileged.db);
-      await sql.raw(`alter table erp.extensible_asset_groups add constraint "${constraint!.name}" foreign key (part_id) references erp.extensible_asset_parts (id) on delete set null`).execute(fixture.privileged.db);
-      try {
+      await withSetNullKey("erp.extensible_asset_groups", "part_id", "erp.extensible_asset_parts", async () => {
         await removed(t, asset, child);
         expect((await get(t.reader, group.id, GROUP)).extensions.partQuantity).toBeNull();
-      } finally {
-        await sql.raw(`alter table erp.extensible_asset_groups drop constraint "${constraint!.name}"`).execute(fixture.privileged.db);
-        await sql.raw(`alter table erp.extensible_asset_groups add constraint "${constraint!.name}" foreign key (part_id) references erp.extensible_asset_parts (id)`).execute(fixture.privileged.db);
-      }
+      });
     });
   });
 });

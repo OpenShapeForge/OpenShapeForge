@@ -967,12 +967,23 @@ refreshes when its value lands.
 **Deleting a target.** A tenant reference's `onDelete` decides: `restrict`
 refuses while a record points at the target, `setNull` clears the reference, the
 lookups through it and every rollup over them, through the existing deletion
-guard. An authored relation follows its foreign key; the lookups on records that
-remain are recomputed. Deleting a child recomputes the rollup of its parent. The
-step of a rollup's `of` follows the same rules: an authored relation's foreign
-key refuses the delete while a child points at the target, a tenant reference
-does what its `onDelete` says, and a child it clears recomputes its parent. An
-owned child that its collection Operation removes is deleted under the same rules.
+guard. An authored relation follows its foreign key, which YAML compiles to
+refuse the delete while a record points at the target. The one exception is an
+owned child's key to its owner, which cascades, and a generic delete refuses an
+owner that still has owned children. Deleting a child recomputes the rollup of
+its parent. The step of a rollup's `of` follows the same rules: an authored
+relation's foreign key refuses the delete while a child points at the target, a
+tenant reference does what its `onDelete` says, and a child it clears recomputes
+its parent. An owned child that its collection Operation removes is deleted under
+the same rules.
+
+A handwritten manifest can give a foreign key `ON DELETE SET NULL` or `CASCADE`.
+The database then changes or deletes the referring records itself, and none of
+that is a write through the runtime. A lookup through the relation on a record
+that remains is still recomputed, because the delete finds those records first.
+Nothing else is: a rollup whose step follows such a key, and whatever reads a
+record a cascade deleted, keep their last value until
+`<Entity>.fieldDefinitions.rebuildIndex`, as after any write behind the runtime.
 
 **Snapshots.** A snapshot freezes a lookup or rollup as it does a formula: the
 value with its definition (`kind`, `lookup` or `rollup`) only while the field is

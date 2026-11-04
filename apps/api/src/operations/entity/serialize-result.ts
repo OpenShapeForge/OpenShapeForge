@@ -58,7 +58,7 @@ export function serializeEntityResult(
   table: GeneratedCrudTable,
   result: EntityOperationResult,
 ): EntityOperationResult {
-  if ("error" in result || result.intent === "delete") return result;
+  if ("error" in result || "accepted" in result || result.intent === "delete") return result;
   if (result.intent === "list")
     return {
       ...result,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { randomUUID } from "node:crypto";
 import type {
+  RuntimeDeclarativeServiceExecutionResult,
   RuntimeDeclarativeServiceRequest,
   RuntimeHostOperationRequest,
   RuntimeOperationExecutionResult,
@@ -8,7 +9,11 @@ import type {
 } from "@openshapeforge/plugin-runtime";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { RuntimeModule } from "../modules/contract.js";
-import { type ModulePlatformRuntime } from "../modules/platform.js";
+import {
+  type ModuleDeclarativeServiceExecutor,
+  type ModulePlatformRuntime,
+} from "../modules/platform.js";
+import { DECLARATIVE_CONNECTION_CAPABILITIES } from "./connection-expectation.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { type GeneratedTable } from "./catalog.js";
 import {
@@ -39,12 +44,12 @@ export function createRuntimeDeclarativeServiceExecutor(input: {
   egressOwner?: RuntimeModule["egress"];
   /** @internal Test-only generated-table override. */
   tablesForTests?: Map<string, GeneratedTable>;
-}): (
-  session: TrustedSessionContext,
-  request: RuntimeDeclarativeServiceRequest,
-  options?: RuntimeOperationExecutionOptions,
-) => Promise<RuntimeOperationExecutionResult> {
-  return async (session, request, options) => {
+}): ModuleDeclarativeServiceExecutor {
+  const executor = async (
+    session: TrustedSessionContext,
+    request: RuntimeDeclarativeServiceRequest,
+    options?: RuntimeOperationExecutionOptions,
+  ): Promise<RuntimeDeclarativeServiceExecutionResult> => {
     const server = buildServer(
       input.db,
       session,
@@ -69,6 +74,14 @@ export function createRuntimeDeclarativeServiceExecutor(input: {
       runtimeDeclarativeServiceExecutors.delete(server);
     }
   };
+  // The engine states what it enforces, on the engine itself: the host wiring
+  // registers one object, so a build cannot end up publishing the control's
+  // capability while running an engine that never checks it. Non-writable and
+  // non-configurable, so nothing downstream can restate the claim.
+  return Object.defineProperty(executor, "capabilities", {
+    value: DECLARATIVE_CONNECTION_CAPABILITIES,
+    enumerable: true,
+  }) as ModuleDeclarativeServiceExecutor;
 }
 
 /**

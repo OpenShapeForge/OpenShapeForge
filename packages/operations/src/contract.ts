@@ -199,10 +199,47 @@ export type OperationEnvelope<TData, TIntent extends string = string> = {
   resources?: readonly OperationResourceReference[];
 };
 
+/**
+ * Who took an Operation over: the owner's kind (for example `workflow`) and
+ * its own reference to the work it started (for example a run id).
+ */
+export type OperationAcceptedBy = { kind: string; ref: string };
+
+/**
+ * The Operation was taken over by another owner (an operation override) and
+ * answered before the original effect happened. `running` and `waiting` mean
+ * the owner's work is still under way and the change happens, if at all, when
+ * it completes; `completed` means the owner's work already finished when it
+ * answered. None of them carries the original's own output.
+ */
+export type OperationAcceptance = {
+  by: OperationAcceptedBy;
+  status: "running" | "waiting" | "completed";
+};
+
+/**
+ * The third result arm: neither the original's data nor a failure. It has no
+ * `data` and no `error` member, so `isOperationFailure` stays false; a reader
+ * of `data` sees it absent and should rule this arm out with
+ * `isOperationAccepted` before treating a missing value as "not found".
+ *
+ * `error` is deliberately not declared, not even as `never`: an optional
+ * member keeps this arm on both sides of an `"error" in result` check, so
+ * every consumer that narrows a failure that way would see `error` as
+ * possibly undefined.
+ */
+export type OperationAccepted<TIntent extends string = string> = {
+  accepted: OperationAcceptance;
+  operations: readonly OperationOffer<TIntent>[];
+  /** Never present; declared so a reader of `data` must handle its absence. */
+  data?: never;
+};
+
 /** Validation is one failure category in this same result contract. */
 export type OperationResult<TData, TIntent extends string = string> =
   | OperationEnvelope<TData, TIntent>
-  | { error: OperationError };
+  | { error: OperationError }
+  | OperationAccepted<TIntent>;
 
 /**
  * Internal control flow for code below the OperationResult boundary. It carries
@@ -249,4 +286,10 @@ export function isOperationFailure<TData, TIntent extends string>(
   result: OperationResult<TData, TIntent>,
 ): result is { error: OperationError } {
   return "error" in result;
+}
+
+export function isOperationAccepted<TData, TIntent extends string>(
+  result: OperationResult<TData, TIntent>,
+): result is OperationAccepted<TIntent> {
+  return "accepted" in result && !("error" in result) && !("data" in result);
 }

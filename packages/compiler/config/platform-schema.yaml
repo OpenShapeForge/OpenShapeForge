@@ -1548,6 +1548,50 @@ tables:
       - { name: updated_at, type: timestamptz, required: true, default: clock_timestamp() }
       - { name: completed_at, type: timestamptz }
 
+  # Operation takeovers: core's record that a runtime module's operation
+  # override took a generated record-scoped `update` or `delete` in place of
+  # the original (apps/api/src/operations/entity/operation-overrides.ts). The
+  # row exists only after the caller's authorization, admission, record
+  # permissions, input validation and confirmation passed and its challenge
+  # and edit lease were consumed. A replay of the original by the tenant's
+  # organization service identity names it (`osfTakeover`) and must match the
+  # operation, record and input hash exactly while it is open; the replay's
+  # write closes it in the same transaction. `input_hash` is a SHA-256 of the
+  # canonical business input without lease/confirmation controls; the input
+  # itself is not retained. At most one open takeover per operation, record
+  # and input (`operation_takeovers_open_uidx`), so a retry finds the same
+  # run instead of starting another.
+  - schema: platform
+    name: operation_takeovers
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: operation_id, type: text, required: true }
+      - { name: record_id, type: text, required: true }
+      - { name: input_hash, type: text, required: true }
+      - { name: caller_user_id, type: uuid }
+      # The caller's linked Relation at takeover, so the replay stamps the
+      # caller (actorUserId, actorRelation), not the service identity.
+      - { name: caller_relation_id, type: uuid }
+      - { name: owner_module, type: text, required: true }
+      - { name: override_id, type: text, required: true }
+      # Filled once the override answered `accepted`: its own reference to the
+      # work it started (for example a workflow instance id), its kind and
+      # the status it reported.
+      - { name: owner_kind, type: text }
+      - { name: owner_ref, type: text }
+      - { name: owner_status, type: text }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: completed_at, type: timestamptz }
+    indexes:
+      - name: operation_takeovers_open_uidx
+        columns: [tenant_id, operation_id, record_id, input_hash]
+        unique: true
+        where: completed_at IS NULL
+
   # Blueprints: published record snapshots a blueprint tenant offers and other
   # tenants copy. The only cross-tenant read surface in the model, and it is
   # read through one SECURITY DEFINER function, `app.read_blueprints`, owned

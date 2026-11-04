@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { acceptanceMessage, isOperationAcceptance } from "@/lib/operation-acceptance";
 import type { Field } from "@/generated/compiler/field-contract";
 import {
   buildStructuredValues,
@@ -312,6 +313,19 @@ export function useRendererForm({
       const payload = id ? { id, ...submissionValues } : submissionValues;
       const result = await action(payload);
 
+      // Taken over by an operation override: nothing is saved yet. Stay on
+      // the form's record and say what started instead of navigating away.
+      const accepted = (result as { accepted?: unknown } | null | undefined)?.accepted;
+      if (isOperationAcceptance(accepted)) {
+        setFormState((currentState) => ({
+          ...currentState,
+          formError: undefined,
+          formNotice: acceptanceMessage(accepted, lang),
+        }));
+        router.refresh();
+        return;
+      }
+
       if (isSubmissionResult(result)) {
         applySubmissionResult(result);
         return;
@@ -364,6 +378,7 @@ export function useRendererForm({
     form: {
       values: flatValues,
       formError: formState.formError,
+      formNotice: formState.formNotice,
       submitAttempted: formState.submitAttempted,
       fieldStates: formState.fields,
       visibleFieldErrors,

@@ -24,6 +24,7 @@ import {
   type ResolvedInvocationSource,
 } from "../modules/invocation-sources.js";
 import type { CapturedDerivedExecution } from "./catalog.js";
+import type { ConnectionControls } from "./connection-expectation.js";
 import type { DerivedToolsCatalogEntry } from "./derived-tools.js";
 import type { ServerScope } from "./server-scope.js";
 import type { ListedTool, SessionSurface } from "./session-surface.js";
@@ -50,6 +51,12 @@ export type DispatchTool = (
     entry: DerivedToolsCatalogEntry;
     row: Record<string, unknown>;
   },
+  /**
+   * Core's own Connection controls for this call
+   * (connection-expectation.ts). Never module input: they travel in the call's
+   * closure, so an interceptor can neither set, read nor drop them.
+   */
+  controls?: ConnectionControls,
 ) => Promise<ModuleToolExecutionResult>;
 
 /** What one direct call sees: the session's scope and surface plus the call's own facts. */
@@ -69,6 +76,8 @@ export type DirectCallScope = ServerScope &
     internalDerivedDefinition:
       | { entry: DerivedToolsCatalogEntry; row: Record<string, unknown> }
       | undefined;
+    /** The call's own Connection controls; absent on a call that has none. */
+    controls: ConnectionControls | undefined;
     request: { params: { name: string; arguments: Record<string, unknown> } };
     extra: { requestId: string | number };
     /** The listed tool the name resolved to, set before the direct call runs. */

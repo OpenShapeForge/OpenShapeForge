@@ -41,6 +41,7 @@ import type {
   RuntimeOperationExecutionResult,
 } from "@openshapeforge/plugin-runtime";
 import {
+  isOperationAccepted,
   operationFailure,
   type OperationEnvelope,
   type OperationError,
@@ -2261,7 +2262,7 @@ export function registerRuntimeOperationRestRoutes(
             "Idempotency-Key must have exactly one value.",
           );
         }
-        return await withSession(
+        const result = await withSession(
           request,
           (session) => runtime.platform!.operations.execute(session, {
             operation: { id, intent: body.intent as string },
@@ -2273,6 +2274,9 @@ export function registerRuntimeOperationRestRoutes(
           }),
           id,
         );
+        // Taken over by an operation override: answered, not yet in effect.
+        if (isOperationAccepted(result)) return reply.status(202).send(result);
+        return result;
       } catch (error) {
         return failed(reply, error);
       }

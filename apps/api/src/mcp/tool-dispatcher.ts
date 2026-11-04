@@ -18,6 +18,10 @@ import {
   catalogDerivedTools,
   compatibilityToolNames,
 } from "./catalog.js";
+import {
+  type ConnectionControls,
+  ambientConnectionControls,
+} from "./connection-expectation.js";
 import { operationMayInvoke, projectCatalogOperationTool } from "./entity-tool-invocation.js";
 import { type ListedTool } from "./session-surface.js";
 import { directToolCall } from "./tool-dispatch.js";
@@ -64,6 +68,7 @@ export function createDispatchTool(scope: ServerScope, surface: SessionSurface):
       entry: DerivedToolsCatalogEntry;
       row: Record<string, unknown>;
     },
+    controls?: ConnectionControls,
   ): Promise<ModuleToolExecutionResult> => {
     signal?.throwIfAborted();
     assertParentInvocationActive?.();
@@ -93,6 +98,15 @@ export function createDispatchTool(scope: ServerScope, surface: SessionSurface):
           idempotencyKey,
           compatibilityCall,
           internalDerivedDefinition,
+          // Core's own controls, carried in the closure: `invoke` below hands
+          // interceptors only the selection options, so an interceptor can
+          // neither relax the expectation nor touch what was used. A dispatch
+          // the enclosing declarative invocation did not hand them to — a host
+          // Operation it reached, a derived tool run from inside a native
+          // binding — inherits them from the ambient store rather than running
+          // uncontrolled; the boundary checks are idempotent, so the common
+          // case where both are the same object is unaffected.
+          controls: controls ?? ambientConnectionControls(),
           request,
           extra,
           current,

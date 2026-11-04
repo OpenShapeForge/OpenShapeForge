@@ -6,7 +6,8 @@
   const typeName = gql.typeName;
   const coreFieldNames = new Set(gql.fields.map(f => f.name));
 -%>
-import { executeGraphqlRequest, profileForGraphqlQuery } from "@/lib/server/graphql-client";
+import { executeGraphqlRequest, isGraphqlProxyError, profileForGraphqlQuery } from "@/lib/server/graphql-client";
+import { acceptanceFromGraphqlPayload, type OperationAcceptance } from "@/lib/operation-acceptance";
 
 export async function get<%= typeName %>(id: string, options?: { query?: string }) {
 <%
@@ -100,13 +101,21 @@ export async function create<%= typeName %>(input: Record<string, unknown>) {
   return created;
 }
 
-export async function update<%= typeName %>(input: Record<string, unknown>) {
-  const response = await executeGraphqlRequest<{
+export async function update<%= typeName %>(input: Record<string, unknown>): Promise<Record<string, unknown> | { accepted: OperationAcceptance }> {
+  let response: {
     <%= gql.mutations.update.name %>?: { data?: Record<string, unknown> | null; error?: { code?: string; message?: string } | null } | null;
-  }>({
-    query: `mutation Update<%= typeName %>($input: Update<%= typeName %>Input!) { <%= gql.mutations.update.name %>(input: $input) { data { id } error { code message retryable } } }`,
-    variables: { input },
-  });
+  };
+  try {
+    response = await executeGraphqlRequest<typeof response>({
+      query: `mutation Update<%= typeName %>($input: Update<%= typeName %>Input!) { <%= gql.mutations.update.name %>(input: $input) { data { id } error { code message retryable } } }`,
+      variables: { input },
+    });
+  } catch (error) {
+    // Taken over by an operation override: started, not saved.
+    const accepted = isGraphqlProxyError(error) ? acceptanceFromGraphqlPayload(error.payload) : undefined;
+    if (accepted) return { accepted };
+    throw error;
+  }
   const result = response?.<%= gql.mutations.update.name %>;
   if (result?.error) throw new Error(`${result.error.code ?? "OPERATION_FAILED"}: ${result.error.message ?? "Operation failed."}`);
   const updated = result?.data;

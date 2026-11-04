@@ -27,6 +27,7 @@ import {
   hasStaticOptions,
   isClassified,
   isCollection,
+  linkedResultType,
   mapConditionPaths,
   record,
   schemaFieldOf,
@@ -57,6 +58,7 @@ import {
 } from "./store.js";
 import { qualifiedTable } from "./write.js";
 import {
+  assertNoLinkedReaders,
   assertTenantGraph,
   isLinkedKind,
   lockExtensionGraph,
@@ -493,6 +495,7 @@ async function updateFormula(
   }
   const before = storedFormula(field.definition);
   const after = storedFormula(change.definition)!;
+  if (before && before.resultType !== after.resultType) await assertNoLinkedReaders(trx, session, set.entity, field);
   const recompute = field.state === "suspended" || !before || before.resultType !== after.resultType || !isDeepStrictEqual(before.ast, after.ast);
   const next = await insertVersion(trx, session, set.entity, {
     fieldId: field.fieldId, key: change.key, version: field.version + 1, kind: "formula", definition: change.definition,
@@ -521,6 +524,10 @@ async function updateLinked(
     extensionError(`${field.key}: its classification never changes once the field exists; create a new field, copy the values and delete this one.`);
   }
   const spec = (definition: ExtensionDefinition) => definition[field.kind];
+  if (linkedResultType(field) !== linkedResultType({ kind: field.kind, definition: change.definition })) {
+    // A formula over it would compute against a type it was not checked with.
+    await assertNoDependents(trx, session, set, field, await dependentsOf(trx, session, set.entity, field.fieldId), "given another result type");
+  }
   const recompute = field.state === "suspended" || !isDeepStrictEqual(spec(field.definition), spec(change.definition));
   const next = await insertVersion(trx, session, set.entity, {
     fieldId: field.fieldId, key: change.key, version: field.version + 1, kind: field.kind, definition: change.definition,

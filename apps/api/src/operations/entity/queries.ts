@@ -381,7 +381,7 @@ async function listGeneratedEntityRowsForTable(
 
     const storageRows = result.rows.slice(0, limit).map((row) => row.row);
     // Lookups the recompute journal has yet to bring up to date: one step for the page.
-    if (projectOutput) await proveExtensionStaleness(trx, resolvedSession, table, extensionSet, storageRows);
+    if (projectOutput) await proveExtensionStaleness(trx, resolvedSession, extensionSet, storageRows);
     const projectedRows = projectOutput
       ? projectRows(table, session, storageRows)
       : storageRows;
@@ -471,7 +471,7 @@ export async function getGeneratedEntity(
       const row = await fetchGeneratedEntityRow(db, resolvedSession, table, input.id);
       if (row === null) return null;
       const extensionSet = await loadExtensionFields(trx, resolvedSession, table);
-      await proveExtensionStaleness(trx, resolvedSession, table, extensionSet, [row]);
+      await proveExtensionStaleness(trx, resolvedSession, extensionSet, [row]);
       const projected = projectGeneratedEntityRow(table, resolvedSession, row);
       const bound = await resolveBoundEntityRows(trx, resolvedSession, table, [projected]);
       return (await resolveComputedEntityRows(trx, resolvedSession, table, bound))[0] ?? null;

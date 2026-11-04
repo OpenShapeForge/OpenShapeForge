@@ -17,11 +17,11 @@ import { composeJobHandlers } from "../../../../jobs/handlers.js";
 import { processJobBatch } from "../../../../jobs/worker.js";
 import { getGeneratedCrudTables } from "../../catalog.js";
 import { executeCollectionMutation } from "../../collection-mutations.js";
-import { updateGeneratedEntityForTable } from "../../mutations.js";
+import { createGeneratedEntity, updateGeneratedEntityForTable } from "../../mutations.js";
 import { executeEntityOperation } from "../../runtime.js";
 import { EXTENSION_BACKFILL_KIND, extensionBackfillJobHandler } from "../backfill.js";
 import { executeFieldDefinitionAction, type FieldDefinitionAction } from "../definitions.js";
-import { EXTENSION_RECOMPUTE_KIND, extensionRecomputeJobHandler, revalidateAfterAuthorizationChange, revalidateLinkedFields } from "../linked.js";
+import { EXTENSION_RECOMPUTE_KIND, extensionRecomputeJobHandler, revalidateLinkedFields } from "../linked.js";
 import { __setExtensionRegistryForTests } from "../registry.js";
 import { extensionSnapshot } from "../snapshot.js";
 import { createExtensionFixture, ENTITY, MANAGER_ROLE, READER_ROLE, sessionFor, TARGET_ENTITY, WRITER_ROLE, type ExtensionFixture } from "./fixture.js";
@@ -196,17 +196,19 @@ describe("tenant lookups and rollups", () => {
     const location = await create(t.writer, TARGET_ENTITY, { name: "Depot" });
     const asset = await create(t.writer, ENTITY, { name: "Asset", extensions: { place: location.id } });
 
-    // A security manager puts the target's reads under managed access. The
-    // test entity's Operations lie outside the application ceiling a profile
-    // may grant, so the row is written directly and the hook every generic
-    // write of the profile model runs (mutations.ts) is run for it.
-    // The ceiling's own guard trigger is set aside for that one row.
+    // The target's reads come under managed access. The test entity's
+    // Operations lie outside the application ceiling a profile may grant, so
+    // that row is written directly, past the ceiling's guard trigger; the
+    // generic write of the profile model that follows, on an Operation inside
+    // the ceiling, is what revalidates (mutations.ts).
     await fixture.privileged.db.transaction().execute(async (trx) => {
       await sql`set local session_replication_role = replica`.execute(trx);
       await sql`insert into erp.authorization_operation_policies (tenant_id, operation_id, entity_type, managed)
         values (${t.id}::uuid, ${`${TARGET_ENTITY}.list`}, ${TARGET_ENTITY}, true)`.execute(trx);
     });
-    await withDbSession(fixture.app.db, t.security, (trx) => revalidateAfterAuthorizationChange(trx, t.security, tableOf("AuthorizationOperationPolicy")));
+    expect((await listed(t, "placeName")).state).toBe("ready");
+    await createGeneratedEntity(fixture.app.db, t.security, { table: tableOf("AuthorizationOperationPolicy").name,
+      values: { operationId: "Relation.list", entityType: "Relation", managed: false } });
     const suspended = await listed(t, "placeName");
     expect(suspended.state).toBe("suspended");
     expect(suspended.backfill?.error).toMatchObject({ code: "AUTHORIZATION_PROOF_LOST", message: expect.stringContaining("authorization profile") });
@@ -390,7 +392,23 @@ describe("tenant lookups and rollups", () => {
     } finally {
       restore();
     }
-    expect((await listed(t, "placeName")).state).toBe("suspended");
+    const suspended = await listed(t, "placeName");
+    expect(suspended.state).toBe("suspended");
     expect((await listed(t, "partCount")).state).toBe("ready");
+    // Back under the contract, its designer saves it again: proven anew and computed.
+    expect(await define(t.manager, "update", { fieldId: suspended.fieldId, definition: lookup("extensions.place", "name", "Again") }))
+      .toMatchObject({ state: "updating" });
+    await drainJobs();
+    expect((await listed(t, "placeName")).state).toBe("ready");
+  });
+
+  test("a field's result type does not change under a lookup that reads it", async () => {
+    const t = await tenant();
+    await field(t, "group", reference(GROUP, "Group"));
+    await field(t, "size", number("Size"), undefined, GROUP);
+    const twice = await field(t, "twice", formula("{Size} * 2", "Twice"), "formula", GROUP);
+    await field(t, "groupTwice", lookup("extensions.group", "extensions.twice"), "lookup");
+    expect(await failure(define(t.manager, "update", { fieldId: twice, definition: formula('{Size} & ""', "Twice") }, GROUP)))
+      .toMatchObject({ code: "CONFLICT", message: expect.stringContaining(`${ENTITY}.groupTwice`) });
   });
 });

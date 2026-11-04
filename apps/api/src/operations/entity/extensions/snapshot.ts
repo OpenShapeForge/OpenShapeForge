@@ -77,7 +77,7 @@ export async function extensionSnapshot(
   const set = await loadExtensionFieldsFor(trx, session, entity, entry!);
   const source = storedExtensionSource(row);
   const values = conditionValues(table!, row, set, source);
-  await proveExtensionStaleness(trx, session, table!, set, [row]);
+  await proveExtensionStaleness(trx, session, set, [row]);
   const stale = staleExtensionFields(entity, row.id);
   const names = set.fields.some((field) => isLinkedKind(field.kind)) ? await tenantFieldNames(trx, session.tenantId!) : new Map<string, { key: string }>();
   const extensions: Record<string, unknown> = {};

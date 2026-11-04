@@ -5,6 +5,7 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
 import type { RuntimeExtensionRegistry } from "@openshapeforge/plugin-runtime";
 import { extensionRegistry } from "../../operations/entity/extensions/registry.js";
 import { formulaColumns } from "../../operations/entity/extensions/formula-columns.js";
+import { narrowerReadAccess } from "../../operations/entity/extensions/read-access.js";
 import { draftRule } from "../../operations/entity/versioned-head.js";
 import type { GeneratedCrudTable } from "../../operations/entity/types.js";
 
@@ -378,11 +379,12 @@ export async function applyWorkerRoleGrants(db: OpenShapeForgeDatabase) {
  *     column) — no other column of the entity;
  *   - on each owned single child a formula may read, SELECT of its id, tenant,
  *     foreign key and formula-readable columns;
- *   - on each entity a lookup or rollup may read (a reference target, an
- *     entity across an authored relation), SELECT of its id, tenant, clocks,
- *     the foreign key of that relation and the columns a computed field may
- *     read (formula-columns.ts) — and no other business table, nor any other
- *     column (a classified or field-policed one never is);
+ *   - on each entity a proven lookup or rollup can read (a reference target
+ *     or an entity across an authored relation, not authorized more narrowly
+ *     than the source by the compiled contract, read-access.ts), SELECT of
+ *     its id, tenant, clocks, the foreign key of that relation and the columns
+ *     a computed field may read (formula-columns.ts) — and no other business
+ *     table, nor any other column (a classified or field-policed one never is);
  *   - on `platform.extension_field_definitions`, SELECT, INSERT (the version
  *     that turns unique off again after a duplicate) and UPDATE of `state`
  *     and `is_current` only;
@@ -433,15 +435,20 @@ export function extensionWorkerGrants(
     }
     childGrants.set(child.table, columns);
   }
-  // What a lookup or rollup reads on the entities it reaches.
+  // What a lookup or rollup reads on the entities it reaches. An entity no
+  // lookup or rollup of this source can be proven against stays out: the
+  // worker never needs it.
   const sources = new Set(entities.map((entry) => entry.table));
-  for (const entry of entities) {
+  for (const source of registry.entityNames()) {
+    const entry = registry.entity(source)!;
     const reached = [
-      ...entry.targets.map((target) => ({ table: target.table, foreignKey: undefined as string | undefined })),
-      ...entry.relations.map((relation) => ({ table: relation.table, foreignKey: relation.kind === "hasMany" ? relation.foreignKey : undefined })),
+      ...entry.targets.map((target) => ({ entity: target.entity, table: target.table, foreignKey: undefined as string | undefined, owned: false })),
+      ...entry.relations.map((relation) => ({ entity: relation.entity, table: relation.table,
+        foreignKey: relation.kind === "hasMany" ? relation.foreignKey : undefined,
+        owned: relation.ownership === "owned" && relation.childAuthorization === "owner" })),
     ];
-    for (const { table: name, foreignKey } of reached) {
-      if (sources.has(name)) continue;
+    for (const { entity, table: name, foreignKey, owned } of reached) {
+      if (sources.has(name) || narrowerReadAccess(source, entity, registry.readAccess(source), registry.readAccess(entity), owned)) continue;
       const [schema, tableName] = name.split(".");
       const table = tables.find((candidate) => candidate.schema === schema && candidate.table === tableName);
       if (!table) continue;

@@ -35,7 +35,7 @@
  */
 import { sql, type Transaction } from "kysely";
 import { operationFailure } from "@openshapeforge/operations";
-import type { RuntimeExtensionReadAccess, RuntimeExtensionRelation } from "@openshapeforge/plugin-runtime";
+import type { RuntimeExtensionRelation } from "@openshapeforge/plugin-runtime";
 import { MAX_RESULT_TEXT_LENGTH, ROUNDING_DECIMALS } from "@openshapeforge/formula";
 import type { DB } from "../../../generated/db/types.js";
 import { currentDbSessionTransaction, type DbSessionInput } from "../../../db/session.js";
@@ -47,7 +47,6 @@ import type { ModuleJobHandler } from "../../../modules/contract.js";
 import { getGeneratedCrudTables } from "../catalog.js";
 import { fieldNameForColumn } from "../columns.js";
 import type { GeneratedCrudTable } from "../types.js";
-import { formulaColumns } from "./formula-columns.js";
 import { authoredFormulaFields, fieldValues, formulaGraph, labelText, storedFormula, tenantFieldType, formulaDependencies } from "./formulas.js";
 import {
   conditionPaths,
@@ -69,6 +68,7 @@ import {
   type ExtensionFieldSet,
   type RollupAggregate,
 } from "./model.js";
+import { narrowerReadAccess } from "./read-access.js";
 import { conditionValues, readValue, storedExtensionSource } from "./read.js";
 import { extensionRegistry } from "./registry.js";
 import { announceFieldDefinitionChange, forgetExtensionFields, loadExtensionFieldsFor, lockExtensionFields } from "./store.js";
@@ -300,18 +300,8 @@ function narrower(
 ): string | undefined {
   const from = extensionRegistry.readAccess(source);
   const to = extensionRegistry.readAccess(target);
-  if (!from || !to) return `${!from ? source : target} is outside the compiled authorization contract tenant fields may reach.`;
-  if (!owned) {
-    const missing = from.roles.filter((role) => !to.roles.includes(role));
-    if (missing.length) {
-      return `${target} is readable for ${to.roles.join(", ") || "no role"}, ${source} also for ${missing.join(", ")}; ` +
-        `${missing.length === 1 ? "that role" : "those roles"} would see ${target} values ${missing.length === 1 ? "it" : "they"} may not read.`;
-    }
-    const classes = (access: RuntimeExtensionReadAccess) => access.principalClasses ?? ["person", "application", "service", "unknown"];
-    const outside = classes(from).filter((kind) => !classes(to).includes(kind));
-    if (outside.length) return `${target} is readable for fewer principal classes than ${source} (not for ${outside.join(", ")}).`;
-  }
-  if (to.rowPolicy) return `the rows of ${target} are narrowed by ${to.rowPolicy}, so a reader of ${source} would see values of ${target} records hidden from them.`;
+  const reason = narrowerReadAccess(source, target, from, to, owned);
+  if (reason || !from || !to) return reason;
   if (field?.authored) {
     const roles = to.fieldReadRoles?.[field.path];
     const missing = roles ? from.roles.filter((role) => !roles.includes(role)) : [];
@@ -409,6 +399,23 @@ function resultTypeOf(resolved: ResolvedLookup | ResolvedRollup): ComputedResult
   }
 }
 
+/**
+ * Refuse a change of a field's result type while a lookup or rollup of the
+ * tenant reads it, naming them: their stored result type and index column
+ * were fixed against the old one. Create a new field instead.
+ */
+export async function assertNoLinkedReaders(trx: Transaction<DB>, session: DbSessionInput, entity: string, field: Pick<ExtensionField, "fieldId" | "key">): Promise<void> {
+  const readers = await sql<{ name: string }>`select distinct f.entity || '.' || f.key as name
+    from platform.extension_field_dependencies d
+    join platform.extension_field_definitions f on f.tenant_id = d.tenant_id and f.field_id = d.field_id and f.is_current
+      and f.state <> 'deleted' and f.kind in ('lookup', 'rollup')
+    where d.tenant_id = ${session.tenantId}::uuid and d.depends_on_entity = ${entity} and d.depends_on_field = ${field.fieldId}
+    order by 1`.execute(trx);
+  if (readers.rows.length) {
+    extensionError(`${field.key}: its result type cannot change while ${readers.rows.map((row) => row.name).join(", ")} read${readers.rows.length === 1 ? "s" : ""} it; create a new field instead.`, "CONFLICT");
+  }
+}
+
 /** The rows of `platform.extension_field_dependencies` a resolved lookup or rollup keeps. */
 function linkedDependencies(entity: string, resolved: ResolvedLookup | ResolvedRollup): LinkedDependency[] {
   if (resolved.kind === "lookup") {
@@ -478,7 +485,7 @@ export async function assertTenantGraph(
       if (entity === changed.entity && field.fieldId === changed.fieldId) continue;
       const reads = field.kind === "formula"
         ? formulaDependencies(set, storedFormula(field.definition)?.ast ?? { kind: "literal", value: null })
-        : await storedDependencies(trx, session, set, field);
+        : storedDependencies(set, field);
       nodes.set(id(entity, field.fieldId), { entity, field: field.fieldId, label: `${entity}.${field.key}`, limit: set.entry.limits.formulaDepth,
         reads: reads.map((read) => ({ entity: read.entity, field: read.field })) });
     }
@@ -518,7 +525,7 @@ export async function assertTenantGraph(
 }
 
 /** The dependencies of a stored lookup or rollup, from its definition (a deprecated one's included). */
-async function storedDependencies(trx: Transaction<DB>, session: DbSessionInput, set: ExtensionFieldSet, field: ExtensionField): Promise<LinkedDependency[]> {
+function storedDependencies(set: ExtensionFieldSet, field: ExtensionField): LinkedDependency[] {
   const lookup = field.kind === "lookup" ? storedLookup(field.definition) : undefined;
   if (lookup) {
     const via = tenantPathId(lookup.via);
@@ -533,7 +540,6 @@ async function storedDependencies(trx: Transaction<DB>, session: DbSessionInput,
   const child = dot > 0 ? rollup.collection.slice(0, dot) : set.entry.relations.find((relation) => relation.key === rollup.collection)?.entity;
   if (!child) return [];
   const paths = [rollup.of, ...(rollup.where !== undefined ? conditionPaths(rollup.where).map((path) => path.kind === "authored" ? path.field : `${TENANT_PATH}${path.key}`) : [])];
-  void trx; void session;
   return paths.flatMap((path) => path ? [{ entity: child, field: tenantPathId(path) ?? path, via: rollup.collection }] : []);
 }
 
@@ -976,7 +982,6 @@ const staleness = new WeakMap<object, Map<string, Map<string, Set<string>>>>();
 export async function proveExtensionStaleness(
   trx: Transaction<DB>,
   session: DbSessionInput,
-  table: GeneratedCrudTable,
   set: ExtensionFieldSet | undefined,
   rows: readonly Readonly<Record<string, unknown>>[],
 ): Promise<void> {
@@ -1006,7 +1011,6 @@ export async function proveExtensionStaleness(
     for (const reader of formulaGraph(set).affectedBy(stale.map((field) => ({ entity: set.entity, field: field.fieldId })))) ids.add(reader.fieldId);
     records.set(String(row.id), ids);
   }
-  void table;
 }
 
 /** The fields of one record this transaction proved stale (proveExtensionStaleness). */
@@ -1097,14 +1101,9 @@ export async function revalidateLinkedFieldsOfEveryTenant(
   return suspended;
 }
 
-/** For tests and the reader: whether a definition kind is one of this module's. */
+/** Whether a definition kind is one of this module's. */
 export function isLinkedKind(kind: unknown): kind is "lookup" | "rollup" {
   return kind === "lookup" || kind === "rollup";
-}
-
-/** Columns of an entity a lookup or rollup may read, for the worker's column grants (db/migrations/worker-role.ts). */
-export function linkedReadableColumns(table: GeneratedCrudTable): string[] {
-  return formulaColumns(table).map((column) => column.name);
 }
 
 /**

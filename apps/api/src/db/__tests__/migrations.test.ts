@@ -1578,7 +1578,8 @@ describe("tenant fields on a carried-forward database", () => {
           // visible.
           const inherited = await sql<{ table: string; permissive: string; command: string; qual: string }>`
             select tablename as table, permissive, cmd as command, qual from pg_policies
-            where schemaname = ${entity.table.split(".")[0]} and policyname = tablename || '_record_access' order by tablename`.execute(db);
+            where schemaname = ${entity.table.split(".")[0]} and policyname = tablename || '_record_access'
+              and tablename like ${`${entity.table.split(".")[1]!}_field_%`} order by tablename`.execute(db);
           expect(inherited.rows.map((row) => [row.table, row.permissive, row.command])).toEqual(
             [entity.uniqueTable, entity.valuesTable].map((table) => [table.split(".")[1]!, "RESTRICTIVE", "ALL"]).toSorted(),
           );
@@ -1588,7 +1589,7 @@ describe("tenant fields on a carried-forward database", () => {
             where schemaname = 'platform' and indexname = 'extension_field_definitions_current_field_uidx'`.execute(db);
           expect(current.rows).toEqual([{ definition: expect.stringMatching(/UNIQUE INDEX .*\(tenant_id, field_id\) WHERE is_current/) }]);
           // The worker: no MAINTAIN, the definition columns a backfill changes
-          // only, and nothing on the dependencies.
+          // only, and the dependencies to read, never to write.
           const worker = databaseRole("worker").name;
           // MAINTAIN exists from PostgreSQL 17; older servers cannot grant it at all.
           const maintainKnown = Number((await sql<{ version: string }>`select current_setting('server_version_num') as version`.execute(db)).rows[0]!.version) >= 170000;
@@ -1599,10 +1600,11 @@ describe("tenant fields on a carried-forward database", () => {
             has_table_privilege(${worker}, 'platform.extension_field_definitions', 'DELETE') as definitions_delete,
             has_column_privilege(${worker}, 'platform.extension_field_definitions', 'state', 'UPDATE') as definitions_state,
             has_column_privilege(${worker}, 'platform.extension_field_definitions', 'definition', 'UPDATE') as definitions_definition,
-            has_table_privilege(${worker}, 'platform.extension_field_dependencies', 'SELECT,INSERT,UPDATE,DELETE') as dependencies,
+            has_table_privilege(${worker}, 'platform.extension_field_dependencies', 'SELECT') as dependencies_read,
+            has_table_privilege(${worker}, 'platform.extension_field_dependencies', 'INSERT,UPDATE,DELETE') as dependencies_write,
             has_table_privilege(${worker}, 'platform.system_bypass_audit', 'INSERT') as bypass_audit`.execute(db);
           expect({ maintain, ...rights.rows[0] } as Record<string, boolean>).toEqual({
-            maintain: false, definitions_delete: false, definitions_state: true, definitions_definition: false, dependencies: false, bypass_audit: true,
+            maintain: false, definitions_delete: false, definitions_state: true, definitions_definition: false, dependencies_read: true, dependencies_write: false, bypass_audit: true,
           });
           expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);
           expect(await valueIndexes(db, entity.valuesTable)).toEqual(measuredIndexes(entity.valuesTable));

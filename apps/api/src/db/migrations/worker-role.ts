@@ -383,8 +383,11 @@ export async function applyWorkerRoleGrants(db: OpenShapeForgeDatabase) {
  *     or an entity across an authored relation, not authorized more narrowly
  *     than the source by the compiled contract, read-access.ts), SELECT of
  *     its id, tenant, clocks, the foreign key of that relation and the columns
- *     a computed field may read (formula-columns.ts) — and no other business
- *     table, nor any other column (a classified or field-policed one never is);
+ *     a computed field may read (formula-columns.ts) — and nothing else of it;
+ *     a classified or field-policed column never is. This rule reaches no
+ *     other business table; what the worker holds on a table that declares
+ *     `workerDml` itself (`erp.tasks`, `erp.comments`) comes from that
+ *     declaration, not from here;
  *   - on `platform.extension_field_definitions`, SELECT, INSERT (the version
  *     that turns unique off again after a duplicate) and UPDATE of `state`,
  *     `suspended_reason` and `is_current` only;

@@ -329,7 +329,11 @@ describe("extensible: the manifest registry", () => {
     const access = (transform: (document: Record<string, any>) => void) =>
       compile(() => {}, { dir: withDocument("extensible-part-spec", transform) }).extensionRegistry!.readAccess.ExtensiblePartSpec!;
     expect(access(() => {}).rowPolicy).toBeUndefined();
-    expect(access((document) => { document.authorization.rowAccess = { enabled: true, empty: "public" }; }).rowPolicy).toBe("rowAccess");
+    // Plain row access narrows nothing; an owner or group axis does.
+    expect(access((document) => { document.authorization.rowAccess = { enabled: true, empty: "public" }; }).rowPolicy).toBeUndefined();
+    expect(access((document) => {
+      document.authorization.rowAccess = { enabled: true, empty: "public", owner: { column: "part_id", session: "app.current_user_id" } };
+    }).rowPolicy).toBe("rowScope");
     expect(access((document) => { document.authorization.roles.read = ["Spec.Reader"]; }).roles).toEqual(["Spec.Reader"]);
   });
 

@@ -2271,12 +2271,17 @@ test("an extensible entity offers its tenant-field routes, and a target its refe
         allowedOsfTypes: ["measurement", "string"],
         targets: [{ entity: "Product", table: "erp.products" }, { entity: "Supplier", table: "erp.suppliers" }],
         ownedSingleChildren: [],
+        relations: [],
       },
     },
     indexProjections: { measurement: { number: "value", text: "unit" } },
     referencedBy: {
       Product: [{ sourceEntity: "Product", valuesTable: "erp.products_field_values" }],
       Supplier: [{ sourceEntity: "Product", valuesTable: "erp.products_field_values" }],
+    },
+    readAccess: {
+      Product: { table: "erp.products", roles: ["Catalogue.Read"] },
+      Supplier: { table: "erp.suppliers", roles: ["Catalogue.Read"] },
     },
   };
   const manifest = buildWebManifest([product, supplier, other], {}, undefined, {}, registry);

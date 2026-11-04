@@ -513,7 +513,8 @@ function readAccessOf(entry: { contract: CompiledEntityContract; table: TableDef
   const rowPolicy = entry.table.rowScope ? "rowScope"
     : entry.table.ownerAxis || authorization?.ownerAxis ? "ownerAxis"
     : entry.table.source?.authorization?.recordPermissions || authorization?.rowAccess?.recordPermissions ? "recordPermissions"
-    : authorization?.rowAccess?.enabled ? "rowAccess"
+    // Plain `rowAccess: { enabled: true }` narrows nothing; only an owner or group axis does.
+    : authorization?.rowAccess?.owner || authorization?.rowAccess?.group ? "rowAccess"
     : Object.keys(authorization?.profileAuthorizations ?? {}).length ? "profileAuthorizations"
     : undefined;
   const fieldReadRoles = Object.fromEntries((authorization?.fieldAuthorizations ?? [])

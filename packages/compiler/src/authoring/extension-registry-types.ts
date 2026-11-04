@@ -33,8 +33,9 @@ export type ExtensionReadAccess = {
   principalClasses?: string[];
   /**
    * Set when its rows are visible to fewer than all its readers: the axis
-   * that narrows them (`rowScope`, `ownerAxis`, `rowAccess`, `recordPermissions`,
-   * `profileAuthorizations`). Absent means every reader sees every row of the tenant.
+   * that narrows them (`rowScope`, `ownerAxis`, `recordPermissions`, `rowAccess`
+   * for an owner or group axis, `profileAuthorizations`). Absent means every
+   * reader sees every row of the tenant.
    */
   rowPolicy?: string;
   /** Fields with read roles of their own (`fieldAuthorizations`), by field key. */

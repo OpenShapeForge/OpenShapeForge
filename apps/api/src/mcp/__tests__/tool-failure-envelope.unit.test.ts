@@ -223,6 +223,15 @@ describe("a database rule's refusal", () => {
     }
     expect(thrown).toMatchObject({ status: 502, code: "PROVIDER_ERROR", message: "boom" });
   });
+
+  it("a database that gave up on a transaction reaches the model as a conflict it may repeat", () => {
+    const error = Object.assign(new Error("deadlock detected"), { name: "PostgresError", errno: "40P01", detail: "Process 1 waits for ShareLock." });
+    const result = failed(error);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual(toHttpError(error).body as unknown as Record<string, unknown>);
+    expect(result.structuredContent).toMatchObject({ error: { code: "CONFLICT", retryable: true } });
+    expect(JSON.stringify(result)).not.toContain("Process 1");
+  });
 });
 
 describe("native composition of a canonical entity success", () => {

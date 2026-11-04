@@ -1561,4 +1561,92 @@ describe("tenant lookups and rollups", () => {
       expect(read.extensionsMeta.double).toMatchObject({ suspended: true });
     });
   });
+
+  describe("a writer and the journal worker", () => {
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    /** Until a backend of this database waits for a lock: the worker, for what the writer holds. */
+    async function blocked() {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        const [row] = await privileged(sql<{ waiting: number }>`select count(*)::int as waiting from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'`);
+        if (row!.waiting) return;
+        await sleep(25);
+      }
+      throw new Error("nothing came to wait");
+    }
+    const row = async (t: Tenant, fieldId: string) => (await privileged(sql<{ id: string }>`select id::text as id from platform.extension_field_recomputes
+      where tenant_id = ${t.id}::uuid and field_id = ${fieldId}::uuid`))[0]!.id;
+    const asJournal = async (trx: Transaction<never>, t: Tenant, fieldId: string, target: { entity: string; id: string }) => {
+      const set = await loadExtensionFieldsFor(trx as never, t.writer, ENTITY, extensionRegistry.entity(ENTITY)!, { lock: "shared" });
+      await journalRecompute(trx as never, t.writer, { entity: ENTITY, field: set.byId.get(fieldId)!, targetEntity: target.entity, targetId: target.id });
+    };
+    const batch = (t: Tenant, id: string) => withDbSession(fixture.worker.db, t.writer, (trx) => runRecomputeBatch(trx, t.writer, id));
+
+    /**
+     * A writer holds a record, as lockLinkedRecords leaves it, and a worker
+     * comes for the same record on a batch of a row the writer journals next:
+     * the order of a write is record, then row, and a worker's must be too.
+     */
+    async function collide(t: Tenant, fieldId: string, held: string, target: { entity: string; id: string }) {
+      await withDbSession(fixture.app.db, t.writer, (trx) => asJournal(trx as never, t, fieldId, target));
+      const id = await row(t, fieldId);
+      let hold!: () => void, go!: () => void;
+      const holding = new Promise<void>((resolve) => { hold = resolve; });
+      const gate = new Promise<void>((resolve) => { go = resolve; });
+      const writing = withDbSession(fixture.app.db, t.writer, async (trx) => {
+        await sql`select id from erp.extensible_assets where id = ${held}::uuid for no key update`.execute(trx);
+        hold();
+        await gate;
+        await asJournal(trx as never, t, fieldId, target);
+      });
+      await holding;
+      const first = batch(t, id);
+      await blocked();
+      go();
+      await writing;
+      // The write came while the batch ran, so the row stays for a batch that sees it.
+      expect(await first).toMatchObject({ done: false });
+      for (let run = 0; run < 3 && (await journal(t.id)).length; run += 1) await batch(t, id);
+      expect(await journal(t.id)).toEqual([]);
+    }
+
+    test("a rollup's row: the record itself", async () => {
+      const t = await tenant();
+      const total = await field(t, "total", rollup({ collection: "parts", aggregate: "sum", of: "quantity" }), "rollup");
+      const asset = await create(t.writer, ENTITY, { name: "A" });
+      await collide(t, total, asset.id, { entity: ENTITY, id: asset.id });
+    });
+
+    test("a rollup over its own entity whose step reaches the row's target: the record itself again", async () => {
+      const t = await tenant();
+      await field(t, "weight", number("Weight"));
+      const total = await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "item.extensions.weight" }), "rollup");
+      const asset = await create(t.writer, ENTITY, { name: "A" });
+      await collide(t, total, asset.id, { entity: ENTITY, id: asset.id });
+    });
+
+    test("a lookup's row: a referring record", async () => {
+      const t = await tenant();
+      await field(t, "place", reference(TARGET_ENTITY, "Place"));
+      const placeName = await field(t, "placeName", lookup("extensions.place", "name"), "lookup");
+      const location = await create(t.writer, TARGET_ENTITY, { name: "L" });
+      const asset = await create(t.writer, ENTITY, { name: "A", extensions: { place: location.id } });
+      await sql`update erp.extensible_asset_locations set name = 'M' where id = ${location.id}::uuid`.execute(fixture.privileged.db);
+      await collide(t, placeName, asset.id, { entity: TARGET_ENTITY, id: location.id });
+      expect((await get(t.reader, asset.id)).extensions.placeName).toBe("M");
+    });
+
+    test("a database that gives up on a write answers a retryable conflict, and the write changed nothing", async () => {
+      const t = await tenant();
+      const asset = await create(t.writer, ENTITY, { name: "A" });
+      for (const sqlstate of ["40P01", "40001"]) {
+        const repair = await failWrites("erp.extensible_assets", sqlstate);
+        const answer = await executeEntityOperation(fixture.app.db, t.writer, { operation: { id: `${ENTITY}.update`, intent: "update" },
+          input: { id: asset.id, values: { name: "B" }, expectedVersion: String(asset.updated_at) } });
+        await repair();
+        expect(answer).toMatchObject({ error: { code: "CONFLICT", retryable: true } });
+        expect((await get(t.reader, asset.id)).name).toBe("A");
+      }
+    });
+  });
 });

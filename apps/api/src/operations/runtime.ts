@@ -2398,7 +2398,7 @@ export function operationGraphqlContribution(
           });
         }
         const { status, body } = toHttpError(error);
-        throw new GraphQLError(body.error.message, { extensions: { code: body.error.code, status } });
+        throw new GraphQLError(body.error.message, { extensions: { code: body.error.code, status, retryable: body.error.retryable } });
       }
     };
   }

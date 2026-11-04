@@ -179,7 +179,7 @@ export function toHttpError(error: unknown): {
         error: {
           code: refusal.code,
           message: refusal.message,
-          retryable: false,
+          retryable: refusal.retryable === true,
           ...(refusal.detail !== undefined ? { detail: refusal.detail } : {}),
           ...(refusal.hint !== undefined ? { data: { hint: refusal.hint } } : {}),
         },

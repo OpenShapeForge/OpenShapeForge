@@ -929,7 +929,9 @@ whatever is written meanwhile, and a new pass then settles the latest
 generation. A job that fails is retried; a row left without a live job gets a
 new one at the next write of the record, and otherwise from the worker's
 periodic sweep. A recompute leaves a published head published: only a change of
-the record itself puts it back to draft.
+the record itself puts it back to draft. A batch locks the records it computes
+before it locks its journal row, the order a write takes them in, so the two
+never wait on each other crosswise.
 
 Before its first row write, a write locks what it will recompute, in one order
 (table, then id) and at once at the strength it needs: `for key share` for a

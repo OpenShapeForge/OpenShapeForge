@@ -1595,8 +1595,13 @@ type JournalRow = { id: string; entity: string; field_id: string; target_entity:
  * written more often than a batch takes cannot starve the records at the back.
  * A write during a pass raises the generation; the pass ends, and a new one
  * starts on the latest generation. The row goes once a pass that started on
- * the latest generation has ended. It is locked for the batch, so a write of
- * the target waits for it rather than slip between.
+ * the latest generation has ended.
+ *
+ * A writer holds a record and then comes for this row, so a batch takes them in
+ * that order too: the records first, the row last (settled), holding it no longer
+ * than its own commit. A write that raises the generation meanwhile is seen there,
+ * and a row of one record is then computed once more. Batches of one row take
+ * turns under an advisory lock, which no writer asks for.
  */
 export async function runRecomputeBatch(
   trx: Transaction<DB>,
@@ -1605,14 +1610,18 @@ export async function runRecomputeBatch(
   batchSize = RECOMPUTE_BATCH_SIZE,
 ): Promise<{ done: boolean; processed: number; step?: string }> {
   const tenantId = session.tenantId!;
+  await sql`select pg_advisory_xact_lock(hashtextextended(${`osf-extensions-recompute:${recomputeId}`}, 0))`.execute(trx);
   const found = await sql<JournalRow>`select id::text as id, entity, field_id::text as field_id, target_entity, target_id::text as target_id,
       generation, pass_generation, cursor from platform.extension_field_recomputes
-    where tenant_id = ${tenantId}::uuid and id = ${recomputeId}::uuid for update`.execute(trx);
+    where tenant_id = ${tenantId}::uuid and id = ${recomputeId}::uuid`.execute(trx);
   const row = found.rows[0];
   if (!row) return { done: true, processed: 0 };
   const entry = extensionRegistry.entity(row.entity);
   const table = tableOf(row.entity);
   const remove = () => sql`delete from platform.extension_field_recomputes where tenant_id = ${tenantId}::uuid and id = ${row.id}::uuid`.execute(trx);
+  /** The row's generation now, under its lock for the rest of the batch; undefined when a rebuild settled it meanwhile. */
+  const settled = async () => (await sql<{ generation: number }>`select generation from platform.extension_field_recomputes
+    where tenant_id = ${tenantId}::uuid and id = ${row.id}::uuid for update`.execute(trx)).rows[0]?.generation;
   if (!entry || !table) { await remove(); return { done: true, processed: 0 }; }
   const set = await loadExtensionFieldsFor(trx, session, row.entity, entry, { lock: "shared" });
   const field = set.byId.get(row.field_id);
@@ -1627,6 +1636,8 @@ export async function runRecomputeBatch(
   return acrossTenant(trx, session, `tenant field recompute ${row.id}`, async () => {
     if (!lookup && !reference && !walk) {
       await recomputeLinkedRecord(trx, session, { table, set, recordId: row.target_id, fields: [field] });
+      const generation = await settled();
+      if (generation !== undefined && generation !== row.generation) return { done: false, processed: 1, step: `${generation}:again` };
       await remove();
       return { done: true, processed: 1 };
     }
@@ -1650,14 +1661,16 @@ export async function runRecomputeBatch(
         : await referringRecords(trx, tenantId, set, lookup!.via, row.target_id, cursor, batchSize);
       for (const source of sources) await recomputeLinkedRecord(trx, session, { table, set, recordId: source, fields: [field] });
     }
+    const generation = await settled();
+    if (generation === undefined) return { done: true, processed: sources.length };
     if (sources.length < batchSize) {
-      if (pass === row.generation) {
+      if (pass === generation) {
         await remove();
         return { done: true, processed: sources.length };
       }
       await sql`update platform.extension_field_recomputes set pass_generation = null, cursor = null
         where tenant_id = ${tenantId}::uuid and id = ${row.id}::uuid`.execute(trx);
-      return { done: false, processed: sources.length, step: `${row.generation}:restart` };
+      return { done: false, processed: sources.length, step: `${generation}:restart` };
     }
     const next = sources.at(-1)!;
     await sql`update platform.extension_field_recomputes set pass_generation = ${pass}, cursor = ${next}

@@ -27,11 +27,25 @@ export function operationForm(form: { showOnlyGroupedFields?: boolean; defaults?
   if (form.defaults) {
     // Preserve the root and its $defs/cross-field rules; only relax fields the
     // person will fill later. Keep required inside `not` and conditionals.
-    const relax = (value: unknown, conditional = false): unknown => {
-      if (Array.isArray(value)) return value.map(item => relax(item, conditional));
+    const supplied = (path: readonly string[]) => {
+      let value: unknown = form.defaults;
+      for (const key of path) {
+        if (!value || typeof value !== "object" || Array.isArray(value) || !Object.hasOwn(value, key)) return false;
+        value = (value as Record<string, unknown>)[key];
+      }
+      return true;
+    };
+    const relax = (value: unknown, path: readonly string[] = [], preserve = false): unknown => {
+      if (Array.isArray(value)) return value.map(item => relax(item, path, preserve));
       if (!value || typeof value !== "object") return value;
-      return Object.fromEntries(Object.entries(value).flatMap(([key, entry]) =>
-        key === "required" && !conditional ? [] : [[key, relax(entry, conditional || key === "not" || key === "if" || key === "then" || key === "else")]]));
+      const full = preserve || (path.length > 0 && supplied(path) && !used.some(field => field.startsWith(`${path.join(".")}.`) || field === path.join(".")));
+      return Object.fromEntries(Object.entries(value).flatMap(([key, entry]) => {
+        if (key === "required" && !full) return [];
+        if (key === "properties" && entry && typeof entry === "object" && !Array.isArray(entry)) {
+          return [[key, Object.fromEntries(Object.entries(entry).map(([name, child]) => [name, relax(child, [...path, name], full)]))]];
+        }
+        return [[key, relax(entry, path, full || key === "not" || key === "if" || key === "then" || key === "else" || key === "$defs")]];
+      }));
     };
     const sample = (value: unknown, locale: string): unknown => {
       if (Array.isArray(value)) return value.map(entry => sample(entry, locale));
@@ -43,7 +57,7 @@ export function operationForm(form: { showOnlyGroupedFields?: boolean; defaults?
     for (const key of Object.keys(form.defaults)) if (!(key in (schema.properties as Record<string, unknown> ?? {}))) throw new Error(`${origin}: invalid form defaults.`);
     const ajv = new Ajv2020.default({ strict: false });
     addFormats.default(ajv);
-    for (const locale of ["en", "nl"]) if (!ajv.validate(relax(schema) as object, sample(form.defaults, locale))) throw new Error(`${origin}: invalid form defaults.`);
+    for (const locale of ["en", "nl"]) if (!ajv.validate(relax(schema) as object, sample(form.defaults, locale))) throw new Error(`${origin}: invalid form defaults: ${ajv.errorsText(ajv.errors)}.`);
   }
   if (form.showOnlyGroupedFields) {
     if (groups.some(group => group.collapsed)) throw new Error(`${origin}: compact form groups cannot be collapsed.`);

@@ -29,7 +29,7 @@ test("compact create forms require valid defaults for hidden required inputs", (
   const groups = [{ title, fields: ["record.title"] }];
   const defaults = { record: { status: "draft" }, version: { label: "1", status: "draft" } };
   expect(operationForm({ showOnlyGroupedFields: true, defaults, groups }, input, "Thing.create", ["requestKey"])).toEqual({ showOnlyGroupedFields: true, defaults, groups });
-  expect(() => operationForm({ showOnlyGroupedFields: true, defaults: { record: { status: "draft" }, version: { label: "1" } }, groups }, input, "Thing.create", ["requestKey"])).toThrow("version.status");
+  expect(() => operationForm({ showOnlyGroupedFields: true, defaults: { record: { status: "draft" }, version: { label: "1" } }, groups }, input, "Thing.create", ["requestKey"])).toThrow("invalid form defaults");
   expect(() => operationForm({ showOnlyGroupedFields: true, defaults: { record: { status: "published" }, version: defaults.version }, groups }, input, "Thing.create", ["requestKey"])).toThrow("invalid form defaults");
   expect(() => operationForm({ showOnlyGroupedFields: true, defaults: { ...defaults, missing: 1 }, groups }, input, "Thing.create", ["requestKey"])).toThrow("invalid form defaults");
 });
@@ -43,8 +43,17 @@ test("compact defaults validate optional objects, locale, formats and cross-fiel
   const groups = [{ title, fields: ["title"] }];
   const content = { locale: { from: "uiLocale" }, channel: "document" };
   expect(operationForm({ showOnlyGroupedFields: true, defaults: { content }, groups }, input, "Thing.create")?.defaults).toEqual({ content });
-  expect(() => operationForm({ showOnlyGroupedFields: true, defaults: { content: { locale: { from: "uiLocale" } } }, groups }, input, "Thing.create")).toThrow("content.channel");
+  expect(() => operationForm({ showOnlyGroupedFields: true, defaults: { content: { locale: { from: "uiLocale" } } }, groups }, input, "Thing.create")).toThrow("invalid form defaults");
   expect(() => operationForm({ showOnlyGroupedFields: true, defaults: { artifact: "invalid" }, groups }, input, "Thing.create")).toThrow("invalid form defaults");
   expect(() => operationForm({ showOnlyGroupedFields: true, defaults: { content, artifact: "28ea0204-a8e4-4765-a1c3-bfb5864a512a" }, groups }, input, "Thing.create")).toThrow("invalid form defaults");
   expect(() => operationForm({ showOnlyGroupedFields: true, groups }, { ...input, allOf: [{ required: ["artifact"] }] }, "Thing.create")).toThrow("conditional or composed");
+});
+
+test("defaults validate required properties of supplied array items", () => {
+  const input = { type: "object", required: ["name"], properties: {
+    name: { type: "string" }, items: { type: "array", items: { type: "object", required: ["kind"], properties: { kind: { type: "string" } } } },
+  } };
+  const groups = [{ title, fields: ["name"] }];
+  expect(() => operationForm({ showOnlyGroupedFields: true, groups, defaults: { items: [{}] } }, input, "Thing.create")).toThrow("invalid form defaults");
+  expect(operationForm({ showOnlyGroupedFields: true, groups, defaults: { items: [{ kind: "text" }] } }, input, "Thing.create")?.defaults).toEqual({ items: [{ kind: "text" }] });
 });

@@ -40,6 +40,9 @@ export type WebBuiltinOperationRef = OperationReference<WebOperationIntent> & {
 };
 
 /** Full JSON-schema contract shared by invoke and plugin-backed CRUD forms. */
+/** Literal JSON form defaults, including the web channel's current locale. */
+export type FormDefault = string | number | boolean | null | FormDefault[] | { [key: string]: FormDefault } | { from: "uiLocale" };
+
 export type WebSchemaOperationRef<
   TIntent extends "invoke" | "create" | "update" | "delete" =
     "invoke" | "create" | "update" | "delete",
@@ -76,8 +79,8 @@ export type WebSchemaOperationRef<
   };
   /** Opaque result presentation key; absent uses structured schema rendering. */
   resultRenderer?: WebRendererKey;
-  /** Presentation only; unlisted inputs remain available unless explicitly hidden, with defaults supplied by the form. */
-  form?: { showOnlyGroupedFields?: boolean; defaults?: Record<string, unknown>; groups: Array<{ title: LocalizedText; fields: string[]; collapsed?: boolean }> };
+  /** Unlisted inputs are available unless hidden. Defaults can contain { from: "uiLocale" }, resolved to the normalized web language before submission. */
+  form?: { showOnlyGroupedFields?: boolean; defaults?: Record<string, FormDefault>; groups: Array<{ title: LocalizedText; fields: string[]; collapsed?: boolean }> };
   effects: {
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";

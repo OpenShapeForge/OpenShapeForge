@@ -1737,6 +1737,8 @@ A value `{ from: uiLocale }` resolves to the active web interface language.
 Defaults are ordinary submitted inputs; they do not change the canonical contract
 or other interfaces. The compiler rejects invalid defaults and required hidden
 fields without a default; the runtime supplies operation control fields. The
-compiler also refuses unknown or overlapping paths, traversal into an optional object or choice, and a collapsed required
-field without a default. Generated entity CRUD uses the record view's create or
-update groups instead.
+compiler also refuses unknown or overlapping paths, traversal into an optional
+object or choice, and a collapsed required field without a default. Compact forms
+cannot collapse groups or hide fields when the applicable schema uses conditional
+or composed requirements the compiler cannot verify. Generated entity CRUD uses
+the record view's create or update groups instead.

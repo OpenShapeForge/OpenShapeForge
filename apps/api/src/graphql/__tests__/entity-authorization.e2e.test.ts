@@ -167,13 +167,22 @@ for (const table of tables) {
       (column) => (column as { classification?: string }).classification !== undefined,
     );
     if (classifiedColumns.length > 0) {
-      const selection = `id ${classifiedColumns.map(fieldName).join(" ")}`;
+      // A classified foreign key is read through its relation, which answers such a reader with a field error.
+      const relations = new Set((table.source?.graphql?.relationships ?? []).map((relationship) => relationship.name));
+      const classifiedValues = classifiedColumns.filter((column) => !relations.has(fieldName(column)));
+      const classifiedRelations = classifiedColumns.filter((column) => relations.has(fieldName(column)));
+      const selection = `id ${classifiedValues.map(fieldName).join(" ")}`;
 
       test("classified columns are redacted for a read-only reader, visible to a writer", async () => {
         const id = await createRow(table, tenantA);
         const asWriter = await fetchRecord(tenantA, table, id, selection);
         const asReader = await fetchRecord(readOnly, table, id, selection);
-        for (const column of classifiedColumns) {
+        for (const column of classifiedRelations) {
+          const refused = await gql(readOnly, getDoc(table, `id ${fieldName(column)} { id }`), { id });
+          expect(refused.errors?.[0]?.extensions?.code).toBe("FORBIDDEN");
+          expect(refused.data?.[graphql.singleQueryName]?.data?.[fieldName(column)]).toBeNull();
+        }
+        for (const column of classifiedValues) {
           const field = fieldName(column);
           expect(asReader[field]).toBeNull();
           // The writer sees the real value (created rows populate required

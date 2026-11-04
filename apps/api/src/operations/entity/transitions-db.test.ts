@@ -18,6 +18,7 @@ import rawCatalog from "../../generated/operations/catalog.json" with { type: "j
 import { bindOperationHandlers, type OperationContract } from "../runtime.js";
 import { registerEntityOperationAvailability } from "./availability.js";
 import { getGeneratedCrudTables } from "./catalog.js";
+import { EXTENSION_GRAPH_TABLES } from "./extensions/__tests__/graph-tables.js";
 import { createGeneratedEntityForTable, updateGeneratedEntity } from "./mutations.js";
 import { currentRecordOffers, offerTarget } from "./runtime.js";
 import { executeTransition, transitionAvailabilityFor, transitionAvailabilityHandler, transitionBinding, transitionOperationHandler, type TransitionBinding } from "./transitions.js";
@@ -191,6 +192,7 @@ describe("status transitions against PostgreSQL", () => {
     await sql.raw(`create schema erp; create schema platform;
       create table erp.agreements(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, code text, activated_at timestamptz, amount numeric, unique(tenant_id,id));
       create table erp.agreement_milestones(${columnDdl()}, parent_agreement_id uuid, related_milestone_id uuid, "authorization" jsonb not null default '{}'::jsonb, unique(tenant_id,id));
+      ${EXTENSION_GRAPH_TABLES}
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, aggregate_type text not null,
         aggregate_id text not null, event_type text not null, payload jsonb, sequence bigint generated always as identity, occurred_at timestamptz not null);
       create table platform.entity_edit_leases(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, entity_id text not null,

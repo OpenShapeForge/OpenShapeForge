@@ -9,9 +9,10 @@ import { applyAuditHistory } from "../../db/migrations/audit-history.js";
  * shape by hand, so the child table is what the catalog names. The owned
  * child's own generic delete is refused statically; collection-policy.test.ts
  * covers that. A tenant field of an extensible entity may reference a
- * Document, so the delete's reference guard reads that entity's value table
- * under an audited tenant bypass (extensions/references.ts); the scratch
- * schema carries both, the value table empty.
+ * Document, so the delete's reference guard reads the value tables of those entities
+ * under an audited tenant bypass (extensions/references.ts) and its write asks
+ * the dependency graph what reads the record (extensions/linked.ts); the
+ * scratch schema carries them, empty.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -19,6 +20,8 @@ import { SQL } from "bun";
 import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
+import { EXTENSION_GRAPH_TABLES } from "./extensions/__tests__/graph-tables.js";
+import { extensionRegistry } from "./extensions/registry.js";
 import { deleteGeneratedEntity } from "./mutations.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -64,11 +67,12 @@ const fails = (promise: Promise<unknown>, code: string) => expect(promise).rejec
         channel text not null default 'document', locale text not null default 'nl',
         created_at timestamptz not null default clock_timestamp(), updated_at timestamptz not null default clock_timestamp(),
         unique(tenant_id,id), unique(tenant_id,document_id,channel,locale), foreign key(tenant_id,document_id) references erp.documents(tenant_id,id) on delete cascade);
-      create table erp.extensible_assets_field_values(tenant_id uuid not null, record_id uuid not null, field_id uuid not null,
-        ordinal integer not null default 0, value_ref_id uuid);
+      ${sql.raw(extensionRegistry.referencedBy("Document").map(({ valuesTable }) => `create table ${valuesTable}(tenant_id uuid not null,
+        record_id uuid not null, field_id uuid not null, ordinal integer not null default 0, value_ref_id uuid);`).join("\n"))}
       create table platform.system_bypass_audit(id uuid primary key default gen_random_uuid(), actor_subject text not null,
         reason text not null, tenant_id uuid, started_at timestamptz not null, ended_at timestamptz,
         succeeded boolean not null default false, created_at timestamptz not null default now());
+      ${sql.raw(EXTENSION_GRAPH_TABLES)}
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null,
         aggregate_type text not null, aggregate_id text not null, event_type text not null, payload jsonb,
         sequence bigint generated always as identity, occurred_at timestamptz not null);

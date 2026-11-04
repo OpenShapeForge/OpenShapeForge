@@ -1753,7 +1753,8 @@ export async function beforeDeleteOfLinkedTarget(
   id: string,
 ): Promise<PendingLookup[]> {
   const entity = baseTableOf(table).source?.authoringEntityName;
-  if (!entity || !session.tenantId || !extensionRegistry.entityNames().length || !extensionRegistry.readAccess(entity)) return [];
+  if (!entity || !session.tenantId || !extensionRegistry.entityNames().some((name) => extensionRegistry.entity(name)!.relations
+    .some((relation) => relation.kind === "belongsTo" && relation.entity === entity))) return [];
   const tenantId = session.tenantId;
   const rows = await sql<{ field_id: string; entity: string; via_field: string }>`
     select distinct d.field_id::text as field_id, f.entity, d.via_field from platform.extension_field_dependencies d

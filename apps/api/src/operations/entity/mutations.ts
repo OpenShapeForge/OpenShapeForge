@@ -78,6 +78,7 @@ import {
   beforeDeleteOfLinkedTarget,
   lockLinkedRecords,
   propagateRecordChange,
+  recomputedInThisWrite,
   revalidateAfterAuthorizationChange,
 } from "./extensions/linked.js";
 
@@ -436,7 +437,21 @@ async function insertGeneratedRowInTransaction(
   // Tenant rollups over this record's collection, wherever they are (extensions/linked.ts).
   await propagateRecordChange(trx, session, table, { after: row });
   await revalidateAfterAuthorizationChange(trx, session, table);
-  return projectGeneratedEntityRow(table, session, row, entityValues.registry);
+  return projectGeneratedEntityRow(table, session, await rowAfterPropagation(trx, table, row), entityValues.registry);
+}
+
+/**
+ * The row a write answers with. What it set in motion may come back to the
+ * record itself, along a rollup over its own entity or a lookup of what it just
+ * changed on its parent: the stored row then has newer computed values and a
+ * newer version than the one the write returned.
+ */
+async function rowAfterPropagation(trx: Transaction<DB>, table: GeneratedCrudTable, row: GeneratedEntityRow): Promise<GeneratedEntityRow> {
+  const id = String(row[table.primaryKey!]);
+  if (!recomputedInThisWrite(trx, table, id)) return row;
+  const stored = await sql<{ row: GeneratedEntityRow }>`select to_jsonb(${sql.id(table.table)}.*) as row
+    from ${sql.id(table.schema, table.table)} where ${sql.id(table.primaryKey!)}::text = ${id}`.execute(trx);
+  return stored.rows[0]?.row ?? row;
 }
 
 export async function updateGeneratedEntity(
@@ -669,7 +684,7 @@ async function applyGeneratedRowUpdate(
     // Tenant lookups and rollups that read this record, wherever they are (extensions/linked.ts).
     await propagateRecordChange(trx, session, table, { before: current, after: row });
     await revalidateAfterAuthorizationChange(trx, session, table);
-    return projectGeneratedEntityRow(table, session, row, entityValues.registry);
+    return projectGeneratedEntityRow(table, session, await rowAfterPropagation(trx, table, row), entityValues.registry);
   }).catch((error) => {
     throw translateDatabaseError(table, error);
   });

@@ -145,6 +145,11 @@ export function writeBudget(trx: Transaction<DB>): Set<string> {
   return budget;
 }
 
+/** Whether this transaction recomputed the record: a write that came back to its own record holds a row older than the stored one. */
+export function recomputedInThisWrite(trx: Transaction<DB>, table: GeneratedCrudTable, id: string): boolean {
+  return writeBudget(trx).has(`${baseTableOf(table).source?.authoringEntityName}:${id}`);
+}
+
 /** Take these records of an entity from the budget, all of them or none. */
 export function withinBudget(budget: Set<string>, set: ExtensionFieldSet, records: readonly string[]): boolean {
   const keys = records.map((id) => `${set.entity}:${id}`);

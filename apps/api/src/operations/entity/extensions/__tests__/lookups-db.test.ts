@@ -1649,4 +1649,32 @@ describe("tenant lookups and rollups", () => {
       }
     });
   });
+
+  describe("a write that comes back to its own record", () => {
+    test("an update answers with the row as it stands, so the next write finds its version", async () => {
+      const t = await tenant();
+      await field(t, "weight", number("Weight"));
+      await field(t, "parent", reference(ENTITY, "Parent"));
+      await field(t, "total", rollup({ collection: `${ENTITY}.extensions.parent`, aggregate: "sum", of: "extensions.weight" }), "rollup");
+      const asset = await create(t.writer, ENTITY, { name: "A", extensions: { weight: 1 } });
+      const joined = await update(t.writer, ENTITY, asset.id, { extensions: { parent: asset.id } });
+      expect(joined.extensions.total).toBe(1);
+      const stored = await get(t.reader, asset.id);
+      expect(joined.updated_at).toBe(stored.updated_at);
+      const next = await executeEntityOperation(fixture.app.db, t.writer, { operation: { id: `${ENTITY}.update`, intent: "update" },
+        input: { id: asset.id, values: { extensions: { weight: 4 } }, expectedVersion: String(joined.updated_at) } });
+      expect(next).toMatchObject({ data: { extensions: { total: 4 } } });
+    });
+
+    test("a create as well: a child that looks up what its own create changed on its parent", async () => {
+      const t = await tenant();
+      await field(t, "parent", reference(ENTITY, "Parent"));
+      await field(t, "count", rollup({ collection: `${ENTITY}.extensions.parent`, aggregate: "countAll" }), "rollup");
+      await field(t, "siblings", lookup("extensions.parent", "extensions.count"), "lookup");
+      const parent = await create(t.writer, ENTITY, { name: "P" });
+      const child = await create(t.writer, ENTITY, { name: "C", extensions: { parent: parent.id } });
+      expect(child.extensions.siblings).toBe(1);
+      expect(child.updated_at).toBe((await get(t.reader, child.id)).updated_at);
+    });
+  });
 });

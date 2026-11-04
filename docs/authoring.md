@@ -915,7 +915,8 @@ write of the record a rollup's `of` steps to recomputes the parents of the
 children that point at it, as a lookup its referring records. A lookup is
 recomputed on the records that refer to the record. Formulas over either follow,
 and the recompute carries on along the chain. A record's lookup is computed in its own write when its
-reference changes. A write through a subtype counts as a write of its base.
+reference changes. A write through a subtype counts as a write of its base. A
+write that comes back to its own record answers with the row as it then stands.
 
 All of that happens in the transaction of the write, up to one budget for the
 whole transaction: `limits.syncFanOut` records, along every chain and on every

@@ -52,6 +52,29 @@ describe("document content authorization against PostgreSQL", () => {
     expect((await variantBlocks(child.id)).map(block => block.markdown)).toEqual(["First", "Second"]);
   });
 
+  test("included version parameters are checked against its frozen field definitions on write", async () => {
+    const setup = platformFor(editor);
+    const template = await seedTemplate();
+    const versionId = await publishTemplate(setup.context, template.template);
+    const title = `template-values-${crypto.randomUUID()}`;
+    const input = { document: { title, documentType: "outgoing_mail", status: "draft" },
+      version: { versionLabel: "1", status: "draft", isMajorVersion: false },
+      content: { variant: { channel: "document", locale: "nl" }, blocks: [
+        { definitionKey: "TemplateBlock", values: { version: versionId, parameters: { name: 42 } } },
+      ] } };
+    await expect(setup.handlers.createDocument!(input, setup.context)).rejects.toBeDefined();
+    const remaining = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${title}`.execute(privileged());
+    expect(remaining.rows[0]!.count).toBe(0);
+    input.content.blocks[0]!.values.parameters.name = "Ada" as any;
+    const created = (await setup.handlers.createDocument!(input, setup.context)).value as { id: string };
+    expect((await variantBlocks((await variant(created.id, "document", "nl")).id)).length).toBe(1);
+    const deniedTitle = `template-denied-${crypto.randomUUID()}`;
+    const deniedSetup = platformFor(caseUser);
+    await expect(deniedSetup.handlers.createDocument!({ ...input, document: { ...input.document, title: deniedTitle } }, deniedSetup.context)).rejects.toBeDefined();
+    const denied = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${deniedTitle}`.execute(privileged());
+    expect(denied.rows[0]!.count).toBe(0);
+  });
+
   test("a document editor edits document blocks only through the variant, never template blocks", async () => {
     const setup = platformFor(editor);
     const ids = await seedTemplate();

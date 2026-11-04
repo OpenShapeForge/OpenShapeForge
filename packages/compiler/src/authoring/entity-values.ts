@@ -131,6 +131,19 @@ export function compileEntityValueStorage(
     for (const name of definitionNames) {
       const definition = byEntity.get(name)!;
       const fields = definition.effectiveFields;
+      for (const field of fields) {
+        if (!field.valueFieldsFrom) continue;
+        const reference = fields.find(item => item.key === field.valueFieldsFrom!.reference);
+        const versionName = reference?.relationship?.target;
+        const owners = candidates.filter(item => item.contract.versioning?.versionEntity === versionName);
+        const source = owners.length === 1 ? owners[0]!.effectiveFields.find(item => item.key === field.valueFieldsFrom!.field) : undefined;
+        const column = owners.length === 1 ? owners[0]!.contract.storage.columns.find(item => item.field === field.valueFieldsFrom!.field) : undefined;
+        if (field.baseType !== "object" || field.cardinality === "collection" || !versionName ||
+          reference?.cardinality === "collection" || owners.length !== 1 || !source || source.osfType !== "fieldDefinition" || source.cardinality !== "collection" || !column || column.type !== "jsonb") {
+          throw new Error(`${name}.${field.key}: valueFieldsFrom must name a sibling version reference and a fieldDefinition collection on its versioned head.`);
+        }
+        field.valueFieldsFrom = { ...field.valueFieldsFrom, snapshotColumn: column.column, headEntity: owners[0]!.contract.entity.name };
+      }
       if (new Set(fields.map((field) => field.key)).size !== fields.length) throw new Error(`${name}: duplicate effective value fields across core and profiles.`);
       if (fields.some((field) => field.entityValue || field.allowedDefinitions)) throw new Error(`${name}: nested entityValue definitions are not supported.`);
       const references = fields.filter((field) => field.relationship?.target);

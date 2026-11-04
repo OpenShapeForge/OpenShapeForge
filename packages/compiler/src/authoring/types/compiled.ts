@@ -95,6 +95,7 @@ export interface CompiledField {
   variables?: "none" | "whole" | "template" | "both";
   sortable?: boolean;
   entityValue?: { definitionField: string; parameterBindings?: boolean };
+  valueFieldsFrom?: { reference: string; field: string; snapshotColumn?: string; headEntity?: string };
   /** The sibling field whose stored FieldDefinition types this value. */
   typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
   allowedDefinitions?: string[];

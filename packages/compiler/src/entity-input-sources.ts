@@ -97,6 +97,18 @@ export function materializeEntityInputSources(
   referentiedata: CoreReferentiedataSnapshot,
 ): void {
   const byName = new Map(contracts.map(contract => [contract.entity.name, contract]));
+  for (const contract of contracts) for (const field of contract.model.fields) {
+    if (!field.valueFieldsFrom) continue;
+    const reference = contract.model.fields.find(item => item.key === field.valueFieldsFrom!.reference);
+    const heads = contracts.filter(item => item.versioning?.versionEntity === reference?.relationship?.target);
+    const source = heads.length === 1 ? heads[0]!.model.fields.find(item => item.key === field.valueFieldsFrom!.field) : undefined;
+    const column = heads.length === 1 ? heads[0]!.storage.columns.find(item => item.field === field.valueFieldsFrom!.field) : undefined;
+    if (field.baseType !== "object" || field.cardinality !== "single" || !reference?.relationship?.target || reference.cardinality !== "single" ||
+      heads.length !== 1 || source?.osfType !== "fieldDefinition" || source.cardinality !== "collection" || !column || column.type !== "jsonb") {
+      throw new Error(`${contract.entity.name}.${field.key}: valueFieldsFrom requires a version reference and stored FieldDefinition collection.`);
+    }
+    field.valueFieldsFrom = { ...field.valueFieldsFrom, snapshotColumn: column.column, headEntity: heads[0]!.entity.name };
+  }
   function validateEntityOptions(fields: readonly CompiledField[]): void {
     for (const field of fields) {
       if (field.options?.type === "entity") {

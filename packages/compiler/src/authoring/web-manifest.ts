@@ -612,6 +612,7 @@ function projectField(
     ...(field.suggestions ? { suggestions: field.suggestions } : {}),
     ...(field.visibility ? { visibility: field.visibility } : {}),
     ...(field.entityValue ? { entityValue: { ...field.entityValue } } : {}),
+    ...(field.valueFieldsFrom ? { valueFieldsFrom: { ...field.valueFieldsFrom } } : {}),
     ...(field.typedBy ? { typedBy: { ...field.typedBy } } : {}),
     ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
     ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),

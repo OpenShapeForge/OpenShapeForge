@@ -40424,6 +40424,11 @@
           "key": "version",
           "osfType": "TemplateVersion",
           "required": true,
+          "options": {
+            "type": "entity",
+            "source": "Template",
+            "valueField": "publishedVersionId"
+          },
           "label": {
             "en": "Template version",
             "nl": "Templateversie"
@@ -40436,6 +40441,10 @@
         {
           "key": "parameters",
           "osfType": "object",
+          "valueFieldsFrom": {
+            "reference": "version",
+            "field": "parameters"
+          },
           "defaultValue": {},
           "label": {
             "en": "Local values",

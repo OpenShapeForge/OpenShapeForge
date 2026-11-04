@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { RuntimeEntityValueCarrier, RuntimeEntityValueRegistry } from "@openshapeforge/plugin-runtime";
+import { operationFailure } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import type { DbSessionInput } from "../../db/session.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import { projectEntityValue, splitEntityValueInput } from "../../modules/entity-value-input.js";
-import { runtimeJsonSchemas } from "../../modules/field-schemas.js";
+import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../../modules/field-schemas.js";
 import fieldSchemaRegistry from "../../generated/operations/field-schema-registry.json" with { type: "json" };
 import { fieldNameForColumn } from "./columns.js";
 import { generatedCrudError, getGeneratedCrudTables, isGeneratedCrudOperationEnabled, requireEntityOperation } from "./catalog.js";
@@ -118,6 +119,7 @@ export async function prepareEntityValueWriteInTransaction(
 ): Promise<Map<GeneratedCrudColumn, unknown>> {
   const result = new Map(values);
   const references: Array<{ entityName: string; id: string; schema: string; table: string }> = [];
+  const dynamicValues: Array<{ entityName: string; id: string; headEntity: string; snapshotColumn: string; values: unknown }> = [];
   for (const carrier of entityValueCarriers(table, context.registry)) {
     const valueColumn = table.columns.find((column) => column.name === carrier.valuesColumn)!;
     const definitionColumn = table.columns.find((column) => column.name === carrier.definitionColumn)!;
@@ -131,6 +133,20 @@ export async function prepareEntityValueWriteInTransaction(
     for (const reference of split.references) {
       const descriptor = definition.references.find((item) => item.fieldKey === reference.fieldKey)!;
       references.push({ ...reference, schema: descriptor.schema, table: descriptor.table });
+    }
+    for (const field of definition.fields) {
+      const source = field.valueFieldsFrom;
+      if (source === undefined) continue;
+      if (!source || typeof source !== "object" || Array.isArray(source)) throw generatedCrudError("Version field-definition metadata is invalid.", "INVALID_DEFINITION");
+      const binding = source as Record<string, unknown>;
+      if (typeof field.key !== "string" || typeof binding.reference !== "string" || typeof binding.snapshotColumn !== "string" || typeof binding.headEntity !== "string") {
+        throw generatedCrudError("Version field-definition metadata is invalid.", "INVALID_DEFINITION");
+      }
+      const reference = split.references.find(item => item.fieldKey === binding.reference);
+      // Parameter-bound references resolve later when the enclosing template is materialized.
+      if (!reference) continue;
+      dynamicValues.push({ entityName: reference.entityName, id: reference.id, headEntity: binding.headEntity,
+        snapshotColumn: binding.snapshotColumn, values: split.values[field.key] ?? {} });
     }
   }
   // Stable order bounds ordinary multi-reference deadlocks. The DB remains the
@@ -149,6 +165,19 @@ export async function prepareEntityValueWriteInTransaction(
       where id=${reference.id}::uuid and tenant_id=${session.tenantId}::uuid for share`.execute(trx);
     if (!visible.rows.length) throw generatedCrudError("A referenced record is unavailable.", "FORBIDDEN");
     if (target.source?.authorization?.recordPermissions) await assertRecordPermissionInTransaction(trx, session, target, reference.id, "view");
+  }
+  for (const dynamic of dynamicValues) {
+    const targets = (context.tables ?? getGeneratedCrudTables()).filter(candidate => candidate.source?.authoringEntityName === dynamic.entityName);
+    const target = targets.length === 1 ? targets[0] : undefined;
+    const snapshotColumn = target?.columns.find(column => fieldNameForColumn(column) === "snapshot");
+    if (!target || !snapshotColumn || snapshotColumn.type !== "jsonb") throw generatedCrudError("The version snapshot is unavailable.", "INVALID_DEFINITION");
+    const row = (await sql<{ snapshot: unknown }>`select ${sql.id(snapshotColumn.name)} as snapshot from ${sql.id(target.schema, target.table)}
+      where id=${dynamic.id}::uuid and tenant_id=${session.tenantId}::uuid`.execute(trx)).rows[0];
+    const snapshot = row?.snapshot as { entity?: unknown; head?: { row?: Record<string, unknown> } } | undefined;
+    const fields = snapshot?.head?.row?.[dynamic.snapshotColumn];
+    if (snapshot?.entity !== dynamic.headEntity || !Array.isArray(fields)) throw generatedCrudError("The frozen field definitions are unavailable.", "INVALID_DEFINITION");
+    const valid = generatedRuntimeFieldSchemas.validateObject(fields, dynamic.values);
+    if (!valid.valid) throw operationFailure(valid.error);
   }
   return result;
 }

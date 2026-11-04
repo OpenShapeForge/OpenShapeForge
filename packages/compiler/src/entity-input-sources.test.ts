@@ -88,3 +88,18 @@ test("managed choices fail closed for missing or incompatible canonical sources"
   incompatible.model.fields[0]!.baseType = "boolean";
   expect(() => materializeEntityInputSources([incompatible], {})).toThrow("Invalid entity option source");
 });
+
+test("version-sourced fields resolve only a stored field-definition collection on the versioned head", () => {
+  const head = { ...contract, entity: { ...contract.entity, name: "Head" }, versioning: { versionEntity: "HeadVersion" },
+    storage: { columns: [{ field: "schema", column: "schema_definitions", type: "jsonb" }] },
+    model: { ...contract.model, fields: [{ key: "schema", osfType: "fieldDefinition", cardinality: "collection" }] }, entityOperations: {} } as unknown as CompiledEntityContract;
+  const value = { ...contract, entity: { ...contract.entity, name: "Value" }, entityOperations: {}, model: { ...contract.model, fields: [
+    { key: "version", cardinality: "single", relationship: { target: "HeadVersion" } },
+    { key: "values", baseType: "object", cardinality: "single", valueFieldsFrom: { reference: "version", field: "schema" } },
+  ] } } as unknown as CompiledEntityContract;
+  materializeEntityInputSources([head, value], {});
+  expect(value.model.fields[1]!.valueFieldsFrom).toEqual({ reference: "version", field: "schema", snapshotColumn: "schema_definitions", headEntity: "Head" });
+  const bad = structuredClone(value);
+  bad.model.fields[1]!.valueFieldsFrom!.field = "missing";
+  expect(() => materializeEntityInputSources([head, bad], {})).toThrow("stored FieldDefinition collection");
+});

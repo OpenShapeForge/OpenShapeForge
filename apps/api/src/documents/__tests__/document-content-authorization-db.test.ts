@@ -68,6 +68,15 @@ describe("document content authorization against PostgreSQL", () => {
     input.content.blocks[0]!.values.parameters.name = "Ada" as any;
     const created = (await setup.handlers.createDocument!(input, setup.context)).value as { id: string };
     expect((await variantBlocks((await variant(created.id, "document", "nl")).id)).length).toBe(1);
+    await sql`update erp.templates set parameters = ${jsonbLiteral([{ key: "name", osfType: "number", required: true, label: { en: "Name", nl: "Naam" } }])}
+      where id = ${template.template}::uuid`.execute(privileged());
+    const newerVersion = await publishTemplate(setup.context, template.template);
+    expect(newerVersion).not.toBe(versionId);
+    const stillPinned = { ...input, document: { ...input.document, title: `template-old-${crypto.randomUUID()}` } };
+    expect((await setup.handlers.createDocument!(stillPinned, setup.context)).value).toHaveProperty("id");
+    const newerInput = { ...input, document: { ...input.document, title: `template-new-${crypto.randomUUID()}` }, content: { ...input.content,
+      blocks: [{ definitionKey: "TemplateBlock", values: { version: newerVersion, parameters: { name: "Ada" } } }] } };
+    await fails(setup.handlers.createDocument!(newerInput, setup.context), "VALIDATION_FAILED");
     const deniedTitle = `template-denied-${crypto.randomUUID()}`;
     const deniedSetup = platformFor(caseUser);
     await fails(deniedSetup.handlers.createDocument!({ ...input, document: { ...input.document, title: deniedTitle } }, deniedSetup.context), "FORBIDDEN");

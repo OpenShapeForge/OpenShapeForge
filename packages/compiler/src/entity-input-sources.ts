@@ -3,6 +3,7 @@ import type { CompiledEntityContract, CompiledField } from "./authoring/types.js
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import { compiledObjectSchema, splitBundledDefinitions } from "./field-json-schema.js";
 import { entityRelationshipKeys, withEntityRelationshipKeys, writableEntityFields } from "./entity-operation-json-schema.js";
+import { resolveValueFieldsFrom } from "./authoring/value-fields-from.js";
 
 type ObjectSchema = Record<string, unknown>;
 const KEY = "x-osf-entityInput";
@@ -97,19 +98,8 @@ export function materializeEntityInputSources(
   referentiedata: CoreReferentiedataSnapshot,
 ): void {
   const byName = new Map(contracts.map(contract => [contract.entity.name, contract]));
-  for (const contract of contracts) for (const field of contract.model.fields) {
-    if (!field.valueFieldsFrom) continue;
-    if (!contract.entity.valueDefinition) throw new Error(`${contract.entity.name}.${field.key}: valueFieldsFrom is currently supported only on entity-value definitions.`);
-    const reference = contract.model.fields.find(item => item.key === field.valueFieldsFrom!.reference);
-    const heads = contracts.filter(item => item.versioning?.versionEntity === reference?.relationship?.target);
-    const source = heads.length === 1 ? heads[0]!.model.fields.find(item => item.key === field.valueFieldsFrom!.field) : undefined;
-    const column = heads.length === 1 ? heads[0]!.storage.columns.find(item => item.field === field.valueFieldsFrom!.field) : undefined;
-    if (field.baseType !== "object" || field.cardinality !== "single" || !reference?.relationship?.target || reference.cardinality !== "single" ||
-      heads.length !== 1 || source?.osfType !== "fieldDefinition" || source.cardinality !== "collection" || !column || column.type !== "jsonb") {
-      throw new Error(`${contract.entity.name}.${field.key}: valueFieldsFrom requires a version reference and stored FieldDefinition collection.`);
-    }
-    field.valueFieldsFrom = { ...field.valueFieldsFrom, snapshotColumn: column.column, headEntity: heads[0]!.entity.name };
-  }
+  const candidates = contracts.map(contract => ({ contract, effectiveFields: contract.model.fields }));
+  for (const candidate of candidates) resolveValueFieldsFrom(candidate, candidates);
   function validateEntityOptions(fields: readonly CompiledField[]): void {
     for (const field of fields) {
       if (field.options?.type === "entity") {

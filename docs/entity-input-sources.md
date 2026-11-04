@@ -58,11 +58,15 @@ An entity-value field can derive its typed fields from a sibling reference to
 an immutable published version:
 
 ```yaml
-parameters:
-  type: object
-  valueFieldsFrom: { reference: version, field: parameters }
+fields:
+  - key: parameters
+    osfType: object
+    valueFieldsFrom: { reference: version, field: parameters }
 ```
 
 The source must be a stored field-definition collection on the versioned
 entity. Values are validated against the selected version, with normal record
 authorization; republishing the source does not change an existing block.
+
+This describes the authored-content and file-binding path, not parity for
+managed document types or destructive document governance.

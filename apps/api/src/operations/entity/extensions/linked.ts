@@ -36,8 +36,8 @@
 import { randomUUID } from "node:crypto";
 import { sql, type RawBuilder, type Transaction } from "kysely";
 import { operationFailure } from "@openshapeforge/operations";
-import type { RuntimeExtensionRelation } from "@openshapeforge/plugin-runtime";
-import { MAX_RESULT_TEXT_LENGTH, ROUNDING_DECIMALS } from "@openshapeforge/formula";
+import type { RuntimeExtensionRelation, RuntimeJobOutcome } from "@openshapeforge/plugin-runtime";
+import { MAX_RESULT_TEXT_BYTES, MAX_RESULT_TEXT_LENGTH, ROUNDING_DECIMALS } from "@openshapeforge/formula";
 import type { DB } from "../../../generated/db/types.js";
 import { currentDbSessionTransaction, type DbSessionInput } from "../../../db/session.js";
 import { entityTableName, entityColumnName } from "../../../db/manifest-lookup.js";
@@ -48,11 +48,14 @@ import { actorSessionOf, type JobActorSession } from "../../../jobs/actor-sessio
 import type { ModuleJobHandler } from "../../../modules/contract.js";
 import { getGeneratedCrudTables } from "../catalog.js";
 import { fieldNameForColumn } from "../columns.js";
-import type { GeneratedCrudTable } from "../types.js";
+import { sqlstateOf } from "../transition-lock-retry.js";
+import type { GeneratedCrudColumn, GeneratedCrudTable } from "../types.js";
+import { acrossTenant, jobActorSession, jobSession, startBackfill, type BackfillOperation } from "./backfill.js";
 import { authoredFormulaFields, fieldValues, formulaGraph, labelText, storedFormula, tenantFieldType, formulaDependencies } from "./formulas.js";
 import {
   conditionPaths,
   EXTENSION_META_KEY,
+  EXTENSION_VALUES_COLUMN,
   evaluateCondition,
   extensionError,
   extensionShape,
@@ -62,6 +65,7 @@ import {
   linkedResultType,
   mapConditionPaths,
   record,
+  referenceIds,
   ROLLUP_AGGREGATES,
   SENSITIVITIES,
   storedLookup,
@@ -74,11 +78,16 @@ import {
 } from "./model.js";
 import { narrowerReadAccess } from "./read-access.js";
 import { conditionValues, readValue, storedExtensionSource } from "./read.js";
+import { unlinkReferences } from "./references.js";
 import { extensionRegistry } from "./registry.js";
 import { announceFieldDefinitionChange, forgetExtensionFields, loadExtensionFieldsFor, lockExtensionFields } from "./store.js";
-import { formulaRowObject, qualifiedTable, recomputeRecordFormulas } from "./write.js";
+import { formulaRowObject, ownerLinks, qualifiedTable, recomputeRecordFormulas } from "./write.js";
 
 export const EXTENSION_RECOMPUTE_KIND = "extensions.recompute";
+export const EXTENSION_REVALIDATE_KIND = "extensions.revalidate";
+/** The subject a recompute job names, so that a row's job can be found. */
+const RECOMPUTE_SUBJECT = "ExtensionFieldRecompute";
+const RECOMPUTE_SWEEP_LIMIT = 500;
 /** How long the journal worker waits after a change before it recomputes, so a burst of writes is one pass. */
 export const RECOMPUTE_DEBOUNCE_MS = 1_000;
 export const RECOMPUTE_BATCH_SIZE = 200;
@@ -93,6 +102,34 @@ export type LinkedDependency = { entity: string; field: string; via: string | nu
 function tableOf(entity: string): GeneratedCrudTable | undefined {
   const tables = getGeneratedCrudTables().filter((table) => table.source?.authoringEntityName === entity && !table.subtype);
   return tables.length === 1 ? tables[0] : undefined;
+}
+
+/** The table a write of this one lands in, as an entity: a subtype writes its base. */
+function baseTableOf(table: GeneratedCrudTable): GeneratedCrudTable {
+  return table.subtype ? tableOf(table.subtype.base.entityName) ?? table : table;
+}
+
+const budgets = new WeakMap<object, Set<string>>();
+
+/**
+ * One transaction, one budget: the records it recomputes itself, along every
+ * chain and on every path, delete included. A record counts once, whatever
+ * number of its fields follow. `limits.syncFanOut` of the entity it recomputes
+ * says how far a write goes; the rest goes to the journal.
+ */
+export function writeBudget(trx: Transaction<DB>): Set<string> {
+  const scope = currentDbSessionTransaction() ?? trx;
+  const budget = budgets.get(scope) ?? new Set<string>();
+  budgets.set(scope, budget);
+  return budget;
+}
+
+/** Take these records of an entity from the budget, all of them or none. */
+export function withinBudget(budget: Set<string>, set: ExtensionFieldSet, records: readonly string[]): boolean {
+  const keys = records.map((id) => `${set.entity}:${id}`);
+  if (new Set([...budget, ...keys]).size > set.entry.limits.syncFanOut) return false;
+  for (const key of keys) budget.add(key);
+  return true;
 }
 
 /** The lookups and rollups the runtime computes: neither deprecated, suspended nor deleted. */
@@ -757,13 +794,12 @@ async function rollupValue(trx: Transaction<DB>, tenantId: string, resolved: Res
 
 /**
  * Compute `fields` (lookups and rollups of `set`) of one record into
- * `source` (mutated); a rollup reads its collection as committed and its
- * own. `row` is the record as stored or as it will be written (an authored
- * foreign key). In the record's own write (`share`) a lookup reads its
- * target under `for share`, so a concurrent write of the target waits for
- * this one and then finds this record through the index; a recompute from
- * the other side (fan-out, journal, backfill) needs no lock, since a later
- * write of the target recomputes it again.
+ * `source` (mutated). `row` is the record as stored or as it will be written
+ * (an authored foreign key). The locks are the caller's: in the record's own
+ * write lockLinkedRecords holds a lookup's target `for share`, so a concurrent
+ * write of the target waits for this one and then finds this record through
+ * the index; a recompute from the other side (fan-out, journal, backfill)
+ * needs none on the target, since a later write of it recomputes this again.
  */
 export async function computeLinkedValues(
   trx: Transaction<DB>,
@@ -772,7 +808,6 @@ export async function computeLinkedValues(
   row: Readonly<Record<string, unknown>>,
   source: Record<string, unknown>,
   fields: readonly ExtensionField[],
-  share = false,
 ): Promise<void> {
   if (!fields.length) return;
   const sets = setLoader(trx, session, set);
@@ -791,7 +826,7 @@ export async function computeLinkedValues(
       if (typeof targetId !== "string" || !table) { storeLinked(source, field.fieldId, { ok: true, value: null }); continue; }
       const found = await sql<{ row: Record<string, unknown> }>`select ${formulaRowObject(table, "target")} as row
         from ${sql.id(table.schema, table.table)} as target
-        where target.tenant_id = ${tenantId}::uuid and target.id = ${targetId}::uuid ${share ? sql`for share` : sql``}`.execute(trx);
+        where target.tenant_id = ${tenantId}::uuid and target.id = ${targetId}::uuid`.execute(trx);
       const target = found.rows[0]?.row;
       storeLinked(source, field.fieldId, bounded(target ? typed(resolved.field.type, valueOf(await sets(resolved.target), table, target, resolved.field.path)) : null));
       continue;
@@ -833,16 +868,180 @@ export function lookupsThrough(set: ExtensionFieldSet, fieldIds: ReadonlySet<str
 }
 
 // ---------------------------------------------------------------------------
+// The lock order of a write.
+
+type LockMode = "key share" | "share" | "no key update" | "update";
+const LOCK_STRENGTH: Readonly<Record<LockMode, number>> = { "key share": 0, share: 1, "no key update": 2, update: 3 };
+
+/** What a write is about to do to one record, for lockLinkedRecords. */
+export type LinkedWrite = {
+  operation: "create" | "update" | "delete";
+  /** The record; a create has none yet. */
+  id?: string;
+  /** The columns this write sets, by column name. */
+  row?: Readonly<Record<string, unknown>>;
+  /** Tenant field values by key. */
+  extensions?: Readonly<Record<string, unknown>>;
+};
+
+/**
+ * Every record this write will recompute, or needs to keep from changing,
+ * locked once, in one order — table, then id — before the record's own row
+ * lock and the first row write: the record itself, the parents of its rollups
+ * (old and new), the records whose lookups read it and, along the chain, what
+ * reads those, up to the budget of the write (what lies beyond goes through
+ * the journal and needs no lock here). Two writers that reach the same records
+ * from opposite sides, a parent and its child, therefore never hold what the
+ * other waits for.
+ *
+ * Each record gets the weakest lock that keeps its invariant, and gets it
+ * here, at once, at the strength the write will need: `for key share` for "this
+ * target exists", `for share` for a lookup's target (it conflicts with a write
+ * of the target, which then finds this record through the index), `for no key
+ * update` for a record to recompute. A lock is never upgraded later: two holders
+ * of a weaker one that both upgrade are a deadlock, and so is an upgrade behind
+ * a queued writer. `for no key update` leaves the foreign key checks of
+ * concurrent children alone, so writers under one parent only take turns.
+ *
+ * Returns the lock the caller takes on the record itself when it is part of
+ * this order: `for no key update`, what the update will take anyway; undefined
+ * when the write touches nothing that reads it, and the caller's usual lock
+ * stands. Work is found under the audited tenant bypass: the writer's own row
+ * policies must not hide a record whose value follows from this write.
+ */
+export async function lockLinkedRecords(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  write: LinkedWrite,
+): Promise<"no key update" | undefined> {
+  const tenantId = session.tenantId;
+  const own = baseTableOf(table);
+  const entity = own.source?.authoringEntityName;
+  if (!tenantId || !entity || !extensionRegistry.entityNames().length) return undefined;
+  const entry = extensionRegistry.entity(entity);
+  const referenced = write.operation === "delete" ? extensionRegistry.referencedBy(entity) : [];
+  if (!entry && !extensionRegistry.readAccess(entity) && !referenced.length) return undefined;
+  const sets = setLoader(trx, session);
+  const set = entry ? await sets(entity) : undefined;
+  const dependents = await linkedDependents(trx, tenantId, entity);
+  // The owner of an owned single child is recomputed with it, when a formula reads the child.
+  const owners: Array<{ table: string; foreignKey: string }> = [];
+  for (const link of ownerLinks(own)) {
+    const ownerSet = await sets(link.entity);
+    if (ownerSet && formulaGraph(ownerSet).relations.includes(link.relation)) owners.push({ table: ownerSet.entry.table, foreignKey: link.foreignKey });
+  }
+  if (!dependents.size && !owners.length && !referenced.length && !(set && computedLinked(set).length)) return undefined;
+  const plan = new Map<string, { table: string; id: string; mode: LockMode }>();
+  const lock = (qualified: string, id: unknown, mode: LockMode) => {
+    if (typeof id !== "string") return;
+    const key = `${qualified}\u0000${id}`;
+    const known = plan.get(key);
+    if (!known || LOCK_STRENGTH[known.mode] < LOCK_STRENGTH[mode]) plan.set(key, { table: qualified, id, mode });
+  };
+  const budget = new Set<string>();
+  const seen = new Set<string>();
+  const stored = async (from: GeneratedCrudTable, id: string) => (await sql<{ row: Record<string, unknown> }>`select to_jsonb(record.*) as row
+    from ${sql.id(from.schema, from.table)} as record where record.tenant_id = ${tenantId}::uuid and record.id = ${id}::uuid`.execute(trx)).rows[0]?.row;
+  /** What reads this record, down the chain: `changed` names its fields a write changes, undefined for all of them. */
+  const follow = async (node: { table: GeneratedCrudTable; entity: string; id?: string; created?: boolean; deleted?: boolean; changed?: ReadonlySet<string>; written?: Readonly<Record<string, unknown>> }): Promise<void> => {
+    const dependents = await linkedDependents(trx, tenantId, node.entity);
+    if (!dependents.size) return;
+    const before = node.id ? await stored(node.table, node.id) : undefined;
+    const after = node.deleted ? null : { ...before, ...node.written };
+    for (const [fieldId, dependent] of dependents) {
+      if (node.changed && ![...dependent.reads].some((read) => node.changed!.has(read))) continue;
+      const set = await sets(dependent.entity);
+      const field = set?.byId.get(fieldId);
+      const sourceTable = tableOf(dependent.entity);
+      if (!set || !field || !sourceTable || !computedLinked(set).includes(field)) continue;
+      const changes = new Set([fieldId, ...formulaGraph(set).affectedBy([{ entity: set.entity, field: fieldId }]).map((item) => item.fieldId)]);
+      const records = field.kind === "lookup"
+        ? node.created || !node.id ? [] : await referringRecords(trx, tenantId, set, storedLookup(field.definition)!.via, node.id, undefined, set.entry.limits.syncFanOut + 1)
+        : await parentsOf(trx, tenantId, set, storedRollup(field.definition)!, node.table, { before, after }, node.id ?? "");
+      // Beyond the budget a lookup goes through the journal as a whole, a rollup's parents one by one.
+      for (const recordId of field.kind === "lookup" ? (withinBudget(budget, set, records) ? records : []) : records.filter((id) => withinBudget(budget, set, [id]))) {
+        const visit = `${dependent.entity}\u0000${recordId}\u0000${[...changes].sort().join()}`;
+        lock(set.entry.table, recordId, "no key update");
+        if (seen.has(visit)) continue;
+        seen.add(visit);
+        await follow({ table: sourceTable, entity: set.entity, id: recordId, changed: changes });
+      }
+    }
+  };
+  await acrossTenant(trx, session, `lock order of a write of ${entity}`, async () => {
+    // The fields this write can change: those it names and everything computed on the record.
+    const named = write.row ? Object.keys(write.row).flatMap((name) => {
+      const column = own.columns.find((candidate) => candidate.name === name);
+      return column ? [fieldNameForColumn(column)] : [];
+    }) : [];
+    const ids = Object.keys(write.extensions ?? {}).flatMap((key) => {
+      const field = set?.byKey.get(key);
+      return field ? [field.fieldId] : [];
+    });
+    const computed = set ? set.fields.filter((field) => field.kind !== "stored").map((field) => field.fieldId) : [];
+    const source = write.extensions && set
+      ? Object.fromEntries(Object.entries(write.extensions).flatMap(([key, value]) => {
+        const field = set.byKey.get(key);
+        return field ? [[field.fieldId, value]] : [];
+      })) : undefined;
+    const current = write.id ? await stored(own, write.id) : undefined;
+    const written = { ...write.row, ...(source ? { [EXTENSION_VALUES_COLUMN]: { ...storedExtensionSource(current), ...source } } : {}) };
+    await follow({
+      table: own, entity, ...(write.id ? { id: write.id } : {}), written,
+      ...(write.operation === "create" ? { created: true } : write.operation === "delete" ? { deleted: true } : { changed: new Set([...named, ...ids, ...computed]) }),
+    });
+    for (const owner of owners) lock(owner.table, write.row?.[owner.foreignKey] ?? current?.[owner.foreignKey], "no key update");
+    // A lookup's new target must not change before this write has committed; a reference's must stay.
+    for (const field of set?.fields ?? []) {
+      if (!set || field.state === "deleted" || field.kind === "formula" || field.kind === "rollup") continue;
+      if (field.kind === "stored") {
+        const shape = extensionShape(set.entry, field.definition);
+        if (shape.reference && Object.hasOwn(write.extensions ?? {}, field.key)) {
+          for (const id of referenceIds(shape, write.extensions![field.key])) lock(shape.reference.table, id, "key share");
+        }
+        continue;
+      }
+      if (!computedLinked(set).includes(field)) continue;
+      const lookup = storedLookup(field.definition)!;
+      const via = tenantPathId(lookup.via);
+      const reference = via ? set.byId.get(via) : undefined;
+      const relation = via ? undefined : set.entry.relations.find((candidate) => candidate.key === lookup.via);
+      const target = reference ? write.extensions?.[reference.key] : relation ? write.row?.[relation.foreignKey] : undefined;
+      const targetTable = reference ? extensionShape(set.entry, reference.definition).reference?.table : relation?.table;
+      if (targetTable) lock(targetTable, target, "share");
+    }
+    // A delete unlinks the tenant references to it, in this transaction while the budget lasts.
+    for (const source of referenced) {
+      const sourceSet = await sets(source.sourceEntity);
+      if (!sourceSet) continue;
+      const records = await sql<{ id: string }>`select distinct record_id::text as id from ${qualifiedTable(source.valuesTable)}
+        where tenant_id = ${tenantId}::uuid and value_ref_id = ${write.id!}::uuid order by 1 limit ${sourceSet.entry.limits.syncFanOut + 1}`.execute(trx);
+      if (!withinBudget(budget, sourceSet, records.rows.map((record) => record.id))) continue;
+      for (const record of records.rows) lock(sourceSet.entry.table, record.id, "no key update");
+    }
+    if (!plan.size) return;
+    if (write.id) lock(entry?.table ?? `${own.schema}.${own.table}`, write.id, write.operation === "delete" ? "update" : "no key update");
+    const ordered = [...plan.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([, item]) => item);
+    for (const item of ordered) {
+      await sql`select id from ${qualifiedTable(item.table)} where tenant_id = ${tenantId}::uuid and id = ${item.id}::uuid for ${sql.raw(item.mode)}`.execute(trx);
+    }
+  });
+  return plan.size && write.id && write.operation !== "delete" ? "no key update" : undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Fan-out: a write of one record recomputes the fields that read it elsewhere.
 
 /**
  * The extensible entities whose lookups or rollups can read records of this
  * table's entity: those that reference it or relate to it, and those an
- * extensible entity's tenant reference may name (a rollup over it).
+ * extensible entity's tenant reference may name (a rollup over it). A subtype
+ * writes its base table, so it counts as its base entity.
  */
 export function linkedReadersOf(table: GeneratedCrudTable): string[] {
-  const entity = table.source?.authoringEntityName;
-  if (!entity || table.subtype || !extensionRegistry.readAccess(entity)) return [];
+  const entity = baseTableOf(table).source?.authoringEntityName;
+  if (!entity || !extensionRegistry.readAccess(entity)) return [];
   const own = extensionRegistry.entity(entity);
   return extensionRegistry.entityNames().filter((name) => {
     const entry = extensionRegistry.entity(name)!;
@@ -852,8 +1051,8 @@ export function linkedReadersOf(table: GeneratedCrudTable): string[] {
 }
 
 type Change = {
-  before?: Readonly<Record<string, unknown>> | null;
-  after?: Readonly<Record<string, unknown>> | null;
+  before?: Readonly<Record<string, unknown>> | null | undefined;
+  after?: Readonly<Record<string, unknown>> | null | undefined;
 };
 
 /** The fields of a write that changed: authored by name, tenant fields by id (`$meta` included for a computed one). */
@@ -861,7 +1060,7 @@ function changedFields(table: GeneratedCrudTable, change: Change): Set<string> {
   const changed = new Set<string>();
   const before = change.before ?? {}, after = change.after ?? {};
   for (const column of table.columns) {
-    if (column.name === "extension_values") continue;
+    if (column.name === EXTENSION_VALUES_COLUMN) continue;
     if (JSON.stringify(before[column.name] ?? null) !== JSON.stringify(after[column.name] ?? null)) changed.add(fieldNameForColumn(column));
   }
   const was = storedExtensionSource(change.before), is = storedExtensionSource(change.after);
@@ -878,14 +1077,35 @@ function changedFields(table: GeneratedCrudTable, change: Change): Set<string> {
 
 const depthOf = new WeakMap<object, number>();
 
+/** The computed fields that read an entity across a relation, with what each reads there. */
+async function linkedDependents(trx: Transaction<DB>, tenantId: string, entity: string): Promise<Map<string, { entity: string; reads: Set<string> }>> {
+  const rows = await sql<{ field_id: string; entity: string; depends_on_field: string }>`
+    select distinct d.field_id::text as field_id, f.entity, d.depends_on_field
+    from platform.extension_field_dependencies d
+    join platform.extension_field_definitions f on f.tenant_id = d.tenant_id and f.field_id = d.field_id and f.is_current
+      and f.state in ('ready', 'updating') and f.kind in ('lookup', 'rollup')
+    where d.tenant_id = ${tenantId}::uuid and d.depends_on_entity = ${entity} and d.via_field is not null
+    order by 1, 3`.execute(trx);
+  const byField = new Map<string, { entity: string; reads: Set<string> }>();
+  for (const row of rows.rows) {
+    const item = byField.get(row.field_id) ?? { entity: row.entity, reads: new Set<string>() };
+    item.reads.add(row.depends_on_field);
+    byField.set(row.field_id, item);
+  }
+  return byField;
+}
+
 /**
  * Carry a write of one record on to the lookups and rollups that read it:
  * called after every create, update and delete of an entity a tenant field
  * can reach (mutations.ts, collection-mutations.ts) and after every internal
  * write of tenant values (write.ts `rewriteExtensionValues`), so a recompute
- * carries on along the chain. A lookup is recomputed on its referring
- * records in this transaction while there are at most `limits.syncFanOut`,
- * else journaled; a rollup on the old and the new parent of the record.
+ * carries on along the chain. Records are recomputed in this transaction while
+ * its budget lasts (writeBudget), a lookup's referring records as a whole or
+ * not at all; the rest is journaled. A rollup follows the old and the new
+ * parent of the record. A write through a subtype is a write of its base entity.
+ * The records are found and written under the audited tenant bypass: the
+ * writer's row policies must not leave a value behind on a record it cannot see.
  */
 export async function propagateRecordChange(
   trx: Transaction<DB>,
@@ -893,57 +1113,53 @@ export async function propagateRecordChange(
   table: GeneratedCrudTable,
   change: Change,
 ): Promise<void> {
-  const entity = table.source?.authoringEntityName;
+  const base = baseTableOf(table);
+  const entity = base.source?.authoringEntityName;
   const tenantId = session.tenantId;
-  if (!entity || !tenantId || table.subtype || !extensionRegistry.entityNames().length || !extensionRegistry.readAccess(entity)) return;
+  if (!entity || !tenantId || !extensionRegistry.entityNames().length || !extensionRegistry.readAccess(entity)) return;
   const scope = currentDbSessionTransaction() ?? trx;
   const depth = depthOf.get(scope) ?? 0;
   if (depth > MAX_PROPAGATION_DEPTH) extensionError("Tenant field recomputation does not converge.", "INVALID_DEFINITION");
-  const dependents = await sql<{ field_id: string; entity: string; depends_on_field: string; via_field: string }>`
-    select distinct d.field_id::text as field_id, f.entity, d.depends_on_field, d.via_field
-    from platform.extension_field_dependencies d
-    join platform.extension_field_definitions f on f.tenant_id = d.tenant_id and f.field_id = d.field_id and f.is_current
-      and f.state in ('ready', 'updating') and f.kind in ('lookup', 'rollup')
-    where d.tenant_id = ${tenantId}::uuid and d.depends_on_entity = ${entity} and d.via_field is not null
-    order by 1, 3`.execute(trx);
-  if (!dependents.rows.length) return;
+  const dependents = await linkedDependents(trx, tenantId, entity);
+  if (!dependents.size) return;
   const recordId = String((change.after ?? change.before)?.id ?? "");
   if (!recordId) return;
   const created = !change.before, deleted = !change.after;
-  const changed = changedFields(table, change);
-  const byField = new Map<string, { entity: string; reads: Set<string> }>();
-  for (const row of dependents.rows) {
-    const item = byField.get(row.field_id) ?? { entity: row.entity, reads: new Set<string>() };
-    item.reads.add(row.depends_on_field);
-    byField.set(row.field_id, item);
-  }
-  depthOf.set(scope, depth + 1);
-  try {
-    for (const [fieldId, dependent] of byField) {
+  const changed = changedFields(base, change);
+  const relevant = [...dependents].filter(([, dependent]) => created || deleted || [...dependent.reads].some((read) => changed.has(read)));
+  if (!relevant.length) return;
+  const budget = writeBudget(trx);
+  const work = async () => {
+    for (const [fieldId, dependent] of relevant) {
       const set = await loadExtensionFieldsFor(trx, session, dependent.entity, extensionRegistry.entity(dependent.entity)!, { lock: "shared" });
       const field = set.byId.get(fieldId);
       if (!field || !computedLinked(set).includes(field)) continue;
       const sourceTable = tableOf(dependent.entity);
       if (!sourceTable) continue;
-      const relevant = created || deleted || [...dependent.reads].some((read) => changed.has(read));
-      if (!relevant) continue;
       if (field.kind === "lookup") {
         // A new record is referred to by none yet; a deleted one is the deletion guard's (references.ts) or its foreign key's.
         if (created || deleted) continue;
-        const lookup = storedLookup(field.definition)!;
-        const sources = await referringRecords(trx, tenantId, set, lookup.via, recordId);
-        if (sources.length <= set.entry.limits.syncFanOut) {
-          for (const source of sources) await recomputeLinkedRecord(trx, session, { table: sourceTable, set, recordId: source, fields: [field] });
-        } else {
+        const sources = await referringRecords(trx, tenantId, set, storedLookup(field.definition)!.via, recordId, undefined, set.entry.limits.syncFanOut + 1);
+        if (!withinBudget(budget, set, sources)) {
           await journalRecompute(trx, session, { entity: set.entity, field, targetEntity: entity, targetId: recordId });
+          continue;
         }
+        for (const source of sources) await recomputeLinkedRecord(trx, session, { table: sourceTable, set, recordId: source, fields: [field] });
         continue;
       }
-      const rollup = storedRollup(field.definition)!;
-      for (const parent of await parentsOf(trx, tenantId, set, rollup, table, change, recordId)) {
-        await recomputeLinkedRecord(trx, session, { table: sourceTable, set, recordId: parent, fields: [field] });
+      for (const parent of await parentsOf(trx, tenantId, set, storedRollup(field.definition)!, base, change, recordId)) {
+        if (withinBudget(budget, set, [parent])) {
+          await recomputeLinkedRecord(trx, session, { table: sourceTable, set, recordId: parent, fields: [field] });
+        } else {
+          await journalRecompute(trx, session, { entity: set.entity, field, targetEntity: set.entity, targetId: parent });
+        }
       }
     }
+  };
+  depthOf.set(scope, depth + 1);
+  try {
+    if (depth) await work();
+    else await acrossTenant(trx, session, `recompute what reads ${entity} ${recordId}`, work);
   } finally {
     depthOf.set(scope, depth);
   }
@@ -962,6 +1178,21 @@ async function referringRecords(trx: Transaction<DB>, tenantId: string, set: Ext
   if (!relation) return [];
   const rows = await sql<{ id: string }>`select id::text as id from ${qualifiedTable(set.entry.table)}
     where tenant_id = ${tenantId}::uuid and ${sql.ref(relation.foreignKey)} = ${targetId}::uuid ${page("id")}`.execute(trx);
+  return rows.rows.map((row) => row.id);
+}
+
+/**
+ * The records still holding a lookup's value after its target went and the
+ * foreign key set their reference to null: what a journal row of a deleted
+ * target recomputes, since nothing names that target any more.
+ */
+async function orphanedRecords(trx: Transaction<DB>, tenantId: string, set: ExtensionFieldSet, via: string, fieldId: string, after: string | undefined, limit: number): Promise<string[]> {
+  const relation = set.entry.relations.find((candidate) => candidate.key === via);
+  if (!relation) return [];
+  const rows = await sql<{ id: string }>`select id::text as id from ${qualifiedTable(set.entry.table)}
+    where tenant_id = ${tenantId}::uuid and ${sql.ref(relation.foreignKey)} is null
+      and (${sql.ref(EXTENSION_VALUES_COLUMN)} ? ${fieldId} or ${sql.ref(EXTENSION_VALUES_COLUMN)} -> ${EXTENSION_META_KEY} ? ${fieldId})
+      ${after ? sql`and id > ${after}::uuid` : sql``} order by id limit ${limit}`.execute(trx);
   return rows.rows.map((row) => row.id);
 }
 
@@ -988,71 +1219,92 @@ async function parentsOf(
     if (dot > 0) return storedExtensionSource(row)[tenantPathId(rollup.collection.slice(dot + 1)) ?? ""];
     if (Object.hasOwn(row, relation!.foreignKey)) return row[relation!.foreignKey];
     if (stored === undefined) {
-      const found = await sql<{ parent: string | null }>`select ${sql.ref(relation!.foreignKey)}::text as parent
-        from ${sql.id(childTable.schema, childTable.table)} where tenant_id = ${tenantId}::uuid and id = ${recordId}::uuid`.execute(trx);
-      stored = found.rows[0]?.parent ?? null;
+      const found = recordId ? await sql<{ parent: string | null }>`select ${sql.ref(relation!.foreignKey)}::text as parent
+        from ${sql.id(childTable.schema, childTable.table)} where tenant_id = ${tenantId}::uuid and id = ${recordId}::uuid`.execute(trx) : undefined;
+      stored = found?.rows[0]?.parent ?? null;
     }
     return stored;
   };
   return [...new Set([await parent(change.before), await parent(change.after)].filter((id): id is string => typeof id === "string"))].sort();
 }
 
-/** Recompute lookups and rollups of one stored record (and the formulas over them), through the one internal write. */
+/**
+ * Recompute lookups and rollups of one stored record (and the formulas over
+ * them), through the one internal write. The cause is another record, so a
+ * published head stays published (rewriteExtensionValues): whoever renames a
+ * supplier unpublishes no product.
+ */
 export async function recomputeLinkedRecord(
   trx: Transaction<DB>,
   session: DbSessionInput,
   input: { table: GeneratedCrudTable; set: ExtensionFieldSet; recordId: string; fields: readonly ExtensionField[] },
 ): Promise<boolean> {
-  return recomputeRecordFormulas(trx, session, { ...input, fields: [...input.fields, ...formulaGraph(input.set).affectedBy(
+  return recomputeRecordFormulas(trx, session, { ...input, draft: false, fields: [...input.fields, ...formulaGraph(input.set).affectedBy(
     input.fields.map((field) => ({ entity: input.set.entity, field: field.fieldId })))] });
 }
 
 // ---------------------------------------------------------------------------
 // The recompute journal.
 
-function actorSessionFrom(session: DbSessionInput): JobActorSession {
-  return actorSessionOf({
-    credential: "trusted-context", roles: [...session.roles ?? []], groups: [...session.groups ?? []],
-    relationGroupIds: [...session.relationGroupIds ?? []], scope: session.scope ?? "tenant",
-  });
+/** Whether a job still works on this journal row: one waiting or running. */
+async function liveRecomputeJob(trx: Transaction<DB>, tenantId: string, id: string): Promise<boolean> {
+  const found = await sql<{ live: boolean }>`select exists (select 1 from platform.jobs
+    where tenant_id = ${tenantId}::uuid and subject_entity = ${RECOMPUTE_SUBJECT} and subject_id = ${id}::uuid
+      and status in ('queued', 'running')) as live`.execute(trx);
+  return found.rows[0]?.live === true;
 }
 
 /**
  * One journal row per (field, target record): a second write of the target
- * before the worker ran raises its generation and enqueues nothing new.
+ * before the worker ran raises its generation and enqueues nothing new, as
+ * long as a job still works on the row. The row remembers who asked last, so
+ * a job that died can be replaced under that session.
  */
-async function journalRecompute(
+export async function journalRecompute(
   trx: Transaction<DB>,
   session: DbSessionInput,
   input: { entity: string; field: ExtensionField; targetEntity: string; targetId: string },
 ): Promise<void> {
+  const actorSession = jobActorSession(session);
   const row = await sql<{ id: string; generation: number; inserted: boolean }>`
-    insert into platform.extension_field_recomputes (tenant_id, entity, field_id, target_entity, target_id)
-    values (${session.tenantId}::uuid, ${input.entity}, ${input.field.fieldId}::uuid, ${input.targetEntity}, ${input.targetId}::uuid)
+    insert into platform.extension_field_recomputes (tenant_id, entity, field_id, target_entity, target_id, actor_id, actor_session)
+    values (${session.tenantId}::uuid, ${input.entity}, ${input.field.fieldId}::uuid, ${input.targetEntity}, ${input.targetId}::uuid,
+      ${session.userId}::uuid, ${jsonbLiteral(actorSession)})
     on conflict (tenant_id, field_id, target_id) do update
-      set generation = extension_field_recomputes.generation + 1, requested_at = now()
+      set generation = extension_field_recomputes.generation + 1, requested_at = now(),
+        actor_id = excluded.actor_id, actor_session = excluded.actor_session
     returning id::text as id, generation, (xmax = 0) as inserted`.execute(trx);
   const journal = row.rows[0]!;
-  if (journal.inserted) await enqueueRecompute(trx, session.tenantId!, session.userId!, actorSessionFrom(session), journal.id, "start");
+  if (journal.inserted) await enqueueRecompute(trx, session.tenantId!, session.userId!, actorSession, journal.id, "start");
+  else if (!await liveRecomputeJob(trx, session.tenantId!, journal.id)) {
+    await enqueueRecompute(trx, session.tenantId!, session.userId!, actorSession, journal.id, `revive:${randomUUID()}`);
+  }
 }
 
 async function enqueueRecompute(trx: Transaction<DB>, tenantId: string, actorId: string, actorSession: JobActorSession, id: string, step: string): Promise<void> {
   await enqueueJob(trx, {
     tenantId, actorId, actorSession, kind: EXTENSION_RECOMPUTE_KIND, payload: { recomputeId: id },
     deliveryKey: `${id}:${step}`, availableAt: new Date(Date.now() + RECOMPUTE_DEBOUNCE_MS),
-    subject: { entity: "ExtensionFieldRecompute", id },
+    subject: { entity: RECOMPUTE_SUBJECT, id },
   });
 }
 
 type JournalRow = { id: string; entity: string; field_id: string; target_entity: string; target_id: string; generation: number; pass_generation: number | null; cursor: string | null };
 
 /**
- * One batch of one journal row: the referring records after its cursor,
- * recomputed through the one internal write (so formulas over the lookup,
- * further fields along the chain and the record's realtime `updated` event
- * follow). A write of the target during a pass starts the pass over; the row
- * goes once a pass ends on its latest generation. The row is locked for the
- * batch, so a write of the target waits for it rather than slip between.
+ * One batch of one journal row, recomputed through the one internal write (so
+ * formulas over the lookup, further fields along the chain and the record's
+ * realtime `updated` event follow). A lookup's row walks the referring records
+ * after its cursor, or, when the target is gone, the records its foreign key
+ * left without a reference; a rollup's row is one record, the parent it names;
+ * a reference field's row unlinks what still points at a deleted target.
+ *
+ * A pass always runs to its end, whatever is written meanwhile, so a target
+ * written more often than a batch takes cannot starve the records at the back.
+ * A write during a pass raises the generation; the pass ends, and a new one
+ * starts on the latest generation. The row goes once a pass that started on
+ * the latest generation has ended. It is locked for the batch, so a write of
+ * the target waits for it rather than slip between.
  */
 export async function runRecomputeBatch(
   trx: Transaction<DB>,
@@ -1072,37 +1324,96 @@ export async function runRecomputeBatch(
   if (!entry || !table) { await remove(); return { done: true, processed: 0 }; }
   const set = await loadExtensionFieldsFor(trx, session, row.entity, entry, { lock: "shared" });
   const field = set.byId.get(row.field_id);
-  const lookup = field && computedLinked(set).includes(field) ? storedLookup(field.definition) : undefined;
-  if (!field || !lookup) { await remove(); return { done: true, processed: 0 }; }
-  const restart = row.pass_generation === null || row.generation !== row.pass_generation;
-  const cursor = restart ? null : row.cursor;
-  const sources = await referringRecords(trx, tenantId, set, lookup.via, row.target_id, cursor ?? undefined, batchSize);
-  for (const source of sources) await recomputeLinkedRecord(trx, session, { table, set, recordId: source, fields: [field] });
-  if (sources.length < batchSize) {
-    await remove();
-    return { done: true, processed: sources.length };
-  }
-  const next = sources.at(-1)!;
-  await sql`update platform.extension_field_recomputes set pass_generation = ${row.generation}, cursor = ${next}
-    where tenant_id = ${tenantId}::uuid and id = ${row.id}::uuid`.execute(trx);
-  return { done: false, processed: sources.length, step: `${row.generation}:${next}` };
+  const computed = field ? computedLinked(set).includes(field) : false;
+  const lookup = field && computed ? storedLookup(field.definition) : undefined;
+  const reference = field?.kind === "stored" && extensionShape(set.entry, field.definition).reference !== undefined;
+  if (!field || (!computed && !reference)) { await remove(); return { done: true, processed: 0 }; }
+  return acrossTenant(trx, session, `tenant field recompute ${row.id}`, async () => {
+    if (!lookup && !reference) {
+      await recomputeLinkedRecord(trx, session, { table, set, recordId: row.target_id, fields: [field] });
+      await remove();
+      return { done: true, processed: 1 };
+    }
+    // The pass this batch belongs to: the running one, or a new one on the latest generation.
+    const pass = row.pass_generation ?? row.generation;
+    const cursor = row.pass_generation === null ? undefined : row.cursor ?? undefined;
+    let sources: string[];
+    if (reference) {
+      sources = await referringRecords(trx, tenantId, set, `${TENANT_PATH}${field.fieldId}`, row.target_id, undefined, batchSize);
+      await unlinkReferences(trx, session, row.entity, set, field, sources, row.target_id);
+    } else {
+      const targetTable = tableOf(row.target_entity);
+      const gone = targetTable ? !(await sql`select 1 from ${sql.id(targetTable.schema, targetTable.table)}
+        where tenant_id = ${tenantId}::uuid and id = ${row.target_id}::uuid`.execute(trx)).rows.length : false;
+      sources = gone && !tenantPathId(lookup!.via) ? await orphanedRecords(trx, tenantId, set, lookup!.via, field.fieldId, cursor, batchSize)
+        : await referringRecords(trx, tenantId, set, lookup!.via, row.target_id, cursor, batchSize);
+      for (const source of sources) await recomputeLinkedRecord(trx, session, { table, set, recordId: source, fields: [field] });
+    }
+    if (sources.length < batchSize) {
+      if (pass === row.generation) {
+        await remove();
+        return { done: true, processed: sources.length };
+      }
+      await sql`update platform.extension_field_recomputes set pass_generation = null, cursor = null
+        where tenant_id = ${tenantId}::uuid and id = ${row.id}::uuid`.execute(trx);
+      return { done: false, processed: sources.length, step: `${row.generation}:restart` };
+    }
+    const next = sources.at(-1)!;
+    await sql`update platform.extension_field_recomputes set pass_generation = ${pass}, cursor = ${next}
+      where tenant_id = ${tenantId}::uuid and id = ${row.id}::uuid`.execute(trx);
+    return { done: false, processed: sources.length, step: `${pass}:${next}` };
+  });
 }
 
-/** The `extensions.recompute` job: one batch per run, the next run enqueued with it. */
-export const extensionRecomputeJobHandler: ModuleJobHandler = async (payload, context) => {
-  const recomputeId = typeof payload.recomputeId === "string" ? payload.recomputeId : undefined;
-  if (!recomputeId) return { outcome: "failed", error: { code: "INVALID_PAYLOAD", message: "A recompute job names its journal row." } };
+/** The tenant session of a queued job, as the enqueuing request held it. */
+async function replayedSession(context: { job: { id: string; tenantId: string; actorId: string }; db: Transaction<DB> }): Promise<{ session: DbSessionInput; actorSession: JobActorSession }> {
   const job = await sql<{ actor_session: unknown }>`select actor_session from platform.jobs
     where tenant_id = ${context.job.tenantId}::uuid and id = ${context.job.id}::uuid`.execute(context.db);
   const actorSession = actorSessionOf(job.rows[0]?.actor_session as JobActorSession);
-  const session: DbSessionInput = {
-    tenantId: context.job.tenantId, userId: context.job.actorId,
-    roles: actorSession.roles, groups: actorSession.groups, scope: actorSession.scope,
-  };
-  const result = await runRecomputeBatch(context.db, session, recomputeId);
-  if (!result.done) await enqueueRecompute(context.db, context.job.tenantId, context.job.actorId, actorSession, recomputeId, result.step!);
-  return { outcome: "done", result: { processed: result.processed } };
+  return { actorSession, session: jobSession(context.job.tenantId, context.job.actorId, actorSession) };
+}
+
+const retryOutcome = (error: unknown, code: string, message: string): RuntimeJobOutcome => ({
+  outcome: "retry",
+  // A database message may quote values of records, so only its code is kept.
+  error: { code: sqlstateOf(error) ?? code, message },
+});
+
+/** The `extensions.recompute` job: one batch per run, the next run enqueued with it. A failed batch leaves nothing behind and runs again. */
+export const extensionRecomputeJobHandler: ModuleJobHandler = async (payload, context) => {
+  const recomputeId = typeof payload.recomputeId === "string" ? payload.recomputeId : undefined;
+  if (!recomputeId) return { outcome: "failed", error: { code: "INVALID_PAYLOAD", message: "A recompute job names its journal row." } };
+  const { session, actorSession } = await replayedSession(context);
+  await sql`savepoint extension_recompute_batch`.execute(context.db);
+  try {
+    const result = await runRecomputeBatch(context.db, session, recomputeId);
+    if (!result.done) await enqueueRecompute(context.db, context.job.tenantId, context.job.actorId, actorSession, recomputeId, result.step!);
+    await sql`release savepoint extension_recompute_batch`.execute(context.db);
+    return { outcome: "done", result: { processed: result.processed } };
+  } catch (error) {
+    await sql`rollback to savepoint extension_recompute_batch`.execute(context.db);
+    return retryOutcome(error, "RECOMPUTE_FAILED", "A batch of the recompute journal failed; it runs again.");
+  }
 };
+
+/**
+ * The journal never gives up on a row: one without a waiting or running job
+ * (its job ran out of attempts) gets a new one, under the session of the write
+ * that last asked for it. Runs in the worker's session, across tenants, on the
+ * worker's maintenance tick; a batch at a time, so a backlog cannot hold it.
+ */
+export async function sweepExtensionRecomputes(trx: Transaction<DB>, limit = RECOMPUTE_SWEEP_LIMIT): Promise<number> {
+  const orphans = await sql<{ id: string; tenant_id: string; actor_id: string; actor_session: unknown }>`
+    select r.id::text as id, r.tenant_id::text as tenant_id, r.actor_id::text as actor_id, r.actor_session
+    from platform.extension_field_recomputes r
+    where not exists (select 1 from platform.jobs j where j.tenant_id = r.tenant_id
+      and j.subject_entity = ${RECOMPUTE_SUBJECT} and j.subject_id = r.id and j.status in ('queued', 'running'))
+    order by r.requested_at, r.id limit ${limit}`.execute(trx);
+  for (const row of orphans.rows) {
+    await enqueueRecompute(trx, row.tenant_id, row.actor_id, actorSessionOf(row.actor_session as JobActorSession), row.id, `sweep:${randomUUID()}`);
+  }
+  return orphans.rows.length;
+}
 
 // ---------------------------------------------------------------------------
 // Staleness, as a reader sees it.
@@ -1110,9 +1421,11 @@ export const extensionRecomputeJobHandler: ModuleJobHandler = async (payload, co
 const staleness = new WeakMap<object, Map<string, Map<string, Set<string>>>>();
 
 /**
- * One step per page: the open journal rows of this entity, matched against
- * the references of `rows` (stored rows). A lookup whose target has an open
- * row is stale, and so is every formula over it.
+ * One step per page: the open journal rows of the records of `rows`. A lookup
+ * whose target has an open row is stale (or whose reference still has to be
+ * unlinked), a rollup whose own record has one too, and so is every formula
+ * over either. Only rows of the page's targets are read: a journal with many
+ * open rows costs a page nothing.
  */
 export async function proveExtensionStaleness(
   trx: Transaction<DB>,
@@ -1121,10 +1434,22 @@ export async function proveExtensionStaleness(
   rows: readonly Readonly<Record<string, unknown>>[],
 ): Promise<void> {
   if (!set || !rows.length || !session.tenantId) return;
-  const lookups = computedLinked(set).filter((field) => field.kind === "lookup");
-  if (!lookups.length) return;
+  const computed = computedLinked(set);
+  if (!computed.length) return;
+  /** The journal keys that make a field of a row stale, per field. */
+  const keysOf = (row: Readonly<Record<string, unknown>>, field: ExtensionField): string[] => {
+    const lookup = field.kind === "lookup" ? storedLookup(field.definition) : undefined;
+    if (!lookup) return [`${field.fieldId}:${String(row.id)}`];
+    const via = tenantPathId(lookup.via);
+    const relation = via ? undefined : set.entry.relations.find((candidate) => candidate.key === lookup.via);
+    const target = via ? storedExtensionSource(row)[via] : relation ? row[relation.foreignKey] : undefined;
+    return typeof target !== "string" ? [] : [`${field.fieldId}:${target}`, ...(via ? [`${via}:${target}`] : [])];
+  };
+  const targets = [...new Set(rows.flatMap((row) => computed.flatMap((field) => keysOf(row, field).map((key) => key.slice(key.indexOf(":") + 1)))))];
+  if (!targets.length) return;
   const open = await sql<{ field_id: string; target_id: string }>`select field_id::text as field_id, target_id::text as target_id
-    from platform.extension_field_recomputes where tenant_id = ${session.tenantId}::uuid and entity = ${set.entity}`.execute(trx);
+    from platform.extension_field_recomputes
+    where tenant_id = ${session.tenantId}::uuid and entity = ${set.entity} and target_id = any(${`{${targets.join(",")}}`}::uuid[])`.execute(trx);
   if (!open.rows.length) return;
   const pending = new Set(open.rows.map((row) => `${row.field_id}:${row.target_id}`));
   const scope = currentDbSessionTransaction() ?? trx;
@@ -1133,14 +1458,7 @@ export async function proveExtensionStaleness(
   const records = byEntity.get(set.entity) ?? new Map<string, Set<string>>();
   byEntity.set(set.entity, records);
   for (const row of rows) {
-    const source = storedExtensionSource(row);
-    const stale = lookups.filter((field) => {
-      const lookup = storedLookup(field.definition)!;
-      const via = tenantPathId(lookup.via);
-      const relation = via ? undefined : set.entry.relations.find((candidate) => candidate.key === lookup.via);
-      const target = via ? source[via] : relation ? row[relation.foreignKey] : undefined;
-      return typeof target === "string" && pending.has(`${field.fieldId}:${target}`);
-    });
+    const stale = computed.filter((field) => keysOf(row, field).some((key) => pending.has(key)));
     if (!stale.length) continue;
     const ids = new Set(stale.map((field) => field.fieldId));
     for (const reader of formulaGraph(set).affectedBy(stale.map((field) => ({ entity: set.entity, field: field.fieldId })))) ids.add(reader.fieldId);
@@ -1241,45 +1559,59 @@ export function isLinkedKind(kind: unknown): kind is "lookup" | "rollup" {
   return kind === "lookup" || kind === "rollup";
 }
 
+type PendingLookup = { set: ExtensionFieldSet; field: ExtensionField; records: string[]; journal?: { targetEntity: string; targetId: string } };
+
 /**
  * Before a record is deleted: the records whose lookup follows an authored
- * relation to it. Its foreign key decides what happens to them (it refuses
- * the delete, or sets the reference null, or deletes them too); whichever it
- * is, afterDeleteOfLinkedTarget recomputes those that remain.
+ * relation to it, up to the write's budget. Its foreign key decides what
+ * happens to them (it refuses the delete, or sets the reference null, or
+ * deletes them too); whichever it is, afterDeleteOfLinkedTarget recomputes
+ * those that remain. A lookup with more of them than the budget allows is left
+ * to the journal, which finds them by the empty reference.
  */
 export async function beforeDeleteOfLinkedTarget(
   trx: Transaction<DB>,
   session: DbSessionInput,
   table: GeneratedCrudTable,
   id: string,
-): Promise<Array<{ set: ExtensionFieldSet; field: ExtensionField; records: string[] }>> {
-  const entity = table.source?.authoringEntityName;
+): Promise<PendingLookup[]> {
+  const entity = baseTableOf(table).source?.authoringEntityName;
   if (!entity || !session.tenantId || !extensionRegistry.entityNames().length || !extensionRegistry.readAccess(entity)) return [];
+  const tenantId = session.tenantId;
   const rows = await sql<{ field_id: string; entity: string; via_field: string }>`
     select distinct d.field_id::text as field_id, f.entity, d.via_field from platform.extension_field_dependencies d
     join platform.extension_field_definitions f on f.tenant_id = d.tenant_id and f.field_id = d.field_id and f.is_current
       and f.state in ('ready', 'updating') and f.kind = 'lookup'
-    where d.tenant_id = ${session.tenantId}::uuid and d.depends_on_entity = ${entity} and d.via_field is not null
+    where d.tenant_id = ${tenantId}::uuid and d.depends_on_entity = ${entity} and d.via_field is not null
       and d.via_field not like 'extensions.%' order by 1`.execute(trx);
-  const pending: Array<{ set: ExtensionFieldSet; field: ExtensionField; records: string[] }> = [];
-  for (const row of rows.rows) {
-    const set = await loadExtensionFieldsFor(trx, session, row.entity, extensionRegistry.entity(row.entity)!, { lock: "shared" });
-    const field = set.byId.get(row.field_id);
-    if (!field) continue;
-    const records = await referringRecords(trx, session.tenantId, set, row.via_field, id);
-    if (records.length) pending.push({ set, field, records });
-  }
-  return pending;
+  if (!rows.rows.length) return [];
+  const budget = writeBudget(trx);
+  return acrossTenant(trx, session, `find what looks up ${entity} ${id}`, async () => {
+    const pending: PendingLookup[] = [];
+    for (const row of rows.rows) {
+      const set = await loadExtensionFieldsFor(trx, session, row.entity, extensionRegistry.entity(row.entity)!, { lock: "shared" });
+      const field = set.byId.get(row.field_id);
+      if (!field) continue;
+      const records = await referringRecords(trx, tenantId, set, row.via_field, id, undefined, set.entry.limits.syncFanOut + 1);
+      if (!withinBudget(budget, set, records)) pending.push({ set, field, records: [], journal: { targetEntity: entity, targetId: id } });
+      else if (records.length) pending.push({ set, field, records });
+    }
+    return pending;
+  });
 }
 
 export async function afterDeleteOfLinkedTarget(
   trx: Transaction<DB>,
   session: DbSessionInput,
-  pending: Awaited<ReturnType<typeof beforeDeleteOfLinkedTarget>>,
+  pending: readonly PendingLookup[],
 ): Promise<void> {
-  for (const { set, field, records } of pending) {
-    const table = tableOf(set.entity);
-    if (!table) continue;
-    for (const recordId of records) await recomputeLinkedRecord(trx, session, { table, set, recordId, fields: [field] });
-  }
+  if (!pending.length) return;
+  await acrossTenant(trx, session, "recompute the lookups of a deleted record", async () => {
+    for (const { set, field, records, journal } of pending) {
+      const table = tableOf(set.entity);
+      if (!table) continue;
+      if (journal) await journalRecompute(trx, session, { entity: set.entity, field, ...journal });
+      for (const recordId of records) await recomputeLinkedRecord(trx, session, { table, set, recordId, fields: [field] });
+    }
+  });
 }

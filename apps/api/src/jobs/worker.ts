@@ -82,6 +82,8 @@ export type JobWorkerOptions = {
    */
   inboundBodyRetention?: InboundBodyRetention;
   sweepIntervalMs?: number;
+  /** What else this worker keeps in order on the sweep interval, each in a worker session of its own, by what its count means. */
+  sweeps?: Readonly<Record<string, (trx: Transaction<DB>) => Promise<number>>>;
 };
 
 const DEFAULT_BATCH_SIZE = 10;
@@ -474,6 +476,10 @@ export function startJobWorker(
             },
             "Inbound deliveries accepted long ago have still not settled; their payloads are retained and need operator action.",
           );
+        }
+        for (const [name, sweep] of Object.entries(options.sweeps ?? {})) {
+          const count = await withJobWorkerSession(db, sweep);
+          if (count > 0) log.info({ count }, `Swept: ${name}.`);
         }
       }
       const result = await processJobBatch(db, handlers, log, options, () => stopped);

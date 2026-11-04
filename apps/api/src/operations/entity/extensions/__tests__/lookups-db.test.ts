@@ -453,6 +453,209 @@ describe("tenant lookups and rollups", () => {
       .toMatchObject({ code: "CONFLICT", message: expect.stringContaining(`${ENTITY}.groupTwice`) });
   });
 
+  test("four concurrent children under one parent: no deadlock over the rounds, and the rollup counts every one", async () => {
+    const t = await tenant();
+    await field(t, "group", reference(GROUP, "Group"));
+    await field(t, "weight", number("Weight"));
+    await field(t, "members", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "countAll" }, "Members"), "rollup", GROUP);
+    await field(t, "total", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "sum", of: "extensions.weight" }, "Total"), "rollup", GROUP);
+    const group = await create(t.writer, GROUP, { name: "G" });
+    for (let round = 0; round < 5; round += 1) {
+      const results = await Promise.allSettled([1, 2, 3, 4].map((n) => create(t.writer, ENTITY, { name: `c${round}.${n}`, extensions: { group: group.id, weight: 2 } })));
+      expect(results.filter((result) => result.status === "rejected")).toEqual([]);
+    }
+    expect((await get(t.reader, group.id, GROUP)).extensions).toMatchObject({ members: 20, total: 40 });
+  }, 60_000);
+
+  test("a parent against its children, in both directions along the graph: no deadlock over the rounds", async () => {
+    const t = await tenant();
+    await field(t, "group", reference(GROUP, "Group"));
+    await field(t, "weight", number("Weight"));
+    await field(t, "groupName", lookup("extensions.group", "name", "Group name"), "lookup");
+    await field(t, "total", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "sum", of: "extensions.weight" }, "Total"), "rollup", GROUP);
+    for (let round = 0; round < 6; round += 1) {
+      const group = await create(t.writer, GROUP, { name: "before" });
+      const one = await create(t.writer, ENTITY, { name: "one", extensions: { group: group.id, weight: 1 } });
+      const two = await create(t.writer, ENTITY, { name: "two", extensions: { group: group.id, weight: 1 } });
+      const results = await Promise.allSettled([
+        write(t.writer, GROUP, group.id, { name: "after" }),
+        write(t.writer, ENTITY, one.id, { extensions: { weight: 5 } }),
+        write(t.writer, ENTITY, two.id, { extensions: { weight: 5 } }),
+        create(t.writer, ENTITY, { name: "three", extensions: { group: group.id, weight: 5 } }),
+      ]);
+      expect(results.filter((result) => result.status === "rejected")).toEqual([]);
+      await drainJobs();
+      expect((await get(t.reader, group.id, GROUP)).extensions.total).toBe(15);
+      expect((await get(t.reader, one.id)).extensions.groupName).toBe("after");
+      expect((await get(t.reader, two.id)).extensions.groupName).toBe("after");
+    }
+  }, 60_000);
+
+  test("a lookup's own write waits for a write of its target, so the value it stores is never the older one", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    await field(t, "placeName", lookup("extensions.place", "name"), "lookup");
+    const location = await create(t.writer, TARGET_ENTITY, { name: "old" });
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    let locked!: () => void;
+    const held = new Promise<void>((resolve) => { locked = resolve; });
+    const writer = fixture.privileged.db.transaction().execute(async (trx) => {
+      await sql`update erp.extensible_asset_locations set name = 'new' where id = ${location.id}::uuid`.execute(trx);
+      locked();
+      await hold;
+    });
+    await held;
+    const asset = create(t.writer, ENTITY, { name: "A", extensions: { place: location.id } });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    release();
+    await writer;
+    expect((await asset).extensions.placeName).toBe("new");
+  });
+
+  test("a job that fails stays in the journal: a deadlock is a retry, and the row is done once the batch goes through", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    await field(t, "placeName", lookup("extensions.place", "name"), "lookup");
+    const location = await create(t.writer, TARGET_ENTITY, { name: "before" });
+    const assets = await Promise.all([1, 2, 3, 4].map((n) => create(t.writer, ENTITY, { name: `a${n}`, extensions: { place: location.id } })));
+    await update(t.writer, TARGET_ENTITY, location.id, { name: "after" });
+    const repair = await failWrites("erp.extensible_assets", "40P01");
+    try {
+      await sql`update platform.jobs set available_at = now() where tenant_id = ${t.id}::uuid and kind = ${EXTENSION_RECOMPUTE_KIND}`.execute(fixture.privileged.db);
+      await processJobBatch(fixture.worker.db, handlers, silent, { kinds: [EXTENSION_RECOMPUTE_KIND] });
+    } finally {
+      await repair();
+    }
+    expect(await jobs(t.id)).toMatchObject([{ status: "queued", attempts: 1, error: expect.stringContaining("40P01") }]);
+    expect(await journal(t.id)).toHaveLength(1);
+    await drainJobs();
+    expect(await journal(t.id)).toEqual([]);
+    for (const asset of assets) expect((await get(t.reader, asset.id)).extensions.placeName).toBe("after");
+  });
+
+  test("a journal row whose job died gets a new one: from the next write of the target, or from the sweep", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    await field(t, "placeName", lookup("extensions.place", "name"), "lookup");
+    const location = await create(t.writer, TARGET_ENTITY, { name: "v0" });
+    const assets = await Promise.all([1, 2, 3, 4].map((n) => create(t.writer, ENTITY, { name: `a${n}`, extensions: { place: location.id } })));
+    await update(t.writer, TARGET_ENTITY, location.id, { name: "v1" });
+    const bury = () => sql`update platform.jobs set status = 'dead', completed_at = now() where tenant_id = ${t.id}::uuid and kind = ${EXTENSION_RECOMPUTE_KIND} and status = 'queued'`.execute(fixture.privileged.db);
+    await bury();
+    expect(await withJobWorkerSession(fixture.worker.db, (trx) => sql`select 1 from platform.extension_field_recomputes`.execute(trx)).then((result) => result.rows.length)).toBeGreaterThan(0);
+
+    await update(t.writer, TARGET_ENTITY, location.id, { name: "v2" });
+    expect((await jobs(t.id)).map((job) => job.status)).toEqual(["dead", "queued"]);
+    await bury();
+    expect(await withJobWorkerSession(fixture.worker.db, sweepExtensionRecomputes)).toBe(1);
+    expect((await jobs(t.id)).map((job) => job.status)).toEqual(["dead", "dead", "queued"]);
+    // A row with a live job is left alone.
+    expect(await withJobWorkerSession(fixture.worker.db, sweepExtensionRecomputes)).toBe(0);
+    await drainJobs();
+    expect(await journal(t.id)).toEqual([]);
+    for (const asset of assets) expect((await get(t.reader, asset.id)).extensions.placeName).toBe("v2");
+  });
+
+  test("a job carries the session that asked for it, not a stand-in", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    await field(t, "group", reference(GROUP, "Group"));
+    await field(t, "placeName", lookup("extensions.place", "name"), "lookup");
+    await field(t, "named", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "count", of: "extensions.placeName" }), "rollup", GROUP);
+    const location = await create(t.writer, TARGET_ENTITY, { name: "v0" });
+    const groups = await Promise.all([1, 2, 3, 4].map((n) => create(t.writer, GROUP, { name: `g${n}` })));
+    for (const group of groups) await create(t.writer, ENTITY, { name: "a", extensions: { place: location.id, group: group.id } });
+    await sql`update erp.extensible_asset_locations set name = 'v1' where id = ${location.id}::uuid`.execute(fixture.privileged.db);
+    await sql`update erp.extensible_assets set extension_values = extension_values - ${(await listed(t, "placeName")).fieldId} where tenant_id = ${t.id}::uuid`.execute(fixture.privileged.db);
+    await update({ ...t.writer, credential: "api-key" } as unknown as Session, TARGET_ENTITY, location.id, { name: "v2" });
+    expect((await jobs(t.id))[0]!.actor_session).toMatchObject({ credential: "api-key", roles: [WRITER_ROLE] });
+    // What the job leaves to the journal in its turn is asked for by the same session.
+    await sql`update platform.jobs set available_at = now() where tenant_id = ${t.id}::uuid and kind = ${EXTENSION_RECOMPUTE_KIND}`.execute(fixture.privileged.db);
+    await processJobBatch(fixture.worker.db, handlers, silent, { kinds: [EXTENSION_RECOMPUTE_KIND], batchSize: 1 });
+    const open = await jobs(t.id);
+    expect(open.length).toBeGreaterThan(1);
+    for (const job of open) expect(job.actor_session).toMatchObject({ credential: "api-key" });
+  });
+
+  test("a pass runs to its end while the target keeps being written, and a new pass settles the latest generation", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    const placeName = await field(t, "placeName", lookup("extensions.place", "name"), "lookup");
+    const location = await create(t.writer, TARGET_ENTITY, { name: "v0" });
+    const assets = await Promise.all([1, 2, 3, 4, 5, 6].map((n) => create(t.writer, ENTITY, { name: `a${n}`, extensions: { place: location.id } })));
+    const ordered = assets.map((asset) => asset.id).sort();
+    const value = async (id: string) => (await get(t.reader, id)).extensions.placeName;
+    const row = async () => (await privileged(sql<{ id: string }>`select id::text as id from platform.extension_field_recomputes
+      where tenant_id = ${t.id}::uuid and field_id = ${placeName}::uuid`))[0]!.id;
+    const batch = async () => {
+      const id = await row();
+      return withDbSession(fixture.worker.db, t.writer, (trx) => runRecomputeBatch(trx, t.writer, id, 2));
+    };
+    await update(t.writer, TARGET_ENTITY, location.id, { name: "v1" });
+    expect(await batch()).toMatchObject({ done: false, processed: 2 });
+    await update(t.writer, TARGET_ENTITY, location.id, { name: "v2" });
+    expect(await batch()).toMatchObject({ done: false, processed: 2 });
+    await update(t.writer, TARGET_ENTITY, location.id, { name: "v3" });
+    expect(await batch()).toMatchObject({ done: false, processed: 2 });
+    // The back of the first pass was reached, though a write came between every batch.
+    expect(await value(ordered[5]!)).toBe("v3");
+    expect(await value(ordered[0]!)).toBe("v1");
+    expect(await batch()).toMatchObject({ done: false, processed: 0 });
+    for (let run = 0; run < 3; run += 1) expect(await batch()).toMatchObject({ done: false, processed: 2 });
+    expect(await batch()).toMatchObject({ done: true, processed: 0 });
+    expect(await journal(t.id)).toEqual([]);
+    for (const id of ordered) expect(await value(id)).toBe("v3");
+  });
+
+  test("a stale read asks the journal for the targets of its page only", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    await field(t, "placeName", lookup("extensions.place", "name"), "lookup");
+    const mine = await create(t.writer, TARGET_ENTITY, { name: "mine" });
+    const other = await create(t.writer, TARGET_ENTITY, { name: "other" });
+    const row = await create(t.writer, ENTITY, { name: "on the page", extensions: { place: mine.id } });
+    await Promise.all([1, 2, 3, 4].map((n) => create(t.writer, ENTITY, { name: `a${n}`, extensions: { place: other.id } })));
+    await update(t.writer, TARGET_ENTITY, other.id, { name: "other 2" });
+    expect(await journal(t.id)).toHaveLength(1);
+    const statements: Array<{ sql: string; parameters: readonly unknown[] }> = [];
+    await withDbSession(fixture.app.db, t.reader, async (trx) => {
+      const executor = trx.getExecutor();
+      const recording = new Proxy(executor, { get(target, name, receiver) {
+        if (name === "executeQuery") return (query: { sql: string; parameters: readonly unknown[] }) => { statements.push(query); return (target.executeQuery as (query: unknown) => unknown)(query); };
+        const value = Reflect.get(target, name, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      } });
+      const spying = new Proxy(trx, { get(target, name) { return name === "getExecutor" ? () => recording : Reflect.get(target, name); } }) as unknown as Transaction<never>;
+      const { loadExtensionFieldsFor } = await import("../store.js");
+      const { extensionRegistry } = await import("../registry.js");
+      const fields = await loadExtensionFieldsFor(trx, t.reader, ENTITY, extensionRegistry.entity(ENTITY)!);
+      const stored = (await sql<{ row: Record<string, unknown> }>`select to_jsonb(a.*) as row from erp.extensible_assets a where id = ${row.id}::uuid`.execute(trx)).rows[0]!.row;
+      await proveExtensionStaleness(spying as never, t.reader, fields, [stored]);
+    });
+    const read = statements.find((statement) => statement.sql.includes("extension_field_recomputes"))!;
+    expect(read.sql).toContain("target_id = any");
+    expect(JSON.stringify(read.parameters)).toContain(mine.id);
+    expect(JSON.stringify(read.parameters)).not.toContain(other.id);
+  });
+
+  test("a record the writer's row policies hide still follows a write of its target", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    const placeName = await field(t, "placeName", lookup("extensions.place", "name"), "lookup");
+    const location = await create(t.writer, TARGET_ENTITY, { name: "before" });
+    const asset = await create(t.writer, ENTITY, { name: "hidden", extensions: { place: location.id } });
+    await sql`create policy hidden_from_writers on erp.extensible_assets as restrictive for all using (app.bypass_rls() or name <> 'hidden')`.execute(fixture.privileged.db);
+    try {
+      await update(t.writer, TARGET_ENTITY, location.id, { name: "after" });
+    } finally {
+      await sql`drop policy hidden_from_writers on erp.extensible_assets`.execute(fixture.privileged.db);
+    }
+    expect((await get(t.reader, asset.id)).extensions.placeName).toBe("after");
+    expect(await privileged(sql<{ value_text: string }>`select value_text from erp.extensible_assets_field_values
+      where record_id = ${asset.id}::uuid and field_id = ${placeName}::uuid`)).toEqual([{ value_text: "after" }]);
+  });
+
   test("text beyond the bounds of a formula is that record's textTooLong, never a failed write of someone else", async () => {
     const t = await tenant();
     await field(t, "group", reference(GROUP, "Group"));
@@ -482,6 +685,78 @@ describe("tenant lookups and rollups", () => {
     const again = await get(t.reader, asset.id);
     expect(again.extensions.groupNote).toBe("short again");
     expect(again.extensionsMeta.groupNote?.error).toBeUndefined();
+  });
+
+  test("a recompute from another record leaves a published head published; its own write puts it back to draft", async () => {
+    const t = await tenant();
+    await field(t, "locationName", lookup("location", "name", "Location name"), "lookup", EDITION);
+    await field(t, "edition", reference(EDITION, "Edition"));
+    await field(t, "assets", rollup({ collection: `${ENTITY}.extensions.edition`, aggregate: "countAll" }, "Assets"), "rollup", EDITION);
+    const location = await create(t.writer, TARGET_ENTITY, { name: "North" });
+    const edition = await create(t.writer, EDITION, { name: "E", location: location.id });
+    const status = async () => (await privileged(sql<{ lifecycle_status: string }>`select lifecycle_status from erp.extensible_asset_editions where id = ${edition.id}::uuid`))[0]!.lifecycle_status;
+    const publish = () => sql`update erp.extensible_asset_editions set lifecycle_status = 'published' where id = ${edition.id}::uuid`.execute(fixture.privileged.db);
+    await publish();
+    await update(t.writer, TARGET_ENTITY, location.id, { name: "South" });
+    expect((await get(t.reader, edition.id, EDITION)).extensions.locationName).toBe("South");
+    expect(await status()).toBe("published");
+    await create(t.writer, ENTITY, { name: "A", extensions: { edition: edition.id } });
+    expect((await get(t.reader, edition.id, EDITION)).extensions.assets).toBe(1);
+    expect(await status()).toBe("published");
+    await write(t.writer, EDITION, edition.id, { name: "E2" });
+    expect(await status()).toBe("draft");
+  });
+
+  test("one budget per write along the whole chain: a lookup's records, then the parents of their rollups through the journal", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    await field(t, "group", reference(GROUP, "Group"));
+    await field(t, "placeName", lookup("extensions.place", "name", "Place name"), "lookup");
+    await field(t, "names", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "arrayUnique", of: "extensions.placeName" }, "Names"), "rollup", GROUP);
+    const location = await create(t.writer, TARGET_ENTITY, { name: "Old" });
+    const groups = await Promise.all([1, 2, 3].map((n) => create(t.writer, GROUP, { name: `g${n}` })));
+    const assets = [];
+    for (const group of groups) assets.push(await create(t.writer, ENTITY, { name: "A", extensions: { place: location.id, group: group.id } }));
+    await update(t.writer, TARGET_ENTITY, location.id, { name: "New" });
+    // Three records in the transaction, which is the whole budget; the rest waits in the journal.
+    for (const asset of assets) expect((await get(t.reader, asset.id)).extensions.placeName).toBe("New");
+    const open = await journal(t.id);
+    expect(open.map((row) => row.target_id).sort()).toEqual(groups.map((group) => group.id).sort());
+    const stale = await get(t.reader, groups[0]!.id, GROUP);
+    expect(stale.extensions.names).toBe("Old");
+    expect(stale.extensionsMeta.names).toMatchObject({ stale: true });
+    await drainJobs();
+    expect(await journal(t.id)).toEqual([]);
+    for (const group of groups) expect((await get(t.reader, group.id, GROUP)).extensions.names).toBe("New");
+  });
+
+  test("a delete has the same budget: setNull beyond it goes through the journal, stale until the worker ran", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place", { onDelete: "setNull" }));
+    await field(t, "placeName", lookup("extensions.place", "name", "Place name"), "lookup");
+    const location = await create(t.writer, TARGET_ENTITY, { name: "Gone" });
+    const assets = await Promise.all([1, 2, 3, 4].map((n) => create(t.writer, ENTITY, { name: `a${n}`, extensions: { place: location.id } })));
+    expect(await remove(t.writer, TARGET_ENTITY, location.id)).not.toHaveProperty("error");
+    expect(await journal(t.id)).toHaveLength(1);
+    expect((await get(t.reader, assets[0]!.id)).extensionsMeta.placeName).toMatchObject({ stale: true });
+    await drainJobs();
+    expect(await journal(t.id)).toEqual([]);
+    for (const asset of assets) expect((await get(t.reader, asset.id)).extensions).toMatchObject({ place: null, placeName: null });
+  });
+
+  test("a delete of a target over an authored relation beyond the budget: the journal finds its records by the empty reference", async () => {
+    const t = await tenant();
+    await field(t, "locationName", lookup("location", "name", "Location name"), "lookup", GROUP);
+    const location = await create(t.writer, TARGET_ENTITY, { name: "Gone" });
+    const groups = await Promise.all([1, 2, 3, 4].map((n) => create(t.writer, GROUP, { name: `g${n}`, location: location.id })));
+    await sql`alter table erp.extensible_asset_groups drop constraint if exists extensible_asset_groups_location_id_fkey`.execute(fixture.privileged.db);
+    const removed = await remove(t.writer, TARGET_ENTITY, location.id);
+    if ("error" in removed) throw new Error(JSON.stringify(removed));
+    expect(await journal(t.id)).toHaveLength(1);
+    await sql`update erp.extensible_asset_groups set location_id = null where tenant_id = ${t.id}::uuid`.execute(fixture.privileged.db);
+    await drainJobs();
+    expect(await journal(t.id)).toEqual([]);
+    for (const group of groups) expect((await get(t.reader, group.id, GROUP)).extensions.locationName).toBeNull();
   });
 
   test("a rollup is SQL: conditions, defaults and every aggregate as a reader would count them", async () => {
@@ -537,5 +812,25 @@ describe("tenant lookups and rollups", () => {
     const plain = (await listed(t, "plain")).fieldId;
     expect(await failure(define(t.manager, "update", { fieldId: plain, definition: { osfType: "number", label: label("Plain"), ...pub, defaultValue: 1 }, appliesWhen: applies })))
       .toMatchObject({ code: "CONFLICT", message: expect.stringContaining(`${GROUP}.sum`) });
+  });
+
+  test("a deadlock in a formula backfill is a retry, not a suspended field", async () => {
+    const t = await tenant();
+    await create(t.writer, ENTITY, { name: "A" });
+    await field(t, "size", number("Size"));
+    const created = await define(t.manager, "create", { key: "twice", kind: "formula", definition: formula("{Size} * 2", "Twice") }) as { fieldId: string };
+    const repair = await failWrites("erp.extensible_assets", "40P01");
+    try {
+      await processJobBatch(fixture.worker.db, handlers, silent, { kinds: [EXTENSION_BACKFILL_KIND] });
+    } finally {
+      await repair();
+    }
+    expect((await listed(t, "twice")).state).toBe("updating");
+    expect(await privileged(sql<{ status: string }>`select status from platform.jobs where tenant_id = ${t.id}::uuid and kind = ${EXTENSION_BACKFILL_KIND} order by sequence desc limit 1`))
+      .toEqual([{ status: "queued" }]);
+    await sql`update platform.jobs set available_at = now() where tenant_id = ${t.id}::uuid`.execute(fixture.privileged.db);
+    await drainJobs();
+    expect((await listed(t, "twice")).state).toBe("ready");
+    void created;
   });
 });

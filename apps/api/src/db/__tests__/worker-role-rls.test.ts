@@ -669,9 +669,11 @@ describe("worker-role RLS axis", () => {
             // AAD bound to its own tenant, endpoint and receipt, so the role's
             // cross-tenant read still opens nothing but the row it claimed —
             // and `platform.inbound_endpoints`, which holds the provider
-            // secret, is deliberately NOT on this axis.
+            // secret, is deliberately NOT on this axis. The recompute journal
+            // is a queue of the same kind: ids and a generation, swept across
+            // tenants for rows whose job died.
             expect(policies.rows.map((row) => row.qualified))
-              .toEqual(["platform.inbound_deliveries", "platform.jobs"]);
+              .toEqual(["platform.extension_field_recomputes", "platform.inbound_deliveries", "platform.jobs"]);
             // USING and WITH CHECK move together, so a claim can also write back
             // — and neither may name the GUC without the connected role beside
             // it, which is the property #223 added.

@@ -105,7 +105,7 @@ function refuse(violations: readonly Violation[]): never {
   });
 }
 
-/** A valid reference names a row the writer may read, locked against deletion. */
+/** A valid reference names a row the writer may read, kept from being deleted (`for key share`, the weakest lock that does). */
 async function assertReferencesReadable(
   trx: Transaction<DB>,
   session: DbSessionInput,
@@ -123,7 +123,7 @@ async function assertReferencesReadable(
   requireEntityOperation(target!, isGeneratedCrudOperationEnabled(target!, "get") ? "get" : "list", session);
   for (const id of new Set(ids)) {
     const visible = await sql<{ id: string }>`select id from ${sql.id(target!.schema, target!.table)}
-      where id = ${id}::uuid and tenant_id = ${session.tenantId}::uuid for share`.execute(trx);
+      where id = ${id}::uuid and tenant_id = ${session.tenantId}::uuid for key share`.execute(trx);
     if (!visible.rows.length) {
       throw operationFailure({ code: "FORBIDDEN", message: `A record referenced by ${field.key} is unavailable.`, retryable: false });
     }
@@ -342,7 +342,7 @@ async function prepareFormulas(
   // Lookups and rollups first (they read other records, never this one's
   // computed fields); the formulas below read their results.
   await computeLinkedValues(trx, session, set, row, input.after,
-    ownLinkedFields(set, { create: !current, current, row, before: input.before, after: input.after }), true);
+    ownLinkedFields(set, { create: !current, current, row, before: input.before, after: input.after }));
   const only = current ? affectedFormulas(set, table, current, row, input.before, input.after) : undefined;
   if (!only || only.size) evaluateFormulas(set, table, { row, source: input.after, children, ...(only ? { only } : {}) });
   return { ...(current ? { current } : {}), children };
@@ -363,7 +363,7 @@ export async function prepareFormulaOnlyCreate(
   const set = await loadExtensionFields(trx, session, table, { lock: "shared" });
   if (!set || (!formulaGraph(set).order.length && !computedLinked(set).length)) return undefined;
   const after: Record<string, unknown> = {};
-  await computeLinkedValues(trx, session, set, plainRow(row, undefined), after, computedLinked(set), true);
+  await computeLinkedValues(trx, session, set, plainRow(row, undefined), after, computedLinked(set));
   return { table, set, before: {}, after, changed: changedFields(set, {}, after),
     formulas: { children: await ownedChildValues(trx, session.tenantId!, set, undefined) } };
 }
@@ -499,10 +499,11 @@ export async function completeExtensionWrite(
  * written with the rest.
  *
  * `draft: false` leaves a published head as it is: a write that follows from
- * a definition change (a formula backfill, a retype, a rebuild) changes no
- * content its publisher wrote. A value that changes for the record itself
- * (retention, setNull, the delete of a field, an owned child's write) puts
- * the head back to draft, as a caller's write does.
+ * a definition change (a formula backfill, a retype, a rebuild) or from another
+ * record (a lookup or rollup recomputed because something it reads changed)
+ * changes no content its publisher wrote. A value that changes for the record
+ * itself (retention, setNull, the delete of a field, an owned child's write)
+ * puts the head back to draft, as a caller's write does.
  */
 export async function rewriteExtensionValues(
   trx: Transaction<DB>,
@@ -635,7 +636,7 @@ export async function recomputeRecordFormulas(
   session: DbSessionInput,
   input: {
     table: GeneratedCrudTable; set: ExtensionFieldSet; recordId: string; fields?: readonly ExtensionField[]; rebuild?: boolean;
-    /** False when a definition change, not the record, is the cause (rewriteExtensionValues). */
+    /** False when a definition change or another record, not the record itself, is the cause (rewriteExtensionValues). */
     draft?: boolean;
   },
 ): Promise<boolean> {
@@ -645,7 +646,7 @@ export async function recomputeRecordFormulas(
   const fields = input.fields ? order.filter((field) => input.fields!.includes(field)) : order;
   const locked = await sql<{ row: Record<string, unknown> }>`select ${formulaRowObject(table, "record")} as row
     from ${sql.id(table.schema, table.table)} as record
-    where record.tenant_id = ${session.tenantId}::uuid and record.id = ${recordId}::uuid for update`.execute(trx);
+    where record.tenant_id = ${session.tenantId}::uuid and record.id = ${recordId}::uuid for no key update`.execute(trx);
   const row = locked.rows[0]?.row;
   if (!row) return false;
   if (!fields.length) return true;
@@ -670,6 +671,13 @@ export async function lockOwnerExtensionFields(trx: Transaction<DB>, session: Db
   for (const entity of [...new Set([...ownersOf(childTable), ...linkedReadersOf(childTable)])].sort()) {
     await lockExtensionFields(trx, session.tenantId, entity, "shared");
   }
+}
+
+/** How this table is an owned single child: its owners, with the relation and the foreign key that name them. */
+export function ownerLinks(childTable: GeneratedCrudTable): Array<{ entity: string; relation: string; foreignKey: string }> {
+  const physical = `${childTable.schema}.${childTable.table}`;
+  return ownersOf(childTable).flatMap((entity) => extensionRegistry.entity(entity)!.ownedSingleChildren
+    .filter((child) => child.table === physical).map((child) => ({ entity, relation: child.relation, foreignKey: child.foreignKey })));
 }
 
 /** The extensible entities this table is an owned single child of, sorted (the order locks are taken in). */

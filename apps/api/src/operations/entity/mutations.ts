@@ -76,6 +76,7 @@ import { enforceExtensionReferencesOnDelete, lockExtensionReferenceSources } fro
 import {
   afterDeleteOfLinkedTarget,
   beforeDeleteOfLinkedTarget,
+  lockLinkedRecords,
   propagateRecordChange,
   revalidateAfterAuthorizationChange,
 } from "./extensions/linked.js";
@@ -85,7 +86,7 @@ async function fetchGeneratedRowInTransaction(
   session: DbSessionInput,
   table: GeneratedCrudTable,
   id: string,
-  lock = false,
+  lock: boolean | "no key update" = false,
 ): Promise<GeneratedEntityRow | null> {
   const tenantWhere = table.tenantScoped
     ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}`
@@ -97,7 +98,7 @@ async function fetchGeneratedRowInTransaction(
       ${tenantWhere}
       ${subtypeScopeWhere(table)}
     limit 1
-    ${lock ? sql`for update` : sql``}
+    ${lock === "no key update" ? sql`for no key update` : lock ? sql`for update` : sql``}
   `.execute(trx);
   return result.rows[0]?.row ?? null;
 }
@@ -322,6 +323,8 @@ async function insertGeneratedRowInTransaction(
   const prepared = await prepareTypedValueWrite(trx, session, table, entityPrepared);
   // A value typed by a stored FieldDefinition is checked against it here, so
   // the pair holds however the write arrived.
+  // The parents and lookup targets of this create, each once and in one order.
+  await lockLinkedRecords(trx, session, table, { operation: "create", row: storageRow(prepared), ...(extensions ? { extensions } : {}) });
 
   // The record's named actions are the entity's to seed and the delegation
   // Operation's to change; a create may carry the authored default and
@@ -515,7 +518,9 @@ async function applyGeneratedRowUpdate(
     // definition change and a backfill batch order against (extensions/store.ts).
     if (extensibleEntityOf(table)) await loadExtensionFields(trx, session, table, { lock: "shared" });
     await lockOwnerExtensionFields(trx, session, table);
-    const current = await fetchGeneratedRowInTransaction(trx, session, table, id, true);
+    // Everything this write recomputes, this record included, in one order.
+    const rowLock = await lockLinkedRecords(trx, session, table, { operation: "update", id, row: storageRow(values), ...(extensions ? { extensions } : {}) });
+    const current = await fetchGeneratedRowInTransaction(trx, session, table, id, rowLock ?? true);
     if ((carriers.length || objectMergeColumn || extensions) && !current) return null;
     if (objectMergeColumn && current) {
       const stored = current[objectMergeColumn.name];
@@ -725,6 +730,7 @@ export async function deleteGeneratedEntity(
       await assertRecordPermissionInTransaction(trx, session, table, input.id, "delete");
     }
     await assertNoOwnedChildrenInTransaction(trx, table, input.id);
+    await lockLinkedRecords(trx, session, table, { operation: "delete", id: input.id });
     const current = await fetchGeneratedRowInTransaction(trx, session, table, input.id, true);
     if (current) {
       await assertHardDeleteAllowedInTransaction(

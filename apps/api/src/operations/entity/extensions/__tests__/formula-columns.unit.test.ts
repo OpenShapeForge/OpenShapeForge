@@ -60,4 +60,21 @@ describe("the worker's column grants", () => {
     const child = grants(tables).find((grant) => grant.table === `${spec.schema}.${spec.table}`)!;
     expect(child.select).toEqual([...new Set(["id", "tenant_id", "created_at", "asset_id", ...names(formulaColumns(spec))])].sort());
   });
+
+  test("on a collection's child: the foreign keys a rollup may follow, never a classified or field-policed one", () => {
+    const member = getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === "ExtensibleAssetMember" && !table.subtype)!;
+    const select = grants(tables).find((grant) => grant.table === `${member.schema}.${member.table}`)!.select;
+    expect(select).toEqual(expect.arrayContaining(["asset_id", "item_id", "group_id", "location_id", "booking_id"]));
+    expect(select).not.toContain("confidential_location_id");
+    expect(select).not.toContain("restricted_location_id");
+  });
+
+  test("across such a foreign key: what no rollup of the source can be proven against stays out", () => {
+    const location = getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === "ExtensibleAssetLocation" && !table.subtype)!;
+    const select = grants(tables).find((grant) => grant.table === `${location.schema}.${location.table}`)!.select;
+    expect(select).toContain("capacity");
+    expect(select).not.toContain("contact_email");
+    expect(select).not.toContain("certified_capacity");
+    expect(grants(tables).find((grant) => grant.table === "erp.extensible_asset_bookings")).toBeUndefined();
+  });
 });

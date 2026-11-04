@@ -5,7 +5,8 @@
  * reference (a tenant reference field or an authored `belongsTo` relation),
  * a rollup as an aggregate over a collection (an authored inverse relation,
  * or the records of another extensible entity whose tenant reference names
- * this one).
+ * this one). A rollup's `of` may follow one single relation of the child, for a
+ * collection whose members are records of their own (rollupPath).
  *
  * A computed value is materialized with the rights of whoever wrote the
  * record it was computed from, or of the worker — never with the reader's.
@@ -16,9 +17,10 @@
  * axis, the target field is not classified and has no read roles of its own
  * that leave a source reader out, and no authorization profile of the tenant
  * manages the reads of the source or the target. A chain is proven link by
- * link, each when its own definition is saved. A relation the value travels
- * along is under the same rule: classified or field-policed, it is refused as
- * a tenant reference is. The proof is repeated by every migration, by every
+ * link, each when its own definition is saved; a rollup's step is a link of its
+ * own, in the same definition, from the source to the entity the step reaches.
+ * A relation the value travels along is under the same rule: classified or
+ * field-policed, it is refused as a tenant reference is. The proof is repeated by every migration, by every
  * change of a tenant's authorization profiles and by a database trigger on
  * them; a definition whose proof no longer holds is `suspended`, and so is
  * whatever reads it, across the whole graph: readers get null with
@@ -28,9 +30,9 @@
  *
  * Recomputation follows the dependency graph in
  * `platform.extension_field_dependencies` across entities: a write of a
- * record recomputes, in its own transaction, the lookups that read it and the
- * rollups of its old and new parent, down the chain, on at most
- * `limits.syncFanOut` records in all. A record's neighbours are locked in one
+ * record recomputes, in its own transaction, the lookups that read it, the
+ * rollups of its old and new parent and those that reach it from a child, down
+ * the chain, on at most `limits.syncFanOut` records in all. A record's neighbours are locked in one
  * order before its write (lockLinkedRecords). Beyond that budget the write
  * leaves one row per (field, record) in the recompute journal
  * (`platform.extension_field_recomputes`), which coalesces further writes of
@@ -76,6 +78,7 @@ import {
   record,
   referenceIds,
   ROLLUP_AGGREGATES,
+  rollupPath,
   SENSITIVITIES,
   storedLookup,
   storedRollup,
@@ -84,6 +87,7 @@ import {
   type ExtensionField,
   type ExtensionFieldSet,
   type RollupAggregate,
+  type StoredRollup,
 } from "./model.js";
 import { AUTHORIZATION_MODEL, narrowerReadAccess } from "./read-access.js";
 import { conditionValues, readValue, storedExtensionSource } from "./read.js";
@@ -101,6 +105,8 @@ const RECOMPUTE_SWEEP_LIMIT = 500;
 export const RECOMPUTE_DEBOUNCE_MS = 1_000;
 export const RECOMPUTE_BATCH_SIZE = 200;
 const TENANT_PATH = "extensions.";
+/** Between the collection and the step in the `via` of a dependency on what a rollup's step reaches. */
+const STEP_VIA = ":";
 /** A chain of recomputes deeper than this is a graph the save-time check should have refused. */
 const MAX_PROPAGATION_DEPTH = 32;
 /** The most distinct values an arrayUnique within the text bounds can list: one character and a separator each. */
@@ -206,11 +212,27 @@ type ResolvedRollup = {
   link: string;
   aggregate: RollupAggregate;
   of?: TargetField;
-  /** `of` and `where` as SQL over the child's row (`child`). */
+  /** The one relation `of` follows on the child; `of` is a field of its target then. */
+  step?: RollupStep;
+  /** `of` and `where` as SQL over the child's row (`child`) and the step's target (`target`). */
   ofSql?: RawBuilder<unknown>;
   whereSql?: RawBuilder<unknown>;
   where?: unknown;
   whereFields: TargetField[];
+};
+
+/** The single relation `rollup.of` follows from a child to the record that holds the value. */
+type RollupStep = {
+  /** As stored: the relation's key, or `extensions.<fieldId>`. */
+  path: string;
+  label: string;
+  /** The child's field that names the target: an authored foreign key's field, or a tenant reference's path. */
+  link: string;
+  target: string;
+  /** `schema.table` of the target. */
+  table: string;
+  relation?: RuntimeExtensionRelation;
+  reference?: ExtensionField;
 };
 
 type Sets = (entity: string) => Promise<ExtensionFieldSet | undefined>;
@@ -272,6 +294,18 @@ function assertRelationReadable(column: GeneratedCrudColumn | undefined, purpose
   }
 }
 
+/** One single tenant reference of `set` a computed value may travel along, or the refusal with the reason. */
+function singleReference(set: ExtensionFieldSet, name: string, id: string, stored: boolean, purpose: string, kind: "lookup" | "rollup"): { field: ExtensionField; reference: NonNullable<ReturnType<typeof extensionShape>["reference"]> } {
+  const field = stored ? set.byId.get(id) : set.byKey.get(id);
+  if (!field || field.state === "deleted") extensionError(`${purpose}: ${name} is not a field of ${set.entity}.`);
+  if (field!.state === "deprecated") extensionError(`${purpose}: ${field!.key} is deprecated.`);
+  const shape = extensionShape(set.entry, field!.definition);
+  if (field!.kind !== "stored" || !shape.reference) extensionError(`${purpose}: ${field!.key} is not a reference field.`);
+  if (shape.collection) extensionError(`${purpose}: ${field!.key} holds more than one reference; a ${kind} follows a single one.`);
+  if (isClassified(field!.definition)) extensionError(`${purpose}: ${field!.key} is classified; what it points at would show through the ${kind}.`);
+  return { field: field!, reference: shape.reference! };
+}
+
 async function resolveLookup(sets: Sets, set: ExtensionFieldSet, lookup: Record<string, unknown>, stored: boolean): Promise<ResolvedLookup> {
   const via = lookup.via;
   if (typeof via !== "string" || !via) extensionError("A lookup names its reference: lookup.via.");
@@ -279,15 +313,9 @@ async function resolveLookup(sets: Sets, set: ExtensionFieldSet, lookup: Record<
   let resolvedVia: ResolvedLookup["via"];
   let target: string;
   if (tenant !== undefined) {
-    const field = stored ? set.byId.get(tenant) : set.byKey.get(tenant);
-    if (!field || field.state === "deleted") extensionError(`lookup.via: ${via} is not a field of ${set.entity}.`);
-    if (field!.state === "deprecated") extensionError(`lookup.via: ${field!.key} is deprecated.`);
-    const shape = extensionShape(set.entry, field!.definition);
-    if (field!.kind !== "stored" || !shape.reference) extensionError(`lookup.via: ${field!.key} is not a reference field.`);
-    if (shape.collection) extensionError(`lookup.via: ${field!.key} holds more than one reference; a lookup follows a single one.`);
-    if (isClassified(field!.definition)) extensionError(`lookup.via: ${field!.key} is classified; what it points at would show through the lookup.`);
-    resolvedVia = { path: `${TENANT_PATH}${field!.fieldId}`, label: field!.key, tenant: field! };
-    target = shape.reference!.entity;
+    const { field, reference } = singleReference(set, via as string, tenant, stored, "lookup.via", "lookup");
+    resolvedVia = { path: `${TENANT_PATH}${field.fieldId}`, label: field.key, tenant: field };
+    target = reference.entity;
   } else {
     const relation = set.entry.relations.find((candidate) => candidate.key === via && candidate.kind === "belongsTo");
     if (!relation) extensionError(`lookup.via: ${via} is neither a tenant reference field (extensions.<key>) nor a single relation of ${set.entity}.`);
@@ -298,6 +326,55 @@ async function resolveLookup(sets: Sets, set: ExtensionFieldSet, lookup: Record<
   const field = await resolveField(sets, target, lookup.field, stored, "lookup.field");
   if (!SCALAR.has(field.type)) extensionError(`lookup.field: ${field.label} is a ${field.type} field; a lookup returns one text, number, boolean, date or timestamp.`);
   return { kind: "lookup", via: resolvedVia, target, field };
+}
+
+/** The single relations `rollup.of` may follow from a child: an extensible child's own, or those the registry keeps for it. */
+function stepRelations(child: string): readonly RuntimeExtensionRelation[] {
+  return extensionRegistry.entity(child)?.relations.filter((relation) => relation.kind === "belongsTo") ?? extensionRegistry.childRelations(child);
+}
+
+/** A stored step as a recompute follows it; undefined when it names nothing any more (a revalidation refuses that). */
+function storedStep(child: string, childSet: ExtensionFieldSet | undefined, via: string): RollupStep | undefined {
+  const id = tenantPathId(via);
+  if (id === undefined) {
+    const relation = stepRelations(child).find((candidate) => candidate.key === via);
+    const column = tableOf(child)?.columns.find((candidate) => candidate.name === relation?.foreignKey);
+    return relation && column ? { path: via, label: `${child}.${via}`, link: fieldNameForColumn(column), target: relation.entity, table: relation.table, relation } : undefined;
+  }
+  const field = childSet?.byId.get(id);
+  const reference = field ? extensionShape(childSet!.entry, field.definition).reference : undefined;
+  return field && reference ? { path: via, label: `${child}.${field.key}`, link: via, target: reference.entity, table: reference.table, reference: field } : undefined;
+}
+
+/** The relation a caller's or a stored `rollup.of` follows from the child, or the refusal with the reason. */
+async function resolveStep(sets: Sets, child: string, via: string, stored: boolean): Promise<RollupStep> {
+  const tenant = tenantPathId(via);
+  if (tenant === undefined) {
+    const relation = stepRelations(child).find((candidate) => candidate.key === via);
+    if (!relation) extensionError(`rollup.of: ${via} is neither a tenant reference field (extensions.<key>) nor a single relation of ${child}.`);
+    assertRelationReadable(tableOf(child)?.columns.find((candidate) => candidate.name === relation!.foreignKey), "rollup.of", `${child}.${relation!.key}`);
+    const step = storedStep(child, undefined, via);
+    if (!step) extensionError(`rollup.of: ${child}.${via} has no readable foreign key.`);
+    return step!;
+  }
+  const set = await sets(child);
+  if (!set) extensionError(`rollup.of: ${child} has no tenant fields; name a single relation of it.`);
+  const { field } = singleReference(set!, via, tenant, stored, "rollup.of", "rollup");
+  return storedStep(child, set, `${TENANT_PATH}${field.fieldId}`)!;
+}
+
+/** Refuse a path of `where` that leaves the child: a condition reads the child's own fields. */
+function assertChildPaths(condition: unknown): void {
+  if (Array.isArray(condition)) {
+    condition.forEach(assertChildPaths);
+    return;
+  }
+  if (!record(condition)) return;
+  [condition.all, condition.any, condition.conditions].forEach(assertChildPaths);
+  const path = record(condition.left) ? condition.left.path : undefined;
+  if (typeof path !== "string") return;
+  const parts = rollupPath(path);
+  if (!parts || parts.via !== undefined) extensionError(`rollup.where: ${path} follows a relation; a condition reads the fields of the collection's own records.`);
 }
 
 async function resolveRollup(sets: Sets, set: ExtensionFieldSet, rollup: Record<string, unknown>, stored: boolean): Promise<ResolvedRollup> {
@@ -335,7 +412,12 @@ async function resolveRollup(sets: Sets, set: ExtensionFieldSet, rollup: Record<
     link = fieldNameForColumn(column!);
     resolved = { path: relation!.key, label: relation!.key, relation: relation! };
   }
-  const of = rollup.of === undefined || rollup.of === null ? undefined : await resolveField(sets, child, rollup.of, stored, "rollup.of");
+  const path = typeof rollup.of === "string" ? rollupPath(rollup.of) : undefined;
+  if (typeof rollup.of === "string" && !path) {
+    extensionError(`rollup.of: ${rollup.of} follows more than one relation; a rollup follows one single relation of ${child}: <relation>.<field>.`);
+  }
+  const step = path?.via === undefined ? undefined : await resolveStep(sets, child, path.via, stored);
+  const of = rollup.of === undefined || rollup.of === null ? undefined : await resolveField(sets, step?.target ?? child, path?.field ?? rollup.of, stored, "rollup.of");
   const numeric = aggregate === "sum" || aggregate === "avg";
   if (numeric && of?.type !== "number") extensionError(`rollup.of: ${aggregate} needs a number field${of ? `; ${of.label} is a ${of.type} field` : ""}.`);
   if ((aggregate === "min" || aggregate === "max") && !["number", "date", "timestamp"].includes(of?.type ?? "")) {
@@ -346,6 +428,7 @@ async function resolveRollup(sets: Sets, set: ExtensionFieldSet, rollup: Record<
   const whereFields: TargetField[] = [];
   let where: unknown;
   if (rollup.where !== undefined && rollup.where !== null) {
+    assertChildPaths(rollup.where);
     for (const path of conditionPaths(rollup.where)) {
       const name = path.kind === "authored" ? path.field : `${TENANT_PATH}${path.key}`;
       whereFields.push(await resolveField(sets, child, name, stored, "rollup.where"));
@@ -357,36 +440,39 @@ async function resolveRollup(sets: Sets, set: ExtensionFieldSet, rollup: Record<
     }
   }
   const childSet = await sets(child);
-  const ofSql = of ? fieldSql(childSet, of, "rollup.of") : undefined;
+  const ofSql = of ? step ? fieldSql(await sets(step.target), of, "rollup.of", "target") : fieldSql(childSet, of, "rollup.of") : undefined;
   const whereSql = where === undefined ? undefined
     : conditionSql(where, new Map(whereFields.map((field) => [field.path, { field, sql: fieldSql(childSet, field, "rollup.where") }])));
-  return { kind: "rollup", collection: resolved, child, link, aggregate: aggregate as RollupAggregate, ...(of ? { of } : {}), ...(ofSql ? { ofSql } : {}),
+  return { kind: "rollup", collection: resolved, child, link, aggregate: aggregate as RollupAggregate, ...(of ? { of } : {}), ...(step ? { step } : {}), ...(ofSql ? { ofSql } : {}),
     ...(whereSql ? { whereSql } : {}), ...(where !== undefined ? { where } : {}), whereFields };
 }
 
 const SQL_TYPES: Readonly<Record<string, string>> = { text: "text", number: "numeric", boolean: "boolean", date: "date", timestamp: "timestamptz" };
 
 /**
- * One field of a rollup's child as SQL over the row `child`: an authored
- * column, or a tenant field's index row (which holds nothing for a computed
- * field in error, the blank a reader sees). The default of a field that applies
- * to every record is the value of a record without one, as a reader sees it;
- * a default under `appliesWhen` depends on a condition the index does not hold,
- * so such a field is refused, as a collection or a measurement is.
+ * One field of a rollup's child as SQL over the row `child`, or of the target
+ * of its step over the row `target`: an authored column, or a tenant field's
+ * index row (which holds nothing for a computed field in error, the blank a
+ * reader sees). The default of a field that applies to every record is the
+ * value of a record without one, as a reader sees it, and a child without a
+ * target has no record to default; a default under `appliesWhen` depends on a
+ * condition the index does not hold, so such a field is refused, as a
+ * collection or a measurement is.
  */
-function fieldSql(set: ExtensionFieldSet | undefined, field: TargetField, purpose: string): RawBuilder<unknown> {
+function fieldSql(set: ExtensionFieldSet | undefined, field: TargetField, purpose: string, row: "child" | "target" = "child"): RawBuilder<unknown> {
   const type = SQL_TYPES[field.type];
   if (!type) extensionError(`${purpose}: ${field.label} is a ${field.type} field; a rollup reads one text, number, boolean, date or timestamp per record.`);
-  if (field.authored) return sql`${sql.id("child", field.authored)}::${sql.raw(type!)}`;
+  if (field.authored) return sql`${sql.id(row, field.authored)}::${sql.raw(type!)}`;
   const tenant = field.field!;
   if (tenant.definition.defaultValue !== undefined && tenant.appliesWhen) {
     extensionError(`${purpose}: the default of ${field.label} depends on appliesWhen, which the index does not hold, so a rollup cannot compute it.`);
   }
   const shape = extensionShape(set!.entry, tenant.definition);
   const indexed = sql`(select ${indexColumnRef(shape.column, "item")} from ${qualifiedTable(set!.entry.valuesTable)} as item
-    where item.tenant_id = child.tenant_id and item.record_id = child.id and item.field_id = ${tenant.fieldId}::uuid and item.ordinal = 0)`;
-  return tenant.definition.defaultValue === undefined ? sql`${indexed}::${sql.raw(type!)}`
-    : sql`coalesce(${indexed}::${sql.raw(type!)}, cast(${String(tenant.definition.defaultValue)} as ${sql.raw(type!)}))`;
+    where item.tenant_id = ${sql.id(row, "tenant_id")} and item.record_id = ${sql.id(row, "id")} and item.field_id = ${tenant.fieldId}::uuid and item.ordinal = 0)`;
+  if (tenant.definition.defaultValue === undefined) return sql`${indexed}::${sql.raw(type!)}`;
+  const value = sql`coalesce(${indexed}::${sql.raw(type!)}, cast(${String(tenant.definition.defaultValue)} as ${sql.raw(type!)}))`;
+  return row === "target" ? sql`case when target.id is not null then ${value} end` : value;
 }
 
 /**
@@ -494,11 +580,13 @@ function narrower(
 function proofOf(resolved: ResolvedLookup | ResolvedRollup, source: string, managed: ReadonlySet<string>): string | undefined {
   if (resolved.kind === "lookup") return narrower(source, resolved.target, resolved.field, managed);
   const owned = resolved.collection.relation?.ownership === "owned" && resolved.collection.relation.childAuthorization === "owner";
-  for (const field of [resolved.of, ...resolved.whereFields]) {
+  for (const field of [resolved.step ? undefined : resolved.of, ...resolved.whereFields]) {
     const reason = narrower(source, resolved.child, field, managed, owned);
     if (reason) return reason;
   }
-  return narrower(source, resolved.child, undefined, managed, owned);
+  const reason = narrower(source, resolved.child, undefined, managed, owned);
+  // The step is a link of its own: the target's value lands on the source, and no owner lends its readers to it.
+  return reason || !resolved.step ? reason : narrower(source, resolved.step.target, resolved.of, managed);
 }
 
 /** The first field a lookup or rollup reads that is suspended itself. */
@@ -559,7 +647,8 @@ export async function validateLinkedDefinition(
   const resultType = resultTypeOf(resolved);
   const storedSpec = resolved.kind === "lookup"
     ? { via: resolved.via.path, field: resolved.field.path, resultType }
-    : { collection: resolved.collection.path, aggregate: resolved.aggregate, ...(resolved.of ? { of: resolved.of.path } : {}),
+    : { collection: resolved.collection.path, aggregate: resolved.aggregate,
+      ...(resolved.of ? { of: resolved.step ? `${resolved.step.path}.${resolved.of.path}` : resolved.of.path } : {}),
       ...(resolved.where !== undefined ? { where: resolved.where } : {}), resultType };
   return {
     definition: { ...definition, osfType: RESULT_OSF_TYPES[resultType], [input.kind]: storedSpec },
@@ -637,8 +726,10 @@ function linkedDependencies(entity: string, resolved: ResolvedLookup | ResolvedR
     ];
   }
   const via = resolved.collection.path;
-  return [resolved.link, ...[resolved.of, ...resolved.whereFields].flatMap((field) => field ? [field.path] : [])]
+  const step = resolved.step;
+  const onChild = [resolved.link, ...(step ? [step.link] : resolved.of ? [resolved.of.path] : []), ...resolved.whereFields.map((field) => field.path)]
     .map((path) => ({ entity: resolved.child, field: tenantPathId(path) ?? path, via }));
+  return step ? [...onChild, { entity: step.target, field: tenantPathId(resolved.of!.path) ?? resolved.of!.path, via: `${via}${STEP_VIA}${step.path}` }] : onChild;
 }
 
 /** The stored definition as a caller reads it: paths named by key again. */
@@ -659,9 +750,10 @@ export function presentLinkedDefinition(
   if (!rollup) return field.definition;
   const dot = rollup.collection.indexOf(".");
   const collection = dot > 0 ? `${rollup.collection.slice(0, dot)}.${name(rollup.collection.slice(dot + 1))}` : rollup.collection;
+  const of = rollup.of ? rollupPath(rollup.of) : undefined;
   return {
     ...field.definition,
-    rollup: { ...rollup, collection, ...(rollup.of ? { of: name(rollup.of) } : {}),
+    rollup: { ...rollup, collection, ...(of ? { of: of.via === undefined ? name(of.field) : `${name(of.via)}.${name(of.field)}` } : {}),
       ...(rollup.where !== undefined ? { where: mapConditionPaths(rollup.where, (id) => names.get(id)?.key ?? id) } : {}) },
   };
 }
@@ -690,14 +782,15 @@ export async function assertTenantGraph(
   type Node = { entity: string; field: string; label: string; limit: number; reads: Array<{ entity: string; field: string }> };
   const nodes = new Map<string, Node>();
   const id = (entity: string, field: string) => `${entity}\u0000${field}`;
-  for (const entity of extensionRegistry.entityNames()) {
-    const set = await loadExtensionFieldsFor(trx, session, entity, extensionRegistry.entity(entity)!);
+  const sets = new Map<string, ExtensionFieldSet>();
+  for (const entity of extensionRegistry.entityNames()) sets.set(entity, await loadExtensionFieldsFor(trx, session, entity, extensionRegistry.entity(entity)!));
+  for (const [entity, set] of sets) {
     for (const field of set.fields) {
       if (field.kind === "stored" || field.state === "deleted") continue;
       if (entity === changed.entity && field.fieldId === changed.fieldId) continue;
       const reads = field.kind === "formula"
         ? formulaDependencies(set, storedFormula(field.definition)?.ast ?? { kind: "literal", value: null })
-        : storedDependencies(set, field);
+        : storedDependencies(set, field, sets);
       nodes.set(id(entity, field.fieldId), { entity, field: field.fieldId, label: `${entity}.${field.key}`, limit: set.entry.limits.formulaDepth,
         reads: reads.map((read) => ({ entity: read.entity, field: read.field })) });
     }
@@ -737,7 +830,7 @@ export async function assertTenantGraph(
 }
 
 /** The dependencies of a stored lookup or rollup, from its definition (a deprecated one's included). */
-function storedDependencies(set: ExtensionFieldSet, field: ExtensionField): LinkedDependency[] {
+function storedDependencies(set: ExtensionFieldSet, field: ExtensionField, sets: ReadonlyMap<string, ExtensionFieldSet>): LinkedDependency[] {
   const lookup = field.kind === "lookup" ? storedLookup(field.definition) : undefined;
   if (lookup) {
     const via = tenantPathId(lookup.via);
@@ -748,11 +841,19 @@ function storedDependencies(set: ExtensionFieldSet, field: ExtensionField): Link
   }
   const rollup = field.kind === "rollup" ? storedRollup(field.definition) : undefined;
   if (!rollup) return [];
-  const dot = rollup.collection.indexOf(".");
-  const child = dot > 0 ? rollup.collection.slice(0, dot) : set.entry.relations.find((relation) => relation.key === rollup.collection)?.entity;
+  const child = rollupChild(set, rollup);
   if (!child) return [];
-  const paths = [rollup.of, ...(rollup.where !== undefined ? conditionPaths(rollup.where).map((path) => path.kind === "authored" ? path.field : `${TENANT_PATH}${path.key}`) : [])];
-  return paths.flatMap((path) => path ? [{ entity: child, field: tenantPathId(path) ?? path, via: rollup.collection }] : []);
+  const of = rollup.of ? rollupPath(rollup.of) : undefined;
+  const step = of?.via !== undefined ? storedStep(child, sets.get(child), of.via) : undefined;
+  const paths = [step ? undefined : rollup.of, ...(rollup.where !== undefined ? conditionPaths(rollup.where).map((path) => path.kind === "authored" ? path.field : `${TENANT_PATH}${path.key}`) : [])];
+  return [...paths.flatMap((path) => path ? [{ entity: child, field: tenantPathId(path) ?? path, via: rollup.collection }] : []),
+    ...(step ? [{ entity: step.target, field: tenantPathId(of!.field) ?? of!.field, via: `${rollup.collection}${STEP_VIA}${step.path}` }] : [])];
+}
+
+/** The entity a stored rollup aggregates. */
+function rollupChild(set: ExtensionFieldSet, rollup: StoredRollup): string | undefined {
+  const dot = rollup.collection.indexOf(".");
+  return dot > 0 ? rollup.collection.slice(0, dot) : set.entry.relations.find((relation) => relation.key === rollup.collection)?.entity;
 }
 
 // ---------------------------------------------------------------------------
@@ -824,8 +925,9 @@ const timestampText = (value: RawBuilder<unknown>): RawBuilder<unknown> => sql`t
 
 /**
  * The aggregate of one parent's collection, in one statement over the child
- * table and the typed index: nothing is read into this process but the
- * result. Runs under the parent's `for no key update` (recomputeRecordFormulas),
+ * table and the typed index, with the target of `of`'s step joined per child
+ * (a child without one counts as a record, with a blank value): nothing is read
+ * into this process but the result. Runs under the parent's `for no key update` (recomputeRecordFormulas),
  * so a concurrent writer of a child waits for it, and reads what committed
  * before it got the lock. `arrayUnique` stops at the first value past what the
  * text bounds can hold: at most one character and a separator each.
@@ -836,7 +938,13 @@ async function rollupValue(trx: Transaction<DB>, tenantId: string, resolved: Res
     : sql`exists (select 1 from ${qualifiedTable(extensionRegistry.entity(resolved.child)!.valuesTable)} as link
         where link.tenant_id = child.tenant_id and link.record_id = child.id
           and link.field_id = ${resolved.collection.reference!.field.fieldId}::uuid and link.value_ref_id = ${recordId}::uuid)`;
-  const scope = sql`from ${sql.id(childTable.schema, childTable.table)} as child
+  const step = resolved.step;
+  const target = !step ? sql`` : step.relation
+    ? sql`left join ${qualifiedTable(step.table)} as target on target.tenant_id = child.tenant_id and target.id = child.${sql.id(step.relation.foreignKey)}`
+    : sql`left join ${qualifiedTable(extensionRegistry.entity(resolved.child)!.valuesTable)} as step on step.tenant_id = child.tenant_id and step.record_id = child.id
+          and step.field_id = ${step.reference!.fieldId}::uuid and step.ordinal = 0
+        left join ${qualifiedTable(step.table)} as target on target.tenant_id = child.tenant_id and target.id = step.value_ref_id`;
+  const scope = sql`from ${sql.id(childTable.schema, childTable.table)} as child ${target}
     where child.tenant_id = ${tenantId}::uuid and ${members} ${resolved.whereSql ? sql`and ${resolved.whereSql}` : sql``}`;
   const type = resolved.of?.type ?? "number";
   const value = resolved.ofSql ? (type === "text" ? sql`nullif(${resolved.ofSql}, '')` : resolved.ofSql) : undefined;
@@ -954,22 +1062,25 @@ export type LinkedWrite = {
   row?: Readonly<Record<string, unknown>>;
   /** Tenant field values by key. */
   extensions?: Readonly<Record<string, unknown>>;
+  /** A member of this record's collection written along with it (collection-mutations.ts), with its values by field name. */
+  member?: { table: GeneratedCrudTable; values?: Readonly<Record<string, unknown>> | undefined };
 };
 
 /**
  * Every record this write will recompute, or needs to keep from changing,
  * locked once, in one order — table, then id — before the record's own row
  * lock and the first row write: the record itself, the parents of its rollups
- * (old and new), the records whose lookups read it and, along the chain, what
- * reads those, up to the budget of the write (what lies beyond goes through
- * the journal and needs no lock here). Two writers that reach the same records
+ * (old and new), the records whose lookups read it, the parents that reach it
+ * from a child and, along the chain, what reads those, up to the budget of the
+ * write (what lies beyond goes through the journal and needs no lock here). Two writers that reach the same records
  * from opposite sides, a parent and its child, therefore never hold what the
  * other waits for.
  *
  * Each record gets the weakest lock that keeps its invariant, and gets it
  * here, at once, at the strength the write will need: `for key share` for "this
- * target exists", `for share` for a lookup's target (it conflicts with a write
- * of the target, which then finds this record through the index), `for no key
+ * target exists", `for share` for a lookup's target or the one a child's rollup
+ * reaches (it conflicts with a write of the target, which then finds this record
+ * through the index), `for no key
  * update` for a record to recompute. A lock is never upgraded later: two holders
  * of a weaker one that both upgrade are a deadlock, and so is an upgrade behind
  * a queued writer. `for no key update` leaves the foreign key checks of
@@ -997,13 +1108,15 @@ export async function lockLinkedRecords(
   const sets = setLoader(trx, session);
   const set = entry ? await sets(entity) : undefined;
   const dependents = await linkedDependents(trx, tenantId, entity);
+  const memberEntity = write.member ? baseTableOf(write.member.table).source?.authoringEntityName : undefined;
+  const memberDependents = memberEntity ? await linkedDependents(trx, tenantId, memberEntity) : new Map<string, Dependent>();
   // The owner of an owned single child is recomputed with it, when a formula reads the child.
   const owners: Array<{ table: string; foreignKey: string }> = [];
   for (const link of ownerLinks(own)) {
     const ownerSet = await sets(link.entity);
     if (ownerSet && formulaGraph(ownerSet).relations.includes(link.relation)) owners.push({ table: ownerSet.entry.table, foreignKey: link.foreignKey });
   }
-  if (!dependents.size && !owners.length && !referenced.length && !(set && computedLinked(set).length)) return undefined;
+  if (!dependents.size && !memberDependents.size && !owners.length && !referenced.length && !(set && computedLinked(set).length)) return undefined;
   const plan = new Map<string, { table: string; id: string; mode: LockMode }>();
   const lock = (qualified: string, id: unknown, mode: LockMode) => {
     if (typeof id !== "string") return;
@@ -1022,17 +1135,21 @@ export async function lockLinkedRecords(
     const before = node.id ? await stored(node.table, node.id) : undefined;
     const after = node.deleted ? null : { ...before, ...node.written };
     for (const [fieldId, dependent] of dependents) {
-      if (node.changed && ![...dependent.reads].some((read) => node.changed!.has(read))) continue;
+      const touched = (reads: ReadonlySet<string>) => reads.size > 0 && (!node.changed || [...reads].some((read) => node.changed!.has(read)));
+      if (!touched(dependent.reads) && !touched(dependent.stepReads)) continue;
       const set = await sets(dependent.entity);
       const field = set?.byId.get(fieldId);
       const sourceTable = tableOf(dependent.entity);
       if (!set || !field || !sourceTable || !computedLinked(set).includes(field)) continue;
       const changes = new Set([fieldId, ...formulaGraph(set).affectedBy([{ entity: set.entity, field: fieldId }]).map((item) => item.fieldId)]);
-      const records = field.kind === "lookup"
-        ? node.created || !node.id ? [] : await referringRecords(trx, tenantId, set, storedLookup(field.definition)!.via, node.id, undefined, set.entry.limits.syncFanOut + 1)
-        : await parentsOf(trx, tenantId, set, storedRollup(field.definition)!, node.table, { before, after }, node.id ?? "");
-      // Beyond the budget a lookup goes through the journal as a whole, a rollup's parents one by one.
-      for (const recordId of field.kind === "lookup" ? (withinBudget(budget, set, records) ? records : []) : records.filter((id) => withinBudget(budget, set, [id]))) {
+      const rollup = field.kind === "rollup" ? storedRollup(field.definition)! : undefined;
+      const limit = set.entry.limits.syncFanOut + 1;
+      const through = !node.id || node.created ? []
+        : rollup ? touched(dependent.stepReads) ? await parentsThroughStep(trx, tenantId, sets, set, rollup, node.id, undefined, limit) : []
+        : await referringRecords(trx, tenantId, set, storedLookup(field.definition)!.via, node.id, undefined, limit);
+      const parents = rollup && touched(dependent.reads) ? await parentsOf(trx, tenantId, set, rollup, node.table, { before, after }, node.id ?? "") : [];
+      // Beyond the budget what reads through a reference goes through the journal as a whole, a rollup's parents one by one.
+      for (const recordId of [...(withinBudget(budget, set, through) ? through : []), ...parents.filter((id) => withinBudget(budget, set, [id]))]) {
         const visit = `${dependent.entity}\u0000${recordId}\u0000${[...changes].sort().join()}`;
         lock(set.entry.table, recordId, "no key update");
         if (seen.has(visit)) continue;
@@ -1064,6 +1181,23 @@ export async function lockLinkedRecords(
       ...(write.operation === "create" ? { created: true } : write.operation === "delete" ? { deleted: true } : { changed: new Set([...named, ...ids, ...computed]) }),
     });
     for (const owner of owners) lock(owner.table, write.row?.[owner.foreignKey] ?? current?.[owner.foreignKey], "no key update");
+    // A target a child's rollup newly reaches must not change before this write has committed: as for a lookup below.
+    const reachedBy = async (from: ReadonlyMap<string, Dependent>, entityName: string, value: (step: RollupStep) => unknown) => {
+      for (const [fieldId, dependent] of from) {
+        const set = dependent.reads.size ? await sets(dependent.entity) : undefined;
+        const field = set?.byId.get(fieldId);
+        const rollup = field?.kind === "rollup" && computedLinked(set!).includes(field) ? storedRollup(field.definition) : undefined;
+        const via = rollup?.of ? rollupPath(rollup.of)?.via : undefined;
+        if (via === undefined || rollupChild(set!, rollup!) !== entityName) continue;
+        const step = storedStep(entityName, await sets(entityName), via);
+        if (step) lock(step.table, value(step), "share");
+      }
+    };
+    await reachedBy(dependents, entity, (step) => step.relation ? write.row?.[step.relation.foreignKey] : write.extensions?.[step.reference!.key]);
+    if (write.member && memberEntity) {
+      const values = write.member.values;
+      await reachedBy(memberDependents, memberEntity, (step) => step.relation ? values?.[step.link] : (values?.extensions as Record<string, unknown> | undefined)?.[step.reference!.key]);
+    }
     // A lookup's new target must not change before this write has committed; a reference's must stay.
     for (const field of set?.fields ?? []) {
       if (!set || field.state === "deleted" || field.kind === "formula" || field.kind === "rollup") continue;
@@ -1107,8 +1241,9 @@ export async function lockLinkedRecords(
 
 /**
  * The extensible entities whose lookups or rollups can read records of this
- * table's entity: those that reference it or relate to it, and those an
- * extensible entity's tenant reference may name (a rollup over it). A subtype
+ * table's entity: those that reference it or relate to it, those an extensible
+ * entity's tenant reference may name (a rollup over it), and those with a
+ * collection whose records may lead to it (the step of `rollup.of`). A subtype
  * writes its base table, so it counts as its base entity.
  */
 export function linkedReadersOf(table: GeneratedCrudTable): string[] {
@@ -1118,8 +1253,19 @@ export function linkedReadersOf(table: GeneratedCrudTable): string[] {
   return extensionRegistry.entityNames().filter((name) => {
     const entry = extensionRegistry.entity(name)!;
     return entry.targets.some((target) => target.entity === entity) || entry.relations.some((relation) => relation.entity === entity) ||
-      (own?.targets.some((target) => target.entity === name) ?? false);
+      (own?.targets.some((target) => target.entity === name) ?? false) || childrenOf(name).some((child) => reachedFrom(child).includes(entity));
   });
+}
+
+/** The entities a rollup of an extensible entity may aggregate. */
+function childrenOf(entity: string): string[] {
+  const referring = extensionRegistry.entityNames().filter((name) => extensionRegistry.entity(name)!.targets.some((target) => target.entity === entity));
+  return [...extensionRegistry.entity(entity)!.relations.filter((relation) => relation.kind === "hasMany").map((relation) => relation.entity), ...referring];
+}
+
+/** The entities `rollup.of` may step to from a child. */
+function reachedFrom(child: string): string[] {
+  return [...stepRelations(child).map((relation) => relation.entity), ...(extensionRegistry.entity(child)?.targets.map((target) => target.entity) ?? [])];
 }
 
 type Change = {
@@ -1149,19 +1295,22 @@ function changedFields(table: GeneratedCrudTable, change: Change): Set<string> {
 
 const depthOf = new WeakMap<object, number>();
 
+/** A computed field that reads an entity across a relation: what it reads there as a target or a child (`reads`), and through a rollup's step (`stepReads`). */
+type Dependent = { entity: string; reads: Set<string>; stepReads: Set<string> };
+
 /** The computed fields that read an entity across a relation, with what each reads there. */
-async function linkedDependents(trx: Transaction<DB>, tenantId: string, entity: string): Promise<Map<string, { entity: string; reads: Set<string> }>> {
-  const rows = await sql<{ field_id: string; entity: string; depends_on_field: string }>`
-    select distinct d.field_id::text as field_id, f.entity, d.depends_on_field
+async function linkedDependents(trx: Transaction<DB>, tenantId: string, entity: string): Promise<Map<string, Dependent>> {
+  const rows = await sql<{ field_id: string; entity: string; depends_on_field: string; via_field: string }>`
+    select distinct d.field_id::text as field_id, f.entity, d.depends_on_field, d.via_field
     from platform.extension_field_dependencies d
     join platform.extension_field_definitions f on f.tenant_id = d.tenant_id and f.field_id = d.field_id and f.is_current
       and f.state in ('ready', 'updating') and f.kind in ('lookup', 'rollup')
     where d.tenant_id = ${tenantId}::uuid and d.depends_on_entity = ${entity} and d.via_field is not null
     order by 1, 3`.execute(trx);
-  const byField = new Map<string, { entity: string; reads: Set<string> }>();
+  const byField = new Map<string, Dependent>();
   for (const row of rows.rows) {
-    const item = byField.get(row.field_id) ?? { entity: row.entity, reads: new Set<string>() };
-    item.reads.add(row.depends_on_field);
+    const item = byField.get(row.field_id) ?? { entity: row.entity, reads: new Set<string>(), stepReads: new Set<string>() };
+    (row.via_field.includes(STEP_VIA) ? item.stepReads : item.reads).add(row.depends_on_field);
     byField.set(row.field_id, item);
   }
   return byField;
@@ -1175,7 +1324,9 @@ async function linkedDependents(trx: Transaction<DB>, tenantId: string, entity: 
  * carries on along the chain. Records are recomputed in this transaction while
  * its budget lasts (writeBudget), a lookup's referring records as a whole or
  * not at all; the rest is journaled. A rollup follows the old and the new
- * parent of the record. A write through a subtype is a write of its base entity.
+ * parent of the record, and from the target of its step the parents of the
+ * children that name it, as a lookup its referring records. A write through a
+ * subtype is a write of its base entity.
  * The records are found and written under the audited tenant bypass: the
  * writer's row policies must not leave a value behind on a record it cannot see.
  */
@@ -1198,10 +1349,12 @@ export async function propagateRecordChange(
   if (!recordId) return;
   const created = !change.before, deleted = !change.after;
   const changed = changedFields(base, change);
-  const relevant = [...dependents].filter(([, dependent]) => created || deleted || [...dependent.reads].some((read) => changed.has(read)));
+  const touched = (reads: ReadonlySet<string>) => [...reads].some((read) => changed.has(read));
+  const relevant = [...dependents].filter(([, dependent]) => created || deleted || touched(dependent.reads) || touched(dependent.stepReads));
   if (!relevant.length) return;
   const budget = writeBudget(trx);
   const work = async () => {
+    const sets = setLoader(trx, session);
     for (const [fieldId, dependent] of relevant) {
       const set = await loadExtensionFieldsFor(trx, session, dependent.entity, extensionRegistry.entity(dependent.entity)!, { lock: "shared" });
       const field = set.byId.get(fieldId);
@@ -1219,7 +1372,18 @@ export async function propagateRecordChange(
         for (const source of sources) await recomputeLinkedRecord(trx, session, { table: sourceTable, set, recordId: source, fields: [field] });
         continue;
       }
-      for (const parent of await parentsOf(trx, tenantId, set, storedRollup(field.definition)!, base, change, recordId)) {
+      const rollup = storedRollup(field.definition)!;
+      // A new target is reached by no child yet; a deleted one is left by its foreign key or the deletion guard, through a write of the child.
+      if (!created && !deleted && touched(dependent.stepReads)) {
+        const parents = await parentsThroughStep(trx, tenantId, sets, set, rollup, recordId, undefined, set.entry.limits.syncFanOut + 1);
+        if (withinBudget(budget, set, parents)) {
+          for (const parent of parents) await recomputeLinkedRecord(trx, session, { table: sourceTable, set, recordId: parent, fields: [field] });
+        } else {
+          await journalRecompute(trx, session, { entity: set.entity, field, targetEntity: entity, targetId: recordId });
+        }
+      }
+      if (!dependent.reads.size || !(created || deleted || touched(dependent.reads))) continue;
+      for (const parent of await parentsOf(trx, tenantId, set, rollup, base, change, recordId)) {
         if (withinBudget(budget, set, [parent])) {
           await recomputeLinkedRecord(trx, session, { table: sourceTable, set, recordId: parent, fields: [field] });
         } else {
@@ -1300,6 +1464,40 @@ async function parentsOf(
   return [...new Set([await parent(change.before), await parent(change.after)].filter((id): id is string => typeof id === "string"))].sort();
 }
 
+type StepMembers = { step: RollupStep; from: RawBuilder<unknown>; parent: RawBuilder<unknown>; target: RawBuilder<unknown> };
+
+/** The children of a rollup that follows a step, as SQL, each with its parent and the target its step names; undefined for a rollup without a step. */
+async function stepMembers(sets: Sets, set: ExtensionFieldSet, rollup: StoredRollup): Promise<StepMembers | undefined> {
+  const via = rollup.of ? rollupPath(rollup.of)?.via : undefined;
+  const child = via === undefined ? undefined : rollupChild(set, rollup);
+  const table = child ? tableOf(child) : undefined;
+  const step = child && table ? storedStep(child, await sets(child), via!) : undefined;
+  if (!table || !step) return undefined;
+  const indexed = (alias: string, fieldId: string) => sql`join ${qualifiedTable(extensionRegistry.entity(child!)!.valuesTable)} as ${sql.id(alias)}
+    on ${sql.id(alias, "tenant_id")} = child.tenant_id and ${sql.id(alias, "record_id")} = child.id
+      and ${sql.id(alias, "field_id")} = ${fieldId}::uuid and ${sql.id(alias, "ordinal")} = 0`;
+  const dot = rollup.collection.indexOf(".");
+  const relation = dot > 0 ? undefined : set.entry.relations.find((candidate) => candidate.key === rollup.collection);
+  const link = relation ? sql`` : indexed("link", tenantPathId(rollup.collection.slice(dot + 1))!);
+  const hop = step.relation ? sql`` : indexed("hop", step.reference!.fieldId);
+  return {
+    step,
+    from: sql`from ${sql.id(table.schema, table.table)} as child ${link} ${hop}`,
+    parent: relation ? sql`child.${sql.id(relation.foreignKey)}` : sql`link.value_ref_id`,
+    target: step.relation ? sql`child.${sql.id(step.relation.foreignKey)}` : sql`hop.value_ref_id`,
+  };
+}
+
+/** The records whose rollup reads `targetId` through the step of its `of`: the parents of the children that name it, in id order. */
+async function parentsThroughStep(trx: Transaction<DB>, tenantId: string, sets: Sets, set: ExtensionFieldSet, rollup: StoredRollup, targetId: string, after?: string, limit?: number): Promise<string[]> {
+  const members = await stepMembers(sets, set, rollup);
+  if (!members) return [];
+  const rows = await sql<{ id: string }>`select distinct ${members.parent}::text as id ${members.from}
+    where child.tenant_id = ${tenantId}::uuid and ${members.target} = ${targetId}::uuid and ${members.parent} is not null
+      ${after ? sql`and ${members.parent} > ${after}::uuid` : sql``} order by 1 ${limit ? sql`limit ${limit}` : sql``}`.execute(trx);
+  return rows.rows.map((row) => row.id);
+}
+
 /**
  * Recompute lookups and rollups of one stored record (and the formulas over
  * them), through the one internal write. The cause is another record, so a
@@ -1368,8 +1566,10 @@ type JournalRow = { id: string; entity: string; field_id: string; target_entity:
  * formulas over the lookup, further fields along the chain and the record's
  * realtime `updated` event follow). A lookup's row walks the referring records
  * after its cursor, or, when the target is gone, the records its foreign key
- * left without a reference; a rollup's row is one record, the parent it names;
- * a reference field's row unlinks what still points at a deleted target.
+ * left without a reference; a rollup's row is one record, the parent it names,
+ * or, when it names the target of the rollup's step, the parents that reach
+ * that target; a reference field's row unlinks what still points at a deleted
+ * target.
  *
  * A pass always runs to its end, whatever is written meanwhile, so a target
  * written more often than a batch takes cannot starve the records at the back.
@@ -1400,8 +1600,12 @@ export async function runRecomputeBatch(
   const lookup = field && computed ? storedLookup(field.definition) : undefined;
   const reference = field?.kind === "stored" && extensionShape(set.entry, field.definition).reference !== undefined;
   if (!field || (!computed && !reference)) { await remove(); return { done: true, processed: 0 }; }
+  const sets = setLoader(trx, session, set);
+  const rollup = computed ? storedRollup(field.definition) : undefined;
+  const members = rollup ? await stepMembers(sets, set, rollup) : undefined;
+  const walk = members?.step.target === row.target_entity ? rollup : undefined;
   return acrossTenant(trx, session, `tenant field recompute ${row.id}`, async () => {
-    if (!lookup && !reference) {
+    if (!lookup && !reference && !walk) {
       await recomputeLinkedRecord(trx, session, { table, set, recordId: row.target_id, fields: [field] });
       await remove();
       return { done: true, processed: 1 };
@@ -1413,6 +1617,11 @@ export async function runRecomputeBatch(
     if (reference) {
       sources = await referringRecords(trx, tenantId, set, `${TENANT_PATH}${field.fieldId}`, row.target_id, undefined, batchSize);
       await unlinkReferences(trx, session, row.entity, set, field, sources, row.target_id);
+    } else if (walk) {
+      sources = await parentsThroughStep(trx, tenantId, sets, set, walk, row.target_id, cursor, batchSize);
+      // A rollup over its own entity: a child's write may have left this row for the record itself.
+      const own = row.target_entity === row.entity && cursor === undefined && !sources.includes(row.target_id) ? [row.target_id] : [];
+      for (const source of [...own, ...sources]) await recomputeLinkedRecord(trx, session, { table, set, recordId: source, fields: [field] });
     } else {
       const targetTable = tableOf(row.target_entity);
       const gone = targetTable ? !(await sql`select 1 from ${sql.id(targetTable.schema, targetTable.table)}
@@ -1495,9 +1704,10 @@ const staleness = new WeakMap<object, Map<string, Map<string, Set<string>>>>();
 /**
  * One step per page: the open journal rows of the records of `rows`. A lookup
  * whose target has an open row is stale (or whose reference still has to be
- * unlinked), a rollup whose own record has one too, and so is every formula
- * over either. Only rows of the page's targets are read: a journal with many
- * open rows costs a page nothing.
+ * unlinked), a rollup whose own record has one too, or that reaches a target
+ * with one through its step, and so is every formula over either. Only rows of
+ * the page's targets are read: a journal with many open rows costs a page
+ * nothing. Open rows on a step's target take one query more, per such rollup.
  */
 export async function proveExtensionStaleness(
   trx: Transaction<DB>,
@@ -1522,8 +1732,21 @@ export async function proveExtensionStaleness(
   const open = await sql<{ field_id: string; target_id: string }>`select field_id::text as field_id, target_id::text as target_id
     from platform.extension_field_recomputes
     where tenant_id = ${session.tenantId}::uuid and entity = ${set.entity} and target_id = any(${`{${targets.join(",")}}`}::uuid[])`.execute(trx);
-  if (!open.rows.length) return;
   const pending = new Set(open.rows.map((row) => `${row.field_id}:${row.target_id}`));
+  // A rollup whose step reaches a target with an open row.
+  const stepped = computed.filter((field) => field.kind === "rollup" && rollupPath(storedRollup(field.definition)?.of ?? "")?.via !== undefined);
+  const journaled = stepped.length ? await sql<{ field_id: string }>`select distinct field_id::text as field_id from platform.extension_field_recomputes
+    where tenant_id = ${session.tenantId}::uuid and entity = ${set.entity} and field_id = any(${`{${stepped.map((field) => field.fieldId).join(",")}}`}::uuid[])`.execute(trx) : undefined;
+  const sets = setLoader(trx, session, set);
+  for (const field of stepped.filter((item) => journaled?.rows.some((row) => row.field_id === item.fieldId))) {
+    const members = await stepMembers(sets, set, storedRollup(field.definition)!);
+    if (!members) continue;
+    const parents = await sql<{ id: string }>`select distinct ${members.parent}::text as id ${members.from}
+      join platform.extension_field_recomputes journal on journal.tenant_id = child.tenant_id and journal.field_id = ${field.fieldId}::uuid and journal.target_id = ${members.target}
+      where child.tenant_id = ${session.tenantId}::uuid and ${members.parent} = any(${`{${rows.map((row) => String(row.id)).join(",")}}`}::uuid[])`.execute(trx);
+    for (const parent of parents.rows) pending.add(`${field.fieldId}:${parent.id}`);
+  }
+  if (!pending.size) return;
   const scope = currentDbSessionTransaction() ?? trx;
   const byEntity = staleness.get(scope) ?? new Map<string, Map<string, Set<string>>>();
   staleness.set(scope, byEntity);

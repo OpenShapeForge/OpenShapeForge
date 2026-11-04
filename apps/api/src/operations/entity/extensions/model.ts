@@ -123,9 +123,24 @@ export type StoredLookup = { via: string; field: string; resultType: ComputedRes
  * A rollup as it is stored: `collection` is an authored inverse relation by
  * key or `<Entity>.extensions.<fieldId>` (the records of another entity whose
  * tenant reference names this one); `of` and the paths of `where` name the
- * child's fields as `via` and `field` do.
+ * child's fields as `via` and `field` do, and `of` may follow one single
+ * relation of the child first (rollupPath).
  */
 export type StoredRollup = { collection: string; aggregate: RollupAggregate; of?: string; where?: unknown; resultType: ComputedResultType };
+
+/**
+ * A rollup's `of` in its parts: the field it reads and the one relation of the
+ * child it follows to get there, if any, each an authored name or
+ * `extensions.<key>`. Undefined when it takes more than one step.
+ */
+export function rollupPath(of: string): { via?: string; field: string } | undefined {
+  const segments = of.split(".");
+  const next = () => segments[0] === "extensions" ? segments.splice(0, 2).join(".") : segments.shift()!;
+  const first = next();
+  if (!segments.length) return { field: first };
+  const second = next();
+  return segments.length ? undefined : { via: first, field: second };
+}
 
 const resultTyped = (value: unknown): value is { resultType: ComputedResultType } =>
   record(value) && (COMPUTED_RESULT_TYPES as readonly string[]).includes(String(value.resultType));

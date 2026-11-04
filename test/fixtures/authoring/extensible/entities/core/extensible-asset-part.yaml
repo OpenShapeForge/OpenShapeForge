@@ -54,6 +54,13 @@ fields:
       inverse:
         key: restrictedParts
         label: { en: Restricted parts, nl: Afgeschermde onderdelen }
+  # What a rollup over the parts may reach, written through the collection.
+  - key: location
+    osfType: ExtensibleAssetLocation
+    label: { en: Location, nl: Locatie }
+    relationship:
+      ownership: reference
+      inverse: false
   - key: quantity
     osfType: number
     label: { en: Quantity, nl: Aantal }

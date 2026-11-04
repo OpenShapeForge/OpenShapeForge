@@ -211,7 +211,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       // proven in this transaction (extensions/store.ts), before its row lock.
       await loadExtensionFields(trx, session, owner, { lock: "shared" });
       // What reads the parent is recomputed below: it comes first, in the one order (extensions/linked.ts).
-      const ownerLock = await lockLinkedRecords(trx, session, owner, { operation: "update", id: request.id });
+      const ownerLock = await lockLinkedRecords(trx, session, owner, { operation: "update", id: request.id, member: { table: target, values: request.values } });
       const locked = await sql<{ row: GeneratedEntityRow; matches: boolean }>`select to_jsonb(${sql.id(owner.table)}.*) as row,
         ${sql.id("updated_at")} = ${normalizeTimestampToken(request.expectedVersion)}::timestamptz as matches
         from ${sql.id(owner.schema, owner.table)} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(owner)}

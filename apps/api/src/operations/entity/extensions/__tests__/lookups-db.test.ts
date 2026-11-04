@@ -18,7 +18,7 @@ import { composeJobHandlers } from "../../../../jobs/handlers.js";
 import { processJobBatch, withJobWorkerSession } from "../../../../jobs/worker.js";
 import { getGeneratedCrudTables } from "../../catalog.js";
 import { executeCollectionMutation } from "../../collection-mutations.js";
-import { createGeneratedEntity, updateGeneratedEntity, updateGeneratedEntityForTable } from "../../mutations.js";
+import { createGeneratedEntity, createGeneratedEntityForTable, updateGeneratedEntity, updateGeneratedEntityForTable } from "../../mutations.js";
 import { executeEntityOperation } from "../../runtime.js";
 import { EXTENSION_BACKFILL_KIND, extensionBackfillJobHandler } from "../backfill.js";
 import { executeFieldDefinitionAction, type FieldDefinitionAction } from "../definitions.js";
@@ -27,18 +27,22 @@ import {
   EXTENSION_REVALIDATE_KIND,
   extensionRecomputeJobHandler,
   extensionRevalidateJobHandler,
+  journalRecompute,
+  propagateRecordChange,
   proveExtensionStaleness,
   revalidateLinkedFields,
   revalidateLinkedFieldsOfEveryTenant,
   runRecomputeBatch,
   sweepExtensionRecomputes,
 } from "../linked.js";
-import { __setExtensionRegistryForTests } from "../registry.js";
+import { __setExtensionRegistryForTests, extensionRegistry } from "../registry.js";
 import { extensionSnapshot } from "../snapshot.js";
+import { loadExtensionFieldsFor } from "../store.js";
 import { createExtensionFixture, ENTITY, MANAGER_ROLE, READER_ROLE, sessionFor, TARGET_ENTITY, WRITER_ROLE, type ExtensionFixture } from "./fixture.js";
 
 const GROUP = "ExtensibleAssetGroup";
 const EDITION = "ExtensibleAssetEdition";
+const MEMBER = "ExtensibleAssetMember";
 let fixture: ExtensionFixture;
 const silent = { info() {}, warn() {}, error() {} };
 const handlers = composeJobHandlers([{ name: "test-lookups", jobHandlers: {
@@ -124,6 +128,16 @@ const anyTable = (entity: string) => getGeneratedCrudTables().find((table) => ta
 const tableOf = (entity: string) => getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === entity && !table.subtype)!;
 const parts = (session: Session, action: "insert" | "update" | "remove", request: Record<string, unknown>) =>
   executeCollectionMutation(fixture.app.db, session, { entityName: ENTITY, field: "parts", action }, request as never);
+/** A member of an asset: the record a rollup steps from. */
+const member = async (session: Session, values: Record<string, unknown>) => (await createGeneratedEntityForTable(fixture.app.db, session, tableOf(MEMBER), values)) as { id: string };
+const editMember = (session: Session, id: string, values: Record<string, unknown>) => updateGeneratedEntityForTable(fixture.app.db, session, tableOf(MEMBER), id, values);
+/** An owned child's delete, as the owner's collection Operation runs it. */
+const removeMember = (session: Session, id: string) => withDbSession(fixture.app.db, session, async (trx) => {
+  const row = await sql<{ row: Record<string, unknown> }>`delete from erp.extensible_asset_members where id = ${id}::uuid returning to_jsonb(extensible_asset_members.*) as row`.execute(trx);
+  await propagateRecordChange(trx, session, tableOf(MEMBER), { before: row.rows[0]!.row });
+});
+const refusal = (t: Tenant, key: string, spec: Record<string, unknown>, entity = ENTITY) =>
+  failure(define(t.manager, "create", { key, kind: "rollup", definition: rollup({ collection: "members", ...spec }) }, entity));
 /** A write that names no version: concurrent tests must not fail on the optimistic check they are not about. */
 const write = (session: Session, entity: string, id: string, { extensions, ...values }: Record<string, unknown>) =>
   updateGeneratedEntity(fixture.app.db, session, { table: anyTable(entity).name, id, values, ...(extensions ? { extensions: extensions as Record<string, unknown> } : {}) });
@@ -1097,5 +1111,382 @@ describe("tenant lookups and rollups", () => {
     await drainJobs();
     expect((await listed(t, "twice")).state).toBe("ready");
     void created;
+  });
+  describe("a rollup whose `of` follows one relation of the child", () => {
+    /** One asset of three members, with what a test needs of them. */
+    async function bundle(t: Tenant, capacities: Array<number | null>) {
+      const asset = await create(t.writer, ENTITY, { name: "Bundle" });
+      const locations = await Promise.all(capacities.map((capacity, n) => create(t.writer, TARGET_ENTITY, { name: `L${n}`, ...(capacity === null ? {} : { capacity }) })));
+      const members = [];
+      for (const location of locations) members.push(await member(t.writer, { asset: asset.id, location: location.id }));
+      return { asset, locations, members };
+    }
+
+    test("every aggregate over the members reads the target's column; a member without a target counts as a record, without a value", async () => {
+      const t = await tenant();
+      const specs = { total: "sum", largest: "max", smallest: "min", mean: "avg", counted: "count" } as const;
+      for (const [key, aggregate] of Object.entries(specs)) await field(t, key, rollup({ collection: "members", aggregate, of: "location.capacity" }, key), "rollup");
+      await field(t, "memberCount", rollup({ collection: "members", aggregate: "countAll" }, "Members"), "rollup");
+      await field(t, "places", rollup({ collection: "members", aggregate: "arrayUnique", of: "location.name" }, "Places"), "rollup");
+      const stored = await listed(t, "total");
+      expect(stored.definition).toMatchObject({ osfType: "number", rollup: { collection: "members", aggregate: "sum", of: "location.capacity", resultType: "number" } });
+
+      const empty = await create(t.writer, ENTITY, { name: "Empty" });
+      expect(empty.extensions).toMatchObject({ total: 0, counted: 0, memberCount: 0 });
+      expect(empty.extensions.mean ?? null).toBeNull();
+
+      const { asset } = await bundle(t, [10, 2, 6, null]);
+      await member(t.writer, { asset: asset.id });
+      expect((await get(t.reader, asset.id)).extensions).toMatchObject({ total: 18, largest: 10, smallest: 2, mean: 6, counted: 3, memberCount: 5, places: "L0, L1, L2, L3" });
+      const filtered = await list(t.reader, { extensions: { total: { eq: 18 } } }) as Row[];
+      expect(filtered.map((row) => row.id)).toEqual([asset.id]);
+      // A condition still reads the member's own fields.
+      await field(t, "big", rollup({ collection: "members", aggregate: "sum", of: "location.capacity",
+        where: { kind: "rule", operator: "greaterThan", left: { kind: "path", path: "quantity" }, right: { kind: "literal", value: 1 } } }, "Big"), "rollup");
+      expect((await get(t.reader, asset.id)).extensions.big).toBe(0);
+    });
+
+    test("a write of the target reaches the parents through the child; a move, a delete and a new foreign key of the child reach them as well", async () => {
+      const t = await tenant();
+      await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }, "Total"), "rollup");
+      const { asset, locations, members } = await bundle(t, [10, 2]);
+      const other = await create(t.writer, ENTITY, { name: "Other" });
+      const third = await create(t.writer, TARGET_ENTITY, { name: "Third", capacity: 100 });
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(12);
+
+      await update(t.writer, TARGET_ENTITY, locations[0]!.id, { capacity: 20 });
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(22);
+      // What the rollup does not read recomputes nothing.
+      const before = (await get(t.reader, asset.id)).updated_at;
+      await update(t.writer, TARGET_ENTITY, locations[0]!.id, { name: "Renamed" });
+      expect((await get(t.reader, asset.id)).updated_at).toBe(before);
+
+      await editMember(t.writer, members[0]!.id, { location: third.id });
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(102);
+      // The old target is no longer read, the new one is.
+      await update(t.writer, TARGET_ENTITY, locations[0]!.id, { capacity: 1000 });
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(102);
+      await update(t.writer, TARGET_ENTITY, third.id, { capacity: 50 });
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(52);
+
+      await editMember(t.writer, members[0]!.id, { asset: other.id });
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(2);
+      expect((await get(t.reader, other.id)).extensions.total).toBe(50);
+
+      await editMember(t.writer, members[1]!.id, { location: null });
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(0);
+
+      await removeMember(t.writer, members[0]!.id);
+      expect((await get(t.reader, other.id)).extensions.total).toBe(0);
+    });
+
+    test("a tenant field of the target, through an authored relation", async () => {
+      const t = await tenant();
+      await field(t, "kwh", number("Kwh"), undefined, GROUP);
+      await field(t, "doubled", formula("{Kwh} * 2", "Doubled"), "formula", GROUP);
+      await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "group.extensions.kwh" }, "Total"), "rollup");
+      await field(t, "totalDoubled", rollup({ collection: "members", aggregate: "max", of: "group.extensions.doubled" }, "Most"), "rollup");
+      expect((await listed(t, "total")).definition.rollup.of).toBe("group.extensions.kwh");
+      const stored = await privileged(sql<{ of: string }>`select definition->'rollup'->>'of' as of from platform.extension_field_definitions
+        where tenant_id = ${t.id}::uuid and key = 'total' and is_current`);
+      expect(stored[0]!.of).toBe(`group.extensions.${(await listed(t, "kwh", GROUP)).fieldId}`);
+
+      const asset = await create(t.writer, ENTITY, { name: "Bundle" });
+      const one = await create(t.writer, GROUP, { name: "One", extensions: { kwh: 3 } });
+      const two = await create(t.writer, GROUP, { name: "Two", extensions: { kwh: 4 } });
+      await member(t.writer, { asset: asset.id, group: one.id });
+      await member(t.writer, { asset: asset.id, group: two.id });
+      expect((await get(t.reader, asset.id)).extensions).toMatchObject({ total: 7, totalDoubled: 8 });
+      await update(t.writer, GROUP, one.id, { extensions: { kwh: 5 } });
+      expect((await get(t.reader, asset.id)).extensions).toMatchObject({ total: 9, totalDoubled: 10 });
+      // A default counts for a target that exists, not for a member without one.
+      await define(t.manager, "update", { fieldId: (await listed(t, "kwh", GROUP)).fieldId, definition: { ...number("Kwh"), defaultValue: 1 } }, GROUP);
+      await drainJobs();
+      await member(t.writer, { asset: asset.id });
+      await member(t.writer, { asset: asset.id, group: (await create(t.writer, GROUP, { name: "Three" })).id });
+      await drainJobs();
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(10);
+    });
+
+    test("back to the source's own entity: membership between records of one entity, and a cycle stays refused", async () => {
+      const t = await tenant();
+      await field(t, "kwh", number("Kwh"));
+      await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "item.extensions.kwh" }, "Total"), "rollup");
+      await field(t, "names", rollup({ collection: "members", aggregate: "arrayUnique", of: "item.name" }, "Names"), "rollup");
+      const module = await create(t.writer, ENTITY, { name: "Module", extensions: { kwh: 4 } });
+      const bundled = await create(t.writer, ENTITY, { name: "Bundle", extensions: { kwh: 1 } });
+      await member(t.writer, { asset: bundled.id, item: module.id });
+      await member(t.writer, { asset: bundled.id, item: module.id });
+      expect((await get(t.reader, bundled.id)).extensions).toMatchObject({ total: 8, names: "Module" });
+      await update(t.writer, ENTITY, module.id, { name: "Cell", extensions: { kwh: 5 } });
+      expect((await get(t.reader, bundled.id)).extensions).toMatchObject({ total: 10, names: "Cell" });
+      expect((await get(t.reader, module.id)).extensions.total).toBe(0);
+      await field(t, "self", formula("{Total} + 1", "Self"), "formula");
+      const circular = await failure(define(t.manager, "update", { fieldId: (await listed(t, "total")).fieldId,
+        definition: rollup({ collection: "members", aggregate: "sum", of: "item.extensions.self" }, "Total") }));
+      expect(circular).toMatchObject({ code: "VALIDATION", message: expect.stringContaining("circular reference") });
+    });
+
+    test("a tenant reference of an extensible child, as the collection and as the step; deleting its target follows the reference's rule", async () => {
+      const t = await tenant();
+      await field(t, "group", reference(GROUP, "Group"));
+      await field(t, "kept", reference(TARGET_ENTITY, "Kept", { onDelete: "restrict" }));
+      await field(t, "loose", reference(TARGET_ENTITY, "Loose", { onDelete: "setNull" }));
+      await field(t, "held", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "sum", of: "extensions.kept.capacity" }, "Held"), "rollup", GROUP);
+      await field(t, "free", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "sum", of: "extensions.loose.capacity" }, "Free"), "rollup", GROUP);
+      expect((await listed(t, "free", GROUP)).definition.rollup).toMatchObject({ collection: `${ENTITY}.extensions.group`, of: "extensions.loose.capacity" });
+      const group = await create(t.writer, GROUP, { name: "G" });
+      const kept = await create(t.writer, TARGET_ENTITY, { name: "K", capacity: 3 });
+      const loose = await create(t.writer, TARGET_ENTITY, { name: "L", capacity: 4 });
+      const asset = await create(t.writer, ENTITY, { name: "A", extensions: { group: group.id, kept: kept.id, loose: loose.id } });
+      expect((await get(t.reader, group.id, GROUP)).extensions).toMatchObject({ held: 3, free: 4 });
+
+      await update(t.writer, TARGET_ENTITY, loose.id, { capacity: 5 });
+      expect((await get(t.reader, group.id, GROUP)).extensions).toMatchObject({ free: 5 });
+      expect(await remove(t.writer, TARGET_ENTITY, kept.id)).toMatchObject({ error: { code: "OPERATION_REFUSED" } });
+      expect((await get(t.reader, group.id, GROUP)).extensions).toMatchObject({ held: 3 });
+      expect(await remove(t.writer, TARGET_ENTITY, loose.id)).not.toHaveProperty("error");
+      expect((await get(t.reader, asset.id)).extensions.loose).toBeNull();
+      expect((await get(t.reader, group.id, GROUP)).extensions).toMatchObject({ free: 0 });
+      // A new value of the reference on the child reaches the parent.
+      const again = await create(t.writer, TARGET_ENTITY, { name: "Again", capacity: 8 });
+      await update(t.writer, ENTITY, asset.id, { extensions: { loose: again.id } });
+      expect((await get(t.reader, group.id, GROUP)).extensions).toMatchObject({ free: 8 });
+    });
+
+    test("deleting a target over an authored relation: its foreign key refuses, and nothing changes", async () => {
+      const t = await tenant();
+      await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }, "Total"), "rollup");
+      const { asset, locations } = await bundle(t, [7]);
+      expect(await remove(t.writer, TARGET_ENTITY, locations[0]!.id)).toHaveProperty("error");
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(7);
+    });
+
+    test("refused with the reason: more than one step, what the step cannot reach, a path in where", async () => {
+      const t = await tenant();
+      const refusals: Array<[Record<string, unknown>, RegExp]> = [
+        [{ aggregate: "sum", of: "group.location.capacity" }, /follows more than one relation/],
+        [{ aggregate: "sum", of: "extensions.place.location.capacity" }, /follows more than one relation/],
+        [{ aggregate: "count", of: "location.contactEmail" }, /contactEmail is classified/],
+        [{ aggregate: "count", of: "confidentialLocation.name" }, /is classified; what it points at/],
+        [{ aggregate: "count", of: "restrictedLocation.name" }, /protected by a field policy/],
+        [{ aggregate: "sum", of: "location.certifiedCapacity" }, /ExtensibleAssetLocation\.update writes it/],
+        [{ aggregate: "count", of: "location.nothing" }, /nothing is not a field of ExtensibleAssetLocation/],
+        [{ aggregate: "count", of: "nothing.name" }, /neither a tenant reference field .* nor a single relation of ExtensibleAssetMember/],
+        // An owned child holds no tenant fields, so no tenant reference to step along.
+        [{ aggregate: "count", of: "extensions.place.name" }, /ExtensibleAssetMember has no tenant fields/],
+        [{ aggregate: "count", where: { kind: "rule", operator: "isNotEmpty", left: { kind: "path", path: "location.name" } } }, /rollup\.where: location\.name follows a relation/],
+        [{ aggregate: "sum", of: "location.name" }, /sum needs a number field/],
+      ];
+      for (const [spec, message] of refusals) {
+        expect(await refusal(t, "refused", spec)).toMatchObject({ code: "VALIDATION", message: expect.stringMatching(message) });
+      }
+    });
+
+    test("a role that reads the source and not the target is refused, by name, whatever the owner lends the child", async () => {
+      const t = await tenant();
+      const refused = await refusal(t, "hours", { aggregate: "sum", of: "booking.hours" });
+      expect(refused).toMatchObject({ code: "FORBIDDEN", data: { reason: "AUTHORIZATION_NARROWER" } });
+      const message = (refused as { message: string }).message;
+      expect(message).toContain("ExtensibleAssetBooking is readable for Test.Bookings.Read");
+      expect(message).toContain("ExtensibleAsset also for General.All.Read");
+    });
+
+    test("an authorization profile on the target refuses it; one that comes later suspends it, redacted, and whatever reads it with it", async () => {
+      const t = await tenant();
+      await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }, "Total"), "rollup");
+      await field(t, "twice", formula("{Total} * 2", "Twice"), "formula");
+      const { asset } = await bundle(t, [4]);
+      await manage(t, TARGET_ENTITY);
+      expect((await listed(t, "total")).state).toBe("ready");
+      await adminWrite(t);
+      const suspended = await listed(t, "total");
+      expect(suspended.state).toBe("suspended");
+      expect(suspended.backfill?.error).toMatchObject({ code: "AUTHORIZATION_PROOF_LOST", message: expect.stringContaining(`reads of ${TARGET_ENTITY}`) });
+      expect((await listed(t, "twice")).state).toBe("suspended");
+      const read = await get(t.reader, asset.id);
+      expect(read.extensions).toMatchObject({ total: null, twice: null });
+      expect(read.extensionsMeta.total).toMatchObject({ suspended: true });
+      expect(await list(t.reader, { extensions: { total: { eq: 4 } } })).toHaveProperty("error");
+      // The stored value stays until its designer decides, and saving it is proven anew.
+      expect((await privileged(sql<{ value: string }>`select extension_values->>${suspended.fieldId} as value from erp.extensible_assets where id = ${asset.id}::uuid`))[0]!.value).toBe("4");
+      expect(await failure(define(t.manager, "update", { fieldId: suspended.fieldId, definition: rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }, "Again") })))
+        .toMatchObject({ code: "FORBIDDEN", data: { reason: "AUTHORIZATION_NARROWER" } });
+      expect(await failure(define(t.manager, "create", { key: "fresh", kind: "rollup", definition: rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }) })))
+        .toMatchObject({ code: "FORBIDDEN", message: expect.stringContaining(TARGET_ENTITY) });
+    });
+
+    test("a change of the compiled contract suspends it at revalidation: the step's target and its relation count, not only the child", async () => {
+      const t = await tenant();
+      await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }, "Total"), "rollup");
+      await field(t, "parts", rollup({ collection: "members", aggregate: "countAll" }, "Parts"), "rollup");
+      const registry = structuredClone((manifest as unknown as { extensionRegistry: Record<string, any> }).extensionRegistry);
+      registry.readAccess[TARGET_ENTITY] = { ...registry.readAccess[TARGET_ENTITY], rowPolicy: "rowScope" };
+      const restore = __setExtensionRegistryForTests(registry as never);
+      try {
+        const suspended = await withDbSession(fixture.app.db, t.manager, (trx) => revalidateLinkedFields(trx, t.manager));
+        expect(suspended.map((item) => item.key)).toEqual(["total"]);
+        expect(suspended[0]!.reason).toContain(`the rows of ${TARGET_ENTITY} are narrowed by rowScope`);
+      } finally {
+        restore();
+      }
+      expect((await listed(t, "parts")).state).toBe("ready");
+    });
+
+    test("beyond syncFanOut a write of the target leaves one journal row, stale on every parent until the worker ran", async () => {
+      const t = await tenant();
+      await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }, "Total"), "rollup");
+      const totalId = (await listed(t, "total")).fieldId;
+      const shared = await create(t.writer, TARGET_ENTITY, { name: "Shared", capacity: 1 });
+      const parents = await Promise.all([1, 2, 3, 4].map((n) => create(t.writer, ENTITY, { name: `p${n}` })));
+      const elsewhere = await create(t.writer, ENTITY, { name: "Elsewhere" });
+      for (const parent of parents) await member(t.writer, { asset: parent.id, location: shared.id });
+      await update(t.writer, TARGET_ENTITY, shared.id, { capacity: 2 });
+      expect(await journal(t.id)).toMatchObject([{ field_id: totalId, target_id: shared.id }]);
+      for (const parent of parents) {
+        const read = await get(t.reader, parent.id);
+        expect(read.extensions.total).toBe(1);
+        expect(read.extensionsMeta.total).toMatchObject({ stale: true });
+      }
+      expect((await get(t.reader, elsewhere.id)).extensionsMeta?.total ?? {}).not.toHaveProperty("stale");
+      // Further writes coalesce.
+      await update(t.writer, TARGET_ENTITY, shared.id, { capacity: 3 });
+      expect(await journal(t.id)).toMatchObject([{ target_id: shared.id, generation: 2 }]);
+      await drainJobs();
+      expect(await journal(t.id)).toEqual([]);
+      for (const parent of parents) {
+        const read = await get(t.reader, parent.id);
+        expect(read.extensions.total).toBe(3);
+        expect(read.extensionsMeta?.total ?? {}).not.toHaveProperty("stale");
+      }
+    });
+
+    test("one journal row on a target of the source's own entity serves the parents that reach it and the record itself", async () => {
+      const t = await tenant();
+      await field(t, "kwh", number("Kwh"));
+      await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "item.extensions.kwh" }, "Total"), "rollup");
+      const shared = await create(t.writer, ENTITY, { name: "Shared", extensions: { kwh: 1 } });
+      const parents = await Promise.all([1, 2, 3, 4].map((n) => create(t.writer, ENTITY, { name: `p${n}` })));
+      for (const parent of parents) await member(t.writer, { asset: parent.id, item: shared.id });
+      await update(t.writer, ENTITY, shared.id, { extensions: { kwh: 2 } });
+      expect(await journal(t.id)).toHaveLength(1);
+      await drainJobs();
+      for (const parent of parents) expect((await get(t.reader, parent.id)).extensions.total).toBe(2);
+      // The same row key, left by a write of a child, is about the record itself.
+      await sql`update erp.extensible_assets_field_values set value_number = 7 where record_id = ${shared.id}::uuid and field_id = ${(await listed(t, "kwh")).fieldId}::uuid`.execute(fixture.privileged.db);
+      await withDbSession(fixture.app.db, t.writer, async (trx) => {
+        const set = await loadExtensionFieldsFor(trx, t.writer, ENTITY, extensionRegistry.entity(ENTITY)!);
+        await journalRecompute(trx, t.writer, { entity: ENTITY, field: set.byKey.get("total")!, targetEntity: ENTITY, targetId: parents[0]!.id });
+      });
+      await drainJobs();
+      expect((await get(t.reader, parents[0]!.id)).extensions.total).toBe(7);
+    });
+
+    test("a journal row that names a parent recomputes that parent, not what reaches a target", async () => {
+      const t = await tenant();
+      await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }, "Total"), "rollup");
+      const shared = await create(t.writer, TARGET_ENTITY, { name: "Shared", capacity: 1 });
+      const [first, second] = await Promise.all([1, 2].map((n) => create(t.writer, ENTITY, { name: `p${n}` })));
+      await member(t.writer, { asset: first!.id, location: shared.id });
+      await member(t.writer, { asset: second!.id, location: shared.id });
+      await sql`update erp.extensible_asset_locations set capacity = 8 where id = ${shared.id}::uuid`.execute(fixture.privileged.db);
+      await withDbSession(fixture.app.db, t.writer, async (trx) => {
+        const set = await loadExtensionFieldsFor(trx, t.writer, ENTITY, extensionRegistry.entity(ENTITY)!);
+        await journalRecompute(trx, t.writer, { entity: ENTITY, field: set.byKey.get("total")!, targetEntity: ENTITY, targetId: first!.id });
+      });
+      await drainJobs();
+      expect((await get(t.reader, first!.id)).extensions.total).toBe(8);
+      expect((await get(t.reader, second!.id)).extensions.total).toBe(1);
+    });
+
+    test("rebuildIndex brings back what a write behind the runtime left, over the step", async () => {
+      const t = await tenant();
+      await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }, "Total"), "rollup");
+      const { asset, locations } = await bundle(t, [3]);
+      await sql`update erp.extensible_asset_locations set capacity = 9 where id = ${locations[0]!.id}::uuid`.execute(fixture.privileged.db);
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(3);
+      await define(t.manager, "rebuildIndex", { fieldId: (await listed(t, "total")).fieldId });
+      await drainJobs();
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(9);
+    });
+
+    test("the target's tenant is the child's: another tenant sees nothing, and a foreign key across tenants reads nothing", async () => {
+      const a = await tenant();
+      const b = await tenant();
+      await field(a, "total", rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }, "Total"), "rollup");
+      await field(a, "kwh", number("Kwh"), undefined, GROUP);
+      await field(a, "perGroup", rollup({ collection: "members", aggregate: "sum", of: "group.extensions.kwh" }, "Per group"), "rollup");
+      const { asset, locations } = await bundle(a, [5]);
+      const groupOfA = await create(a.writer, GROUP, { name: "A", extensions: { kwh: 2 } });
+      await member(a.writer, { asset: asset.id, group: groupOfA.id });
+      expect((await get(a.reader, asset.id)).extensions).toMatchObject({ total: 5, perGroup: 2 });
+      expect(((await define(b.manager, "list")) as { items: unknown[] }).items).toEqual([]);
+      expect(await list(b.reader)).toEqual([]);
+      expect((await executeEntityOperation(fixture.app.db, b.reader, { operation: { id: `${ENTITY}.get`, intent: "get" }, input: { id: asset.id } }) as { data?: unknown }).data ?? null).toBeNull();
+      // B's member cannot name A's record, by its write path or its foreign key.
+      await field(b, "total", rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }, "Total"), "rollup");
+      await field(b, "kwh", number("Kwh"), undefined, GROUP);
+      await field(b, "perGroup", rollup({ collection: "members", aggregate: "sum", of: "group.extensions.kwh" }, "Per group"), "rollup");
+      const own = await create(b.writer, ENTITY, { name: "B" });
+      expect(await member(b.writer, { asset: own.id, location: locations[0]!.id }).then(() => "written", () => "refused")).toBe("refused");
+      // A row that got there past every constraint is read by nothing: the join names the child's tenant.
+      await fixture.privileged.db.transaction().execute(async (trx) => {
+        await sql`set local session_replication_role = replica`.execute(trx);
+        await sql`insert into erp.extensible_asset_members (tenant_id, asset_id, location_id, group_id)
+          values (${b.id}::uuid, ${own.id}::uuid, ${locations[0]!.id}::uuid, ${groupOfA.id}::uuid)`.execute(trx);
+      });
+      await define(b.manager, "rebuildIndex", {});
+      await drainJobs();
+      expect((await get(b.reader, own.id)).extensions).toMatchObject({ total: 0, perGroup: 0 });
+      // A write in A finds no parent of B.
+      await update(a.writer, TARGET_ENTITY, locations[0]!.id, { capacity: 6 });
+      expect((await get(a.reader, asset.id)).extensions.total).toBe(6);
+      expect((await get(b.reader, own.id)).extensions.total).toBe(0);
+    });
+
+    /** Update a location in a transaction of its own and keep it open until the returned function is called. */
+    async function holdCapacity(id: string, capacity: number) {
+      let release!: () => void;
+      const hold = new Promise<void>((resolve) => { release = resolve; });
+      let locked!: () => void;
+      const held = new Promise<void>((resolve) => { locked = resolve; });
+      const writer = fixture.privileged.db.transaction().execute(async (trx) => {
+        await sql`update erp.extensible_asset_locations set capacity = ${capacity} where id = ${id}::uuid`.execute(trx);
+        locked();
+        await hold;
+      });
+      await held;
+      return async () => { release(); await writer; };
+    }
+
+    test("a child's write that names a new target waits for a write of it, so a parent never keeps the older value", async () => {
+      const t = await tenant();
+      await field(t, "total", rollup({ collection: "members", aggregate: "sum", of: "location.capacity" }, "Total"), "rollup");
+      const asset = await create(t.writer, ENTITY, { name: "A" });
+      const location = await create(t.writer, TARGET_ENTITY, { name: "L", capacity: 1 });
+      const current = await member(t.writer, { asset: asset.id });
+      const release = await holdCapacity(location.id, 2);
+      const moved = editMember(t.writer, current.id, { location: location.id });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await release();
+      await moved;
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(2);
+    });
+
+    test("a collection write locks the new target in the one order, before the parent's row", async () => {
+      const t = await tenant();
+      await field(t, "total", rollup({ collection: "parts", aggregate: "sum", of: "location.capacity" }, "Total"), "rollup");
+      const asset = await create(t.writer, ENTITY, { name: "A" });
+      const location = await create(t.writer, TARGET_ENTITY, { name: "L", capacity: 1 });
+      const expectedVersion = String(asset.updated_at);
+      const release = await holdCapacity(location.id, 2);
+      const inserted = parts(t.writer, "insert", { id: asset.id, expectedVersion, values: { quantity: 1, location: location.id } });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const free = await sql<{ id: string }>`select id from erp.extensible_assets where id = ${asset.id}::uuid for no key update nowait`.execute(fixture.privileged.db).then(() => true, () => false);
+      await release();
+      await inserted;
+      expect(free).toBe(true);
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(2);
+    });
   });
 });

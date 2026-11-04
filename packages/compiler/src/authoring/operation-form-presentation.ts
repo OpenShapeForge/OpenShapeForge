@@ -49,6 +49,11 @@ export function operationForm(form: { showOnlyGroupedFields?: boolean; defaults?
         if (defaults?.[key] !== undefined) continue;
         throw new Error(`${origin}: required form field ${current} is hidden without a default.`);
       }
+      for (const [key, value] of Object.entries(defaults ?? {})) {
+        if ((node.required ?? []).includes(key)) continue;
+        const field = node.properties?.[key];
+        if (field?.properties && value && typeof value === "object" && !Array.isArray(value)) checkRequired(field, value, path ? `${path}.${key}` : key);
+      }
     };
     checkRequired(schema, form.defaults, "");
   }

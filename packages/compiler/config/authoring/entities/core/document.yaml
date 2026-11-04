@@ -649,6 +649,7 @@ interfaces:
           defaults:
             document: { status: draft }
             version: { versionLabel: "1", status: draft }
+            content: { variant: { channel: document, locale: nl }, blocks: [] }
           groups:
             - title: { en: Document, nl: Document }
               fields: [document.title, document.documentType]

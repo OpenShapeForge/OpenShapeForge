@@ -1,0 +1,60 @@
+# Test fixture — an owned collection of extensible-asset.yaml (any number of
+# parts per asset), authorized through its owner: what a tenant rollup over an
+# owned collection aggregates. Only in the test composition. Read-only for the
+# same reason as extensible-asset-spec.yaml: the engine refuses a generic
+# create, update and delete of an owned child.
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ExtensibleAssetPart
+title: Extensible asset part
+description: One part of an extensible test asset.
+language: en
+displayTemplate: "{{quantity}}"
+labels: { en: Extensible asset part, nl: Onderdeel van uitbreidbaar object }
+pluralLabels: { en: Extensible asset parts, nl: Onderdelen van uitbreidbare objecten }
+domains: [relations]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite]
+    create: [General.All.ReadWrite]
+    update: [General.All.ReadWrite]
+    delete: [General.All.ReadWrite]
+fields:
+  - key: asset
+    osfType: ExtensibleAsset
+    required: true
+    relationship:
+      inverse:
+        key: parts
+        label: { en: Parts, nl: Onderdelen }
+        ownership: owned
+        childAuthorization: owner
+  - key: quantity
+    osfType: number
+    label: { en: Quantity, nl: Aantal }
+    persisted: { column: quantity, storageClass: core }
+  - key: kind
+    osfType: string
+    label: { en: Kind, nl: Soort }
+    validation: { maxLength: 100 }
+    persisted: { column: kind, storageClass: core }
+operations:
+  list:
+    name: List extensible asset parts
+    description: Read accessible extensible asset parts.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read extensible asset part
+    description: Read one accessible extensible asset part.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }

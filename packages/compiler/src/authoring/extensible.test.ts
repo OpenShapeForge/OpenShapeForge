@@ -297,9 +297,13 @@ describe("extensible: the manifest registry", () => {
           { entity: "RestEnabled", table: "erp.rest_enableds" },
         ],
         ownedSingleChildren: [{ relation: "spec", entity: "ExtensiblePartSpec", table: "parts.extensible_part_specs", foreignKey: "part_id" }],
+        relations: [{ key: "spec", kind: "hasMany", entity: "ExtensiblePartSpec", table: "parts.extensible_part_specs", foreignKey: "part_id", ownership: "owned" }],
       },
     });
     expect(registry.indexProjections).toEqual({ measurement: { number: "value", text: "unit" } });
+    // Every entity a lookup or rollup can reach, with who may read it.
+    expect(Object.keys(registry.readAccess)).toEqual(["ExtensiblePart", "ExtensiblePartSpec", "RestEnabled"]);
+    expect(registry.readAccess.ExtensiblePartSpec).toEqual({ table: "parts.extensible_part_specs", roles: expect.any(Array) });
     expect(registry.referencedBy).toEqual({
       ExtensiblePart: [{ sourceEntity: "ExtensiblePart", valuesTable: "parts.extensible_parts_field_values" }],
       ExtensiblePartSpec: [{ sourceEntity: "ExtensiblePart", valuesTable: "parts.extensible_parts_field_values" }],
@@ -319,6 +323,14 @@ describe("extensible: the manifest registry", () => {
         persisted: { column: "cost", storageClass: "core" } });
     })).toEqual([]);
     expect(children(() => {}).map((child) => child.relation)).toEqual(["spec"]);
+  });
+
+  it("names what narrows the rows of an entity a lookup could reach, never folding it into the roles", () => {
+    const access = (transform: (document: Record<string, any>) => void) =>
+      compile(() => {}, { dir: withDocument("extensible-part-spec", transform) }).extensionRegistry!.readAccess.ExtensiblePartSpec!;
+    expect(access(() => {}).rowPolicy).toBeUndefined();
+    expect(access((document) => { document.authorization.rowAccess = { enabled: true, empty: "public" }; }).rowPolicy).toBe("rowAccess");
+    expect(access((document) => { document.authorization.roles.read = ["Spec.Reader"]; }).roles).toEqual(["Spec.Reader"]);
   });
 
   it("does not list an owned child without a one-per-parent key", () => {

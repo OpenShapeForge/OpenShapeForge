@@ -327,8 +327,8 @@ tables:
   # detection, evaluation order and "which fields does this write touch".
   # `via_field` is null for a field of the same record, so uniqueness is two
   # partial indexes: a plain unique index would let null rows repeat.
-  # Written by the definition Operations (the runtime role); the worker has
-  # no grant on it.
+  # Written by the definition Operations (the runtime role); the worker only
+  # reads it, to carry a recompute on to the fields that read what it wrote.
   - schema: platform
     name: extension_field_dependencies
     tenantScoped: true
@@ -396,6 +396,40 @@ tables:
         name: extension_field_backfills_state_check
         kind: check
         expression: "state IN ('queued', 'running', 'done', 'failed')"
+
+  # The recompute journal of tenant lookups: a write of a record that more
+  # than `limits.syncFanOut` records look up leaves one row per (field, that
+  # record) here instead of recomputing them in its own transaction. Further
+  # writes of the same record coalesce on the unique key (`generation` counts
+  # them); the journal worker recomputes the referring records in batches and
+  # removes the row once a pass saw its latest generation. A reader derives
+  # `extensionsMeta.<key>.stale` from the open rows of its page. The worker
+  # holds full DML on it (db/migrations/worker-role.ts).
+  - schema: platform
+    name: extension_field_recomputes
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      # The entity and tenant field to recompute, on the records that refer to target_id.
+      - { name: entity, type: text, required: true }
+      - { name: field_id, type: uuid, required: true }
+      - { name: target_entity, type: text, required: true }
+      - { name: target_id, type: uuid, required: true }
+      - { name: generation, type: integer, required: true, default: "1" }
+      # The generation the running pass started from, and where it stands.
+      - { name: pass_generation, type: integer }
+      - { name: cursor, type: text }
+      - { name: requested_at, type: timestamptz, required: true, default: now() }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: extension_field_recomputes_target_uidx
+        columns: [tenant_id, field_id, target_id]
+        unique: true
+      - name: extension_field_recomputes_entity_idx
+        columns: [tenant_id, entity, field_id]
 
   # Central, interface-neutral edit leases for long-running human write modes.
   # A lease is record-wide: one actor editing a Relation blocks every other

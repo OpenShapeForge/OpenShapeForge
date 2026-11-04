@@ -2,6 +2,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "bun:test";
 import { collectAllArtifacts } from "./index.js";
 import { loadActivePlatformCompile, resolveActiveAuthoringDir } from "./active-manifest.js";
@@ -198,8 +199,8 @@ test("canonical entity input sources reach every generated operation interface",
   }
 }, 60_000);
 
-test("authored document form reaches both web artifacts with resolved input paths", async () => {
-  const root = new URL("../../../", import.meta.url).pathname;
+test("authored document form reaches the web artifact with resolved input paths", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
   const artifacts = await collectAllArtifacts(root);
   const entry = artifacts.all.find(item => item.path === "apps/web/src/generated/web-manifest.json");
   expect(entry).toBeDefined();

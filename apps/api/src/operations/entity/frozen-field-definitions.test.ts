@@ -36,7 +36,7 @@ test("version projection requires the matching visible owner and never changes t
   expect(readTenant).toBe("tenant-a");
   expect(await withFrozenFieldDefinitions({} as any, { ...viewer, tenantId: "tenant-b" }, version, data, deps)).toEqual(data);
   expect(await withFrozenFieldDefinitions({} as any, viewer, version, data, { ...deps, requireRead: () => { throw operationFailure({ code: "FORBIDDEN", message: "denied" }); } })).toEqual(data);
-  const protectedOwner = { ...owner, source: { ...owner.source, authorization: { ...owner.source?.authorization, recordPermissions: { field: "access", column: "access", empty: "deny", createRequires: ["view"] } } } } as unknown as GeneratedCrudTable;
+  const protectedOwner = { ...owner, source: { ...owner.source, authorization: { ...owner.source?.authorization, recordPermissions: { field: "access", column: "access", empty: "restricted", createRequires: ["view"] } } } } as unknown as GeneratedCrudTable;
   let reads = 0;
   const protectedDeps = { ...deps, tables: () => [protectedOwner], read: async () => { reads++; return { id: "owner-1" }; } };
   expect((await withFrozenFieldDefinitions({} as any, viewer, version, data, protectedDeps)).frozenFieldDefinitions).toEqual({ parameters: [{ key: "name" }] });

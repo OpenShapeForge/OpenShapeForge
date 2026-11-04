@@ -377,8 +377,8 @@ operations:
   create:
     name: { en: Create document, nl: Document aanmaken }
     description:
-      en: Create a document with its first version. You can attach a file.
-      nl: Maak een document met de eerste versie. U kunt een bestand bijvoegen.
+      en: Create a document with its first version.
+      nl: Maak een document met de eerste versie.
 
     implementation: { type: plugin, plugin: documents, handler: createDocument, action: create }
     target: { scope: collection }
@@ -649,7 +649,7 @@ interfaces:
           defaults:
             document: { status: draft }
             version: { versionLabel: "1", status: draft }
-            content: { variant: { channel: document, locale: nl }, blocks: [] }
+            content: { variant: { channel: document, locale: { from: uiLocale } }, blocks: [] }
           groups:
             - title: { en: Document, nl: Document }
               fields: [document.title, document.documentType]

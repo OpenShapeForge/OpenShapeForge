@@ -1730,7 +1730,13 @@ A plugin-backed entity Operation may arrange its existing input fields under
 For example, `fields: [record.title, record.description]` groups two fields
 of the required `record` input. This is a web presentation: the Operation's
 input, authorization, validation, other interfaces and submission are unchanged.
-Fields not listed remain available by default. Set `showOnlyGroupedFields: true` to present only the grouped fields, and use `defaults` for values the operation still requires (for example, `{ version: { status: draft, label: "1" } }`). Defaults are submitted as ordinary inputs and do not change the canonical contract or other interfaces. The compiler rejects unknown or invalid defaults and required hidden fields without a default; operation control fields continue to be supplied by the runtime. The compiler also refuses unknown or overlapping
-paths, traversal into an optional object or choice, and a collapsed required
+Fields not listed remain available by default. Set `showOnlyGroupedFields: true`
+to present only the grouped fields, and use `defaults` for values the operation
+still requires (for example, `{ version: { status: draft, label: "1" } }`).
+A value `{ from: uiLocale }` resolves to the active web interface language.
+Defaults are ordinary submitted inputs; they do not change the canonical contract
+or other interfaces. The compiler rejects invalid defaults and required hidden
+fields without a default; the runtime supplies operation control fields. The
+compiler also refuses unknown or overlapping paths, traversal into an optional object or choice, and a collapsed required
 field without a default. Generated entity CRUD uses the record view's create or
 update groups instead.

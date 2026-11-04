@@ -215,7 +215,7 @@ describe("smtp provider", () => {
     }
     // The module resolves the transport when the worker starts, not when the API composes it.
     const module = createJobsRuntimeModule({ modules: () => [], env: {} });
-    expect(Object.keys(module.jobHandlers ?? {}).sort()).toEqual(["extensions.backfill", "extensions.retention", "mail.deliver", "osf-inbound.dispatch"].sort());
+    expect(Object.keys(module.jobHandlers ?? {}).sort()).toEqual(["extensions.backfill", "extensions.recompute", "extensions.retention", "extensions.revalidate", "mail.deliver", "osf-inbound.dispatch"].sort());
     const start = module.workers?.["job-worker"]?.start;
     expect(() => start!({ db: {} as never, log: { info() {}, warn() {}, error() {} } } as never)).toThrow(/No mail transport is configured/);
   });

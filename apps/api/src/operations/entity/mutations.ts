@@ -73,13 +73,20 @@ import {
 } from "./extensions/write.js";
 import { extensibleEntityOf, loadExtensionFields } from "./extensions/store.js";
 import { enforceExtensionReferencesOnDelete, lockExtensionReferenceSources } from "./extensions/references.js";
+import {
+  afterDeleteOfLinkedTarget,
+  beforeDeleteOfLinkedTarget,
+  lockLinkedRecords,
+  propagateRecordChange,
+  revalidateAfterAuthorizationChange,
+} from "./extensions/linked.js";
 
 async function fetchGeneratedRowInTransaction(
   trx: Transaction<DB>,
   session: DbSessionInput,
   table: GeneratedCrudTable,
   id: string,
-  lock = false,
+  lock: boolean | "no key update" = false,
 ): Promise<GeneratedEntityRow | null> {
   const tenantWhere = table.tenantScoped
     ? sql`and ${sql.id("tenant_id")} = ${session.tenantId}`
@@ -91,7 +98,7 @@ async function fetchGeneratedRowInTransaction(
       ${tenantWhere}
       ${subtypeScopeWhere(table)}
     limit 1
-    ${lock ? sql`for update` : sql``}
+    ${lock === "no key update" ? sql`for no key update` : lock ? sql`for update` : sql``}
   `.execute(trx);
   return result.rows[0]?.row ?? null;
 }
@@ -316,6 +323,8 @@ async function insertGeneratedRowInTransaction(
   const prepared = await prepareTypedValueWrite(trx, session, table, entityPrepared);
   // A value typed by a stored FieldDefinition is checked against it here, so
   // the pair holds however the write arrived.
+  // The parents and lookup targets of this create, each once and in one order.
+  await lockLinkedRecords(trx, session, table, { operation: "create", row: storageRow(prepared), ...(extensions ? { extensions } : {}) });
 
   // The record's named actions are the entity's to seed and the delegation
   // Operation's to change; a create may carry the authored default and
@@ -342,7 +351,7 @@ async function insertGeneratedRowInTransaction(
   // Tenant fields are checked against the tenant's definitions here, with
   // the authored values of this create, before anything is written.
   const extensionWrite = extensions === undefined
-    ? await prepareFormulaOnlyCreate(trx, session, table)
+    ? await prepareFormulaOnlyCreate(trx, session, table, storageRow(prepared))
     : await prepareExtensionWrite(trx, session, table, { operation: "create", row: storageRow(prepared), extensions });
   const extensionValue = extensionStorageValue(extensionWrite);
   // Everything above reads, validates and may wait on another transaction's
@@ -424,6 +433,9 @@ async function insertGeneratedRowInTransaction(
   // covers the in-transaction create the collection insert runs.
   await draftOwningHead(trx, entityValues.tables ?? getGeneratedCrudTables(), table, row);
   await recomputeOwnerFormulas(trx, session, table, row);
+  // Tenant rollups over this record's collection, wherever they are (extensions/linked.ts).
+  await propagateRecordChange(trx, session, table, { after: row });
+  await revalidateAfterAuthorizationChange(trx, session, table);
   return projectGeneratedEntityRow(table, session, row, entityValues.registry);
 }
 
@@ -506,7 +518,9 @@ async function applyGeneratedRowUpdate(
     // definition change and a backfill batch order against (extensions/store.ts).
     if (extensibleEntityOf(table)) await loadExtensionFields(trx, session, table, { lock: "shared" });
     await lockOwnerExtensionFields(trx, session, table);
-    const current = await fetchGeneratedRowInTransaction(trx, session, table, id, true);
+    // Everything this write recomputes, this record included, in one order.
+    const rowLock = await lockLinkedRecords(trx, session, table, { operation: "update", id, row: storageRow(values), ...(extensions ? { extensions } : {}) });
+    const current = await fetchGeneratedRowInTransaction(trx, session, table, id, rowLock ?? true);
     if ((carriers.length || objectMergeColumn || extensions) && !current) return null;
     if (objectMergeColumn && current) {
       const stored = current[objectMergeColumn.name];
@@ -646,11 +660,15 @@ async function applyGeneratedRowUpdate(
       returning to_jsonb(${sql.id(table.table)}.*) as row
     `.execute(trx);
 
-    const row = result.rows[0]?.row ?? null;
+    let row = result.rows[0]?.row ?? null;
     if (!row) return unchangedRow();
-    await completeExtensionWrite(trx, session, extensionWrite, String(row[table.primaryKey!]), row);
+    const settledSource = await completeExtensionWrite(trx, session, extensionWrite, String(row[table.primaryKey!]), row);
+    if (settledSource) row = { ...row, [extensionValuesColumn(table).name]: settledSource };
     await draftOwningHead(trx, entityValues.tables ?? getGeneratedCrudTables(), table, row);
     await recomputeOwnerFormulas(trx, session, table, row);
+    // Tenant lookups and rollups that read this record, wherever they are (extensions/linked.ts).
+    await propagateRecordChange(trx, session, table, { before: current, after: row });
+    await revalidateAfterAuthorizationChange(trx, session, table);
     return projectGeneratedEntityRow(table, session, row, entityValues.registry);
   }).catch((error) => {
     throw translateDatabaseError(table, error);
@@ -704,12 +722,15 @@ export async function deleteGeneratedEntity(
   if (unsupported) throw operationFailure(unsupported);
 
   return withDbSession(db, session, async (trx) => {
-    // Before the record lock: a setNull below writes the referencing records.
+    // Before the record lock: a setNull below writes the referencing records,
+    // and the delete recomputes the lookups and rollups that read this one.
     await lockExtensionReferenceSources(trx, session, table);
+    await lockOwnerExtensionFields(trx, session, table);
     if (table.source?.authorization?.recordPermissions) {
       await assertRecordPermissionInTransaction(trx, session, table, input.id, "delete");
     }
     await assertNoOwnedChildrenInTransaction(trx, table, input.id);
+    await lockLinkedRecords(trx, session, table, { operation: "delete", id: input.id });
     const current = await fetchGeneratedRowInTransaction(trx, session, table, input.id, true);
     if (current) {
       await assertHardDeleteAllowedInTransaction(
@@ -771,6 +792,7 @@ export async function deleteGeneratedEntity(
     const expectedVersionWhere = input.guard && versionColumn
       ? sql`and ${sql.id(versionColumn.name)} = ${normalizeTimestampToken(input.guard.expectedVersion)}::timestamptz`
       : sql``;
+    const linkedSources = current ? await beforeDeleteOfLinkedTarget(trx, session, table, input.id) : [];
     // The row is locked, its owned children, hard-delete and related-state
     // guards have passed and this request's controls are consumed: the last
     // point before the delete itself.
@@ -796,6 +818,9 @@ export async function deleteGeneratedEntity(
       }
       return false;
     }
+    await afterDeleteOfLinkedTarget(trx, session, linkedSources);
+    await propagateRecordChange(trx, session, table, { before: row });
+    await revalidateAfterAuthorizationChange(trx, session, table);
     return true;
   }).catch((error) => {
     throw translateDatabaseError(table, error);

@@ -1,0 +1,96 @@
+# Test fixture — a third extensible entity, this one a published-snapshot head:
+# a recompute that follows from another record must leave a published edition
+# published, while a write of the edition itself puts it back to draft. Read by
+# the same roles as extensible-asset.yaml. Only in the test composition.
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ExtensibleAssetEdition
+title: Extensible asset edition
+description: A published edition of extensible test data whose tenants may add fields of their own.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels: { en: Asset edition, nl: Objecteditie }
+pluralLabels: { en: Asset editions, nl: Objectedities }
+domains: [relations]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite]
+    create: [General.All.ReadWrite]
+    update: [General.All.ReadWrite]
+    delete: [General.All.ReadWrite]
+versioning:
+  strategy: publishedSnapshot
+  versionEntity: ExtensibleAssetEditionVersion
+  versionsField: versions
+  snapshot: { ownedRelationships: recursive }
+extensible:
+  authorization: { manage: [Test.Fields.Manage] }
+  limits: { fields: 10, filtersPerQuery: 3, syncFanOut: 3 }
+fields:
+  - key: name
+    osfType: string
+    required: true
+    label: { en: Name, nl: Naam }
+    validation: { minLength: 1, maxLength: 200 }
+    persisted: { column: name, storageClass: core }
+  - key: location
+    osfType: ExtensibleAssetLocation
+    label: { en: Location, nl: Locatie }
+    relationship:
+      ownership: reference
+      inverse: false
+  # A lookup through a relation with read roles of its own is refused. Here and
+  # not on a group: this entity has no MCP tools, whose sweeps write every field.
+  # The writer reads it, which the generic relationship sweep needs.
+  - key: restrictedLocation
+    osfType: ExtensibleAssetLocation
+    label: { en: Restricted location, nl: Afgeschermde locatie }
+    authorization:
+      roles:
+        read: [General.All.ReadWrite]
+        write: [General.All.ReadWrite]
+    relationship:
+      ownership: reference
+      inverse: false
+operations:
+  list:
+    name: List asset editions
+    description: Read accessible asset editions.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read asset edition
+    description: Read one accessible asset edition.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create asset edition
+    description: Create asset edition.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update asset edition
+    description: Update asset edition.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  delete:
+    name: Delete asset edition
+    description: Delete asset edition.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}

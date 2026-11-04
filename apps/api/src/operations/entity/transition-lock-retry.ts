@@ -4,7 +4,7 @@ import { readDatabaseError } from "../../db/database-refusals.js";
 
 export const TRANSITION_LOCK_ATTEMPTS = 3;
 
-function sqlstateOf(error: unknown): string | undefined {
+export function sqlstateOf(error: unknown): string | undefined {
   const seen = new Set<unknown>();
   let current: unknown = error;
   while (current && typeof current === "object" && !seen.has(current)) {

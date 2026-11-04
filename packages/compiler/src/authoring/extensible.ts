@@ -27,7 +27,7 @@
  * versioned migration.
  */
 import { BASE_TYPES } from "./entity-fields.js";
-import type { ExtensionRegistry, ExtensionRegistryEntity } from "./extension-registry-types.js";
+import type { ExtensionReadAccess, ExtensionRegistry, ExtensionRegistryEntity, ExtensionRegistryRelation } from "./extension-registry-types.js";
 import type { CoreEntity, ExtensionIndexColumn, OsfTypeDefinition, OsfTypeIndexProjection } from "./types.js";
 import type { CompiledEntityContract, CompiledExtensible } from "./types/compiled.js";
 import { hasTenantIdentityCheck } from "../tenant-bound-references.js";
@@ -467,6 +467,69 @@ function childAuthorizedByOwner(
 }
 
 /**
+ * The authored relations of an extensible entity a tenant lookup may follow
+ * or a rollup aggregate: a single reference the entity holds (`belongsTo`,
+ * its foreign key on the entity's table) and an inverse collection
+ * (`hasMany`, the foreign key on the related table), each to a stored,
+ * tenant-scoped entity with a uuid id. Through-, via- and provider-backed
+ * relations have no foreign key to follow and stay out.
+ */
+function extensionRelations(
+  owner: { contract: CompiledEntityContract; table: TableDefinition },
+  byEntity: ReadonlyMap<string, { contract: CompiledEntityContract; table: TableDefinition }>,
+): ExtensionRegistryRelation[] {
+  const relations: ExtensionRegistryRelation[] = [];
+  for (const relationship of owner.contract.model.relationships) {
+    if (relationship.through || relationship.provider || relationship.via || !relationship.foreignKey) continue;
+    const related = byEntity.get(relationship.target);
+    if (!related || !related.table.tenantScoped || related.contract.source || related.contract.subtype) continue;
+    const id = related.table.columns.find((column) => column.name === "id");
+    if (!id || id.type !== "uuid" || !id.primaryKey) continue;
+    const holder = relationship.kind === "belongsTo" ? owner.table : related.table;
+    const foreignKey = holder.columns.find((column) => column.name === relationship.foreignKey);
+    if (!foreignKey || foreignKey.type !== "uuid") continue;
+    relations.push({
+      key: relationship.kind === "belongsTo" ? relationship.fieldKey ?? relationship.key : relationship.key,
+      kind: relationship.kind,
+      entity: relationship.target,
+      table: qualified(related.table),
+      foreignKey: relationship.foreignKey,
+      ...(relationship.ownership ? { ownership: relationship.ownership } : {}),
+      ...(relationship.childAuthorization ? { childAuthorization: relationship.childAuthorization } : {}),
+    });
+  }
+  return relations.sort((left, right) => left.key.localeCompare(right.key));
+}
+
+/**
+ * Who may read an entity, from its compiled authorization contract: the read
+ * roles, the principal classes, the axis that narrows its rows (if any) and
+ * the fields with read roles of their own. A lookup or rollup is proven
+ * against exactly this; anything that narrows rows is named, never folded
+ * into the roles, so the runtime refuses it rather than guess.
+ */
+function readAccessOf(entry: { contract: CompiledEntityContract; table: TableDefinition }): ExtensionReadAccess {
+  const authorization = entry.contract.authorization;
+  const rowPolicy = entry.table.rowScope ? "rowScope"
+    : entry.table.ownerAxis || authorization?.ownerAxis ? "ownerAxis"
+    : entry.table.source?.authorization?.recordPermissions || authorization?.rowAccess?.recordPermissions ? "recordPermissions"
+    // Plain `rowAccess: { enabled: true }` narrows nothing; only an owner or group axis does.
+    : authorization?.rowAccess?.owner || authorization?.rowAccess?.group ? "rowAccess"
+    : Object.keys(authorization?.profileAuthorizations ?? {}).length ? "profileAuthorizations"
+    : undefined;
+  const fieldReadRoles = Object.fromEntries((authorization?.fieldAuthorizations ?? [])
+    .map((field) => [field.fieldKey, [...new Set(field.readRoles)].sort()] as const)
+    .sort(([left], [right]) => left.localeCompare(right)));
+  return {
+    table: qualified(entry.table),
+    roles: [...new Set(authorization?.roles.read ?? [])].sort(),
+    ...(authorization?.principalClasses ? { principalClasses: [...new Set(authorization.principalClasses)].sort() } : {}),
+    ...(rowPolicy ? { rowPolicy } : {}),
+    ...(Object.keys(fieldReadRoles).length ? { fieldReadRoles } : {}),
+  };
+}
+
+/**
  * Lower every extensible entity into its storage and return the registry the
  * manifest publishes, or undefined when no entity is extensible (the manifest
  * then stays byte-identical to one compiled before extensible existed).
@@ -486,7 +549,8 @@ export function compileExtensionStorage(
     }
   }
   const candidates = entries.filter((entry) => isExtensionTargetCandidate(entry.contract, entry.table));
-  const registry: ExtensionRegistry = { entities: {}, indexProjections: {}, referencedBy: {} };
+  const registry: ExtensionRegistry = { entities: {}, indexProjections: {}, referencedBy: {}, readAccess: {} };
+  const reachable = new Set<string>();
 
   for (const { contract, table } of [...extensible].sort((left, right) => left.contract.entity.name.localeCompare(right.contract.entity.name))) {
     const name = contract.entity.name;
@@ -536,7 +600,11 @@ export function compileExtensionStorage(
       allowedOsfTypes: [...resolved.allowedOsfTypes],
       targets,
       ownedSingleChildren: ownedSingleChildren({ contract, table }, byEntity),
+      relations: extensionRelations({ contract, table }, byEntity),
     };
+    for (const reached of [name, ...targets.map((target) => target.entity), ...registry.entities[name]!.relations.map((relation) => relation.entity)]) {
+      reachable.add(reached);
+    }
     for (const [type, projection] of Object.entries(resolved.indexProjections)) {
       const previous = registry.indexProjections[type];
       if (previous && JSON.stringify(previous) !== JSON.stringify(projection)) {
@@ -548,6 +616,7 @@ export function compileExtensionStorage(
       (registry.referencedBy[target.entity] ??= []).push({ sourceEntity: name, valuesTable: qualified(values) });
     }
   }
+  registry.readAccess = Object.fromEntries([...reachable].sort().map((entity) => [entity, readAccessOf(byEntity.get(entity)!)]));
   registry.indexProjections = Object.fromEntries(Object.entries(registry.indexProjections).sort(([left], [right]) => left.localeCompare(right)));
   registry.referencedBy = Object.fromEntries(Object.entries(registry.referencedBy)
     .sort(([left], [right]) => left.localeCompare(right))

@@ -52,6 +52,7 @@ import {
   extensionShape,
   isClassified,
   isEntityOsfType,
+  linkedResultType,
   record,
   type ExtensionDefinition,
   type ExtensionField,
@@ -82,7 +83,7 @@ export function computedFormulas(set: ExtensionFieldSet): ExtensionField[] {
     storedFormula(field.definition) !== undefined);
 }
 
-const labelText = (label: unknown, fallback: string): string => {
+export const labelText = (label: unknown, fallback: string): string => {
   if (typeof label === "string" && label.trim()) return label;
   if (!record(label)) return fallback;
   const text = label.en ?? Object.values(label).find((value) => typeof value === "string" && value.trim());
@@ -104,6 +105,11 @@ function authoredType(name: string, osfType: string): string {
 }
 
 const authoredCache = new Map<string, readonly FormulaField[]>();
+
+/** The authored fields of an entity's table a computed field may read, and those it may not (with `outOfScope`). */
+export function authoredFormulaFields(table: GeneratedCrudTable): readonly FormulaField[] {
+  return authoredFields(table, "self");
+}
 
 /**
  * The authored fields of a table a formula may name: the columns of
@@ -134,7 +140,7 @@ function authoredFields(table: GeneratedCrudTable, scope: FormulaField["scope"],
   return authoredCache.get(cacheKey)!;
 }
 
-function tenantFieldType(entry: RuntimeExtensibleEntity, field: ExtensionField): string {
+export function tenantFieldType(entry: RuntimeExtensibleEntity, field: Pick<ExtensionField, "kind" | "definition">): string {
   const shape = extensionShape(entry, field.definition);
   const osfType = String(field.definition.osfType ?? field.kind);
   if (shape.reference || shape.collection || shape.baseType === "object") return osfType;
@@ -157,7 +163,9 @@ export function formulaEnvironment(set: ExtensionFieldSet): FormulaEnvironment {
       ...(isClassified(field.definition) ? { classified: true } : {}) };
     const formula = field.kind === "formula" ? storedFormula(field.definition) : undefined;
     if (formula) return { ...base, type: formula.resultType, kind: "formula", dependencies: dependencies(formula.ast) };
-    if (field.kind !== "stored") return { ...base, type: field.kind, kind: field.kind };
+    // A lookup or rollup reads as its result type; its depth across entities
+    // is checked over the tenant's whole graph (linked.ts).
+    if (field.kind !== "stored") return { ...base, type: linkedResultType(field) ?? field.kind, kind: field.kind };
     return { ...base, type: tenantFieldType(set.entry, field) };
   });
   const children = set.entry.ownedSingleChildren.flatMap((child) => {

@@ -18,6 +18,7 @@ import { extensionRegistry } from "./registry.js";
 import { loadExtensionFieldsFor, lockExtensionFields } from "./store.js";
 import { qualifiedTable, rewriteExtensionValues } from "./write.js";
 import { storedExtensionSource } from "./read.js";
+import { journalRecompute, withinBudget, writeBudget } from "./linked.js";
 
 function sourceTable(entity: string): GeneratedCrudTable {
   const tables = getGeneratedCrudTables().filter((table) => table.source?.authoringEntityName === entity && !table.subtype);
@@ -56,7 +57,7 @@ function mayName(session: DbSessionInput, source: GeneratedCrudTable, field: Ext
 /**
  * The deletion guard of a reference target. Runs under the target row's
  * exclusive lock, so a concurrent writer referencing it either committed its
- * index row (and is seen here) or waits on its `for share` and then finds
+ * index row (and is seen here) or waits on its `for key share` and then finds
  * the target gone.
  *
  * The referencing records are found, and a setNull unlinks them, under an
@@ -64,7 +65,10 @@ function mayName(session: DbSessionInput, source: GeneratedCrudTable, field: Ext
  * policies, so the deleting actor's own session would miss references held by
  * records it may not see — a `restrict` would let the delete through, and a
  * setNull would leave those records pointing at nothing. The refusal names
- * the referencing entity and field only to an actor who may read them.
+ * the referencing entity and field only to an actor who may read them. A
+ * setNull unlinks in this transaction while its budget lasts (linked.ts
+ * `writeBudget`) and leaves the rest to the journal; until then those records
+ * read as pointing at a record that is gone, and their lookups as stale.
  */
 export async function enforceExtensionReferencesOnDelete(
   trx: Transaction<DB>,
@@ -81,15 +85,14 @@ export async function enforceExtensionReferencesOnDelete(
   }, async () => {
     for (const source of sources) {
       const entry = extensionRegistry.entity(source.sourceEntity)!;
-      const referencing = await sql<{ field_id: string; record_id: string }>`
-        select distinct field_id, record_id from ${qualifiedTable(source.valuesTable)}
+      const referencing = await sql<{ field_id: string; records: string }>`
+        select field_id::text as field_id, count(distinct record_id)::text as records from ${qualifiedTable(source.valuesTable)}
         where tenant_id = ${session.tenantId}::uuid and value_ref_id = ${id}::uuid
-        order by field_id, record_id`.execute(trx);
+        group by field_id order by field_id`.execute(trx);
       if (!referencing.rows.length) continue;
       const set = await loadExtensionFieldsFor(trx, session, source.sourceEntity, entry);
-      const byField = new Map<string, string[]>();
-      for (const row of referencing.rows) byField.set(row.field_id, [...byField.get(row.field_id) ?? [], row.record_id]);
-      for (const [fieldId, records] of byField) {
+      const budget = writeBudget(trx);
+      for (const { field_id: fieldId, records } of referencing.rows) {
         const field = set.byId.get(fieldId);
         // A deleted field's index rows are its backfill's to remove; they hold
         // nothing a reader can see and never restrict.
@@ -98,19 +101,24 @@ export async function enforceExtensionReferencesOnDelete(
           throw operationFailure({
             code: "OPERATION_REFUSED",
             message: mayName(session, sourceTable(source.sourceEntity), field)
-              ? `This record is still referenced by ${records.length} ${source.sourceEntity} record(s) through "${field.key}".`
-              : `This record is still referenced by ${records.length} record(s).`,
+              ? `This record is still referenced by ${records} ${source.sourceEntity} record(s) through "${field.key}".`
+              : `This record is still referenced by ${records} record(s).`,
             retryable: false,
           });
         }
-        await unlinkReferences(trx, session, source.sourceEntity, set, field, records, id);
+        const rows = await sql<{ id: string }>`select distinct record_id::text as id from ${qualifiedTable(source.valuesTable)}
+          where tenant_id = ${session.tenantId}::uuid and value_ref_id = ${id}::uuid and field_id = ${fieldId}::uuid
+          order by 1 limit ${entry.limits.syncFanOut + 1}`.execute(trx);
+        const ids = rows.rows.map((row) => row.id);
+        if (withinBudget(budget, set, ids)) await unlinkReferences(trx, session, source.sourceEntity, set, field, ids, id);
+        else await journalRecompute(trx, session, { entity: source.sourceEntity, field, targetEntity: target, targetId: id });
       }
     }
   });
 }
 
 /** `setNull`: remove the id from each referencing record's source and index. */
-async function unlinkReferences(
+export async function unlinkReferences(
   trx: Transaction<DB>,
   session: DbSessionInput,
   entity: string,
@@ -123,7 +131,7 @@ async function unlinkReferences(
   for (const recordId of records) {
     const locked = await sql<{ extension_values: unknown }>`
       select extension_values from ${sql.id(table.schema, table.table)}
-      where tenant_id = ${session.tenantId}::uuid and id = ${recordId}::uuid for update`.execute(trx);
+      where tenant_id = ${session.tenantId}::uuid and id = ${recordId}::uuid for no key update`.execute(trx);
     if (!locked.rows[0]) continue;
     const before = storedExtensionSource(locked.rows[0]);
     const after: Record<string, unknown> = { ...before };

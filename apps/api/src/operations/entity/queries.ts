@@ -26,6 +26,7 @@ import { assertBoundFieldQueryAllowed, resolveBoundEntityRows } from "./field-bi
 import { subtypeScopeWhere } from "./subtype-scope.js";
 import { assertExtensionQueryAllowed, extensionFilterCondition, extensionSort, extensionSortedPage } from "./extensions/query.js";
 import { extensibleEntityOf, loadExtensionFields } from "./extensions/store.js";
+import { proveExtensionStaleness } from "./extensions/linked.js";
 import type {
   CountedEntityConnection,
   GeneratedCrudColumn,
@@ -341,7 +342,7 @@ async function listGeneratedEntityRowsForTable(
     assertClassifiedQueryAllowed(table, session, input);
     // The tenant's field definitions, proven in this transaction, before a
     // filter, sort or projection reads them.
-    await loadExtensionFields(trx, resolvedSession, table);
+    const extensionSet = await loadExtensionFields(trx, resolvedSession, table);
     assertExtensionQueryAllowed(table, session, input);
   const ordinaryWhere = sql`(${buildFilterConditions(table, session, input.filter, fixedWhere, config)})${subtypeScopeWhere(table, "row_source")}`;
   const scopedWhere = relationScope ? sql`(${ordinaryWhere}) and (${relationScope.where})` : ordinaryWhere;
@@ -379,6 +380,8 @@ async function listGeneratedEntityRowsForTable(
     }
 
     const storageRows = result.rows.slice(0, limit).map((row) => row.row);
+    // Lookups the recompute journal has yet to bring up to date: one step for the page.
+    if (projectOutput) await proveExtensionStaleness(trx, resolvedSession, extensionSet, storageRows);
     const projectedRows = projectOutput
       ? projectRows(table, session, storageRows)
       : storageRows;
@@ -467,7 +470,8 @@ export async function getGeneratedEntity(
     return runWithAuditContext({ ...audit, readOperations: temporalReadOperations(table) }, () => withDbSession(db, session, async (trx, resolvedSession) => {
       const row = await fetchGeneratedEntityRow(db, resolvedSession, table, input.id);
       if (row === null) return null;
-      await loadExtensionFields(trx, resolvedSession, table);
+      const extensionSet = await loadExtensionFields(trx, resolvedSession, table);
+      await proveExtensionStaleness(trx, resolvedSession, extensionSet, [row]);
       const projected = projectGeneratedEntityRow(table, resolvedSession, row);
       const bound = await resolveBoundEntityRows(trx, resolvedSession, table, [projected]);
       return (await resolveComputedEntityRows(trx, resolvedSession, table, bound))[0] ?? null;

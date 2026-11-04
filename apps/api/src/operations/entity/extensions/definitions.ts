@@ -27,7 +27,9 @@ import {
   hasStaticOptions,
   isClassified,
   isCollection,
+  linkedResultType,
   mapConditionPaths,
+  proofLost,
   record,
   schemaFieldOf,
   SENSITIVITIES,
@@ -57,6 +59,18 @@ import {
 } from "./store.js";
 import { qualifiedTable } from "./write.js";
 import {
+  assertNoLinkedReaders,
+  assertRollupsCanRead,
+  assertTenantGraph,
+  isLinkedKind,
+  lockExtensionGraph,
+  presentLinkedDefinition,
+  recomputeLinkedReaders,
+  refuseProof,
+  tenantFieldNames,
+  validateLinkedDefinition,
+} from "./linked.js";
+import {
   acrossTenant,
   duplicateValues,
   latestBackfills,
@@ -79,7 +93,7 @@ export type FieldDefinitionRecord = {
   appliesWhen: unknown;
   state: ExtensionState;
   position: number;
-  backfill?: { id: string; state: string; processed: number; total: number };
+  backfill?: { id: string; state: string; processed: number; total: number; error?: { code: string; message: string } };
 };
 
 /** Properties a tenant field may not carry: they need a runtime the serialization step does not have. */
@@ -89,7 +103,6 @@ const UNSUPPORTED_PROPERTIES = [
   "children", "shape", "item", "allowedDefinitions", "childAuthorization", "childLock", "writeSource",
   "defaultTemplate", "transform", "suggestions", "runtime", "localized",
 ];
-const UNAVAILABLE_KINDS = new Set(["lookup", "rollup"]);
 
 function tableOf(entity: string): GeneratedCrudTable {
   const tables = getGeneratedCrudTables().filter((table) => table.source?.authoringEntityName === entity && !table.subtype);
@@ -140,11 +153,20 @@ function appliesWhenForCaller(set: ExtensionFieldSet, appliesWhen: unknown): unk
     : mapConditionPaths(appliesWhen, (fieldId) => set.byId.get(fieldId)?.key ?? fieldId);
 }
 
-function toRecord(set: ExtensionFieldSet, field: ExtensionField, backfill?: BackfillRow): FieldDefinitionRecord {
+/** Field keys of the tenant by id, for a lookup or rollup that names fields of other entities. */
+type FieldNames = ReadonlyMap<string, { key: string }>;
+
+function presentDefinition(set: ExtensionFieldSet, field: ExtensionField, names: FieldNames): ExtensionDefinition {
+  return isLinkedKind(field.kind) ? presentLinkedDefinition(field, names) : presentFormulaDefinition(set, field);
+}
+
+function toRecord(set: ExtensionFieldSet, field: ExtensionField, backfill?: BackfillRow, names: FieldNames = new Map()): FieldDefinitionRecord {
+  const error = backfill?.state === "failed" && backfill.error && typeof backfill.error === "object" ? backfill.error as Record<string, unknown> : undefined;
   return {
     fieldId: field.fieldId, key: field.key, version: field.version, kind: field.kind,
-    definition: presentFormulaDefinition(set, field), appliesWhen: appliesWhenForCaller(set, field.appliesWhen), state: field.state, position: field.position,
-    ...(backfill ? { backfill: { id: backfill.id, state: backfill.state, processed: Number(backfill.processed), total: Number(backfill.total) } } : {}),
+    definition: presentDefinition(set, field, names), appliesWhen: appliesWhenForCaller(set, field.appliesWhen), state: field.state, position: field.position,
+    ...(backfill ? { backfill: { id: backfill.id, state: backfill.state, processed: Number(backfill.processed), total: Number(backfill.total),
+      ...(error && typeof error.code === "string" ? { error: { code: error.code, message: String(error.message ?? "") } } : {}) } } : {}),
   };
 }
 
@@ -164,11 +186,8 @@ export function validateFieldDefinition(
   table: GeneratedCrudTable,
   input: { fieldId: string; key: string; kind?: unknown; definition: unknown; appliesWhen?: unknown },
   existing?: ExtensionField,
-): { kind: ExtensionKind; definition: ExtensionDefinition; appliesWhen: unknown; dependsOn: Array<FormulaDependency | { field: string }>; readers?: RetypedReader[] } {
+): { kind: ExtensionKind; definition: ExtensionDefinition; appliesWhen: unknown; dependsOn: Array<FormulaDependency | { entity?: string; field: string; via?: string | null }>; readers?: RetypedReader[] } {
   const kind = input.kind ?? "stored";
-  if (typeof kind === "string" && UNAVAILABLE_KINDS.has(kind)) {
-    extensionError(`Fields of kind ${kind} are not available yet (nog niet beschikbaar).`, "NOT_AVAILABLE");
-  }
   if (kind !== "stored" && kind !== "formula") extensionError(`Unknown field kind ${String(kind)}.`);
   if (typeof input.key !== "string" || !EXTENSION_KEY.test(input.key)) {
     extensionError("A field key starts with a lowercase letter and holds letters and digits only (at most 63).");
@@ -271,6 +290,53 @@ export function validateFieldDefinition(
   return { kind: "stored", definition, appliesWhen: stored, dependsOn: [...new Map(dependsOn.map((item) => [item.field, item])).values()] };
 }
 
+/**
+ * Any definition a tenant may save: a lookup or rollup through its own
+ * validator (other entities, the authorization proof), the rest as above;
+ * a computed one then against the tenant's whole graph (cycles and depth
+ * across entities).
+ */
+async function validateAnyDefinition(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  set: ExtensionFieldSet,
+  table: GeneratedCrudTable,
+  input: { fieldId: string; key: string; kind?: unknown; definition: unknown; appliesWhen?: unknown },
+  existing?: ExtensionField,
+): Promise<ReturnType<typeof validateFieldDefinition>> {
+  let valid: ReturnType<typeof validateFieldDefinition>;
+  if (isLinkedKind(input.kind)) {
+    if (typeof input.key !== "string" || !EXTENSION_KEY.test(input.key)) {
+      extensionError("A field key starts with a lowercase letter and holds letters and digits only (at most 63).");
+    }
+    const clash = set.byKey.get(input.key);
+    if (clash && clash.fieldId !== existing?.fieldId) extensionError(`Field key ${input.key} is already in use.`, "CONFLICT");
+    if (!record(input.definition)) extensionError("A field definition is an object.");
+    const definition = { ...input.definition as ExtensionDefinition };
+    delete definition.key;
+    for (const property of UNSUPPORTED_PROPERTIES) {
+      if (definition[property] !== undefined) extensionError(`Tenant fields do not support ${property}.`);
+    }
+    const linked = await validateLinkedDefinition(trx, session, set, { fieldId: input.fieldId, key: input.key, kind: input.kind, definition, appliesWhen: input.appliesWhen });
+    valid = { kind: input.kind, definition: linked.definition, appliesWhen: null, dependsOn: linked.dependsOn };
+  } else {
+    valid = validateFieldDefinition(set, table, input, existing);
+  }
+  if (valid.kind === "formula") assertReadsNoLostProof(set, input.key, valid.dependsOn);
+  if (valid.kind !== "stored") {
+    await assertTenantGraph(trx, session, { entity: set.entity, fieldId: input.fieldId, key: input.key, kind: valid.kind, definition: valid.definition, dependsOn: valid.dependsOn });
+  }
+  return valid;
+}
+
+/** A formula over a field whose proof is lost would show what its readers no longer see: it waits for that field to be saved again. */
+function assertReadsNoLostProof(set: ExtensionFieldSet, key: string, dependsOn: readonly { entity?: string; field: string; via?: string | null }[]): void {
+  for (const dependency of dependsOn) {
+    const input = (dependency.entity ?? set.entity) === set.entity && !dependency.via ? set.byId.get(dependency.field) : undefined;
+    if (input && proofLost(input)) refuseProof(key, "formula", `${input.key} is suspended.`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Storage
 
@@ -298,12 +364,21 @@ async function writeDependencies(
   }
 }
 
-/** Refuse taking away a field another (not deleted) field still depends on, naming those fields. */
-function assertNoDependents(set: ExtensionFieldSet, field: ExtensionField, dependents: readonly string[], action: string): void {
-  const names = dependents.map((id) => set.byId.get(id)).filter((candidate): candidate is ExtensionField =>
-    candidate !== undefined && candidate.state !== "deleted" && candidate.fieldId !== field.fieldId).map((candidate) => candidate.key).sort();
+/**
+ * Refuse taking away a field another (not deleted) field still depends on,
+ * naming those fields — a lookup or rollup of another entity as `<Entity>.<key>`.
+ */
+async function assertNoDependents(trx: Transaction<DB>, session: DbSessionInput, set: ExtensionFieldSet, field: ExtensionField, dependents: readonly string[], action: string): Promise<void> {
+  const others = dependents.some((id) => !set.byId.has(id)) ? await tenantFieldNames(trx, session.tenantId!) : new Map();
+  const names = dependents.flatMap((id) => {
+    if (id === field.fieldId) return [];
+    const own = set.byId.get(id);
+    if (own) return own.state === "deleted" ? [] : [own.key];
+    const other = others.get(id);
+    return other && other.state !== "deleted" ? [`${other.entity}.${other.key}`] : [];
+  }).sort();
   if (names.length) {
-    extensionError(`${field.key} cannot be ${action}: ${names.join(", ")} depend${names.length === 1 ? "s" : ""} on it (appliesWhen or formula).`, "CONFLICT");
+    extensionError(`${field.key} cannot be ${action}: ${names.join(", ")} depend${names.length === 1 ? "s" : ""} on it (appliesWhen, formula, lookup or rollup).`, "CONFLICT");
   }
 }
 
@@ -433,6 +508,8 @@ async function updateFormula(
   }
   const before = storedFormula(field.definition);
   const after = storedFormula(change.definition)!;
+  if (before && before.resultType !== after.resultType) await assertNoLinkedReaders(trx, session, set.entity, field);
+  await assertRetypedReadersUnread(trx, session, set, change.readers);
   const recompute = field.state === "suspended" || !before || before.resultType !== after.resultType || !isDeepStrictEqual(before.ast, after.ast);
   const next = await insertVersion(trx, session, set.entity, {
     fieldId: field.fieldId, key: change.key, version: field.version + 1, kind: "formula", definition: change.definition,
@@ -441,6 +518,38 @@ async function updateFormula(
   await writeDependencies(trx, session, set.entity, field.fieldId, change.dependsOn);
   const started = recompute ? await startBackfill(trx, session, { entity: set.entity, field: next, operation: "formula" }) : undefined;
   await storeRetypedReaders(trx, session, set, change.readers);
+  if (recompute) await recomputeLinkedReaders(trx, session, set.entity, field.fieldId);
+  return [next, started];
+}
+
+/**
+ * A new version of a lookup or rollup: classification never changes; another
+ * reference, field, collection, aggregate or condition, or a field that was
+ * suspended (its proof is the one just made), is `updating` until its
+ * backfill has recomputed every record. A new label or key alone recomputes nothing.
+ */
+async function updateLinked(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  set: ExtensionFieldSet,
+  field: ExtensionField,
+  change: { key: string; definition: ExtensionDefinition; dependsOn: Parameters<typeof writeDependencies>[4] },
+): Promise<[ExtensionField, BackfillRow | undefined]> {
+  if (!isDeepStrictEqual(field.definition.classification, change.definition.classification)) {
+    extensionError(`${field.key}: its classification never changes once the field exists; create a new field, copy the values and delete this one.`);
+  }
+  const spec = (definition: ExtensionDefinition) => definition[field.kind];
+  if (linkedResultType(field) !== linkedResultType({ kind: field.kind, definition: change.definition })) {
+    // A formula over it would compute against a type it was not checked with.
+    await assertNoDependents(trx, session, set, field, await dependentsOf(trx, session, set.entity, field.fieldId), "given another result type");
+  }
+  const recompute = field.state === "suspended" || !isDeepStrictEqual(spec(field.definition), spec(change.definition));
+  const next = await insertVersion(trx, session, set.entity, {
+    fieldId: field.fieldId, key: change.key, version: field.version + 1, kind: field.kind, definition: change.definition,
+    appliesWhen: null, state: recompute ? "updating" : field.state, position: field.position,
+  });
+  await writeDependencies(trx, session, set.entity, field.fieldId, change.dependsOn);
+  const started = recompute ? await startBackfill(trx, session, { entity: set.entity, field: next, operation: field.kind as BackfillOperation }) : undefined;
   return [next, started];
 }
 
@@ -461,10 +570,24 @@ async function storeRetypedReaders(trx: Transaction<DB>, session: DbSessionInput
 }
 
 /**
+ * A formula typed again along a change must have no lookup or rollup over it:
+ * the guard on the changed formula holds for its whole set of readers, or the
+ * backfill would write a text into what a lookup stores as a number.
+ */
+async function assertRetypedReadersUnread(trx: Transaction<DB>, session: DbSessionInput, set: ExtensionFieldSet, readers: readonly RetypedReader[]): Promise<void> {
+  for (const reader of readers) {
+    if (storedFormula(reader.field.definition)?.resultType !== storedFormula(reader.definition)?.resultType) {
+      await assertNoLinkedReaders(trx, session, set.entity, reader.field);
+    }
+  }
+}
+
+/**
  * A stored field's default or `appliesWhen` changed: what a record without a
  * value reads changes with it (read.ts `readValue`), and so does every
- * formula over it. Each computed formula that reads the field directly is
- * backfilled; that backfill computes the formulas over it in turn.
+ * computed field over it. Each formula that reads the field directly is
+ * backfilled, and computes the formulas over it in turn; each lookup and
+ * rollup that reads it, on any entity, is backfilled as well.
  */
 async function recomputeFormulaReaders(trx: Transaction<DB>, session: DbSessionInput, set: ExtensionFieldSet, field: ExtensionField): Promise<void> {
   const node = { entity: set.entity, field: field.fieldId };
@@ -473,6 +596,7 @@ async function recomputeFormulaReaders(trx: Transaction<DB>, session: DbSessionI
     if (!formulaDependencies(set, reads.ast).some((dependency) => dependency.via === null && dependency.field === field.fieldId)) continue;
     await startBackfill(trx, session, { entity: set.entity, field: reader, operation: "formula" });
   }
+  await recomputeLinkedReaders(trx, session, set.entity, field.fieldId);
 }
 
 // ---------------------------------------------------------------------------
@@ -491,30 +615,34 @@ export async function executeFieldDefinitionAction(
   const table = tableOf(entity);
   if (action === "list") assertMayRead(entity, session);
   else assertMayManage(entity, session);
+  // One designer at a time per tenant: a lookup or rollup closes a cycle
+  // across two entities whose designers would otherwise each see half of it.
+  if (action !== "list" && action !== "affectedRecords") await lockExtensionGraph(trx, session.tenantId!);
   const set = await loadExtensionFieldsFor(trx, session, entity, entry, { lock: action !== "list" });
+  const names: FieldNames = set.fields.some((field) => isLinkedKind(field.kind)) ? await tenantFieldNames(trx, session.tenantId!) : new Map();
   switch (action) {
     case "list": {
       const backfills = await latestBackfills(trx, session.tenantId!, entity);
       const items = set.fields
         .filter((field) => field.state !== "deleted" && (input.includeDeprecated === true || field.state !== "deprecated"))
-        .map((field) => toRecord(set, field, backfills.get(field.fieldId)));
+        .map((field) => toRecord(set, field, backfills.get(field.fieldId), names));
       return { items };
     }
     case "create": {
       const live = set.fields.filter((field) => field.state !== "deleted");
       if (live.length >= entry.limits.fields) extensionError(`${entity} holds at most ${entry.limits.fields} tenant fields.`, "LIMIT_EXCEEDED");
       const fieldId = randomUUID();
-      const valid = validateFieldDefinition(set, table, { fieldId, key: input.key as string, kind: input.kind, definition: input.definition, appliesWhen: input.appliesWhen });
-      // A formula is `updating` until its backfill has computed every record.
-      const formula = valid.kind === "formula";
+      const valid = await validateAnyDefinition(trx, session, set, table, { fieldId, key: input.key as string, kind: input.kind, definition: input.definition, appliesWhen: input.appliesWhen });
+      // A computed field is `updating` until its backfill has computed every record.
+      const formula = valid.kind !== "stored";
       const field = await insertVersion(trx, session, entity, {
         fieldId, key: input.key as string, version: 1, kind: valid.kind, definition: valid.definition,
         appliesWhen: valid.appliesWhen, state: formula ? "updating" : "ready", position: Math.max(-1, ...set.fields.map((item) => item.position)) + 1,
       });
       await writeDependencies(trx, session, entity, field.fieldId, valid.dependsOn);
-      const started = formula ? await startBackfill(trx, session, { entity, field, operation: "formula" }) : undefined;
+      const started = formula ? await startBackfill(trx, session, { entity, field, operation: valid.kind as BackfillOperation }) : undefined;
       if (valid.definition.retention) await scheduleExtensionRetention(trx, session, entity);
-      return toRecord(set, field, started);
+      return toRecord(set, field, started, isLinkedKind(field.kind) ? await tenantFieldNames(trx, session.tenantId!) : names);
     }
     case "update": {
       const field = requireField(set, input.fieldId);
@@ -526,17 +654,23 @@ export async function executeFieldDefinitionAction(
         extensionError(`${field.key} is a ${field.kind} field; its kind never changes. Create a new field instead.`);
       }
       const key = input.key === undefined ? field.key : input.key as string;
-      const definition = input.definition === undefined ? presentFormulaDefinition(set, field) : input.definition;
+      const definition = input.definition === undefined ? presentDefinition(set, field, names) : input.definition;
       const appliesWhen = input.appliesWhen === undefined ? appliesWhenForCaller(set, field.appliesWhen) : input.appliesWhen;
-      const valid = validateFieldDefinition(set, table, { fieldId: field.fieldId, key, kind: field.kind, definition, appliesWhen }, field);
-      if (key === field.key && isDeepStrictEqual(valid.definition, presentFormulaDefinition(set, field)) && isDeepStrictEqual(valid.appliesWhen, field.appliesWhen) &&
+      const valid = await validateAnyDefinition(trx, session, set, table, { fieldId: field.fieldId, key, kind: field.kind, definition, appliesWhen }, field);
+      const unchanged = isLinkedKind(field.kind) ? field.definition : presentFormulaDefinition(set, field);
+      if (key === field.key && isDeepStrictEqual(valid.definition, unchanged) && isDeepStrictEqual(valid.appliesWhen, field.appliesWhen) &&
           field.state !== "suspended") {
-        return toRecord(set, field);
+        return toRecord(set, field, undefined, names);
+      }
+      if (isLinkedKind(field.kind)) {
+        return toRecord(set, ...await updateLinked(trx, session, set, field, { key, definition: valid.definition, dependsOn: valid.dependsOn }),
+          await tenantFieldNames(trx, session.tenantId!));
       }
       if (field.kind === "formula") {
         return toRecord(set, ...await updateFormula(trx, session, set, field, { key, definition: valid.definition, dependsOn: valid.dependsOn, readers: valid.readers ?? [] }));
       }
       let backfill = await typeChange(trx, session, set, field.definition, valid.definition, field);
+      if (valid.definition.defaultValue !== undefined && valid.appliesWhen) await assertRollupsCanRead(trx, session, entity, field);
       if (valid.definition.unique === true && field.definition.unique !== true) {
         // Counted across the tenant, normalized as claims compare; the values
         // are shown only as mayShowValues allows, and only those of records
@@ -571,7 +705,7 @@ export async function executeFieldDefinitionAction(
       // backfill rewrites claims only, the retype the index only.
       const started = backfill ? await startBackfill(trx, session, { entity, field: next, operation: backfill === "retype" && valid.definition.unique === true && field.definition.unique !== true ? "unique" : backfill }) : undefined;
       if (valid.definition.retention && !field.definition.retention) await scheduleExtensionRetention(trx, session, entity);
-      return toRecord(set, next, started);
+      return toRecord(set, next, started, names);
     }
     case "deprecate":
     case "restore": {
@@ -580,22 +714,26 @@ export async function executeFieldDefinitionAction(
       // backfill that never finishes must not trap it.
       const from: ExtensionState[] = action === "deprecate" ? ["ready", "updating", "suspended"] : ["deprecated"];
       if (!from.includes(field.state)) extensionError(`${field.key} is ${field.state}; only a ${from.join(" or ")} field can be ${action}d.`, "CONFLICT");
-      if (action === "deprecate") assertNoDependents(set, field, await dependentsOf(trx, session, entity, field.fieldId), "deprecated");
+      if (action === "deprecate") await assertNoDependents(trx, session, set, field, await dependentsOf(trx, session, entity, field.fieldId), "deprecated");
       // A restored formula was not computed while it was deprecated: it is
       // checked again as if it were saved now — the fields it reads may have
       // changed type, a cycle or the depth limit may have been reached in
       // the meantime — and its backfill brings every record up to date.
-      const recompute = action === "restore" && field.kind === "formula";
-      const restored = recompute
-        ? validateFormulaDefinition(withRestoredField(set, field.fieldId), { fieldId: field.fieldId, key: field.key, definition: presentFormulaDefinition(set, field) })
-        : undefined;
+      const recompute = action === "restore" && field.kind !== "stored";
+      const restored = recompute && field.kind === "formula"
+        ? restoredFormula(set, field)
+        : recompute
+          ? { ...await validateAnyDefinition(trx, session, withRestoredField(set, field.fieldId), table,
+            { fieldId: field.fieldId, key: field.key, kind: field.kind, definition: presentDefinition(set, field, names) }, field), readers: [] as RetypedReader[] }
+          : undefined;
       const next = await insertVersion(trx, session, entity, { ...field, version: field.version + 1,
         ...(restored ? { definition: restored.definition } : {}),
         state: action === "deprecate" ? "deprecated" : recompute ? "updating" : "ready" });
       if (restored) await writeDependencies(trx, session, entity, field.fieldId, restored.dependsOn);
-      const started = recompute ? await startBackfill(trx, session, { entity, field: next, operation: "formula" }) : undefined;
-      if (restored) await storeRetypedReaders(trx, session, set, restored.readers);
-      return toRecord(set, next, started);
+      const started = recompute ? await startBackfill(trx, session, { entity, field: next, operation: field.kind as BackfillOperation }) : undefined;
+      if (restored) await storeRetypedReaders(trx, session, set, restored.readers ?? []);
+      if (restored) await assertRetypedReadersUnread(trx, session, set, restored.readers ?? []);
+      return toRecord(set, next, started, names);
     }
     case "affectedRecords": {
       const field = requireField(set, input.fieldId);
@@ -604,7 +742,7 @@ export async function executeFieldDefinitionAction(
     case "delete": {
       const field = requireField(set, input.fieldId);
       if (field.state !== "deprecated") extensionError(`${field.key} must be deprecated before it can be deleted.`, "CONFLICT");
-      assertNoDependents(set, field, await dependentsOf(trx, session, entity, field.fieldId), "deleted");
+      await assertNoDependents(trx, session, set, field, await dependentsOf(trx, session, entity, field.fieldId), "deleted");
       const count = await affectedRecordCount(trx, session, entity, field.fieldId);
       if (input.confirmAffectedRecords !== count) {
         throw operationFailure({
@@ -621,18 +759,34 @@ export async function executeFieldDefinitionAction(
     }
     case "rebuildIndex": {
       // The index and the claims are derived: rebuilt from the source,
-      // per field, as backfills over every record of the tenant.
+      // per field, as backfills over every record of the tenant. A lookup or
+      // rollup is computed again from what it reads, which also repairs a value
+      // a write behind the runtime's back left stale, and what its journal
+      // still had open is settled along the way. What reads a rebuilt field
+      // on another entity follows. A field whose proof is lost, or a suspended
+      // lookup or rollup, is only brought back by saving it.
+      const stopped = (field: ExtensionField) => proofLost(field) || (isLinkedKind(field.kind) && field.state === "suspended");
+      if (input.fieldId !== undefined && stopped(requireField(set, input.fieldId))) {
+        extensionError(`${requireField(set, input.fieldId).key} is suspended; save it again to bring it back.`, "CONFLICT");
+      }
       const fields = input.fieldId === undefined
-        ? set.fields.filter((field) => field.state !== "deleted" && (field.kind === "stored" || field.kind === "formula"))
+        ? set.fields.filter((field) => field.state !== "deleted" && !stopped(field))
         : [requireField(set, input.fieldId)];
       const backfills: Array<{ fieldId: string; backfillId: string }> = [];
+      const computing = new Set(fields.filter((field) => isLinkedKind(field.kind)).map((field) => field.fieldId));
       for (const field of fields) {
         // A suspended formula is computed again rather than re-indexed: the
         // index of a backfill that stopped halfway holds two generations.
         const resume = field.kind === "formula" && field.state === "suspended"
           ? await insertVersion(trx, session, entity, { ...field, version: field.version + 1, state: "updating" }) : undefined;
-        const started = await startBackfill(trx, session, { entity, field: resume ?? field, operation: resume ? "formula" : "rebuild" });
+        if (isLinkedKind(field.kind)) {
+          await sql`delete from platform.extension_field_recomputes
+            where tenant_id = ${session.tenantId}::uuid and field_id = ${field.fieldId}::uuid`.execute(trx);
+        }
+        const operation: BackfillOperation = resume ? "formula" : isLinkedKind(field.kind) && field.state !== "deprecated" ? field.kind : "rebuild";
+        const started = await startBackfill(trx, session, { entity, field: resume ?? field, operation });
         backfills.push({ fieldId: field.fieldId, backfillId: started.id });
+        await recomputeLinkedReaders(trx, session, entity, field.fieldId, computing);
       }
       return { backfills };
     }
@@ -652,9 +806,16 @@ export async function executeFieldDefinitionAction(
       }
       forgetExtensionFields(trx, session.tenantId!, entity);
       const reloaded = await loadExtensionFieldsFor(trx, session, entity, entry);
-      return { items: reloaded.fields.filter((field) => field.state !== "deleted").map((field) => toRecord(reloaded, field)) };
+      return { items: reloaded.fields.filter((field) => field.state !== "deleted").map((field) => toRecord(reloaded, field, undefined, names)) };
     }
   }
+}
+
+/** A formula as it is restored: checked as if it were saved now, and not over a field whose proof is lost. */
+function restoredFormula(set: ExtensionFieldSet, field: ExtensionField) {
+  const restored = validateFormulaDefinition(withRestoredField(set, field.fieldId), { fieldId: field.fieldId, key: field.key, definition: presentFormulaDefinition(set, field) });
+  assertReadsNoLostProof(set, field.key, restored.dependsOn);
+  return restored;
 }
 
 /**

@@ -11,6 +11,7 @@ import { readFileSync } from "node:fs";
 import type {
   RuntimeExtensibleEntity,
   RuntimeExtensionIndexColumn,
+  RuntimeExtensionReadAccess,
   RuntimeExtensionRegistry,
   RuntimeExtensionRegistryManifest,
 } from "@openshapeforge/plugin-runtime";
@@ -19,6 +20,8 @@ const qualified = /^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$/;
 const entityName = /^[A-Z][A-Za-z0-9]*$/;
 const osfTypeName = /^[A-Za-z][A-Za-z0-9]*$/;
 const fieldKey = /^[a-z][A-Za-z0-9]*$/;
+const columnName = /^[a-z_][a-z0-9_]*$/;
+const ROW_POLICIES = ["rowScope", "ownerAxis", "recordPermissions", "rowAccess", "profileAuthorizations"];
 const INDEX_COLUMNS: readonly RuntimeExtensionIndexColumn[] = ["text", "number", "boolean", "date", "timestamp"];
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 const matches = (value: unknown, pattern: RegExp): value is string => typeof value === "string" && pattern.test(value);
@@ -57,15 +60,34 @@ function entityEntry(name: string, value: unknown): RuntimeExtensibleEntity {
     record(target) && matches(target.entity, entityName) && matches(target.table, qualified))) invalid(`${name}.targets is invalid`);
   if (!Array.isArray(entry.ownedSingleChildren) || !entry.ownedSingleChildren.every((child) =>
     record(child) && matches(child.relation, fieldKey) && matches(child.entity, entityName) &&
-    matches(child.table, qualified) && matches(child.foreignKey, /^[a-z_][a-z0-9_]*$/))) invalid(`${name}.ownedSingleChildren is invalid`);
+    matches(child.table, qualified) && matches(child.foreignKey, columnName))) invalid(`${name}.ownedSingleChildren is invalid`);
+  if (!Array.isArray(entry.relations) || !entry.relations.every((relation) =>
+    record(relation) && matches(relation.key, fieldKey) && (relation.kind === "belongsTo" || relation.kind === "hasMany") &&
+    matches(relation.entity, entityName) && matches(relation.table, qualified) && matches(relation.foreignKey, columnName) &&
+    (relation.ownership === undefined || relation.ownership === "owned" || relation.ownership === "reference") &&
+    (relation.childAuthorization === undefined || relation.childAuthorization === "owner")) ||
+    new Set(entry.relations.map((relation) => (relation as Record<string, unknown>).key)).size !== entry.relations.length) {
+    invalid(`${name}.relations is invalid`);
+  }
   return structuredClone(entry) as unknown as RuntimeExtensibleEntity;
+}
+
+function readAccessEntry(name: string, value: unknown): RuntimeExtensionReadAccess {
+  if (!record(value) || !matches(value.table, qualified) || !strings(value.roles, /^\S+$/) ||
+      (value.principalClasses !== undefined && !strings(value.principalClasses, /^[a-z]+$/)) ||
+      (value.rowPolicy !== undefined && !ROW_POLICIES.includes(String(value.rowPolicy))) ||
+      (value.fieldReadRoles !== undefined && (!record(value.fieldReadRoles) ||
+        !Object.entries(value.fieldReadRoles).every(([field, roles]) => fieldKey.test(field) && strings(roles, /^\S+$/))))) {
+    invalid(`readAccess.${name} is invalid`);
+  }
+  return structuredClone(value) as unknown as RuntimeExtensionReadAccess;
 }
 
 /** Accepts generated metadata only, never tenant-authored definitions. */
 export function createExtensionRegistry(value: unknown): RuntimeExtensionRegistry {
-  if (value === undefined) value = { entities: {}, indexProjections: {}, referencedBy: {} };
-  if (!record(value) || !record(value.entities) || !record(value.indexProjections) || !record(value.referencedBy)) {
-    invalid("entities, indexProjections and referencedBy are required");
+  if (value === undefined) value = { entities: {}, indexProjections: {}, referencedBy: {}, readAccess: {} };
+  if (!record(value) || !record(value.entities) || !record(value.indexProjections) || !record(value.referencedBy) || !record(value.readAccess)) {
+    invalid("entities, indexProjections, referencedBy and readAccess are required");
   }
   const source = value as unknown as RuntimeExtensionRegistryManifest;
   const entities = new Map<string, RuntimeExtensibleEntity>();
@@ -89,11 +111,24 @@ export function createExtensionRegistry(value: unknown): RuntimeExtensionRegistr
       item.valuesTable === entities.get(item.sourceEntity)!.valuesTable)) invalid(`referencedBy.${target} is invalid`);
     referencedBy.set(target, freeze(sources.map((item) => ({ sourceEntity: item.sourceEntity, valuesTable: item.valuesTable }))));
   }
+  const readAccess = new Map<string, RuntimeExtensionReadAccess>();
+  for (const [entity, access] of Object.entries(source.readAccess)) {
+    if (!entityName.test(entity)) invalid(`readAccess.${entity} is not an entity name`);
+    readAccess.set(entity, freeze(readAccessEntry(entity, access)));
+  }
+  // Every entity a lookup or rollup can reach is in readAccess: a missing one
+  // would be unprovable, and the registry says so here rather than per request.
+  for (const [name, entry] of entities) {
+    for (const reached of [name, ...entry.targets.map((target) => target.entity), ...entry.relations.map((relation) => relation.entity)]) {
+      if (!readAccess.has(reached)) invalid(`readAccess lacks ${reached}, which ${name} can reach`);
+    }
+  }
   return Object.freeze({
     entity: (name: string) => entities.get(name),
     entityNames: () => [...entities.keys()].sort(),
     indexProjection: (type: string) => projections.get(type),
     referencedBy: (name: string) => referencedBy.get(name) ?? [],
+    readAccess: (name: string) => readAccess.get(name),
   });
 }
 
@@ -118,6 +153,7 @@ export const extensionRegistry: RuntimeExtensionRegistry = Object.freeze({
   entityNames: () => active().entityNames(),
   indexProjection: (type: string) => active().indexProjection(type),
   referencedBy: (name: string) => active().referencedBy(name),
+  readAccess: (name: string) => active().readAccess(name),
 });
 
 /**

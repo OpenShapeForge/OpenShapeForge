@@ -278,6 +278,36 @@ export type RuntimeExtensibleEntity = {
     readonly table: string;
     readonly foreignKey: string;
   }[];
+  /** Authored relations a tenant lookup may follow (`belongsTo`) or a rollup aggregate (`hasMany`). */
+  readonly relations: readonly RuntimeExtensionRelation[];
+};
+
+/**
+ * An authored relation of an extensible entity: a single reference it holds
+ * (`belongsTo`, `foreignKey` on its own table) or an inverse collection
+ * (`hasMany`, `foreignKey` on the related table).
+ */
+export type RuntimeExtensionRelation = {
+  readonly key: string;
+  readonly kind: "belongsTo" | "hasMany";
+  readonly entity: string;
+  readonly table: string;
+  readonly foreignKey: string;
+  readonly ownership?: "owned" | "reference";
+  readonly childAuthorization?: "owner";
+};
+
+/**
+ * Who may read an entity a tenant lookup or rollup can reach, from its
+ * compiled authorization contract (roles, principal classes, the axis that
+ * narrows its rows, fields with read roles of their own).
+ */
+export type RuntimeExtensionReadAccess = {
+  readonly table: string;
+  readonly roles: readonly string[];
+  readonly principalClasses?: readonly string[];
+  readonly rowPolicy?: string;
+  readonly fieldReadRoles?: Readonly<Record<string, readonly string[]>>;
 };
 
 /** The manifest's top-level `extensionRegistry`, as the compiler emits it. */
@@ -285,6 +315,7 @@ export type RuntimeExtensionRegistryManifest = {
   readonly entities: Readonly<Record<string, RuntimeExtensibleEntity>>;
   readonly indexProjections: Readonly<Record<string, Partial<Record<RuntimeExtensionIndexColumn, string>>>>;
   readonly referencedBy: Readonly<Record<string, readonly { readonly sourceEntity: string; readonly valuesTable: string }[]>>;
+  readonly readAccess: Readonly<Record<string, RuntimeExtensionReadAccess>>;
 };
 
 /** Read access to the validated registry. Absent entries mean "not extensible". */
@@ -293,6 +324,8 @@ export type RuntimeExtensionRegistry = {
   entityNames(): readonly string[];
   indexProjection(osfType: string): Partial<Record<RuntimeExtensionIndexColumn, string>> | undefined;
   referencedBy(entityName: string): readonly { readonly sourceEntity: string; readonly valuesTable: string }[];
+  /** Absent means the entity is out of reach of a lookup or rollup. */
+  readAccess(entityName: string): RuntimeExtensionReadAccess | undefined;
 };
 
 /**

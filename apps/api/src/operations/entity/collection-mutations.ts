@@ -28,6 +28,7 @@ import { subtypeScopeWhere } from "./subtype-scope.js";
 import { assertAdmittedBeforeEffects, assertEffectsWereAdmitted } from "../execution-policy.js";
 import { loadExtensionFields } from "./extensions/store.js";
 import { recomputeOwnerFormulas } from "./extensions/write.js";
+import { lockLinkedRecords, propagateRecordChange } from "./extensions/linked.js";
 
 /** Compiler/boot-owned binding, never a request-selected table or FK. */
 export type CollectionMutationBinding = { entityName: string; field: string; action: "insert" | "move" | "update" | "remove" };
@@ -209,9 +210,12 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       // The parent is projected below; its tenant fields need definitions
       // proven in this transaction (extensions/store.ts), before its row lock.
       await loadExtensionFields(trx, session, owner, { lock: "shared" });
+      // What reads the parent is recomputed below: it comes first, in the one order (extensions/linked.ts).
+      const ownerLock = await lockLinkedRecords(trx, session, owner, { operation: "update", id: request.id });
       const locked = await sql<{ row: GeneratedEntityRow; matches: boolean }>`select to_jsonb(${sql.id(owner.table)}.*) as row,
         ${sql.id("updated_at")} = ${normalizeTimestampToken(request.expectedVersion)}::timestamptz as matches
-        from ${sql.id(owner.schema, owner.table)} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(owner)} for update`.execute(trx);
+        from ${sql.id(owner.schema, owner.table)} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(owner)}
+        ${ownerLock ? sql`for no key update` : sql`for update`}`.execute(trx);
       if (!locked.rows[0]) throw generatedCrudError("Parent not found or not visible.", "NOT_FOUND");
       await permission(trx, session, owner, request.id, parentOp, "edit");
       if (!locked.rows[0].matches) throw generatedCrudError("The parent changed; reload before editing its collection.", "VERSION_CONFLICT");
@@ -311,6 +315,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
             if (row) {
               changed = true;
               await recomputeOwnerFormulas(trx, session, target, row);
+              await propagateRecordChange(trx, session, target, { before: current, after: row });
             } else if (!(await sql<{ id: string }>`select id from ${sql.id(target.schema, target.table)} where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid`.execute(trx)).rows[0]) {
               throw generatedCrudError("Child update was refused.", "FORBIDDEN");
             }
@@ -324,6 +329,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
           if (!row) throw generatedCrudError("Child removal was refused.", "FORBIDDEN");
           // An owner formula over this child now reads none.
           await recomputeOwnerFormulas(trx, session, target, row);
+          await propagateRecordChange(trx, session, target, { before: row });
           ordered.splice(ordered.indexOf(childId), 1);
           changed = true;
         }

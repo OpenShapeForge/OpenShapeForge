@@ -14,10 +14,16 @@ export type ExtensionRegistry = {
   /** Target entity -> the extensible entities whose tenant reference fields may point at it. */
   referencedBy: Record<string, Array<{ sourceEntity: string; valuesTable: string }>>;
   /**
+   * The single relations of a collection's child that is not extensible
+   * itself, by child entity: what `rollup.of` may follow from the child. An
+   * extensible child has them in its own `relations`.
+   */
+  childRelations: Record<string, ExtensionRegistryRelation[]>;
+  /**
    * Who may read each entity a tenant lookup or rollup can reach — every
-   * extensible entity, every reference target and every entity across an
-   * authored relation of an extensible one — from its compiled authorization
-   * contract. The runtime proves from this that a lookup or rollup shows no
+   * extensible entity, every reference target, every entity across an
+   * authored relation of an extensible one and every entity a child's single
+   * relation leads to — from its compiled authorization contract. The runtime proves from this that a lookup or rollup shows no
    * reader of the source anything the target would hide from them; an entity
    * missing here is never a lookup or rollup target.
    */

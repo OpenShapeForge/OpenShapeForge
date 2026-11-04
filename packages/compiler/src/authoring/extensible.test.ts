@@ -311,6 +311,19 @@ describe("extensible: the manifest registry", () => {
     });
   });
 
+  it("publishes the single relations of a collection's child, and what they reach counts as reach", () => {
+    const registry = compile(() => {}, { dir: withDocument("extensible-part-spec", (document) => {
+      document.fields.push({ key: "custom", osfType: "RestCustom", label: { en: "Custom" }, relationship: { ownership: "reference", inverse: false } });
+    }) }).extensionRegistry!;
+    expect(registry.childRelations.ExtensiblePartSpec!.map((relation) => relation.key)).toEqual(["custom", "part"]);
+    expect(registry.childRelations.ExtensiblePartSpec![0]).toEqual({ key: "custom", kind: "belongsTo", entity: "RestCustom", table: "erp.rest_customs", foreignKey: "custom_id", ownership: "reference" });
+    // Excluded as a tenant reference target, and reachable by this step all the same: the proof decides.
+    expect(registry.entities.ExtensiblePart!.targets.map((target) => target.entity)).not.toContain("RestCustom");
+    expect(Object.keys(registry.readAccess)).toContain("RestCustom");
+    // No extensible entity's collection, no entry: nothing an extensible child would duplicate.
+    expect(Object.keys(registry.childRelations)).toEqual(["ExtensiblePartSpec"]);
+  });
+
   it("lists an owned child only when it is authorized through its owner", () => {
     const children = (transform: (document: Record<string, any>) => void) =>
       compile(() => {}, { dir: withDocument("extensible-part-spec", transform) }).extensionRegistry!.entities.ExtensiblePart!.ownedSingleChildren;

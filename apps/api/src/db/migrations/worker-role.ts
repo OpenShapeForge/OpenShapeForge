@@ -384,7 +384,10 @@ export async function applyWorkerRoleGrants(db: OpenShapeForgeDatabase) {
  *     than the source by the compiled contract, read-access.ts), SELECT of
  *     its id, tenant, clocks, the foreign key of that relation and the columns
  *     a computed field may read (formula-columns.ts) — and nothing else of it;
- *     a classified or field-policed column never is. This rule reaches no
+ *     a classified or field-policed column never is. The same across a single
+ *     relation of a collection's child that is not extensible itself, which
+ *     `rollup.of` may follow, with that relation's foreign key on the child.
+ *     This rule reaches no
  *     other business table; what the worker holds on a table that declares
  *     `workerDml` itself (`erp.tasks`, `erp.comments`) comes from that
  *     declaration, not from here;
@@ -446,11 +449,16 @@ export function extensionWorkerGrants(
   const sources = new Set(entities.map((entry) => entry.table));
   for (const source of registry.entityNames()) {
     const entry = registry.entity(source)!;
+    const collections = entry.relations.filter((relation) => relation.kind === "hasMany" && !narrowerReadAccess(source, relation.entity, registry.readAccess(source),
+      registry.readAccess(relation.entity), relation.ownership === "owned" && relation.childAuthorization === "owner"));
     const reached = [
       ...entry.targets.map((target) => ({ entity: target.entity, table: target.table, foreignKey: undefined as string | undefined, owned: false })),
       ...entry.relations.map((relation) => ({ entity: relation.entity, table: relation.table,
         foreignKey: relation.kind === "hasMany" ? relation.foreignKey : undefined,
         owned: relation.ownership === "owned" && relation.childAuthorization === "owner" })),
+      // What `rollup.of` reaches from a collection's child that is not extensible itself.
+      ...collections.flatMap((relation) => registry.childRelations(relation.entity))
+        .map((relation) => ({ entity: relation.entity, table: relation.table, foreignKey: undefined as string | undefined, owned: false })),
     ];
     for (const { entity, table: name, foreignKey, owned } of reached) {
       if (sources.has(name) || narrowerReadAccess(source, entity, registry.readAccess(source), registry.readAccess(entity), owned)) continue;
@@ -464,6 +472,17 @@ export function extensionWorkerGrants(
         if (present.has(column)) columns.add(column);
       }
       childGrants.set(name, columns);
+    }
+    // The child's foreign key a rollup follows there, never a classified or field-policed one.
+    for (const collection of collections) {
+      const [schema, tableName] = collection.table.split(".");
+      const table = tables.find((candidate) => candidate.schema === schema && candidate.table === tableName);
+      const columns = childGrants.get(collection.table);
+      if (!table || !columns) continue;
+      for (const relation of registry.childRelations(collection.entity)) {
+        const link = table.columns.find((column) => column.name === relation.foreignKey);
+        if (link && !link.classification && !link.fieldPolicy) columns.add(link.name);
+      }
     }
   }
   const grants: ExtensionWorkerGrant[] = [

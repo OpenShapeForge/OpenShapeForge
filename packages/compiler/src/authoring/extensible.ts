@@ -467,12 +467,13 @@ function childAuthorizedByOwner(
 }
 
 /**
- * The authored relations of an extensible entity a tenant lookup may follow
- * or a rollup aggregate: a single reference the entity holds (`belongsTo`,
- * its foreign key on the entity's table) and an inverse collection
- * (`hasMany`, the foreign key on the related table), each to a stored,
- * tenant-scoped entity with a uuid id. Through-, via- and provider-backed
- * relations have no foreign key to follow and stay out.
+ * The authored relations of an entity a tenant lookup may follow or a rollup
+ * aggregate: a single reference the entity holds (`belongsTo`, its foreign key
+ * on the entity's table) and an inverse collection (`hasMany`, the foreign key
+ * on the related table), each to a stored, tenant-scoped entity with a uuid
+ * id. Through-, via- and provider-backed relations have no foreign key to
+ * follow and stay out. Of an extensible entity's collection the single
+ * relations count too: `rollup.of` may follow one.
  */
 function extensionRelations(
   owner: { contract: CompiledEntityContract; table: TableDefinition },
@@ -549,7 +550,7 @@ export function compileExtensionStorage(
     }
   }
   const candidates = entries.filter((entry) => isExtensionTargetCandidate(entry.contract, entry.table));
-  const registry: ExtensionRegistry = { entities: {}, indexProjections: {}, referencedBy: {}, readAccess: {} };
+  const registry: ExtensionRegistry = { entities: {}, indexProjections: {}, referencedBy: {}, childRelations: {}, readAccess: {} };
   const reachable = new Set<string>();
 
   for (const { contract, table } of [...extensible].sort((left, right) => left.contract.entity.name.localeCompare(right.contract.entity.name))) {
@@ -615,6 +616,16 @@ export function compileExtensionStorage(
     for (const target of targets) {
       (registry.referencedBy[target.entity] ??= []).push({ sourceEntity: name, valuesTable: qualified(values) });
     }
+  }
+  // A collection's child that is not extensible itself has its single
+  // relations here: `rollup.of` may follow one, so what it leads to is in reach.
+  for (const child of [...new Set(Object.values(registry.entities).flatMap((entry) =>
+    entry.relations.filter((relation) => relation.kind === "hasMany").map((relation) => relation.entity)))].sort()) {
+    if (registry.entities[child]) continue;
+    const relations = extensionRelations(byEntity.get(child)!, byEntity).filter((relation) => relation.kind === "belongsTo");
+    if (!relations.length) continue;
+    registry.childRelations[child] = relations;
+    for (const relation of relations) reachable.add(relation.entity);
   }
   registry.readAccess = Object.fromEntries([...reachable].sort().map((entity) => [entity, readAccessOf(byEntity.get(entity)!)]));
   registry.indexProjections = Object.fromEntries(Object.entries(registry.indexProjections).sort(([left], [right]) => left.localeCompare(right)));

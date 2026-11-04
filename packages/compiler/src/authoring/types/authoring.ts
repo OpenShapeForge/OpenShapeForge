@@ -412,6 +412,7 @@ export interface EntityRestOperationProjectionConfig
 export interface EntityWebOperationProjectionConfig extends EntityInterfaceOperationProjectionConfig {
   /** Presentation only; never changes the operation result or its authorization. */
   resultRenderer?: string;
+  form?: { groups: Array<{ title: LocalizedText; fields: string[]; collapsed?: boolean }> };
 }
 
 export interface EntityMcpOperationProjectionConfig

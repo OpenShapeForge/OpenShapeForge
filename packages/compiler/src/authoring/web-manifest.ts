@@ -99,6 +99,8 @@ function contextFor(contract: CompiledEntityContract, preferred: string): Compil
     ?? Object.entries(contract.views).sort(([left], [right]) => left.localeCompare(right))[0]?.[1];
 }
 
+import { operationForm } from "./operation-form-presentation.js";
+
 function operation(
   source: CompiledEntityOperation | undefined,
   contract: CompiledEntityContract,
@@ -172,6 +174,7 @@ function operation(
       }),
     },
     output: source.output,
+    ...(source.interfaces?.web && source.interfaces.web.form ? { form: operationForm(source.interfaces.web.form, source.input.schema, source.id) } : {}),
     effects: source.effects,
     reliability: source.reliability,
     ...(source.concurrency ? { concurrency: source.concurrency } : {}),
@@ -230,6 +233,7 @@ function customOperation(
     input: { kind: "json-schema", schema: withOperationControls(definition.input.schema, definition) },
     output: { kind: "json-schema", schema: definition.output.schema },
     ...(source.interfaces.web?.resultRenderer ? { resultRenderer: source.interfaces.web.resultRenderer } : {}),
+    ...(source.interfaces.web?.form ? { form: operationForm(source.interfaces.web.form, definition.input.schema, source.id) } : {}),
     effects: definition.effects,
     ...(definition.auth ? { auth: standaloneAuth({ auth: definition.auth } as CompiledPluginOperation) } : {}),
     reliability: {
@@ -614,7 +618,7 @@ function projectField(
     ...(field.suggestions ? { suggestions: field.suggestions } : {}),
     ...(field.visibility ? { visibility: field.visibility } : {}),
     ...(field.entityValue ? { entityValue: { ...field.entityValue } } : {}),
-    ...(field.valueFieldsFrom ? { valueFieldsFrom: { ...field.valueFieldsFrom } } : {}),
+    ...(field.valueFieldsFrom ? { valueFieldsFrom: { reference: field.valueFieldsFrom.reference, field: field.valueFieldsFrom.field } } : {}),
     ...(field.typedBy ? { typedBy: { ...field.typedBy } } : {}),
     ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
     ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),

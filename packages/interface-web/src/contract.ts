@@ -76,6 +76,8 @@ export type WebSchemaOperationRef<
   };
   /** Opaque result presentation key; absent uses structured schema rendering. */
   resultRenderer?: WebRendererKey;
+  /** Presentation only; every input not named here remains available. */
+  form?: { groups: Array<{ title: LocalizedText; fields: string[]; collapsed?: boolean }> };
   effects: {
     data: "read" | "write" | "delete";
     external: "none" | "read" | "write";
@@ -183,7 +185,7 @@ export type WebFieldProjection = {
   baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
-  valueFieldsFrom?: { reference: string; field: string; snapshotColumn?: string; headEntity?: string };
+  valueFieldsFrom?: { reference: string; field: string };
   typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
   allowedDefinitions?: string[];
   relationship?: {

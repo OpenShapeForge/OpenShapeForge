@@ -1,3 +1,4 @@
+import { operationForm } from "./authoring/operation-form-presentation.js";
 // SPDX-License-Identifier: BUSL-1.1
 import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
@@ -119,11 +120,17 @@ export function materializeEntityInputSources(
   for (const contract of contracts) validateEntityOptions(contract.model.fields);
   for (const contract of contracts) {
     for (const operation of Object.values(contract.entityOperations)) {
-      if (operation?.input.kind === "json-schema") operation.input.schema = resolveEntityInputSources(operation.input.schema, contracts, referentiedata);
+      if (operation?.input.kind === "json-schema") {
+        operation.input.schema = resolveEntityInputSources(operation.input.schema, contracts, referentiedata);
+        if (operation.interfaces?.web && operation.interfaces.web.form) operationForm(operation.interfaces.web.form, operation.input.schema, operation.id);
+      }
       if (operation?.output.kind === "json-schema") operation.output.schema = resolveEntityInputSources(operation.output.schema, contracts, referentiedata);
     }
     for (const operation of contract.pluginOperations ?? []) {
-      if (operation.definition.input) operation.definition.input.schema = resolveEntityInputSources(operation.definition.input.schema, contracts, referentiedata);
+      if (operation.definition.input) {
+        operation.definition.input.schema = resolveEntityInputSources(operation.definition.input.schema, contracts, referentiedata);
+        if (operation.interfaces.web && operation.interfaces.web.form) operationForm(operation.interfaces.web.form, operation.definition.input.schema, operation.id);
+      }
       if (operation.definition.output) operation.definition.output.schema = resolveEntityInputSources(operation.definition.output.schema, contracts, referentiedata);
     }
   }

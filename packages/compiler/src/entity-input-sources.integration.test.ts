@@ -106,7 +106,7 @@ test("canonical entity input sources reach every generated operation interface",
     expect(blockInput["x-osf-collection"]).toEqual({ entity: "DocumentVariant", field: "blocks" });
     const directWeb = buildWebManifest(active.entities, {}, corpusWebOperations(resolveActiveAuthoringDir(root)));
     expect(directWeb.entityValueDefinitions?.TemplateBlock?.fields.find(field => field.key === "parameters")?.valueFieldsFrom)
-      .toEqual({ reference: "version", field: "parameters", snapshotColumn: "parameters", headEntity: "Template" });
+      .toEqual({ reference: "version", field: "parameters" });
     expect(directWeb.entityValueDefinitions?.TemplateBlock?.fields.find(field => field.key === "version")?.optionSource)
       .toMatchObject({ type: "entity", source: "Template", valueField: "publishedVersionId" });
     const directCreate = object(JSON.parse(JSON.stringify(directWeb.entities.Document!.operations.create)));

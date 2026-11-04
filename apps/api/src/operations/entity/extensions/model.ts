@@ -208,6 +208,32 @@ export function extensionShape(entry: RuntimeExtensibleEntity, definition: Exten
   };
 }
 
+const numericOsfType = (osfType: unknown): boolean => {
+  const base = typeof osfType === "string" ? osfTypes[osfType]?.baseType ?? osfType : undefined;
+  return base === "integer" || base === "number";
+};
+
+/**
+ * A value as the number its field holds. The value schema admits exact decimal
+ * text beside a number, and a form sends text, but tenant values are JSON
+ * numbers: in the source, and from there in every read, snapshot and formula.
+ * Covers integer, number and the types on them (money, percentage), and the
+ * number of an object type that projects one (measurement). Reads apply it too, so a value stored as text before reads
+ * the same. Text that is no number is left to the validator. `converted` hears
+ * every text with the number it became.
+ */
+export function numericValue(definition: ExtensionDefinition, value: unknown, converted?: (text: string, number: number) => void): unknown {
+  const component = numericOsfType(definition.osfType) ? undefined : extensionRegistry.indexProjection(String(definition.osfType))?.number;
+  if (component === undefined && !numericOsfType(definition.osfType)) return value;
+  const number = (item: unknown): unknown => {
+    if (typeof item !== "string" || !item.trim() || !Number.isFinite(Number(item))) return item;
+    converted?.(item, Number(item));
+    return Number(item);
+  };
+  return component === undefined ? number(value)
+    : record(value) && typeof value[component] === "string" ? { ...value, [component]: number(value[component]) } : value;
+}
+
 /** The entity id a stored reference value names, or the ids of a collection. */
 export function referenceIds(shape: ExtensionShape, value: unknown): string[] {
   if (!shape.reference || value === null || value === undefined) return [];

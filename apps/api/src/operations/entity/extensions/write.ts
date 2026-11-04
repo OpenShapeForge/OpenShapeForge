@@ -31,6 +31,7 @@ import {
   indexRows,
   isClassified,
   normalizedUnique,
+  numericValue,
   record,
   referenceIds,
   typedOperand,
@@ -43,7 +44,7 @@ import { childEntityTable, evaluateFormulas, fieldValues, formulaGraph, type Own
 import { conditionValues, storedExtensionSource } from "./read.js";
 import { extensibleEntityOf, loadExtensionFields, loadExtensionFieldsFor, lockExtensionFields } from "./store.js";
 import { extensionRegistry } from "./registry.js";
-import { operationFailure } from "@openshapeforge/operations";
+import { exactNumericEquals, operationFailure } from "@openshapeforge/operations";
 import { computedLinked, computeLinkedValues, linkedReadersOf, lookupsThrough, ownLinkedFields, propagateRecordChange } from "./linked.js";
 
 /** `schema.table` → a quoted identifier pair. */
@@ -165,7 +166,7 @@ function settleExtensionValues(
     const becameApplicable = operation === "create" || (was !== undefined && !evaluateCondition(field.appliesWhen, was));
     if (blank(after[field.fieldId]) && field.definition.defaultValue !== undefined &&
         (operation === "create" || (becameApplicable && !touched))) {
-      after[field.fieldId] = structuredClone(field.definition.defaultValue);
+      after[field.fieldId] = numericValue(field.definition, structuredClone(field.definition.defaultValue));
     }
     if (field.definition.required === true && (touched || becameApplicable) && blank(after[field.fieldId])) {
       violations.push({ field: `extensions.${field.key}`, code: "REQUIRED", message: `extensions.${field.key} is required.` });
@@ -299,6 +300,14 @@ export async function prepareExtensionWrite(
       for (const violation of result.error.violations ?? []) {
         const key = String(violation.field ?? "").split("/")[1] ?? "";
         violations.push({ field: `extensions.${key}`, code: violation.code, message: `extensions.${key} is not a valid value.` });
+      }
+    } else {
+      // Valid numeric text is stored as the number it is; what a JSON number cannot hold is refused, never rounded.
+      for (const key of Object.keys(checked)) {
+        const field = set.byKey.get(key)!;
+        after[field.fieldId] = numericValue(field.definition, after[field.fieldId], (text, number) => {
+          if (!exactNumericEquals(text, number)) violations.push({ field: `extensions.${key}`, code: "NOT_REPRESENTABLE", message: `extensions.${key} has more digits than a number holds.` });
+        });
       }
     }
   }

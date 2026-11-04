@@ -612,7 +612,11 @@ What the compiler adds for an extensible entity `<schema>.<table>`, all of it
 additive, so a built database rolls forward:
 
 - `extension_values jsonb not null default '{}'` on the table: the source of
-  every tenant value, keyed by field id.
+  every tenant value, keyed by field id. A numeric value (`integer`, `number`,
+  the types on them such as `money`, the number of a `measurement`) is a JSON
+  number there, also when a form sent it as numeric text. Other text is refused,
+  and so are more digits than a JSON number holds, never rounded. A value stored
+  as text before this rule stays until it is written, and reads as a number.
 - `<table>_field_values`: one typed row per record, field and collection
   element (`ordinal`), keyed `(tenant_id, record_id, field_id, ordinal)` with a
   composite reference to the record that cascades, and the partial indexes of
@@ -635,8 +639,9 @@ additive, so a built database rolls forward:
   `platform.extension_field_dependencies` and `platform.extension_field_backfills`.
 - `extensionRegistry` in the backend `manifest.json`: per entity its tables,
   manage roles, limits, allowed types, targets and owned single children
-  (owned children keyed unique per parent), the index projections, and per
-  target entity the extensible entities that may reference it.
+  (owned children keyed unique per parent), the index projections, per
+  target entity the extensible entities that may reference it, and the single
+  relations of a collection's child that `rollup.of` may follow.
 - The `osf-extensions` Operations, on REST and GraphQL but not MCP:
   `<Entity>.fieldDefinitions.{list,create,update,deprecate,restore,delete,reorder,affectedRecords,rebuildIndex}`
   at `POST /api/rest/v1/<base>/field-definitions/<action>`, and on every target

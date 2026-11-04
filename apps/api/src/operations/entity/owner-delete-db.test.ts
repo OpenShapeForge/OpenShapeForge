@@ -8,7 +8,10 @@ import { applyAuditHistory } from "../../db/migrations/audit-history.js";
  * (document_variants.document_id). The scratch schema mirrors the catalog's
  * shape by hand, so the child table is what the catalog names. The owned
  * child's own generic delete is refused statically; collection-policy.test.ts
- * covers that.
+ * covers that. A tenant field of an extensible entity may reference a
+ * Document, so the delete's reference guard reads that entity's value table
+ * under an audited tenant bypass (extensions/references.ts); the scratch
+ * schema carries both, the value table empty.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
@@ -61,6 +64,11 @@ const fails = (promise: Promise<unknown>, code: string) => expect(promise).rejec
         channel text not null default 'document', locale text not null default 'nl',
         created_at timestamptz not null default clock_timestamp(), updated_at timestamptz not null default clock_timestamp(),
         unique(tenant_id,id), unique(tenant_id,document_id,channel,locale), foreign key(tenant_id,document_id) references erp.documents(tenant_id,id) on delete cascade);
+      create table erp.extensible_assets_field_values(tenant_id uuid not null, record_id uuid not null, field_id uuid not null,
+        ordinal integer not null default 0, value_ref_id uuid);
+      create table platform.system_bypass_audit(id uuid primary key default gen_random_uuid(), actor_subject text not null,
+        reason text not null, tenant_id uuid, started_at timestamptz not null, ended_at timestamptz,
+        succeeded boolean not null default false, created_at timestamptz not null default now());
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null,
         aggregate_type text not null, aggregate_id text not null, event_type text not null, payload jsonb,
         sequence bigint generated always as identity, occurred_at timestamptz not null);

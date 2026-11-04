@@ -24,6 +24,8 @@ import { resolveComputedEntityRows } from "./computed-fields.js";
 import { temporalReadOperations } from "./temporal-threshold-resolver.js";
 import { assertBoundFieldQueryAllowed, resolveBoundEntityRows } from "./field-bindings.js";
 import { subtypeScopeWhere } from "./subtype-scope.js";
+import { assertExtensionQueryAllowed, extensionFilterCondition, extensionSort, extensionSortedPage } from "./extensions/query.js";
+import { extensibleEntityOf, loadExtensionFields } from "./extensions/store.js";
 import type {
   CountedEntityConnection,
   GeneratedCrudColumn,
@@ -163,6 +165,11 @@ export function buildFilterConditions(
     if (key === "and" || key === "or") {
       conditions.push(sql`(${sql.join((value as Record<string, unknown>[]).map(child =>
         buildFilterConditions(table, session, child, [], rules)), key === "and" ? sql` and ` : sql` or `)})`);
+      continue;
+    }
+    // Tenant fields: EXISTS on the typed index (extensions/query.ts).
+    if (key === "extensions" && extensibleEntityOf(table)) {
+      conditions.push(extensionFilterCondition(table, session, value));
       continue;
     }
     const relationship = table.source?.graphql?.relationships?.find((candidate) => candidate.name === key);
@@ -332,13 +339,25 @@ async function listGeneratedEntityRowsForTable(
     const config = (await sql<{rules:AuthorizationProfileRules}>`select nullif(current_setting('app.authorization_rules',true),'')::jsonb as rules`.execute(trx)).rows[0]?.rules;
     bindAuthorizationProfileRules(session, config);
     assertClassifiedQueryAllowed(table, session, input);
+    // The tenant's field definitions, proven in this transaction, before a
+    // filter, sort or projection reads them.
+    await loadExtensionFields(trx, resolvedSession, table);
+    assertExtensionQueryAllowed(table, session, input);
   const ordinaryWhere = sql`(${buildFilterConditions(table, session, input.filter, fixedWhere, config)})${subtypeScopeWhere(table, "row_source")}`;
   const scopedWhere = relationScope ? sql`(${ordinaryWhere}) and (${relationScope.where})` : ordinaryWhere;
   const profileWhere=authorizationProfilePredicate(config?.states[auditContext()?.operationId ?? ""],config?.actor ?? {},"row_source");
   const where=sql`(${scopedWhere}) and (${profileWhere})`;
-  const orderBy = relationScope?.orderBy ?? buildSortExpression(table, input.sort);
+  const tenantSort = relationScope?.orderBy ? undefined : extensionSort(table, session, input.sort);
+  const orderBy = relationScope?.orderBy ?? buildSortExpression(table, tenantSort ? undefined : input.sort);
 
-    const result = await sql<{ row: GeneratedEntityRow }>`
+    // A tenant field sort reads the page from its index (extensions/query.ts);
+    // the same predicate, offset and page size, so the cursor means the same.
+    const result = tenantSort
+      ? await extensionSortedPage({
+          plan: tenantSort, entityTable: sql.id(table.schema, table.table), tenantId: session.tenantId!,
+          where, offset, fetch: limit + 1,
+        }).execute(trx) as { rows: Array<{ row: GeneratedEntityRow }> }
+      : await sql<{ row: GeneratedEntityRow }>`
       select to_jsonb(row_source.*) as row
       from ${sql.id(table.schema, table.table)} as row_source
       where ${where}
@@ -448,6 +467,7 @@ export async function getGeneratedEntity(
     return runWithAuditContext({ ...audit, readOperations: temporalReadOperations(table) }, () => withDbSession(db, session, async (trx, resolvedSession) => {
       const row = await fetchGeneratedEntityRow(db, resolvedSession, table, input.id);
       if (row === null) return null;
+      await loadExtensionFields(trx, resolvedSession, table);
       const projected = projectGeneratedEntityRow(table, resolvedSession, row);
       const bound = await resolveBoundEntityRows(trx, resolvedSession, table, [projected]);
       return (await resolveComputedEntityRows(trx, resolvedSession, table, bound))[0] ?? null;

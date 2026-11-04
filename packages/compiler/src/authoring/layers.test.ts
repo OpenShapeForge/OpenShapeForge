@@ -232,6 +232,19 @@ describe("resolveAuthoringLayers", () => {
     ]);
   });
 
+  test("overlay entityPatch makes a core entity extensible", () => {
+    const root = makeRepo();
+    writeYaml(root, "base/entities/core/widget.yaml", baseEntity);
+    writeYaml(root, "overlay/entities/core/widget.yaml", {
+      kind: "entityPatch",
+      extensible: { authorization: { manage: ["Widgets.Manage"] }, excludedTargets: ["NaturalPerson"] },
+    });
+    configureLayers(root, ["base", "overlay"]);
+    const merged = YAML.parse(readFileSync(join(resolveAuthoringLayers(root), "entities/core/widget.yaml"), "utf8"));
+    expect(merged.kind).toBe("coreEntity");
+    expect(merged.extensible).toEqual({ authorization: { manage: ["Widgets.Manage"] }, excludedTargets: ["NaturalPerson"] });
+  });
+
   test("entity patches may narrow OR roles and add AND requirements", () => {
     const root = makeRepo();
     writeYaml(root, "base/entities/core/widget.yaml", securedEntity);

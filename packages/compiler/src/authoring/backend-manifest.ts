@@ -39,6 +39,7 @@ import { resolveModelFields } from "./compiler/model.js";
 import { normalizeEntityFields } from "./entity-fields.js";
 import { assertEntityValueDefinition, compileEntityValueStorage, entityValueDefinitionNames } from "./entity-values.js";
 import type { EntityValueRegistry } from "./entity-value-types.js";
+import { compileExtensionStorage } from "./extensible.js";
 import { ensureDerivedIdentifierIndexes, resolveDerivedOnCreateBindings } from "./compiler/derive-on-create.js";
 import { compileFieldValuePolicy, fieldValuePolicySchema } from "./field-value-policy.js";
 import { compiledFieldSchema } from "../field-json-schema.js";
@@ -1858,7 +1859,9 @@ export function compileAuthoringBackendManifest(
     };
   });
 
+  const entityTables = physicalCandidates.map((candidate, index) => ({ contract: candidate.contract, table: tables[index]! }));
   const entityValues = compileFieldRelationStorage(physicalCandidates, tables, relationshipRegister, candidates);
+  const extensionRegistry = compileExtensionStorage(entityTables, tables);
   bindVersioningStorage(physicalCandidates, tables);
   bindOwnerAxes(physicalCandidates, tables);
   validateDefaultTemplates(tables);
@@ -1897,6 +1900,7 @@ export function compileAuthoringBackendManifest(
     tables: sortTablesByDependencies(tables),
     ...(entitySubtypes.length > 0 ? { entitySubtypes } : {}),
     ...(entityValues ? { entityValues } : {}),
+    ...(extensionRegistry ? { extensionRegistry } : {}),
   };
 }
 

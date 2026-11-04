@@ -158,6 +158,7 @@ export function registerResourceReadHandler(
             McpOperation,
             boolean,
           ]>).filter(([, enabled]) => enabled).map(([intent]) => intent),
+          offerTransport: "mcp",
           input: { limit: RESOURCE_READ_LIMIT },
         });
         if (result.intent !== "list") throw new Error("Unexpected entity result.");
@@ -189,6 +190,7 @@ export function registerResourceReadHandler(
               McpOperation,
               boolean,
             ]>).filter(([, enabled]) => enabled).map(([intent]) => intent),
+            offerTransport: "mcp",
             input: { id },
           });
           if (result.intent !== "get") throw new Error("Unexpected entity result.");

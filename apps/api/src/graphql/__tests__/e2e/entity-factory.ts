@@ -18,6 +18,7 @@ import {
   isWritableColumn,
 } from "../../generated-crud.js";
 import fieldAuthoringRegistry from "../../../generated/compiler/field-authoring-registry.json" with { type: "json" };
+import { EXTENSION_VALUES_COLUMN } from "../../../operations/entity/extensions/model.js";
 import { fieldNameForColumn } from "../../../operations/entity/columns.js";
 import { createGeneratedEntityForTable } from "../../../operations/entity/mutations.js";
 import { createDoc, expectOperationData } from "./gql-shapes.js";
@@ -82,13 +83,16 @@ export function fieldName(column: Column): string {
  * factory's job is building rows, and a column authored `immutable` is settable
  * exactly then (#177). Tests that build an update body ask for "update". A
  * column written by a named Operation (a versioned head's lifecycle status)
- * is never a caller's to set, whatever the intent.
+ * is never a caller's to set, whatever the intent. The same goes for the
+ * `extension_values` source of an extensible entity: callers write
+ * `extensions`, never the column the engine keeps them in.
  */
 export function isMutableColumn(
   column: Column,
   operation: "create" | "update" = "create",
 ): boolean {
-  return isWritableColumn(column, operation) && !isOperationWrittenColumn(column);
+  return isWritableColumn(column, operation) && !isOperationWrittenColumn(column) &&
+    column.name !== EXTENSION_VALUES_COLUMN;
 }
 
 /**
@@ -491,6 +495,7 @@ export async function columnInput(
   const marker = nextMarker();
 
   for (const column of table.columns) {
+    if (column.name === EXTENSION_VALUES_COLUMN) continue;
     if (!(runtimeOwned ? isWritableColumn(column, "create") : isMutableColumn(column))) continue;
     const field = fieldName(column);
     if (field in overrides) {

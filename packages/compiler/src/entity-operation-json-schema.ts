@@ -1,6 +1,7 @@
 import { relatedUpdateSchema } from "./related-update-schema.js";
 import { blueprintBindingsSchema } from "./blueprint-create-schema.js";
 import { sortablePositionFieldKeys } from "./authoring/sortable-position.js";
+import { EXTENSIONS_META_RECORD_FIELD, EXTENSIONS_RECORD_FIELD } from "./authoring/extensible.js";
 // SPDX-License-Identifier: BUSL-1.1
 /** Concrete JSON Schemas for the canonical entity Operation executor. */
 import type {
@@ -203,6 +204,49 @@ export function withEntityBindingControls(
 }
 
 /**
+ * Tenant-defined values on a record of an extensible entity, keyed by field
+ * key. Their types are per tenant, so every static contract (OpenAPI, the
+ * generic MCP tools, GraphQL `JSON`) describes an open object; a session
+ * projection may narrow it to the tenant's definitions.
+ */
+export function extensionValuesSchema(mode: "read" | "write"): JsonObject {
+  return {
+    type: "object",
+    additionalProperties: true,
+    title: "Custom fields",
+    description: mode === "read"
+      ? "Tenant-defined field values by field key: every current field the reader may see, with its default when the record holds none."
+      : "Tenant-defined field values by field key. A missing key is left unchanged and null clears the value; computed fields cannot be written.",
+    "x-osf-i18n": { title: { en: "Custom fields", nl: "Eigen velden" } },
+  };
+}
+
+/** Per tenant field key: whether a computed value is stale, failed or suspended, and whether the field applies to the record. */
+export function extensionMetaSchema(): JsonObject {
+  return {
+    type: "object",
+    additionalProperties: true,
+    title: "Custom field state",
+    description: "Per tenant-defined field key: stale, error, suspended and applicable, for computed or conditional fields.",
+    "x-osf-i18n": { title: { en: "Custom field state", nl: "Status van eigen velden" } },
+  };
+}
+
+/** The `extensions` branch of a list filter: per field key, operators of that field's type. */
+function extensionFilterSchema(contract: CompiledEntityContract): JsonObject {
+  return {
+    type: "object",
+    minProperties: 1,
+    maxProperties: contract.extensible!.limits.filtersPerQuery,
+    description: "Tenant-defined field predicates by field key, with the operators of the field's type; a collection accepts only contains.",
+    additionalProperties: { type: "object", minProperties: 1, additionalProperties: true },
+  };
+}
+
+/** A sort on a tenant-defined field: `extensions.<key>`. */
+export const EXTENSION_SORT_FIELD_PATTERN = "^extensions\\.[a-z][A-Za-z0-9]*$";
+
+/**
  * Persisted record shape returned by every canonical entity read/write. It
  * follows storage, not the create schema: server-managed values and
  * relationship foreign keys are present in reads too, and older rows are not
@@ -290,6 +334,10 @@ export function entityRecordOutputSchema(
         ],
       }])),
     }), false);
+  }
+  if (contract.extensible) {
+    if (!(EXTENSIONS_RECORD_FIELD in properties)) add(EXTENSIONS_RECORD_FIELD, extensionValuesSchema("read"), false);
+    if (!(EXTENSIONS_META_RECORD_FIELD in properties)) add(EXTENSIONS_META_RECORD_FIELD, extensionMetaSchema(), false);
   }
   return { type: "object", properties, required, additionalProperties: true };
 }
@@ -574,6 +622,7 @@ export function entityValuesSchema(
   );
   const { schema: values, definitions } = splitBundledDefinitions(compiledValues);
   const properties = values.properties as Record<string, JsonObject>;
+  if (contract.extensible) properties[EXTENSIONS_RECORD_FIELD] = extensionValuesSchema("write");
   for (const field of fields) {
     if (operation === "create" && field.defaultTemplate && properties[field.key]) properties[field.key]!["x-osf-default-template"] = field.defaultTemplate;
     const policy = compileFieldValuePolicy(field);
@@ -671,6 +720,7 @@ export function entityOperationJsonSchemas(
         filterProperties[key]={...presentation(schema),oneOf:[schema,{type:"object",additionalProperties:false,minProperties:1,properties}]};
       }
       Object.assign(filterProperties, relationshipAnyFilters(contract, contracts, referentiedata));
+      if (contract.extensible) filterProperties[EXTENSIONS_RECORD_FIELD] = extensionFilterSchema(contract);
       const filterDefinitions = {entityFilter: {
         type:"object", additionalProperties:false, maxProperties:30,
         properties:{...filterProperties, ...Object.fromEntries(["and","or"].map(key=>[key,{
@@ -713,7 +763,9 @@ export function entityOperationJsonSchemas(
             sort: {
               type: "object",
               properties: {
-                field: { type: "string", ...(sortable.length > 0 ? { enum: sortable } : {}) },
+                field: contract.extensible
+                  ? { type: "string", ...(sortable.length > 0 ? { anyOf: [{ enum: sortable }, { pattern: EXTENSION_SORT_FIELD_PATTERN }] } : {}) }
+                  : { type: "string", ...(sortable.length > 0 ? { enum: sortable } : {}) },
                 direction: { type: "string", enum: ["asc", "desc"] },
               },
               additionalProperties: false,

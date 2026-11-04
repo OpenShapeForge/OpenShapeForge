@@ -100,6 +100,12 @@ export type OperationFieldOsfType = {
   options?: OperationFieldOptions;
   /** Where a value of this type is picked from when the field authors no options (a derived identity alias names its entity). */
   optionSource?: OperationFieldOptions;
+  /**
+   * For an object type: the child that fills each typed column of a
+   * tenant-field index row (`number`, `text`, ...). Object types without one
+   * are not offered for tenant-defined fields.
+   */
+  indexProjection?: Readonly<Partial<Record<"text" | "number" | "boolean" | "date" | "timestamp", string>>>;
   shape?: readonly OperationFieldDefinition[];
   children?: readonly OperationFieldDefinition[];
   item?: OperationFieldDefinition;

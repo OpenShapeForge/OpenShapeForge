@@ -567,6 +567,189 @@ Relationships are fields; there is no entity-level `relationships:` block
   reference> }`) is the one collection that stays authored: it has no
   foreign key of its own to derive from.
 
+## Extensible entities
+
+`extensible:` lets the tenants of a deployment add fields of their own to an
+entity at runtime, without a schema change per field. A host can also add it
+to an entity from an earlier layer with `kind: entityPatch`.
+
+```yaml
+extensible:
+  authorization: { manage: [Catalogue.Manage] }   # required, one role or more
+  limits: { fields: 100, filtersPerQuery: 5, formulaDepth: 5, syncFanOut: 100 }  # optional; these are the defaults
+  excludedTypes: []                 # osfTypes a tenant may not use here
+  excludedTargets: [NaturalPerson]  # entities a tenant reference may not point at
+```
+
+- `Organization.All.ReadWrite` may always manage the fields; the compiler adds
+  it to the manage roles. The entity's own read roles list the definitions.
+- Only an entity without a row-scope axis (`rowAccess.owner`/`group`), owner
+  axis or record ACL may declare it: the side tables below inherit the
+  entity's row policies, but the other tenant field paths are not yet proven
+  for such entities. Plain `rowAccess: { enabled: true, empty: public }` is
+  fine. A subtype never inherits it; an Operation-backed or identity-less
+  entity cannot declare it, and neither can an owned child (its owner's
+  snapshot would freeze its raw values).
+- A tenant field uses the same types as authored fields: the base types and
+  every catalog type, minus `typedValue`, `fieldDefinition`, `entityValue`,
+  `keyValueMap`, `variableTemplate`, `labelSet`, `condition`, `excludedTypes`
+  and every object type without an `indexProjection`. A reference names a
+  target entity: any tenant-scoped, generated-CRUD entity with a `get`, outside
+  `excludedTargets` and the `platform` schema. Never a target, whatever the
+  host: a tenant registry (`Tenant`, whose row is its tenant), an entity with
+  no generated create, update or delete of its own (version snapshots, runs,
+  sequences, renditions, owned children: the deletion guard of a reference
+  would not run where their rows go), and the access-control model
+  (`AuthorizationProfile*`, `AuthorizationOperationPolicy`,
+  `OrganizationPermission`, `UserOrganizationPermission`;
+  `EXTENSION_TARGET_DENYLIST`). Such an entity carries no `referencedBy`.
+- `indexProjection` on an object type in `osf-types.yaml` says which child
+  lands in which index column (`text`, `number`, `boolean`, `date`,
+  `timestamp`); `measurement` has `{ number: value, text: unit }`. An object
+  type gains tenant-field support by declaring one.
+
+What the compiler adds for an extensible entity `<schema>.<table>`, all of it
+additive, so a built database rolls forward:
+
+- `extension_values jsonb not null default '{}'` on the table: the source of
+  every tenant value, keyed by field id.
+- `<table>_field_values`: one typed row per record, field and collection
+  element (`ordinal`), keyed `(tenant_id, record_id, field_id, ordinal)` with a
+  composite reference to the record that cascades, and the partial indexes of
+  `EXTENSION_VALUE_INDEXES` (packages/compiler/src/authoring/extensible.ts):
+  `(tenant_id, field_id, value_<type>, record_id) where value_<type> is not null`
+  per index column and `(tenant_id, value_ref_id, field_id, record_id) where
+  value_ref_id is not null`, so filters, sort pages and "referenced by" read
+  the index alone. Beside them, an mcv statistics object on `(field_id,
+  value_<type>)` per value column at statistics target 1000, since all fields
+  share one value column. They follow autovacuum's `ANALYZE`; a backfill
+  does not run one (the worker holds no `MAINTAIN`).
+- `<table>_field_unique_values`: the claimed values of `unique` fields, keyed
+  `(tenant_id, field_id, value_text)`, released with the record.
+- Both side tables get the entity's tenant policy and worker surface, with
+  worker DML for the backfill, and a restrictive `<table>_record_access`
+  policy that admits a row only while its entity row is visible to the
+  session: every row policy of the entity, authorization profiles included,
+  holds for its index too. The definitions themselves live in
+  `platform.extension_field_definitions` (append-only versions),
+  `platform.extension_field_dependencies` and `platform.extension_field_backfills`.
+- `extensionRegistry` in the backend `manifest.json`: per entity its tables,
+  manage roles, limits, allowed types, targets and owned single children
+  (owned children keyed unique per parent), the index projections, and per
+  target entity the extensible entities that may reference it.
+- The `osf-extensions` Operations, on REST and GraphQL but not MCP:
+  `<Entity>.fieldDefinitions.{list,create,update,deprecate,restore,delete,reorder,affectedRecords,rebuildIndex}`
+  at `POST /api/rest/v1/<base>/field-definitions/<action>`, and on every target
+  entity `<Entity>.referencedBy` at `POST /api/rest/v1/<base>/:id/referenced-by`.
+- `extensions` and `extensionsMeta` on the entity's records, `extensions` on
+  create and update, an `extensions` branch in list filters and
+  `extensions.<key>` as a sort field, all open objects in the static contracts.
+- `customFields` on the entity's web interface and `referencedByPath` on each
+  target's.
+
+### Formulas
+
+A tenant field of `kind: formula` is computed, never entered:
+`definition: { label, classification, formula: { text: "{Capacity kWh} * {Price per kWh}" } }`.
+The language is spreadsheet (Airtable) grammar, implemented by
+`@openshapeforge/formula` and compiled to the canonical expression AST:
+
+- Fields by label in braces (`{Capacity kWh}`) or by key (`capacityKwh`), an
+  owned single child's field under its relation (`spec.weight`); numbers,
+  strings in either quote, `TRUE()`/`FALSE()`; `+ - * /`, `&` to join text,
+  `= != <> < > <= >=`.
+- Functions: text `CONCATENATE LEFT RIGHT MID LEN TRIM UPPER LOWER SUBSTITUTE`;
+  logical `IF AND OR NOT SWITCH BLANK ISERROR`; numeric `ROUND ROUNDUP
+  ROUNDDOWN MIN MAX SUM AVERAGE ABS VALUE MOD POWER SQRT CEILING FLOOR`; date
+  `DATEADD DATETIME_DIFF DATETIME_FORMAT YEAR MONTH DAY` with a unit in quotes
+  (`'days'`, `'months'`, …); record `RECORD_ID CREATED_TIME`.
+- In reach: the record's authored fields that its read contract names, its
+  current tenant fields (formulas included, up to `limits.formulaDepth` deep)
+  and the authored fields of its owned single children. Anything across a
+  reference or collection is out of scope, and a classified or field-policed
+  field is never in reach: the result would reveal it. Nor is anything the
+  platform changes outside the record's own write — `updatedAt`, a field
+  `writtenBy` an Operation, a versioned head's `lifecycleStatus` and
+  `latestVersion*`/`publishedVersion*` — refused as `outOfScope` with that
+  reason: a formula over it would be stale.
+- A stored tenant field reads as a reader sees it: a record written before
+  the field existed reads its default, when the field applies. A new default
+  or `appliesWhen` computes the formulas over the field again.
+- An owned single child is in reach only when the compiler can prove that it
+  is authorized through its owner: the relation declares
+  `childAuthorization: owner`, or the child has exactly the owner's read,
+  create, update and delete roles. Either way the child has no row scope,
+  owner axis, record ACL, profile or field read roles, and no classified or
+  field-policed column. Otherwise a reader of the owner could see, through a
+  formula, a value of a child they may not read, so such a child is not in
+  the registry's `ownedSingleChildren` and a formula naming it is
+  `outOfScope`.
+
+Saving refuses with every reason in `data.errors` (`code`, `message`, the
+`start`/`end` of the text it is about): `syntaxError`, `unknownField`,
+`ambiguousField`, `unknownFunction`, `argumentCount`, `typeMismatch`,
+`mixedBranches` (every branch of `IF`/`SWITCH` has one type), `timeFunction`,
+`outOfScope`, `unsupportedFieldType`, `classifiedField`, `cycle` (through any
+formula of the entity) and `depthExceeded` (by this formula, or by a formula
+that reads it, a deprecated one included: its restore is no way past the
+limit). A change of a formula types every formula that reads it again,
+transitively: one that no longer types refuses the change, naming that
+reader and why; one whose result type follows (`{F}`) gets a new version and
+its own backfill. A restore checks the restored formula as a save would.
+A formula that reads no field at all and gives an error code (below) is
+refused with that code. Time functions (`NOW()`, `TODAY()`) are refused: a stored
+"now" is stale the moment it is written. A formula takes no `appliesWhen`,
+`unique`, `required`, `defaultValue` or options; its classification is
+required and never changes.
+
+The stored definition keeps the text, the AST bound to field ids (renaming a
+field never breaks a formula; the text is printed with today's labels) and
+the static `resultType` (`text`, `number`, `boolean`, `date`, `timestamp`),
+which sets `osfType` and the index column: a formula filters and sorts like a
+stored field of that type. Every create evaluates every formula, and every
+update the ones it affects, in dependency order inside the write transaction;
+a write of an owned child recomputes its owner, and so does every write of a
+tenant value outside the record's own write — retention, `onDelete: setNull`,
+the delete and retype backfills — in its transaction. A blank input counts as
+blank or 0, as in a spreadsheet. A per-record failure (`divideByZero`,
+`invalidNumber`, `numberOutOfRange`, `invalidDate`, `textTooLong`,
+`typeError`) is `null` with the code in `extensionsMeta.<key>.error`, and no
+index value; it is never a database error. A new, changed or restored formula
+is `updating` while a backfill recomputes every record and every formula that
+reads it. A recompute that a definition change causes leaves a published
+versioned head published; one that a write of the record or its child causes
+puts it back to draft, as that write would.
+
+Limits, so that every result fits its index column: a text result is at most
+1000 characters and 2000 bytes as UTF-8, and text on the way at most 10000
+characters — `&`, `CONCATENATE` and `SUBSTITUTE` are refused (`textTooLong`)
+before they build a longer text, so no formula grows a text without bound; a
+date or timestamp result lies in the years 0001 to 9999 (`invalidDate`); a
+number is finite (`numberOutOfRange`, `invalidNumber`).
+
+Precision: formulas compute in IEEE 754 doubles, about 15 significant digits.
+A number result is rounded to 10 decimals before it is stored, so `0.1 + 0.2`
+is `0.3` in the record and the index. An input with more significant digits
+(a stored `numeric` such as `12345678901234567.89`) is computed, but loses
+the digits beyond those 15: compute exact money amounts elsewhere.
+
+An error code in one record never stops a backfill: that record gets the code
+and the backfill goes on. Only a database failure fails a batch: the batch is
+rolled back and the formula is `suspended`. Records of earlier batches then
+hold the new formula's values and the rest the old one's, so readers see
+`extensionsMeta.<key>.suspended: true` (from the definition, not stored per
+record), filtering or sorting on it is refused with that reason, and new
+writes do not compute it. Saving the formula again, or `rebuildIndex`, starts
+a new backfill. A snapshot freezes the value, with the formula's text and
+result type, only of a `ready` formula; an `updating`, `suspended` or
+deprecated one freezes as `{ unavailable: "<state>" }`, and a record's error
+code as `{ error: "<code>" }`.
+
+A collection may also be presented as a tree:
+`interfaces.web.views.collection.tree: { children, label, count }`, where
+`children` is a collection relationship of the entity and `label` and `count`
+are its fields. The web manifest publishes it as `views.collection.tree`.
+
 ## Entity subtypes: `kind: entitySubtype`
 
 A subtype is a scoped projection of one stored entity: the same table and the
@@ -1217,8 +1400,12 @@ Omitting `recordLayout` preserves the existing default.
 
 The default `authoring.config.yaml` is the production composition. The
 repository's two `ExternalProcessRun` and `MeterConnection` sample entities
-are test fixtures and are not compiled into the API image. To run this
-repository's record-action DB and end-to-end tests locally, copy
+are test fixtures and are not compiled into the API image; neither is the
+extensible acceptance layer (`test/fixtures/authoring/extensible`):
+`ExtensibleAsset` with tenant-defined fields, its owned single child
+`ExtensibleAssetSpec` and the reference target `ExtensibleAssetLocation`. To
+run this repository's record-action and tenant-field DB and end-to-end tests
+locally, copy
 `test/fixtures/authoring/test-composition.yaml` to the ignored
 `authoring.config.local.yaml`, then run `bun run generate`. Remove the local
 file and regenerate to return to the default composition. Do not replace an

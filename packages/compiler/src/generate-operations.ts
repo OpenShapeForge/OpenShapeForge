@@ -55,9 +55,10 @@ export type { CompiledPluginOperation } from "./plugins.js";
  * source system by their base source fields, `osf-edit-leases` the central
  * edit-lease service a non-interface caller takes a record lease with, and
  * `osf-billing` the milestone billing run and the milestone create that
- * freezes a computed amount.
+ * freezes a computed amount, and `osf-extensions` the tenant-field definitions
+ * of extensible entities and the "referenced by" read of their targets.
  */
-export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-api-keys", "osf-audit", "osf-billing", "osf-blueprints", "osf-control", "osf-edit-leases", "osf-grants", "osf-jobs", "osf-record-actions", "osf-source-sync", "osf-transitions"];
+export const CORE_OPERATION_MODULES: readonly string[] = ["accounts", "osf-api-keys", "osf-audit", "osf-billing", "osf-blueprints", "osf-control", "osf-edit-leases", "osf-extensions", "osf-grants", "osf-jobs", "osf-record-actions", "osf-source-sync", "osf-transitions"];
 
 /**
  * The one OpenAPI security scheme every `auth.mode: capability` Operation is
@@ -143,10 +144,12 @@ const CORE_MODULE_API_NAMESPACES: ReadonlyMap<string, readonly string[]> = new M
   ["control", ["osf-control"]],
   ["jobs", ["osf-jobs"]],
   ["audit-events", ["osf-audit"]],
-  // Status transitions and the billing run live under the entity's own
-  // generated REST resource (POST /api/rest/v1/<base>/:id/<key>, POST
-  // /api/rest/v1/billing-runs/execute): they are that resource's verbs.
-  ["rest", ["osf-transitions", "osf-billing"]],
+  // Status transitions, the billing run and tenant-field definitions live
+  // under the entity's own generated REST resource (POST
+  // /api/rest/v1/<base>/:id/<key>, POST /api/rest/v1/billing-runs/execute,
+  // POST /api/rest/v1/<base>/field-definitions/<action>): they are that
+  // resource's verbs.
+  ["rest", ["osf-transitions", "osf-billing", "osf-extensions"]],
 ]);
 
 const DEFAULT_OPERATION_ERROR_SCHEMA = {

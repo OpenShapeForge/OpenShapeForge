@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // SPDX-License-Identifier: BUSL-1.1
 import { collectBlueprintOperations } from "./blueprint-operations.js";
+import { collectExtensionOperations } from "./extension-operations.js";
 import { collectJobOperations } from "./job-operations.js";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -417,6 +418,7 @@ export async function collectAllArtifacts(
   );
   const operations = [
     ...collectBlueprintOperations(entities),
+    ...collectExtensionOperations(entities, manifest.extensionRegistry),
     ...collectJobOperations(),
     ...collectPluginOperations(plugins, operationContext),
     // The catalogs travel with the entities: application search offers a
@@ -650,7 +652,7 @@ export async function collectAllArtifacts(
     // graphql group above. Web hosts generate the populated API + web pair as
     // part of their UI corpus.
     ui: [
-      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot, standaloneWeb, referentiedata) : []),
+      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot, standaloneWeb, referentiedata, manifest.extensionRegistry) : []),
       ...(productWebPresent
         ? [{
             path: "apps/product-web/src/generated/web-manifest.json",
@@ -659,6 +661,7 @@ export async function collectAllArtifacts(
               { locale: "nl", routeLocale: "en", authorizationOperations },
               standaloneWeb,
               referentiedata,
+              manifest.extensionRegistry,
             )),
           }]
         : []),

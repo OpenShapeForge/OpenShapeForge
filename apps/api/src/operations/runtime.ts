@@ -112,6 +112,7 @@ import {
 import { grantTokenFromAuthorization } from "./capability-grant-token.js";
 import { nativeCollectionHandler } from "./collection-runtime.js";
 import { nativeConstrainedReferenceCreateHandler } from "./constrained-reference-create.js";
+import { EXTENSIONS_PLUGIN, nativeExtensionHandler } from "./entity/extensions/operations.js";
 
 export type OperationContract = {
   /** Compiler-owned source-adapter normalization. No shape guessing or authored override. */
@@ -713,6 +714,14 @@ export function bindOperationHandlers(
     // Billing is core as well: the milestone run and the milestone create
     // (operations/billing) bind in every process, entity-authored plugin
     // Operations included, so the ERP entities carry their own behaviour.
+    // Tenant field definitions and referencedBy are core as well
+    // (operations/entity/extensions): the compiler emits them for every
+    // extensible entity and reference target, with no module behind them.
+    if (operation.plugin === EXTENSIONS_PLUGIN) {
+      if (modulesByName.has(EXTENSIONS_PLUGIN)) throw new Error("The core tenant field runtime cannot be replaced by a plugin.");
+      bound.set(operation.key, { operation, handler: nativeExtensionHandler(operation) });
+      continue;
+    }
     if (operation.plugin === BILLING_PLUGIN) {
       if (modulesByName.has(BILLING_PLUGIN)) throw new Error("The core billing runtime cannot be replaced by a plugin.");
       bound.set(operation.key, { operation, handler: billingOperationHandler(operation) });
@@ -738,6 +747,7 @@ export function bindOperationHandlers(
       bound.set(operation.key, { operation, handler: nativeConstrainedReferenceCreateHandler(operation) });
       continue;
     }
+
     if (pluginOperations === "absent") continue;
     const module = modulesByName.get(operation.plugin);
     if (!module) {
@@ -2278,10 +2288,10 @@ export function operationGraphqlContribution(
   modules: readonly RuntimeModule[],
   runtime: ModuleRuntimeContext,
 ): RuntimeModule | undefined {
-  // The core jobs, transition and billing Operations project in every
-  // process, as their REST and MCP surfaces do: the handlers ship with the
-  // runtime, not with a module.
-  const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN, TRANSITIONS_PLUGIN, BILLING_PLUGIN]);
+  // The core jobs, transition, billing and tenant field Operations project in
+  // every process, as their REST and MCP surfaces do: the handlers ship with
+  // the runtime, not with a module.
+  const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN, TRANSITIONS_PLUGIN, BILLING_PLUGIN, EXTENSIONS_PLUGIN]);
   const projected = catalog.operations.filter((operation) =>
     activePlugins.has(operation.plugin) && operation.transports.graphql.enabled
   );

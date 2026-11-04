@@ -24,6 +24,12 @@ import { createNullMailProvider, type MailProvider } from "./mail/provider.js";
 import { createSmtpMailProvider, readSmtpConfig } from "./mail/smtp.js";
 import { JOBS_PLUGIN } from "./operations.js";
 import { JOB_WORKER_ROLE, readJobWorkerOptions, startJobWorker } from "./worker.js";
+import {
+  EXTENSION_BACKFILL_KIND,
+  EXTENSION_RETENTION_KIND,
+  extensionBackfillJobHandler,
+  extensionRetentionJobHandler,
+} from "../operations/entity/extensions/backfill.js";
 
 export { JOBS_PLUGIN, JOB_WORKER_ROLE };
 
@@ -101,6 +107,9 @@ export function createJobsRuntimeModule(options: JobsRuntimeModuleOptions): Runt
       broker: () => broker,
       workerId: () => workerId,
     }),
+    // Tenant field backfills and retention (operations/entity/extensions).
+    [EXTENSION_BACKFILL_KIND]: extensionBackfillJobHandler,
+    [EXTENSION_RETENTION_KIND]: extensionRetentionJobHandler,
   };
   const module: RuntimeModule = {
     name: JOBS_PLUGIN,

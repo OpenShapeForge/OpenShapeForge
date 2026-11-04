@@ -30,7 +30,9 @@ import {
 } from "./e2e/entity-factory.js";
 import {
   collectionOf,
+  deleteRecord,
   expectDeleted,
+  expectOperationError,
   fetchRecord,
   listDoc,
   recordOf,
@@ -94,7 +96,24 @@ for (const table of tables) {
       // A plugin-created row keeps the companion records its create made, and
       // the entity delete is authored to refuse while they exist — so its
       // lifecycle here ends at the update; entity-crud pins that refusal.
-      const deletable = isEntityBackedCreate(table);
+      //
+      // A tenant's first document theme is its default, and a default is kept
+      // until another one is chosen, so the delete is refused and the
+      // lifecycle ends at the update here too. Whether this row is the first
+      // depends on which suites created a theme in the tenant before, which
+      // follows the order the runner visits the files in, so the refusal is
+      // asserted rather than assumed away.
+      const keptAsDefault = table.source!.authoringEntityName === "DocumentTheme" &&
+        (await fetchRecord(tenantA, table, id, "id isDefault"))?.isDefault === true;
+      if (keptAsDefault) {
+        expectOperationError(
+          table,
+          await deleteRecord(tenantA, table, id),
+          graphql.deleteMutationName,
+          "VALIDATION",
+        );
+      }
+      const deletable = isEntityBackedCreate(table) && !keptAsDefault;
       if (deletable) {
         await expectDeleted(tenantA, table, id);
         untrackRow(id);

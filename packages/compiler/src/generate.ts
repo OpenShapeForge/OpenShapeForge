@@ -484,6 +484,33 @@ function renderOwnerAxisPolicy(table: TableDefinition): string[] {
   ];
 }
 
+/**
+ * The restrictive `recordAccessFrom` policy: a row is visible, insertable
+ * and removable only while the row it describes is visible to the same
+ * session, through that table's own policies. Additive under its own name.
+ */
+function renderRecordAccessPolicy(table: TableDefinition): string[] {
+  const source = table.recordAccessFrom;
+  if (!source) return [];
+  if (!table.tenantScoped) {
+    throw new Error(`Table ${table.schema}.${table.name} declares recordAccessFrom but is not tenant-scoped.`);
+  }
+  if (!columnNames(table).has(source.column)) {
+    throw new Error(`Table ${table.schema}.${table.name} declares recordAccessFrom column "${source.column}" but the column is not defined.`);
+  }
+  const policyName = quoteIdent(`${table.name}_record_access`);
+  const self = quoteIdent(table.name);
+  const predicate = `app.bypass_rls() OR EXISTS (SELECT 1 FROM ${quoteIdent(source.schema)}.${quoteIdent(source.table)} AS described ` +
+    `WHERE described.tenant_id = ${self}.tenant_id AND described.id = ${self}.${quoteIdent(source.column)})`;
+  return [
+    "",
+    `DROP POLICY IF EXISTS ${policyName} ON ${tableIdent(table)};`,
+    `CREATE POLICY ${policyName} ON ${tableIdent(table)} AS RESTRICTIVE FOR ALL`,
+    `  USING (${predicate})`,
+    `  WITH CHECK (${predicate});`,
+  ];
+}
+
 function deriveRowScopeIndexes(table: TableDefinition): Array<{
   name: string;
   columns: string[];
@@ -523,6 +550,46 @@ function renderIndexSql(
   const indexName = stableIdentifier(index.name);
   const head = `${keyword} IF NOT EXISTS ${quoteIdent(indexName)} ON ${tableIdent(table)} (${cols})`;
   return index.where ? `${head} WHERE ${index.where};` : `${head};`;
+}
+
+const STATISTICS_KINDS = new Set(["mcv", "ndistinct", "dependencies"]);
+
+function renderStatisticsSql(table: TableDefinition): string[] {
+  const lines: string[] = [];
+  const targets = new Map<string, number>();
+  for (const statistics of table.statistics ?? []) {
+    const label = `${table.schema}.${table.name} statistics ${statistics.name}`;
+    if (statistics.columns.length < 2 || new Set(statistics.columns).size !== statistics.columns.length ||
+      statistics.columns.some((name) => !table.columns.some((column) => column.name === name))) {
+      throw new Error(`${label} needs two or more distinct columns of the table.`);
+    }
+    if (!statistics.kinds.length || statistics.kinds.some((kind) => !STATISTICS_KINDS.has(kind))) {
+      throw new Error(`${label} has an unknown kind; use mcv, ndistinct or dependencies.`);
+    }
+    if (statistics.target !== undefined) {
+      if (!Number.isInteger(statistics.target) || statistics.target < 1 || statistics.target > 10_000) {
+        throw new Error(`${label} target must be an integer from 1 to 10000.`);
+      }
+      for (const column of statistics.columns) {
+        const previous = targets.get(column);
+        if (previous !== undefined && previous !== statistics.target) {
+          throw new Error(`${label} sets column ${column} to statistics target ${statistics.target}, another object to ${previous}.`);
+        }
+        targets.set(column, statistics.target);
+      }
+    }
+  }
+  for (const [column, target] of targets) {
+    lines.push("", `ALTER TABLE ${tableIdent(table)} ALTER COLUMN ${quoteIdent(column)} SET STATISTICS ${target};`);
+  }
+  for (const statistics of table.statistics ?? []) {
+    lines.push(
+      "",
+      `CREATE STATISTICS IF NOT EXISTS ${quoteIdent(table.schema)}.${quoteIdent(stableIdentifier(statistics.name))} ` +
+        `(${statistics.kinds.join(", ")}) ON ${statistics.columns.map(quoteIdent).join(", ")} FROM ${tableIdent(table)};`,
+    );
+  }
+  return lines;
 }
 
 function renderTableSql(table: TableDefinition, workerDatabaseRole: string): string {
@@ -589,6 +656,7 @@ function renderTableSql(table: TableDefinition, workerDatabaseRole: string): str
     lines.push(...tenantRegistryPolicy);
   }
   lines.push(...renderOwnerAxisPolicy(table));
+  lines.push(...renderRecordAccessPolicy(table));
   lines.push(...renderTenantRegistryWritePolicies(table));
 
   for (const index of deriveRowScopeIndexes(table)) {
@@ -597,6 +665,7 @@ function renderTableSql(table: TableDefinition, workerDatabaseRole: string): str
   for (const index of table.indexes ?? []) {
     lines.push("", renderIndexSql(table, index));
   }
+  lines.push(...renderStatisticsSql(table));
 
   return lines.join("\n");
 }
@@ -975,6 +1044,9 @@ function renderManifestJson(
         generatedEntities,
       },
       ...(manifest.entityValues ? { entityValues: manifest.entityValues } : {}),
+      // Entities that accept tenant-defined fields, their side tables and the
+      // reverse reference map; the runtime validates it on load.
+      ...(manifest.extensionRegistry ? { extensionRegistry: manifest.extensionRegistry } : {}),
       tables,
       ...(entitySubtypes.length > 0 ? { entitySubtypes } : {}),
     },

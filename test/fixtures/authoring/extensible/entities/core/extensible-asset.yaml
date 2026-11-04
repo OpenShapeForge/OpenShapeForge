@@ -1,0 +1,120 @@
+# Test fixture — the acceptance entity for tenant-defined fields (`extensible`,
+# docs/authoring.md "Extensible entities"). Its tenants may add fields of their
+# own: the compiler emits the `extension_values` source column, the
+# `_field_values` index and `_field_unique_values` claim tables, the
+# definition Operations and the extension registry entry the runtime reads.
+# No row scope, owner axis or record ACL, which `extensible` requires.
+#
+# Managing the fields is its own role, never the entity's write role, so the
+# database tests can prove a writer cannot change the record's shape.
+# `ExtensibleAssetSpec` is its owned single child (what a formula may read)
+# and `ExtensibleAssetLocation` the reference target the tests point at.
+# Only in the test composition (test/fixtures/authoring/test-composition.yaml).
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ExtensibleAsset
+title: Extensible asset
+description: A test asset whose tenants may add fields of their own.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels: { en: Extensible asset, nl: Uitbreidbaar object }
+pluralLabels: { en: Extensible assets, nl: Uitbreidbare objecten }
+domains: [relations]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite]
+    create: [General.All.ReadWrite]
+    update: [General.All.ReadWrite]
+    delete: [General.All.ReadWrite]
+extensible:
+  authorization: { manage: [Test.Fields.Manage] }
+  limits: { fields: 10, filtersPerQuery: 3 }
+  excludedTypes: [iban]
+fields:
+  - key: name
+    osfType: string
+    required: true
+    label: { en: Name, nl: Naam }
+    validation: { minLength: 1, maxLength: 200 }
+    persisted: { column: name, storageClass: core }
+operations:
+  list:
+    name: List extensible assets
+    description: Read accessible extensible assets.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read extensible asset
+    description: Read one accessible extensible asset.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create extensible asset
+    description: Create extensible asset.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update extensible asset
+    description: Update extensible asset.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  delete:
+    name: Delete extensible asset
+    description: Delete extensible asset.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }
+  web:
+    # Here so the web manifest carries `customFields` (definition routes,
+    # limits, types and targets) for the tenant-field designer and form.
+    views:
+      collection:
+        route:
+          en: /extensible-assets
+          nl: /uitbreidbare-objecten
+        title:
+          en: Extensible assets
+          nl: Uitbreidbare objecten
+        columns:
+          - key: name
+            sortable: true
+      record:
+        routes:
+          read:
+            en: /extensible-assets/:id
+            nl: /uitbreidbare-objecten/:id
+          create:
+            en: /extensible-assets/create
+            nl: /uitbreidbare-objecten/aanmaken
+        title: "{{name}}"
+        actions:
+          - update
+          - delete
+        layout:
+          tabs:
+            - id: overview
+              label:
+                en: Overview
+                nl: Overzicht
+              groups:
+                - id: overview
+                  title:
+                    en: Asset
+                    nl: Object
+                  fields: [name]

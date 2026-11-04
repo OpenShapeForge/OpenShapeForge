@@ -37,6 +37,7 @@ import { resolveDerivedOnCreateBindings } from "./derive-on-create.js";
 import { withStatusTransitions } from "./transitions.js";
 import { pluginOperations, webOperationActions, webUi } from "../entity-model.js";
 import { operationSourceEntity } from "./operation-source.js";
+import { compileExtensible } from "../extensible.js";
 
 /**
  * Make trusted Operation stamps the field's writer contract before any input
@@ -300,6 +301,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
     throw new Error(`[${coreEntity.entity}] blueprint copying requires canonical entity-backed create and update Operations.`);
   }
   const tableName = deriveTableName(subtype?.base ?? coreEntity.entity);
+  const extensible = compileExtensible(coreEntity, artifacts.osfTypes);
 
   resolveDerivedOnCreateBindings({
     entityName: coreEntity.entity,
@@ -347,6 +349,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
       },
     } : {}),
     ...(coreEntity.hardDelete ? { hardDelete: coreEntity.hardDelete } : {}),
+    ...(extensible ? { extensible } : {}),
     ...(subtype ? {
       subtype: {
         base: { name: subtype.base, id: `${coreEntity.module}.${subtype.base}`, slug: subtype.baseSlug },
@@ -379,6 +382,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
                 ? { recordContext: coreEntity.interfaces.web.views.record.layout.context }
                 : {}),
               ...(coreEntity.interfaces.web.views?.collection.emptyState ? { collectionEmptyState: coreEntity.interfaces.web.views.collection.emptyState } : {}),
+              ...(coreEntity.interfaces.web.views?.collection.tree ? { collectionTree: coreEntity.interfaces.web.views.collection.tree } : {}),
               ...(coreEntity.interfaces.web.views?.collection.board ? { collectionBoard: coreEntity.interfaces.web.views.collection.board } : {}),
               ...(coreEntity.interfaces.web.views?.collection.actions?.length
                 ? {

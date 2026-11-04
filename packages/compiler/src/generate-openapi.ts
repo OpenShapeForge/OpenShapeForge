@@ -43,7 +43,9 @@ import {
   operationOpenApiPaths,
   type CompiledPluginOperation,
 } from "./generate-operations.js";
+import { EXTENSION_VALUES_COLUMN } from "./authoring/extensible.js";
 import {
+  EXTENSION_SORT_FIELD_PATTERN,
   entityListPageSchema,
   entityOperationControlSchema,
   entityOperationJsonSchemas,
@@ -236,10 +238,12 @@ function listParameters(
     : { defaultLimit: 50, maxLimit: 200 };
   const elicitedOutputField = table.source?.secureInputOnCreate?.into ??
     table.source?.mcp?.elicitOnCreate?.into;
+  const extensible = table.columns.some((column) => column.name === EXTENSION_VALUES_COLUMN);
   const sortableFields = table.columns
     .filter(
       (column) =>
         column.name !== "tenant_id" &&
+        column.name !== EXTENSION_VALUES_COLUMN &&
         fieldNameForColumn(column) !== elicitedOutputField &&
         !isRestrictedColumn(column) &&
         !isRestrictedField(fieldsByKey.get(fieldNameForColumn(column))),
@@ -277,10 +281,16 @@ function listParameters(
     {
       name: "sortField",
       in: "query",
-      description: "Entity field to sort by. Defaults to the primary key.",
+      description: extensible
+        ? "Entity field to sort by, or extensions.<key> for a tenant-defined field. Defaults to the primary key."
+        : "Entity field to sort by. Defaults to the primary key.",
       schema: {
         type: "string",
-        ...(sortableFields.length > 0 ? { enum: sortableFields } : {}),
+        ...(sortableFields.length > 0
+          ? extensible
+            ? { anyOf: [{ enum: sortableFields }, { pattern: EXTENSION_SORT_FIELD_PATTERN }] }
+            : { enum: sortableFields }
+          : {}),
         ...(primaryKeyField ? { default: primaryKeyField } : {}),
       },
     },

@@ -26,6 +26,7 @@ import {
   requireCreateOperationConfirmation,
 } from "../operations/entity/index.js";
 import { assertEntityValuesValid } from "../operations/entity/input-validation.js";
+import { splitExtensionInput } from "../operations/entity/extensions/write.js";
 import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import { HttpError } from "../rest/http-error.js";
 import { guardModelTypedValueArguments, withGuardedModelTypedValueWrite } from "./typed-value-write-guard.js";
@@ -84,7 +85,7 @@ export async function invokeTool(
       // count pass is always requested (#17).
       const operationResult = await executeEntityOperation(db, session, {
         operation: operationRef("list"),
-        offerIntents,
+        offerIntents, offerTransport: "mcp",
         input: {
           ...(typeof args.first === "number" ? { limit: args.first } : {}),
           ...(typeof args.after === "string" ? { cursor: args.after } : {}),
@@ -112,7 +113,7 @@ export async function invokeTool(
     case "get": {
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("get"),
-        offerIntents,
+        offerIntents, offerTransport: "mcp",
         input: { id: requireId(args) },
       });
       if (result.intent !== "get") throw new Error("Unexpected entity result.");
@@ -129,7 +130,7 @@ export async function invokeTool(
       const operation = entityOperationContract(operationRef("create").id);
       if (operation.implementation?.type === "plugin") {
         const result = await executeEntityOperation(db, session, {
-          operation: operationRef("create"), offerIntents,
+          operation: operationRef("create"), offerIntents, offerTransport: "mcp",
           input: pluginEntityTransportInput(operation, args),
         });
         if (result.intent !== "create") throw new Error("Unexpected entity result.");
@@ -156,13 +157,17 @@ export async function invokeTool(
         : values;
       assertOperationWrittenFields(modelValues, table);
       assertDeclaredProperties(tool.inputSchema, modelValues, "field");
-      assertWritableValues(modelValues, entity, table, session);
-      await guardModelTypedValueArguments(db, session, table, modelValues);
+      // Tenant fields are the runtime's to validate against this tenant's
+      // definitions (operations/entity/extensions); the checks below judge
+      // the authored fields only.
+      const authoredValues = splitExtensionInput(table, modelValues).values;
+      assertWritableValues(authoredValues, entity, table, session);
+      await guardModelTypedValueArguments(db, session, table, authoredValues);
       // The model's payload against the write contract BEFORE the
       // acknowledgement: an invalid create answers VALIDATION, never
       // CONFIRMATION_REQUIRED. The completed-elicitation write below does not
       // pass through executeEntityOperation, so this is its contract check.
-      assertEntityValuesValid(operation, table, modelValues, {
+      assertEntityValuesValid(operation, table, authoredValues, {
         partial: typeof args.blueprintId === "string",
       });
       requireCreateOperationConfirmation(operation, {
@@ -170,7 +175,7 @@ export async function invokeTool(
           ? { confirmed: args.confirmed }
           : {}),
       });
-      await assertPublishableWrite(db, session, tables, table, values);
+      await assertPublishableWrite(db, session, tables, table, splitExtensionInput(table, values).values);
       if (elicitationCompleted && elicitField) {
         if (args.blueprintId !== undefined) throw new HttpError(400, "BAD_USER_INPUT", "Secure completion does not accept a blueprint.");
         // The elicitation write does not pass through executeEntityOperation,
@@ -181,7 +186,7 @@ export async function invokeTool(
             "A create that collects a value securely does not take field bindings; bind the field afterwards.");
         }
         const result = await completeEntitySecureInput(db, session, {
-          operation: operationRef("create"), offerIntents,
+          operation: operationRef("create"), offerIntents, offerTransport: "mcp",
           input: { values: modelValues, ...(typeof args.confirmed === "boolean" ? { confirmed: args.confirmed } : {}) },
         }, { into: elicitField, value: values[elicitField] });
         if (result.intent !== "create") throw new Error("Unexpected entity result.");
@@ -192,7 +197,7 @@ export async function invokeTool(
 
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("create"),
-        offerIntents,
+        offerIntents, offerTransport: "mcp",
         input: {
           values,
           ...(typeof args.blueprintId === "string" ? { blueprintId: args.blueprintId } : {}),
@@ -216,7 +221,7 @@ export async function invokeTool(
       const operation = entityOperationContract(operationRef("update").id);
       if (operation.implementation?.type === "plugin") {
         const result = await executeEntityOperation(db, session, {
-          operation: operationRef("update"), offerIntents,
+          operation: operationRef("update"), offerIntents, offerTransport: "mcp",
           input: pluginEntityTransportInput(operation, args),
         });
         if (result.intent !== "update") throw new Error("Unexpected entity result.");
@@ -238,12 +243,13 @@ export async function invokeTool(
         "field",
       );
       assertOperationWrittenFields(values, table);
-      assertWritableValues(values, entity, table, session);
-      const result = await withGuardedModelTypedValueWrite(db, session, table, values, id, async () => {
-        await assertPublishableWrite(db, session, tables, table, values, id);
+      const authoredUpdate = splitExtensionInput(table, values).values;
+      assertWritableValues(authoredUpdate, entity, table, session);
+      const result = await withGuardedModelTypedValueWrite(db, session, table, authoredUpdate, id, async () => {
+        await assertPublishableWrite(db, session, tables, table, authoredUpdate, id);
         return executeEntityOperation(db, session, {
         operation: operationRef("update"),
-        offerIntents,
+        offerIntents, offerTransport: "mcp",
         input: {
           id,
           values,
@@ -266,7 +272,7 @@ export async function invokeTool(
       const id = requireId(args);
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("delete"),
-        offerIntents,
+        offerIntents, offerTransport: "mcp",
         input: {
           id,
           ...entityMutationControls(args),

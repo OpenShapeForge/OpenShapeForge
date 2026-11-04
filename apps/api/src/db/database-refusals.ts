@@ -11,7 +11,7 @@
  *
  * What is exposed, and why it is safe
  * ------------------------------------
- * Two kinds of database error become a readable 4xx:
+ * Three kinds of database error become a readable 4xx:
  *
  *   1. A RAISED refusal. Postgres tags an error with the internal routine
  *      that produced it; `exec_stmt_raise` is the PL/pgSQL RAISE statement
@@ -34,6 +34,12 @@
  *      the constraint name, the table name and the offending values (`detail`)
  *      are never forwarded.
  *
+ *   3. A transaction Postgres gave up on, a deadlock (40P01) or a serialization
+ *      failure (40001): nothing in it happened and the same request can
+ *      succeed, so it is a `CONFLICT` that says `retryable`, on every path,
+ *      a plugin's own locks included. The driver's message and detail name
+ *      processes and relations and are never forwarded.
+ *
  * Everything else — syntax errors, cast failures, connection faults, driver
  * text — stays exactly as redacted as before. A misclassification here would
  * be a leak, so the recognisers are narrow on purpose and the unit tests pin
@@ -49,6 +55,8 @@ export type DatabaseRefusal = {
   detail?: string;
   /** Authored HINT of a RAISEd refusal; never a system hint. */
   hint?: string;
+  /** The transaction was rolled back and repeating the request is safe. */
+  retryable?: true;
 };
 
 /** The driver-independent facts this module reads off a database error. */
@@ -82,6 +90,8 @@ const SQLSTATE_FOREIGN_KEY_VIOLATION = "23503";
 const SQLSTATE_UNIQUE_VIOLATION = "23505";
 const SQLSTATE_CHECK_VIOLATION = "23514";
 const SQLSTATE_INSUFFICIENT_PRIVILEGE = "42501";
+const SQLSTATE_SERIALIZATION_FAILURE = "40001";
+const SQLSTATE_DEADLOCK_DETECTED = "40P01";
 const INTEGRITY_CONSTRAINT_CLASS = "23";
 
 /** The PL/pgSQL routine behind every RAISE statement; the structural mark of authored text. */
@@ -221,6 +231,14 @@ export function classifyDatabaseError(
         status: statusFor("FORBIDDEN"),
         code: "FORBIDDEN",
         message: "You do not have permission to perform this operation on this record.",
+      };
+    case SQLSTATE_SERIALIZATION_FAILURE:
+    case SQLSTATE_DEADLOCK_DETECTED:
+      return {
+        status: statusFor("CONFLICT"),
+        code: "CONFLICT",
+        message: "This request collided with a concurrent one and changed nothing; repeating it is safe.",
+        retryable: true,
       };
     default:
       return undefined;

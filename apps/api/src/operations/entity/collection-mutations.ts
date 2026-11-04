@@ -27,8 +27,9 @@ import { hasConsumedCollectionLease } from "./collection-lease-context.js";
 import { subtypeScopeWhere } from "./subtype-scope.js";
 import { assertAdmittedBeforeEffects, assertEffectsWereAdmitted } from "../execution-policy.js";
 import { loadExtensionFields } from "./extensions/store.js";
-import { recomputeOwnerFormulas } from "./extensions/write.js";
-import { lockLinkedRecords, propagateRecordChange } from "./extensions/linked.js";
+import { lockOwnerExtensionFields, recomputeOwnerFormulas } from "./extensions/write.js";
+import { enforceExtensionReferencesOnDelete, lockExtensionReferenceSources } from "./extensions/references.js";
+import { afterDeleteOfLinkedTarget, beforeDeleteOfLinkedTarget, lockLinkedRecords, propagateRecordChange } from "./extensions/linked.js";
 
 /** Compiler/boot-owned binding, never a request-selected table or FK. */
 export type CollectionMutationBinding = { entityName: string; field: string; action: "insert" | "move" | "update" | "remove" };
@@ -210,8 +211,15 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       // The parent is projected below; its tenant fields need definitions
       // proven in this transaction (extensions/store.ts), before its row lock.
       await loadExtensionFields(trx, session, owner, { lock: "shared" });
+      const removing = binding.action === "remove" ? request.childId : undefined;
+      // A remove is a delete of the child, as mutations.ts takes one: a setNull
+      // writes the records that refer to it, and what reads it is recomputed.
+      if (removing) {
+        await lockExtensionReferenceSources(trx, session, target);
+        await lockOwnerExtensionFields(trx, session, target);
+      }
       // What reads the parent is recomputed below: it comes first, in the one order (extensions/linked.ts).
-      const ownerLock = await lockLinkedRecords(trx, session, owner, { operation: "update", id: request.id });
+      const ownerLock = await lockLinkedRecords(trx, session, owner, { operation: "update", id: request.id, member: { table: target, values: request.values, removed: removing } });
       const locked = await sql<{ row: GeneratedEntityRow; matches: boolean }>`select to_jsonb(${sql.id(owner.table)}.*) as row,
         ${sql.id("updated_at")} = ${normalizeTimestampToken(request.expectedVersion)}::timestamptz as matches
         from ${sql.id(owner.schema, owner.table)} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(owner)}
@@ -321,12 +329,17 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
             }
           }
         } else {
+          // Tenant reference fields have no foreign key: `restrict` refuses
+          // here and `setNull` unlinks the referencing records.
+          await enforceExtensionReferencesOnDelete(trx, session, target, childId);
+          const linkedSources = await beforeDeleteOfLinkedTarget(trx, session, target, childId);
           // Past this child's related-state guard above.
           await assertAdmittedBeforeEffects(trx, session);
           const deleted = await sql<{ row: GeneratedEntityRow }>`delete from ${sql.id(target.schema, target.table)}
             where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid returning to_jsonb(${sql.id(target.table)}.*) as row`.execute(trx);
           const row = deleted.rows[0]?.row;
           if (!row) throw generatedCrudError("Child removal was refused.", "FORBIDDEN");
+          await afterDeleteOfLinkedTarget(trx, session, linkedSources);
           // An owner formula over this child now reads none.
           await recomputeOwnerFormulas(trx, session, target, row);
           await propagateRecordChange(trx, session, target, { before: row });

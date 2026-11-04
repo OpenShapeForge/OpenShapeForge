@@ -38,6 +38,11 @@ fields:
     osfType: number
     label: { en: Weight, nl: Gewicht }
     persisted: { column: weight, storageClass: core }
+  - key: unitCost
+    osfType: number
+    label: { en: Unit cost, nl: Kostprijs }
+    classification: { sensitivity: internal, category: financial }
+    persisted: { column: unit_cost, storageClass: core }
 operations:
   list:
     name: List extensible asset specs

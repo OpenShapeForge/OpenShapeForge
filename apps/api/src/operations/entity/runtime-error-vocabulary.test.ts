@@ -53,6 +53,9 @@ const NOT_A_REQUEST_REFUSAL = new Set([
   // Refuses only an operation override's service-identity replay of a
   // takeover (operation-overrides.ts), never an ordinary caller's request.
   "TAKEOVER_INVALID",
+  // A transaction the database gave up on, a deadlock or a serialization
+  // failure: no refusal of the request, and it says `retryable` itself.
+  "CONFLICT",
 ]);
 
 function thrownCodes(): Set<string> {

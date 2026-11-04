@@ -1506,8 +1506,10 @@ async function executeEntityOperationWithContext(
       }
     }
   } catch (error) {
-    const refusal = request.input?.relatedChanges ? classifyDatabaseError(error) : undefined;
-    const operationError = operationErrorOf(error) ?? (refusal ? {code:refusal.code,message:refusal.message,retryable:false} : undefined);
+    const classified = classifyDatabaseError(error);
+    // A retryable refusal is the answer on any path; the rest only for related changes.
+    const refusal = request.input?.relatedChanges || classified?.retryable ? classified : undefined;
+    const operationError = operationErrorOf(error) ?? (refusal ? {code:refusal.code,message:refusal.message,retryable:refusal.retryable === true} : undefined);
     // A canonical failure is the answer; anything else is a defect. Report it
     // before it collapses into the opaque internal error the caller sees, so
     // the server log holds the cause (#471). Message only — no input, no session.

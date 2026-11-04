@@ -1,8 +1,10 @@
 # Test fixture — a plain tenant entity that tenant reference fields on
 # extensible-asset.yaml point at: it gets the `referencedBy` read and the
 # deletion guard, and is what a tenant lookup reads through such a field.
-# `contactEmail` is classified, so a lookup of it is refused. Only in the
-# test composition.
+# `contactEmail` is classified, so a lookup of it is refused. `capacity` is what
+# a rollup over asset members reads, `certifiedCapacity` what none may: only a
+# named Operation writes it, outside the record's own write. Only in the test
+# composition.
 schemaVersion: 3
 kind: coreEntity
 module: core
@@ -33,6 +35,16 @@ fields:
     label: { en: Contact email, nl: Contactadres }
     classification: { sensitivity: pii, category: contact }
     persisted: { column: contact_email, storageClass: core }
+  - key: capacity
+    osfType: number
+    label: { en: Capacity, nl: Capaciteit }
+    persisted: { column: capacity, storageClass: core }
+  - key: certifiedCapacity
+    osfType: number
+    readOnly: true
+    writtenBy: [ExtensibleAssetLocation.update]
+    label: { en: Certified capacity, nl: Gecertificeerde capaciteit }
+    persisted: { column: certified_capacity, storageClass: core }
 operations:
   list:
     name: List asset locations

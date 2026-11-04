@@ -4,6 +4,10 @@
 
 ### Added
 
+- **`childRelations` on the extension registry.** The single relations of a
+  collection's child that is not extensible itself, by child entity, for
+  `rollup.of` to follow: `RuntimeExtensionRegistryManifest.childRelations` and
+  `RuntimeExtensionRegistry.childRelations(entity)`. Metadata only.
 - **Extension registry types.** `RuntimeExtensibleEntity`,
   `RuntimeExtensionRegistryManifest`, `RuntimeExtensionRegistry` and
   `RuntimeExtensionIndexColumn` describe the manifest's `extensionRegistry`

@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/plugin-runtime",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "description": "Stable runtime contracts for OpenShapeForge plugins.",
   "repository": {
     "type": "git",

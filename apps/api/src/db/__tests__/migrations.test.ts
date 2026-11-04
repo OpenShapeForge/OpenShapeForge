@@ -25,6 +25,7 @@ import { type Kysely, sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
+import { databaseRole } from "../database-roles.js";
 import { runMigrationChain } from "../migration-chain.js";
 import {
   diffManifestAgainstDatabase,
@@ -1455,4 +1456,210 @@ describe("tenant registry identity default (0017)", () => {
     });
   }, TEST_TIMEOUT);
 
+});
+
+/**
+ * Extensible entities arrive on a database that was built before the entity
+ * declared `extensible:`: the source column and both side tables are new, and
+ * so are the three platform tables that hold the tenant definitions. All of it
+ * is additive, so the roll-forward must carry the rows already there across
+ * without a versioned migration.
+ */
+describe("tenant fields on a carried-forward database", () => {
+  const registry = (manifest as {
+    extensionRegistry?: {
+      entities: Record<string, { table: string; valuesTable: string; uniqueTable: string }>;
+    };
+  }).extensionRegistry;
+  const extensible = Object.values(registry?.entities ?? {})[0];
+  const platformTables = [
+    "platform.extension_field_backfills",
+    "platform.extension_field_definitions",
+    "platform.extension_field_dependencies",
+  ];
+  const valueColumns = ["value_boolean", "value_date", "value_number", "value_text", "value_timestamp"];
+  /** The measured index shape, as pg_indexes reports it: record_id last, the reference index led by the target. */
+  const measuredIndexes = (valuesTable: string) => {
+    const [, name] = valuesTable.split(".");
+    return [
+      ...valueColumns.map((column) => ({
+        name: `${name}_${column}_record_idx`,
+        definition: `CREATE INDEX ${name}_${column}_record_idx ON ${valuesTable} USING btree (tenant_id, field_id, ${column}, record_id) WHERE (${column} IS NOT NULL)`,
+      })),
+      {
+        name: `${name}_value_ref_id_record_idx`,
+        definition: `CREATE INDEX ${name}_value_ref_id_record_idx ON ${valuesTable} USING btree (tenant_id, value_ref_id, field_id, record_id) WHERE (value_ref_id IS NOT NULL)`,
+      },
+    ].toSorted((left, right) => left.name.localeCompare(right.name));
+  };
+  /** The planner statistics the compiler declares beside them: mcv on (field_id, value) per value column, target 1000. */
+  const measuredStatistics = (valuesTable: string) => {
+    const [, name] = valuesTable.split(".");
+    return {
+      objects: valueColumns.map((column) => ({ name: `${name}_${column}_stats`, kinds: "{m}", columns: `field_id, ${column}` })),
+      targets: ["field_id", ...valueColumns].map((column) => ({ column, target: 1000 })).toSorted((left, right) => left.column.localeCompare(right.column)),
+    };
+  };
+  const valueStatistics = async (db: Kysely<DB>, valuesTable: string) => ({
+    objects: (await sql<{ name: string; kinds: string; columns: string }>`
+      select s.stxname as name, s.stxkind::text as kinds,
+        (select string_agg(a.attname, ', ' order by k.ordinality) from unnest(s.stxkeys) with ordinality k(attnum, ordinality)
+          join pg_attribute a on a.attrelid = s.stxrelid and a.attnum = k.attnum) as columns
+      from pg_statistic_ext s where s.stxrelid = ${valuesTable}::regclass order by s.stxname
+    `.execute(db)).rows,
+    targets: (await sql<{ column: string; target: number }>`
+      select attname as column, attstattarget::integer as target from pg_attribute
+      where attrelid = ${valuesTable}::regclass and attnum > 0 and not attisdropped and attstattarget > 0
+      order by attname
+    `.execute(db)).rows,
+  });
+  const valueIndexes = async (db: Kysely<DB>, valuesTable: string) => {
+    const [schema, name] = valuesTable.split(".");
+    return (await sql<{ name: string; definition: string }>`
+      select indexname as name, indexdef as definition from pg_indexes
+      where schemaname = ${schema} and tablename = ${name} and indexname <> ${`${name}_pkey`}
+      order by indexname
+    `.execute(db)).rows;
+  };
+
+  // Needs the extensible acceptance layer (test/fixtures/authoring/extensible);
+  // the production composition declares no extensible entity.
+  test.skipIf(extensible === undefined)(
+    "a database built before the entity was extensible rolls forward additively and keeps its rows",
+    async () => {
+      const entity = extensible!;
+      const tenant = randomUUID();
+      await withScratchDb(async (url) => {
+        await runChain(url);
+        await withDb(url, async (db) => {
+          await sql`insert into erp.extensible_assets (tenant_id, name) values (${tenant}::uuid, 'kept')`.execute(db);
+          // Rewind to the origin/main shape: no source column, no side tables,
+          // no platform tables for tenant definitions.
+          await sql.raw(`drop table ${entity.valuesTable}, ${entity.uniqueTable}`).execute(db);
+          await sql.raw(`alter table ${entity.table} drop column extension_values`).execute(db);
+          await sql.raw(`drop table ${platformTables.join(", ")}`).execute(db);
+          await staleChecksum(db);
+        });
+
+        const result = await runChain(url);
+        expect(result.applied).toBe(true);
+        expect(result.built).toBeUndefined();
+        expect(result.checksum).toBe(manifest.checksum);
+        expect(result.rollForward?.addedTables.toSorted()).toEqual(
+          [...platformTables, entity.valuesTable, entity.uniqueTable].toSorted(),
+        );
+        expect(result.rollForward?.addedColumns).toEqual([`${entity.table}.extension_values`]);
+
+        await withDb(url, async (db) => {
+          // The existing row survives and gets the column default.
+          const rows = await sql<{ name: string; extension_values: unknown }>`
+            select name, extension_values from erp.extensible_assets where tenant_id = ${tenant}::uuid
+          `.execute(db);
+          expect(rows.rows).toEqual([{ name: "kept", extension_values: {} }]);
+
+          expect((await diffManifestAgainstDatabase(db)).nonAdditive).toEqual([]);
+          expect(await findUndeclaredDatabaseSchema(db)).toEqual({ tables: [], columns: [] });
+
+          // The grants and row policies come with the tables: tenant isolation
+          // is forced, and the worker (backfill) and app roles can reach them.
+          for (const table of [entity.valuesTable, entity.uniqueTable]) {
+            const [schema, name] = table.split(".");
+            const flags = await sql<{ rls: boolean; forced: boolean; worker: boolean; app: boolean }>`
+              select c.relrowsecurity as rls, c.relforcerowsecurity as forced,
+                has_table_privilege(${databaseRole("worker").name}, ${table}, 'INSERT,UPDATE,DELETE') as worker,
+                has_table_privilege(${databaseRole("app").name}, ${table}, 'SELECT') as app
+              from pg_class c join pg_namespace n on n.oid = c.relnamespace
+              where n.nspname = ${schema} and c.relname = ${name}
+            `.execute(db);
+            expect(flags.rows).toEqual([{ rls: true, forced: true, worker: true, app: true }]);
+          }
+          // Each side table also inherits the entity's row policies: a
+          // restrictive policy that admits a row only while its entity row is
+          // visible.
+          const inherited = await sql<{ table: string; permissive: string; command: string; qual: string }>`
+            select tablename as table, permissive, cmd as command, qual from pg_policies
+            where schemaname = ${entity.table.split(".")[0]} and policyname = tablename || '_record_access' order by tablename`.execute(db);
+          expect(inherited.rows.map((row) => [row.table, row.permissive, row.command])).toEqual(
+            [entity.uniqueTable, entity.valuesTable].map((table) => [table.split(".")[1]!, "RESTRICTIVE", "ALL"]).toSorted(),
+          );
+          for (const row of inherited.rows) expect(row.qual).toContain(entity.table.split(".")[1]!);
+          // One current version per field, as a database guard.
+          const current = await sql<{ definition: string }>`select indexdef as definition from pg_indexes
+            where schemaname = 'platform' and indexname = 'extension_field_definitions_current_field_uidx'`.execute(db);
+          expect(current.rows).toEqual([{ definition: expect.stringMatching(/UNIQUE INDEX .*\(tenant_id, field_id\) WHERE is_current/) }]);
+          // The worker: no MAINTAIN, the definition columns a backfill changes
+          // only, and nothing on the dependencies.
+          const worker = databaseRole("worker").name;
+          // MAINTAIN exists from PostgreSQL 17; older servers cannot grant it at all.
+          const maintainKnown = Number((await sql<{ version: string }>`select current_setting('server_version_num') as version`.execute(db)).rows[0]!.version) >= 170000;
+          const maintain = maintainKnown
+            ? (await sql<{ maintain: boolean }>`select has_table_privilege(${worker}, ${entity.valuesTable}, 'MAINTAIN') as maintain`.execute(db)).rows[0]!.maintain
+            : false;
+          const rights = await sql<Record<string, boolean>>`select
+            has_table_privilege(${worker}, 'platform.extension_field_definitions', 'DELETE') as definitions_delete,
+            has_column_privilege(${worker}, 'platform.extension_field_definitions', 'state', 'UPDATE') as definitions_state,
+            has_column_privilege(${worker}, 'platform.extension_field_definitions', 'definition', 'UPDATE') as definitions_definition,
+            has_table_privilege(${worker}, 'platform.extension_field_dependencies', 'SELECT,INSERT,UPDATE,DELETE') as dependencies,
+            has_table_privilege(${worker}, 'platform.system_bypass_audit', 'INSERT') as bypass_audit`.execute(db);
+          expect({ maintain, ...rights.rows[0] } as Record<string, boolean>).toEqual({
+            maintain: false, definitions_delete: false, definitions_state: true, definitions_definition: false, dependencies: false, bypass_audit: true,
+          });
+          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);
+          expect(await valueIndexes(db, entity.valuesTable)).toEqual(measuredIndexes(entity.valuesTable));
+          expect(await valueStatistics(db, entity.valuesTable)).toEqual(measuredStatistics(entity.valuesTable));
+        });
+
+        expect((await runChain(url)).applied).toBe(false);
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test.skipIf(extensible === undefined)(
+    "a database built with the first index shape and no statistics rolls forward to the measured ones",
+    async () => {
+      const entity = extensible!;
+      const [, name] = entity.valuesTable.split(".");
+      await withScratchDb(async (url) => {
+        await runChain(url);
+        await withDb(url, async (db) => {
+          // Rewind to the first shape: (tenant_id, field_id, <column>) and
+          // (tenant_id, value_ref_id) under their old names.
+          for (const { name: index } of measuredIndexes(entity.valuesTable)) {
+            await sql.raw(`drop index ${entity.valuesTable.split(".")[0]}.${index}`).execute(db);
+          }
+          for (const column of valueColumns) {
+            await sql.raw(`create index ${name}_${column}_idx on ${entity.valuesTable} (tenant_id, field_id, ${column}) where ${column} is not null`).execute(db);
+          }
+          await sql.raw(`create index ${name}_value_ref_id_idx on ${entity.valuesTable} (tenant_id, value_ref_id) where value_ref_id is not null`).execute(db);
+          // ... and without the planner statistics, which came with it.
+          for (const column of valueColumns) {
+            await sql.raw(`drop statistics ${entity.valuesTable.split(".")[0]}.${name}_${column}_stats`).execute(db);
+            await sql.raw(`alter table ${entity.valuesTable} alter column ${column} set statistics -1`).execute(db);
+          }
+          await sql.raw(`alter table ${entity.valuesTable} alter column field_id set statistics -1`).execute(db);
+          expect(await valueStatistics(db, entity.valuesTable)).toEqual({ objects: [], targets: [] });
+          await staleChecksum(db);
+        });
+
+        const result = await runChain(url);
+        expect(result.applied).toBe(true);
+        expect(result.rollForward).toEqual({ addedTables: [], addedColumns: [] });
+        await withDb(url, async (db) => {
+          const indexes = await valueIndexes(db, entity.valuesTable);
+          // The measured indexes are added; the first ones are no longer
+          // declared and stay behind, a harmless prefix, until a rebuild.
+          expect(indexes.filter((index) => index.name.endsWith("_record_idx"))).toEqual(measuredIndexes(entity.valuesTable));
+          expect(indexes.filter((index) => !index.name.endsWith("_record_idx")).map((index) => index.name)).toEqual(
+            [...valueColumns, "value_ref_id"].map((column) => `${name}_${column}_idx`).toSorted(),
+          );
+          expect(await valueStatistics(db, entity.valuesTable)).toEqual(measuredStatistics(entity.valuesTable));
+          expect((await diffManifestAgainstDatabase(db)).nonAdditive).toEqual([]);
+          expect(await recordedChecksum(db, generatedSchemaMigrationVersion)).toBe(manifest.checksum);
+        });
+        expect((await runChain(url)).applied).toBe(false);
+      });
+    },
+    TEST_TIMEOUT,
+  );
 });

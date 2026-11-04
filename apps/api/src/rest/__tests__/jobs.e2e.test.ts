@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { withDbSession } from "../../db/session.js";
+import { EXTENSION_BACKFILL_KIND, EXTENSION_RETENTION_KIND } from "../../operations/entity/extensions/backfill.js";
 import { composeJobHandlers } from "../../jobs/handlers.js";
 import { createNullMailProvider, type MailMessage } from "../../jobs/mail/provider.js";
 import { createJobsRuntimeModule } from "../../jobs/module.js";
@@ -108,7 +109,7 @@ describe("durable jobs end to end", () => {
     const sent: MailMessage[] = [];
     const module = createJobsRuntimeModule({ modules: () => [], mailProvider: createNullMailProvider({ sent, log: () => {} }) });
     const handlers = composeJobHandlers([module]);
-    expect([...handlers.keys()].sort()).toEqual([kind, "osf-inbound.dispatch"].sort());
+    expect([...handlers.keys()].sort()).toEqual([kind, "osf-inbound.dispatch", EXTENSION_BACKFILL_KIND, EXTENSION_RETENTION_KIND].sort());
 
     const key = `e2e-${randomUUID()}`;
     const good = await enqueue({ to: "someone@example.test", subject: "Your link", text: "Follow the link." }, key);

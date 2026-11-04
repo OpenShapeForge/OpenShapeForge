@@ -63,6 +63,7 @@
  *   transport-sessions.ts               stateful transport sessions
  *   *-routes.ts, route-context.ts       the browser-facing routes
  */
+import { primeSessionExtensions } from "./extension-schemas.js";
 import { createMcpSessionAdmission } from "./session-admission.js";
 import { withRuntimeSpan } from "@openshapeforge/observability";
 import { createTransportSessions } from "./transport-sessions.js";
@@ -184,6 +185,8 @@ export function buildServer(
   const dispatchTool = createDispatchTool(scope, surface);
 
   server.setRequestHandler('tools/call', async (request, ctx) => {
+    // osf_describe and every CRUD call read this tenant's field definitions.
+    await primeSessionExtensions(scope.db, scope.session);
     const dispatch = () => dispatchTool(
       request.params.name,
       (request.params.arguments ?? {}) as Record<string, unknown>,

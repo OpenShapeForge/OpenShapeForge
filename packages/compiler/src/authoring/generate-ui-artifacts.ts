@@ -385,6 +385,7 @@ export async function generateAuthoringUiArtifacts(
   repoRoot: string,
   standalone: WebStandaloneOperationsInput = { catalogs: [], operations: [] },
   referentiedata: import("../core-referentiedata-artifacts.js").CoreReferentiedataSnapshot = {},
+  extensionRegistry?: import("./extension-registry-types.js").ExtensionRegistry,
 ): Promise<AuthoringUiArtifact[]> {
   const entityNames = listEntityFiles(authoringDir).map((file) => file.slug);
   const compiled: CompiledAuthoringEntity[] = [];
@@ -525,6 +526,7 @@ export async function generateAuthoringUiArtifacts(
       {},
       standalone,
       referentiedata,
+      extensionRegistry,
     )),
   );
 

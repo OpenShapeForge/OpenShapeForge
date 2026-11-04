@@ -3,6 +3,8 @@ import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { classifyDatabaseError } from "../../db/database-refusals.js";
 import { applyRelatedChanges } from "./related-update.js";
+import { splitExtensionInput } from "./extensions/write.js";
+import { extensibleEntityOf } from "./extensions/store.js";
 import { getGeneratedCrudTables } from "./table-registry.js";
 import { authorizationProfileDecision } from "../../auth/authorization-profile-decision.js";
 import { resolveAuthorizationProfileAccess } from "../../auth/authorization-profile-session.js";
@@ -1262,7 +1264,14 @@ async function executeEntityOperationWithContext(
       }
       case "create": {
         const blueprintId = typeof request.input?.blueprintId === "string" ? request.input.blueprintId : undefined;
-        const supplied = blueprintId === undefined ? requireValues(request.input) : request.input?.values ?? {};
+        // Tenant fields leave the values before the entity's own contract sees
+        // them; they are validated against the tenant's definitions in the
+        // write transaction (extensions/write.ts).
+        const { values: supplied, extensions } = splitExtensionInput(table,
+          blueprintId === undefined ? requireValues(request.input) : request.input?.values ?? {});
+        if (extensions && (blueprintId !== undefined || completion)) {
+          throw generatedCrudError("Tenant fields are written by a plain create.", "BAD_USER_INPUT");
+        }
         // The bindings first: a bound field's value is part of the payload
         // the contract below has to hold for.
         if (blueprintId !== undefined && (request.input?.bindings !== undefined || request.input?.unbind !== undefined)) {
@@ -1311,6 +1320,9 @@ async function executeEntityOperationWithContext(
           : createGeneratedEntity(db, session, {
               table: table.name,
               values,
+              // Always an object on an extensible entity: its required tenant
+              // fields hold for a create that names none.
+              ...(extensibleEntityOf(table) ? { extensions: extensions ?? {} } : {}),
               ...(prepared.bindings ? { fieldBindings: prepared.bindings } : {}),
               ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
             }));
@@ -1335,7 +1347,7 @@ async function executeEntityOperationWithContext(
         const concurrencyGuard = mutationConcurrencyGuard(controlOperation, request.input);
         // Before any confirmation or lease work: an illegal payload must not
         // start a challenge it can only fail on the confirmed retry.
-        const supplied = requireValues(request.input);
+        const { values: supplied, extensions } = splitExtensionInput(table, requireValues(request.input));
         // The record as it is now: what its bindings are, and what a binding
         // on `local.<field>` reads for a field this write does not touch.
         const bindable = bindableFields(table).size > 0;
@@ -1378,6 +1390,7 @@ async function executeEntityOperationWithContext(
           requireContractValues(operation, table, committed.values, { partial: true }, session);
           return updateGeneratedEntity(db, session, {
           table: table.name, id: requireId(request.input), values: committed.values,
+          ...(extensions ? { extensions } : {}),
           ...(committed.bindings ? { fieldBindings: committed.bindings } : {}),
           // A replay stamps the caller the takeover recorded, not the service identity.
           ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation,
@@ -1509,9 +1522,33 @@ async function executeEntityOperationWithContext(
   }
 }
 
+/** Plugin Operations an interface does not project, by interface; the generated ones follow `offerIntents`. */
+const unprojectedPluginOperations = {
+  mcp: new Set(pluginOperations.filter((operation) => !operation.transports.mcp.enabled).map((operation) => operation.key)),
+};
+
+/**
+ * Drop the offers of Operations the requesting interface cannot invoke, from
+ * the result envelope and from every item of a page. On MCP these are the
+ * REST, GraphQL and web Operations such as `<Entity>.referencedBy` and the
+ * tenant field definitions (osf-extensions).
+ */
+function projectOfferTransport(result: EntityOperationResult, transport: EntityOperationRequest["offerTransport"]): EntityOperationResult {
+  if (!transport || "error" in result) return result;
+  const hidden = unprojectedPluginOperations[transport];
+  if (!hidden.size) return result;
+  const visible = <T extends { operation: { id: string } }>(offers: readonly T[] | undefined) =>
+    offers?.filter((offer) => !hidden.has(offer.operation.id));
+  const projected = { ...result, operations: visible(result.operations) ?? result.operations } as EntityOperationResult;
+  if (projected.intent === "list" && "data" in projected && projected.data) {
+    projected.data = { ...projected.data, items: projected.data.items.map((item) => ({ ...item, operations: visible(item.operations) ?? item.operations })) };
+  }
+  return projected;
+}
+
 export const executeEntityOperation = (db: OpenShapeForgeDatabase, session: DbSessionInput, request: EntityOperationRequest): Promise<EntityOperationResult> =>
   withAuditContext(request.operation.id, (session as { credential?: import("../../auth/trusted-context.js").SessionCredential }).credential,
-    () => executeEntityOperationWithContext(db, session, request),
+    async () => projectOfferTransport(await executeEntityOperationWithContext(db, session, request), request.offerTransport),
     (session as { principalKind?: "person" | "service" }).principalKind);
 
 /** Server-only continuation: secret values are never accepted through public Operation input. */
@@ -1519,6 +1556,6 @@ export function completeEntitySecureInput(db: OpenShapeForgeDatabase, session: D
   request: EntityOperationRequest, completion: SecureCompletion): Promise<EntityOperationResult> {
   if (request.operation.intent !== "create") throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion requires a create Operation." });
   return withAuditContext(request.operation.id, (session as { credential?: import("../../auth/trusted-context.js").SessionCredential }).credential,
-    () => executeEntityOperationWithContext(db, session, request, completion),
+    async () => projectOfferTransport(await executeEntityOperationWithContext(db, session, request, completion), request.offerTransport),
     (session as { principalKind?: "person" | "service" }).principalKind);
 }

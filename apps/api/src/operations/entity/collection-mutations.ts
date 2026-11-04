@@ -26,6 +26,7 @@ import { consumeEntityEditLeaseInTransaction } from "./edit-leases.js";
 import { hasConsumedCollectionLease } from "./collection-lease-context.js";
 import { subtypeScopeWhere } from "./subtype-scope.js";
 import { assertAdmittedBeforeEffects, assertEffectsWereAdmitted } from "../execution-policy.js";
+import { loadExtensionFields } from "./extensions/store.js";
 
 /** Compiler/boot-owned binding, never a request-selected table or FK. */
 export type CollectionMutationBinding = { entityName: string; field: string; action: "insert" | "move" | "update" | "remove" };
@@ -204,6 +205,9 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         and current_setting('app.user_groups_exact', true) = ${verified.groups.join(",")}
         and current_setting('app.relation_group_ids', true) = ${verified.relationGroupIds.join(",")} as matches`.execute(trx)).rows[0];
       if (!context?.matches) throw generatedCrudError("The transaction must use the same verified session as the collection Operation.", "FORBIDDEN");
+      // The parent is projected below; its tenant fields need definitions
+      // proven in this transaction (extensions/store.ts), before its row lock.
+      await loadExtensionFields(trx, session, owner, { lock: "shared" });
       const locked = await sql<{ row: GeneratedEntityRow; matches: boolean }>`select to_jsonb(${sql.id(owner.table)}.*) as row,
         ${sql.id("updated_at")} = ${normalizeTimestampToken(request.expectedVersion)}::timestamptz as matches
         from ${sql.id(owner.schema, owner.table)} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(owner)} for update`.execute(trx);

@@ -2,6 +2,10 @@
 import { sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import type { RuntimeExtensionRegistry } from "@openshapeforge/plugin-runtime";
+import { extensionRegistry } from "../../operations/entity/extensions/registry.js";
+import { draftRule } from "../../operations/entity/versioned-head.js";
+import type { GeneratedCrudTable } from "../../operations/entity/types.js";
 
 /**
  * Provisions the second restricted runtime role, `openshapeforge_worker`, and
@@ -182,6 +186,19 @@ export function workerGrantedTables(): string[] {
   return workerGrantedTablesFromManifest(manifestTables);
 }
 
+/**
+ * Every table the worker holds a table-level privilege on: the DML tables
+ * above plus the tenant field grants that are not column-precise
+ * (`extensionWorkerGrants`). What `information_schema.role_table_grants`
+ * reports for the worker.
+ */
+export function workerTableLevelGrants(): string[] {
+  const extension = extensionWorkerGrants()
+    .filter((grant) => grant.select === "all" || grant.insert || grant.update === "all" || grant.delete)
+    .map((grant) => grant.table);
+  return [...new Set([...workerGrantedTables(), ...extension])].sort();
+}
+
 /** Distinct schemas the granted tables live in, for the USAGE grants. */
 function workerGrantedSchemas(): string[] {
   return [
@@ -339,6 +356,84 @@ export async function applyWorkerRoleGrants(db: OpenShapeForgeDatabase) {
             seq.schema_name, seq.sequence_name, ${sql.lit(WORKER_ROLE)}
           );
         end loop;
+      end
+      $$;
+    `.execute(db);
+  }
+
+  await applyExtensionWorkerGrants(db);
+}
+
+/**
+ * What a tenant field backfill (operations/entity/extensions/backfill.ts)
+ * needs, derived from the extension registry and nothing wider:
+ *
+ *   - DML on each entity's derived index and claim tables (the compiler
+ *     declares `workerDml` on them);
+ *   - on the entity table, SELECT of the columns a batch reads and UPDATE of
+ *     the columns the one internal write changes (`extension_values`,
+ *     `updated_at`, and a versioned head's lifecycle column) — no other
+ *     column of the entity and no other business table;
+ *   - on `platform.extension_field_definitions`, SELECT, INSERT (the version
+ *     that turns unique off again after a duplicate) and UPDATE of `state`
+ *     and `is_current` only;
+ *   - on `platform.extension_field_backfills`, SELECT and UPDATE of its
+ *     progress columns;
+ *   - INSERT on `platform.system_bypass_audit`, the trail of the audited
+ *     tenant bypass every batch runs under.
+ *
+ * Nothing on `platform.extension_field_dependencies`: the definition
+ * Operations write it, the worker never reads it. No MAINTAIN anywhere: a
+ * finished backfill leaves the planner statistics to autovacuum's ANALYZE.
+ * The job runs under the replayed session, so RLS still scopes it to the
+ * tenant that started the change; the bypass inside lifts the row policies,
+ * never the tenant predicate each statement writes.
+ */
+export type ExtensionWorkerGrant = { table: string; select: "all" | string[]; insert?: boolean; update?: "all" | string[]; delete?: boolean };
+
+export function extensionWorkerGrants(
+  registry: RuntimeExtensionRegistry = extensionRegistry,
+  tables: readonly GeneratedCrudTable[] = manifest.tables as unknown as GeneratedCrudTable[],
+): ExtensionWorkerGrant[] {
+  const entities = registry.entityNames().map((name) => registry.entity(name)!);
+  if (!entities.length) return [];
+  const sourceGrants = entities.map((entry): ExtensionWorkerGrant => {
+    const [schema, name] = entry.table.split(".");
+    const table = tables.find((candidate) => candidate.schema === schema && candidate.table === name);
+    const present = new Set(table?.columns.map((column) => column.name) ?? []);
+    const draft = table ? draftRule(table)?.column : undefined;
+    const update = ["extension_values", "updated_at", ...(draft ? [draft] : [])].filter((column) => present.has(column));
+    const select = [...new Set(["id", "tenant_id", "created_at", ...update])].filter((column) => present.has(column));
+    return { table: entry.table, select, update };
+  });
+  const grants: ExtensionWorkerGrant[] = [
+    ...[...new Set(entities.flatMap((entry) => [entry.valuesTable, entry.uniqueTable]))]
+      .map((table): ExtensionWorkerGrant => ({ table, select: "all", insert: true, update: "all", delete: true })),
+    ...sourceGrants,
+    { table: "platform.extension_field_definitions", select: "all", insert: true, update: ["state", "is_current"] },
+    { table: "platform.extension_field_backfills", select: "all", update: ["state", "processed", "cursor", "error", "updated_at"] },
+    { table: "platform.system_bypass_audit", select: [], insert: true },
+  ];
+  return grants.sort((left, right) => left.table.localeCompare(right.table));
+}
+
+async function applyExtensionWorkerGrants(db: OpenShapeForgeDatabase) {
+  for (const grant of extensionWorkerGrants()) {
+    const [schema, table] = grant.table.split(".") as [string, string];
+    const columns = (names: readonly string[]) => names.map((name) => `"${name}"`).join(", ");
+    const privileges = [
+      grant.select === "all" ? "select" : grant.select.length ? `select (${columns(grant.select)})` : undefined,
+      grant.insert ? "insert" : undefined,
+      grant.update === "all" ? "update" : grant.update?.length ? `update (${columns(grant.update)})` : undefined,
+      grant.delete ? "delete" : undefined,
+    ].filter(Boolean).join(", ");
+    await sql`
+      do $$
+      begin
+        if to_regclass(${sql.lit(grant.table)}) is not null then
+          execute format('grant usage on schema %I to %I', ${sql.lit(schema)}, ${sql.lit(WORKER_ROLE)});
+          execute format('grant ' || ${sql.lit(privileges)} || ' on %I.%I to %I', ${sql.lit(schema)}, ${sql.lit(table)}, ${sql.lit(WORKER_ROLE)});
+        end if;
       end
       $$;
     `.execute(db);

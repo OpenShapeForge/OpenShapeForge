@@ -452,66 +452,74 @@ function persistCapture() {
  */
 export function ensureTenantRows(): Promise<void> {
   if (remoteUrl) return Promise.resolve();
-  store.tenantRowsEnsured ??= (async () => {
-    // Tenant registry seeding is setup, not an API request: the restricted app
-    // role is correctly blocked by RLS before it has a tenant session.
-    const db = getSeedRuntime().db;
-    for (const { tenantId } of [tenantA, tenantB]) {
-      await sql`
-        INSERT INTO erp.tenants (id, tenant_id, slug, name)
-        VALUES (${tenantId}, ${tenantId}, ${`e2e-${tenantId}`}, ${`e2e tenant ${tenantId}`})
-        ON CONFLICT (id) DO NOTHING
-      `.execute(db);
-      await sql`
-        INSERT INTO platform.tenants (id, slug, name, status)
-        VALUES (${tenantId}, ${`e2e-${tenantId}`}, ${`e2e tenant ${tenantId}`}, 'active')
-        ON CONFLICT (id) DO NOTHING
-      `.execute(db);
-    }
-    // The canonical create Operations that stamp an acting Relation must see
-    // the same admitted identity state production sessions require. Trusted
-    // context proves who signed the internal request; it deliberately does
-    // not invent an organization membership or Relation link. Seed one
-    // tenant-owned person and linked identity for every synthetic caller.
-    const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER!;
-    for (const identity of [tenantA, tenantB, readOnly, noRoles]) {
-      const relationId = randomUUID();
-      const identityId = randomUUID();
-      const email = `e2e-${identity.userId}@example.invalid`;
-      await sql`
-        insert into erp.relations (id, tenant_id, display_name, relation_type, status)
-        values (${relationId}, ${identity.tenantId}, ${`E2E ${identity.userId}`}, 'person', 'active')
-      `.execute(db);
-      await sql`
-        insert into platform.identities (id, issuer, subject, email, display_name)
-        values (${identityId}, ${issuer}, ${identity.userId}, ${email}, ${`E2E ${identity.userId}`})
-        on conflict (issuer, subject) do update set display_name = excluded.display_name
-      `.execute(db);
-      await withSystemSession(
-        db,
-        {
-          actorSubject: "e2e-seed",
-          roles: [SYSTEM_BYPASS_ROLE],
-          reason: "e2e: admit synthetic transport identity",
-          tenantId: identity.tenantId,
-        },
-        (trx) => sql`
-          insert into platform.identity_relations
-            (identity_id, tenant_id, status, relation_id, linked_at, linked_by, roles)
-          select i.id, ${identity.tenantId}, 'linked', ${relationId}, now(), 'e2e-seed',
-                 (select coalesce(array_agg(value), '{}'::text[])
-                    from jsonb_array_elements_text(${identity.roles}::jsonb))
-            from platform.identities i
-           where i.issuer = ${issuer} and i.subject = ${identity.userId}
-          on conflict (identity_id, tenant_id) do update
-            set status = 'linked', relation_id = excluded.relation_id,
-                linked_at = now(), linked_by = 'e2e-seed', roles = excluded.roles,
-                updated_at = now()
-        `.execute(trx),
-      );
-    }
-  })();
+  store.tenantRowsEnsured ??= admitTransportIdentities([tenantA, tenantB, readOnly, noRoles]);
   return store.tenantRowsEnsured;
+}
+
+/**
+ * Seed the tenants of `identities` in both registries and admit every
+ * identity as production sessions require, through the privileged
+ * connection. Tenant registry seeding is setup, not an API request: the
+ * restricted app role is correctly blocked by RLS before it has a tenant
+ * session. A suite that needs a tenant of its own (one no other suite
+ * writes in) admits its identities here too.
+ */
+export async function admitTransportIdentities(identities: readonly Identity[]): Promise<void> {
+  const db = getSeedRuntime().db;
+  for (const tenantId of [...new Set(identities.map((identity) => identity.tenantId))]) {
+    await sql`
+      INSERT INTO erp.tenants (id, tenant_id, slug, name)
+      VALUES (${tenantId}, ${tenantId}, ${`e2e-${tenantId}`}, ${`e2e tenant ${tenantId}`})
+      ON CONFLICT (id) DO NOTHING
+    `.execute(db);
+    await sql`
+      INSERT INTO platform.tenants (id, slug, name, status)
+      VALUES (${tenantId}, ${`e2e-${tenantId}`}, ${`e2e tenant ${tenantId}`}, 'active')
+      ON CONFLICT (id) DO NOTHING
+    `.execute(db);
+  }
+  // The canonical create Operations that stamp an acting Relation must see
+  // the same admitted identity state production sessions require. Trusted
+  // context proves who signed the internal request; it deliberately does
+  // not invent an organization membership or Relation link. Seed one
+  // tenant-owned person and linked identity for every synthetic caller.
+  const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER!;
+  for (const identity of identities) {
+    const relationId = randomUUID();
+    const identityId = randomUUID();
+    const email = `e2e-${identity.userId}@example.invalid`;
+    await sql`
+      insert into erp.relations (id, tenant_id, display_name, relation_type, status)
+      values (${relationId}, ${identity.tenantId}, ${`E2E ${identity.userId}`}, 'person', 'active')
+    `.execute(db);
+    await sql`
+      insert into platform.identities (id, issuer, subject, email, display_name)
+      values (${identityId}, ${issuer}, ${identity.userId}, ${email}, ${`E2E ${identity.userId}`})
+      on conflict (issuer, subject) do update set display_name = excluded.display_name
+    `.execute(db);
+    await withSystemSession(
+      db,
+      {
+        actorSubject: "e2e-seed",
+        roles: [SYSTEM_BYPASS_ROLE],
+        reason: "e2e: admit synthetic transport identity",
+        tenantId: identity.tenantId,
+      },
+      (trx) => sql`
+        insert into platform.identity_relations
+          (identity_id, tenant_id, status, relation_id, linked_at, linked_by, roles)
+        select i.id, ${identity.tenantId}, 'linked', ${relationId}, now(), 'e2e-seed',
+               (select coalesce(array_agg(value), '{}'::text[])
+                  from jsonb_array_elements_text(${identity.roles}::jsonb))
+          from platform.identities i
+         where i.issuer = ${issuer} and i.subject = ${identity.userId}
+        on conflict (identity_id, tenant_id) do update
+          set status = 'linked', relation_id = excluded.relation_id,
+              linked_at = now(), linked_by = 'e2e-seed', roles = excluded.roles,
+              updated_at = now()
+      `.execute(trx),
+    );
+  }
 }
 
 /** Seed tenant membership for real bearer identities through the owner connection. */

@@ -9,6 +9,7 @@
  * Split out of generated-mcp-server.ts: the body is the former prologue of
  * buildServer, verbatim.
  */
+import { hasExtensibleEntities } from "./extension-schemas.js";
 import { createDerivedDefinitionResolution } from "./derived-definitions.js";
 import { projectPrompts } from "./prompts.js";
 import { createInvocationSourceResolution } from "./invocation-source-resolution.js";
@@ -113,7 +114,7 @@ function createServerScopePrologue(input: {
       // listChanged is advertised only when the tool list can actually change
       // mid-session — i.e. when stored rows project as tools.
       tools:
-        projectedDerivedTools.length > 0 || hasDynamicModuleTools
+        projectedDerivedTools.length > 0 || hasDynamicModuleTools || hasExtensibleEntities()
           ? { listChanged: true }
           : {},
       resources: hasDynamicModuleResources ? { listChanged: true } : {},

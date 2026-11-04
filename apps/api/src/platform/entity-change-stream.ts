@@ -8,6 +8,7 @@ import { getGeneratedCrudTables, requireEntityOperation } from "../operations/en
 import { primaryKeyEquals } from "../operations/entity/columns.js";
 import type { GeneratedCrudTable } from "../operations/entity/types.js";
 import { mapEntityEvent, type EntityEventRecord } from "./entity-events.js";
+import { mayFollowFieldDefinitions } from "../operations/entity/extensions/definitions.js";
 
 export const REPLAY_WINDOW_MS = 24 * 60 * 60 * 1000;
 export type ResourceChange = { entity: string; id: string; change: "created" | "updated" | "deleted"; version?: string };
@@ -35,6 +36,13 @@ function eventTable(event: EntityEventRecord): GeneratedCrudTable | undefined {
 
 async function projectChange(trx: Transaction<DB>, session: DbSessionInput, event: EntityEventRecord, authorizeResource?:ResourceChangeAuthorizer): Promise<ResourceChange | undefined> {
   if (!["created", "updated", "deleted"].includes(event.eventType)) return;
+  // The field definitions of an extensible entity (`<Entity>FieldDefinition`):
+  // delivered to a session that may list them now, deletions included —
+  // visibility is the entity's read roles, not a row a tombstone could hide.
+  const definitions = mayFollowFieldDefinitions(session, event.aggregateType);
+  if (definitions !== undefined) {
+    return definitions ? { entity: event.aggregateType, id: event.aggregateId, change: event.eventType as ResourceChange["change"] } : undefined;
+  }
   const table = eventTable(event);
   if (!table) {
     // Private resources have no tombstone policy; never disclose a deletion.

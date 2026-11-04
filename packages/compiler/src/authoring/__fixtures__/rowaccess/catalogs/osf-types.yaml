@@ -221,3 +221,34 @@ types:
     render:
       display: FieldDefinitionView
       input: JsonFieldEditor
+
+  # Test fixture: an object type with an index projection (a tenant field may
+  # use it) and one without (excluded from tenant fields by rule).
+  measurement:
+    kind: object
+    label: { en: Measurement, nl: Meetwaarde }
+    baseType: object
+    indexProjection: { number: value, text: unit }
+    children:
+      - key: value
+        osfType: number
+        required: true
+        label: { en: Value, nl: Waarde }
+      - key: unit
+        osfType: string
+        required: true
+        label: { en: Unit, nl: Eenheid }
+
+  coordinates:
+    kind: object
+    label: { en: Coordinates, nl: Coördinaten }
+    baseType: object
+    children:
+      - key: latitude
+        osfType: number
+        required: true
+        label: { en: Latitude, nl: Breedtegraad }
+      - key: longitude
+        osfType: number
+        required: true
+        label: { en: Longitude, nl: Lengtegraad }

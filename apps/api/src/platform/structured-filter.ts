@@ -3,7 +3,15 @@ import { operationFailure } from "@openshapeforge/operations";
 import { sql, type RawBuilder } from "kysely";
 import { jsonbLiteral } from "../db/sql-helpers.js";
 
-export type QueryField = { sql: RawBuilder<unknown>; kind: "text" | "timestamp" | "array" | "objects" | "number" | "boolean" };
+export type QueryField = { sql: RawBuilder<unknown>; kind: "text" | "timestamp" | "date" | "array" | "objects" | "number" | "boolean" };
+const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+/** A calendar date `YYYY-MM-DD` that exists; anything else (a timestamp included) is no date. */
+export function isCalendarDate(input: unknown): input is string {
+  const match = typeof input === "string" ? DATE.exec(input) : null;
+  if (!match) return false;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return date.toISOString().slice(0, 10) === input;
+}
 export function invalidQuery(message: string): never { throw operationFailure({ code: "VALIDATION", message }); }
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 
@@ -32,6 +40,10 @@ export function structuredFilter(value: unknown, fields: Record<string, QueryFie
           return sql`${String(input)}::numeric`;
         }
         if (typeof input !== "string" || input.length > 2000) invalidQuery("Invalid filter value.");
+        if (field.kind === "date") {
+          if (!isCalendarDate(input)) invalidQuery("A date filter takes a date (YYYY-MM-DD).");
+          return sql`${input}::date`;
+        }
         if (field.kind === "timestamp") {
           if (!Number.isFinite(Date.parse(input))) invalidQuery("Invalid timestamp filter.");
           return sql`${input}::timestamptz`;

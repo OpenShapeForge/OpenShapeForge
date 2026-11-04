@@ -7,6 +7,7 @@
  *
  * Split out of generated-mcp-server.ts.
  */
+import { withExtensionInputSchema } from "./extension-schemas.js";
 import { advertisedEntityTool, localizedEntityToolText } from "@openshapeforge/operations";
 import { collectionManagedFields, withoutCollectionInputs } from "../operations/entity/collection-policy.js";
 import type { DbSessionInput } from "../db/session.js";
@@ -90,12 +91,14 @@ export function describeTool(
     title: text.title,
     description: text.description,
     descriptionLanguage: text.descriptionLanguage,
-    inputSchema: withholdClassified(
+    // This session's tenant fields join after the static withholding: they
+    // carry their own classification and are redacted per key on output.
+    inputSchema: withExtensionInputSchema(tool.operation, withholdClassified(
       table && (tool.operation === "create" || tool.operation === "update")
         ? withoutCollectionInputs(tool.inputSchema as Record<string, unknown>, collectionManagedFields(table, getGeneratedCrudTables()))
         : tool.inputSchema as Record<string, unknown>,
       classified,
-    ),
+    ), table, session),
     outputSchema: withholdClassifiedOutput(tool.outputSchema, tool.operation, classified),
     annotations: tool.annotations,
     linksConfigurationApp: entity?.elicitOnCreate !== undefined && publicOriginIsHttps(),

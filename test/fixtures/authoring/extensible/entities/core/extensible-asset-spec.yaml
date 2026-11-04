@@ -1,0 +1,59 @@
+# Test fixture — the owned single child of extensible-asset.yaml (one spec per
+# asset): what the extension registry lists as `ownedSingleChildren` for
+# formulas. Only in the test composition. Read-only: the engine refuses a
+# generic create, update and delete of an owned child (it needs an atomic
+# collection Operation), so the generic CRUD sweeps must not see them offered.
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ExtensibleAssetSpec
+title: Extensible asset spec
+description: The specification of one extensible test asset.
+language: en
+displayTemplate: "{{weight}}"
+labels: { en: Extensible asset spec, nl: Specificatie van uitbreidbaar object }
+pluralLabels: { en: Extensible asset specs, nl: Specificaties van uitbreidbare objecten }
+domains: [relations]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite]
+    create: [General.All.ReadWrite]
+    update: [General.All.ReadWrite]
+    delete: [General.All.ReadWrite]
+indexes:
+  - name: extensible_asset_specs_asset_uidx
+    fields: [tenantId, asset]
+    unique: true
+fields:
+  - key: asset
+    osfType: ExtensibleAsset
+    required: true
+    immutable: true
+    relationship:
+      inverse:
+        key: spec
+        label: { en: Spec, nl: Specificatie }
+        ownership: owned
+  - key: weight
+    osfType: number
+    label: { en: Weight, nl: Gewicht }
+    persisted: { column: weight, storageClass: core }
+operations:
+  list:
+    name: List extensible asset specs
+    description: Read accessible extensible asset specs.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read extensible asset spec
+    description: Read one accessible extensible asset spec.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }

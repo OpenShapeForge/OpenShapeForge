@@ -51,7 +51,7 @@ import { databaseRole } from "../database-roles.js";
 import {
   DEV_WORKER_ROLE_PASSWORD_DEFAULT,
   WORKER_ROLE,
-  workerGrantedTables,
+  workerTableLevelGrants,
 } from "../migrations/worker-role.js";
 import { claimJobs } from "../../jobs/store.js";
 import { JOB_WORKER_ROLE, withJobWorkerSession } from "../../jobs/worker.js";
@@ -632,7 +632,7 @@ describe("worker-role RLS axis", () => {
               order by 1
             `.execute(conn);
 
-            expect(live.rows.map((row) => row.qualified)).toEqual(workerGrantedTables());
+            expect(live.rows.map((row) => row.qualified)).toEqual(workerTableLevelGrants());
           });
         });
       });

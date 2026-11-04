@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-/** Check that sample record-action entities only enter the explicit test composition. */
+/** Check that the sample record-action and extensible entities only enter the explicit test composition. */
 import { readFileSync } from "node:fs";
 
 const mode = process.argv[2];
@@ -11,7 +11,7 @@ const paths = [
   "apps/api/src/generated/mcp/tools.json",
   "apps/web/src/generated/web-manifest.json",
 ];
-const identifiers = ["ExternalProcessRun", "MeterConnection"];
+const identifiers = ["ExternalProcessRun", "MeterConnection", "ExtensibleAsset"];
 for (const path of paths) {
   const artifact = readFileSync(path, "utf8");
   for (const name of identifiers) {

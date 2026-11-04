@@ -721,6 +721,19 @@ export interface CompiledEntitySubtype {
   hiddenColumns: Array<{ field: string; column: string }>;
 }
 
+/** An entity that accepts tenant-defined fields, resolved against the osfType catalog. */
+export interface CompiledExtensible {
+  /** Authored manage roles plus the organization administrator, sorted. */
+  manageRoles: string[];
+  limits: { fields: number; filtersPerQuery: number; formulaDepth: number; syncFanOut: number };
+  /** Catalog types a tenant field may use: base types and catalog entries minus every exclusion, sorted. */
+  allowedOsfTypes: string[];
+  /** The index projection of every allowed object type, keyed by osfType. */
+  indexProjections: Record<string, import("./authoring.js").OsfTypeIndexProjection>;
+  excludedTypes: string[];
+  excludedTargets: string[];
+}
+
 export interface CompiledEntityContract {
   audit?: { timeline?: { include?: string[]; parents?: string[] } };
   source?: { kind: "operations"; query?: { mode?: "structured"; filterFields: string[]; sortFields: string[] } };
@@ -767,6 +780,8 @@ export interface CompiledEntityContract {
     onEdit: { field: string; value: string };
   };
   hardDelete?: { requireNeverPublished: true };
+  /** Resolved `extensible:` block (extensible.ts); absent on every other entity. */
+  extensible?: CompiledExtensible;
   /**
    * Present when this contract is a subtype projection of another entity.
    * `storage`, `model`, `graphql` and `views` above already exclude the
@@ -802,6 +817,8 @@ export interface CompiledEntityContract {
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
       collectionEmptyState?: { title: LocalizedText; description?: LocalizedText; illustration?: "empty-collection"; primaryAction?: "create" };
+      /** Authored collapsible tree presentation; `children` names a collection relationship of this entity. */
+      collectionTree?: { children: string; label?: string; count?: string };
       collectionBoard?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: string; currency: string }; card: { title: string | string[]; timestamp?: string; indicator?: string; subtitle?: string[]; amount?: { value: string; currency: string }; body?: string[] } };
       recordContext?: { fields: string[]; relationships?: string[]; contacts?: import("./views.js").ContactContextPresentation; records?: import("./views.js").RelatedRecordContextPresentation[] };
       /** Authored layout-renderer exceptions; hosts resolve these opaque keys. */

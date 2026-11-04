@@ -10,28 +10,41 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { sql } from "kysely";
+import { sql, type Transaction } from "kysely";
 import manifest from "../../../../generated/db/manifest.json" with { type: "json" };
+import { runMigrationChain } from "../../../../db/migration-chain.js";
 import { withDbSession } from "../../../../db/session.js";
 import { composeJobHandlers } from "../../../../jobs/handlers.js";
-import { processJobBatch } from "../../../../jobs/worker.js";
+import { processJobBatch, withJobWorkerSession } from "../../../../jobs/worker.js";
 import { getGeneratedCrudTables } from "../../catalog.js";
 import { executeCollectionMutation } from "../../collection-mutations.js";
-import { createGeneratedEntity, updateGeneratedEntityForTable } from "../../mutations.js";
+import { createGeneratedEntity, updateGeneratedEntity, updateGeneratedEntityForTable } from "../../mutations.js";
 import { executeEntityOperation } from "../../runtime.js";
 import { EXTENSION_BACKFILL_KIND, extensionBackfillJobHandler } from "../backfill.js";
 import { executeFieldDefinitionAction, type FieldDefinitionAction } from "../definitions.js";
-import { EXTENSION_RECOMPUTE_KIND, extensionRecomputeJobHandler, revalidateLinkedFields } from "../linked.js";
+import {
+  EXTENSION_RECOMPUTE_KIND,
+  EXTENSION_REVALIDATE_KIND,
+  extensionRecomputeJobHandler,
+  extensionRevalidateJobHandler,
+  proveExtensionStaleness,
+  revalidateLinkedFields,
+  revalidateLinkedFieldsOfEveryTenant,
+  runRecomputeBatch,
+  sweepExtensionRecomputes,
+} from "../linked.js";
 import { __setExtensionRegistryForTests } from "../registry.js";
 import { extensionSnapshot } from "../snapshot.js";
 import { createExtensionFixture, ENTITY, MANAGER_ROLE, READER_ROLE, sessionFor, TARGET_ENTITY, WRITER_ROLE, type ExtensionFixture } from "./fixture.js";
 
 const GROUP = "ExtensibleAssetGroup";
+const EDITION = "ExtensibleAssetEdition";
 let fixture: ExtensionFixture;
 const silent = { info() {}, warn() {}, error() {} };
 const handlers = composeJobHandlers([{ name: "test-lookups", jobHandlers: {
   [EXTENSION_BACKFILL_KIND]: extensionBackfillJobHandler,
   [EXTENSION_RECOMPUTE_KIND]: extensionRecomputeJobHandler,
+  [EXTENSION_REVALIDATE_KIND]: extensionRevalidateJobHandler,
 } }]);
 
 type Session = ReturnType<typeof sessionFor>;
@@ -39,10 +52,11 @@ type Row = Record<string, unknown> & { id: string; updated_at: string; extension
 const label = (text: string) => ({ en: text, nl: text });
 const pub = { classification: { sensitivity: "public" } };
 const number = (text: string) => ({ osfType: "number", label: label(text), ...pub });
+const text = (name: string, extra: Record<string, unknown> = {}) => ({ osfType: "string", label: label(name), ...pub, ...extra });
 const reference = (target: string, text: string, extra: Record<string, unknown> = {}) => ({ osfType: target, label: label(text), ...pub, ...extra });
 const lookup = (via: string, field: string, text = "Lookup") => ({ label: label(text), ...pub, lookup: { via, field } });
 const rollup = (spec: Record<string, unknown>, text = "Rollup") => ({ label: label(text), ...pub, rollup: spec });
-const formula = (text: string, name: string) => ({ label: label(name), ...pub, formula: { text } });
+const formula = (source: string, name: string) => ({ label: label(name), ...pub, formula: { text: source } });
 
 async function tenant() {
   const id = randomUUID();
@@ -64,7 +78,7 @@ async function drainJobs() {
   for (let round = 0; round < 50; round += 1) {
     // The recompute journal debounces; a test does not wait it out.
     await sql`update platform.jobs set available_at = now() where kind = ${EXTENSION_RECOMPUTE_KIND} and status = 'queued'`.execute(fixture.privileged.db);
-    const { processed } = await processJobBatch(fixture.worker.db, handlers, silent, { kinds: [EXTENSION_BACKFILL_KIND, EXTENSION_RECOMPUTE_KIND] });
+    const { processed } = await processJobBatch(fixture.worker.db, handlers, silent, { kinds: [EXTENSION_BACKFILL_KIND, EXTENSION_RECOMPUTE_KIND, EXTENSION_REVALIDATE_KIND] });
     if (!processed) return;
   }
 }
@@ -106,9 +120,35 @@ const privileged = <T>(query: ReturnType<typeof sql<T>>) => query.execute(fixtur
 const journal = (tenantId: string) => privileged(sql<{ field_id: string; target_id: string; generation: number }>`
   select field_id::text as field_id, target_id::text as target_id, generation from platform.extension_field_recomputes
   where tenant_id = ${tenantId}::uuid order by created_at`);
+const anyTable = (entity: string) => getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === entity)!;
 const tableOf = (entity: string) => getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === entity && !table.subtype)!;
 const parts = (session: Session, action: "insert" | "update" | "remove", request: Record<string, unknown>) =>
   executeCollectionMutation(fixture.app.db, session, { entityName: ENTITY, field: "parts", action }, request as never);
+/** A write that names no version: concurrent tests must not fail on the optimistic check they are not about. */
+const write = (session: Session, entity: string, id: string, { extensions, ...values }: Record<string, unknown>) =>
+  updateGeneratedEntity(fixture.app.db, session, { table: anyTable(entity).name, id, values, ...(extensions ? { extensions: extensions as Record<string, unknown> } : {}) });
+const jobs = (tenantId: string) => privileged(sql<{ status: string; attempts: number; actor_session: Record<string, unknown>; error: string | null }>`
+  select status, attempts, actor_session, last_error::text as error from platform.jobs where tenant_id = ${tenantId}::uuid and kind = ${EXTENSION_RECOMPUTE_KIND} order by sequence`);
+/** Fail every write of a table with one SQLSTATE until the returned function is called. */
+async function failWrites(table: string, sqlstate: string) {
+  const name = `fail_${randomUUID().replaceAll("-", "")}`;
+  await sql.raw(`create function ${name}() returns trigger language plpgsql as $$ begin raise exception 'injected' using errcode = '${sqlstate}'; end $$`).execute(fixture.privileged.db);
+  await sql.raw(`create trigger ${name} before update on ${table} for each row execute function ${name}()`).execute(fixture.privileged.db);
+  return async () => {
+    await sql.raw(`drop trigger ${name} on ${table}`).execute(fixture.privileged.db);
+    await sql.raw(`drop function ${name}()`).execute(fixture.privileged.db);
+  };
+}
+/** Manage one entity's reads under the tenant's profiles, past the ceiling's guard, then write the profile model the way an administrator does. */
+async function manage(t: Tenant, entity: string) {
+  await fixture.privileged.db.transaction().execute(async (trx) => {
+    await sql`set local session_replication_role = replica`.execute(trx);
+    await sql`insert into erp.authorization_operation_policies (tenant_id, operation_id, entity_type, managed)
+      values (${t.id}::uuid, ${`${entity}.list`}, ${entity}, true)`.execute(trx);
+  });
+}
+const adminWrite = (t: Tenant) => createGeneratedEntity(fixture.app.db, t.security, { table: tableOf("AuthorizationOperationPolicy").name,
+  values: { operationId: "Relation.list", entityType: "Relation", managed: false } });
 
 describe("tenant lookups and rollups", () => {
   beforeAll(async () => {
@@ -212,10 +252,11 @@ describe("tenant lookups and rollups", () => {
     const suspended = await listed(t, "placeName");
     expect(suspended.state).toBe("suspended");
     expect(suspended.backfill?.error).toMatchObject({ code: "AUTHORIZATION_PROOF_LOST", message: expect.stringContaining("authorization profile") });
-    // The last value stays readable, marked, and is no filter.
+    // Target data a reader may no longer see: null, marked, and no filter. The source keeps it.
     const read = await get(t.reader, asset.id);
-    expect(read.extensions.placeName).toBe("Depot");
+    expect(read.extensions.placeName).toBeNull();
     expect(read.extensionsMeta.placeName).toMatchObject({ suspended: true });
+    expect((await privileged(sql<{ value: string }>`select extension_values->>${suspended.fieldId} as value from erp.extensible_assets where id = ${asset.id}::uuid`))[0]!.value).toBe("Depot");
     expect(await list(t.reader, { extensions: { placeName: { eq: "Depot" } } })).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
 
     // Saving it again while the profile manages the target is refused.
@@ -410,5 +451,91 @@ describe("tenant lookups and rollups", () => {
     await field(t, "groupTwice", lookup("extensions.group", "extensions.twice"), "lookup");
     expect(await failure(define(t.manager, "update", { fieldId: twice, definition: formula('{Size} & ""', "Twice") }, GROUP)))
       .toMatchObject({ code: "CONFLICT", message: expect.stringContaining(`${ENTITY}.groupTwice`) });
+  });
+
+  test("text beyond the bounds of a formula is that record's textTooLong, never a failed write of someone else", async () => {
+    const t = await tenant();
+    await field(t, "group", reference(GROUP, "Group"));
+    await field(t, "note", text("Note"), undefined, GROUP);
+    await field(t, "groupNote", lookup("extensions.group", "extensions.note", "Group note"), "lookup");
+    await field(t, "tag", text("Tag"));
+    await field(t, "tags", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "arrayUnique", of: "extensions.tag" }, "Tags"), "rollup", GROUP);
+    const group = await create(t.writer, GROUP, { name: "G", extensions: { note: "short" } });
+    const asset = await create(t.writer, ENTITY, { name: "A", extensions: { group: group.id, tag: "x" } });
+    expect(asset.extensions.groupNote).toBe("short");
+    expect((await get(t.reader, group.id, GROUP)).extensions.tags).toBe("x");
+
+    // Too many characters, and few enough characters but too many bytes.
+    for (const long of ["a".repeat(1_001), "€".repeat(800)]) {
+      await write(t.writer, GROUP, group.id, { extensions: { note: long } });
+      const read = await get(t.reader, asset.id);
+      expect(read.extensions.groupNote).toBeNull();
+      expect(read.extensionsMeta.groupNote).toMatchObject({ error: "textTooLong" });
+      await write(t.writer, ENTITY, asset.id, { extensions: { tag: long } });
+      const parent = await get(t.reader, group.id, GROUP);
+      expect(parent.extensions.tags).toBeNull();
+      expect(parent.extensionsMeta.tags).toMatchObject({ error: "textTooLong" });
+      await write(t.writer, ENTITY, asset.id, { extensions: { tag: "x" } });
+      expect((await get(t.reader, group.id, GROUP)).extensions.tags).toBe("x");
+    }
+    await write(t.writer, GROUP, group.id, { extensions: { note: "short again" } });
+    const again = await get(t.reader, asset.id);
+    expect(again.extensions.groupNote).toBe("short again");
+    expect(again.extensionsMeta.groupNote?.error).toBeUndefined();
+  });
+
+  test("a rollup is SQL: conditions, defaults and every aggregate as a reader would count them", async () => {
+    const t = await tenant();
+    await field(t, "group", reference(GROUP, "Group"));
+    await field(t, "weight", number("Weight"));
+    const group = await create(t.writer, GROUP, { name: "G" });
+    // Older than the field below: it holds no value, and reads the default.
+    await create(t.writer, ENTITY, { name: "old", extensions: { group: group.id } });
+    await field(t, "rated", { osfType: "number", label: label("Rated"), ...pub, defaultValue: 3 });
+    await field(t, "tag", text("Tag"));
+    await field(t, "due", { osfType: "date", label: label("Due"), ...pub });
+    await field(t, "total", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "sum", of: "extensions.weight",
+      where: { kind: "group", mode: "any", conditions: [
+        { kind: "rule", operator: "equals", left: { kind: "path", path: "extensions.tag" }, right: { kind: "literal", value: "a" } },
+        { kind: "rule", operator: "greaterThan", left: { kind: "path", path: "extensions.weight" }, right: { kind: "literal", value: 9 } },
+      ] } }, "Total"), "rollup", GROUP);
+    await field(t, "mean", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "avg", of: "extensions.rated" }, "Mean"), "rollup", GROUP);
+    await field(t, "low", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "min", of: "extensions.weight" }, "Low"), "rollup", GROUP);
+    await field(t, "named", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "count", of: "extensions.tag",
+      where: { kind: "rule", operator: "notEquals", left: { kind: "path", path: "name" }, right: { kind: "literal", value: "skip" } } }, "Named"), "rollup", GROUP);
+    await field(t, "tags", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "arrayUnique", of: "extensions.tag" }, "Tags"), "rollup", GROUP);
+    await field(t, "firstDue", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "min", of: "extensions.due" }, "First due"), "rollup", GROUP);
+    await field(t, "latest", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "max", of: "createdAt" }, "Latest"), "rollup", GROUP);
+    await create(t.writer, ENTITY, { name: "one", extensions: { group: group.id, weight: 1, tag: "a", due: "2026-03-02" } });
+    await create(t.writer, ENTITY, { name: "two", extensions: { group: group.id, weight: 2, tag: "b", due: "2026-01-15" } });
+    await create(t.writer, ENTITY, { name: "skip", extensions: { group: group.id, weight: 10, tag: "a", rated: 7 } });
+    await create(t.writer, ENTITY, { name: "none", extensions: { group: group.id } });
+    expect((await get(t.reader, group.id, GROUP)).extensions).toMatchObject({ total: 11, mean: 3.8, low: 1, named: 2, tags: "a, b", firstDue: "2026-01-15",
+      latest: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/) });
+
+    const refusals: Array<[Record<string, unknown>, string]> = [
+      [{ kind: "rule", operator: "contains", left: { kind: "path", path: "extensions.weight" }, right: { kind: "literal", value: "1" } }, "only text contains text"],
+      [{ kind: "rule", operator: "greaterThan", left: { kind: "path", path: "extensions.weight" }, right: { kind: "literal", value: "many" } }, "no value of it"],
+      [{ kind: "rule", operator: "equals", left: { kind: "path", path: "extensions.group" }, right: { kind: "literal", value: group.id } }, "a rollup reads one"],
+    ];
+    for (const [where, reason] of refusals) {
+      expect(await failure(define(t.manager, "create", { key: "nope", kind: "rollup", definition: rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "countAll", where }) }, GROUP)))
+        .toMatchObject({ code: "VALIDATION", message: expect.stringContaining(reason) });
+    }
+  });
+
+  test("a default under appliesWhen is out of a rollup's reach, when the rollup is saved and when the field changes later", async () => {
+    const t = await tenant();
+    await field(t, "group", reference(GROUP, "Group"));
+    await field(t, "kind", { osfType: "string", label: label("Kind"), ...pub, options: { type: "static", items: [{ value: "a", label: label("A") }, { value: "b", label: label("B") }] } });
+    const applies = { kind: "rule", operator: "equals", left: { kind: "path", path: "extensions.kind" }, right: { kind: "literal", value: "a" } };
+    await define(t.manager, "create", { key: "conditional", definition: { osfType: "number", label: label("Conditional"), ...pub, defaultValue: 2 }, appliesWhen: applies });
+    await field(t, "plain", number("Plain"));
+    expect(await failure(define(t.manager, "create", { key: "sum", kind: "rollup", definition: rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "sum", of: "extensions.conditional" }) }, GROUP)))
+      .toMatchObject({ code: "VALIDATION", message: expect.stringContaining("depends on appliesWhen") });
+    await field(t, "sum", rollup({ collection: `${ENTITY}.extensions.group`, aggregate: "sum", of: "extensions.plain" }), "rollup", GROUP);
+    const plain = (await listed(t, "plain")).fieldId;
+    expect(await failure(define(t.manager, "update", { fieldId: plain, definition: { osfType: "number", label: label("Plain"), ...pub, defaultValue: 1 }, appliesWhen: applies })))
+      .toMatchObject({ code: "CONFLICT", message: expect.stringContaining(`${GROUP}.sum`) });
   });
 });

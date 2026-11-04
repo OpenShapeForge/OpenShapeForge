@@ -780,6 +780,17 @@ a formula's, and read-only on every transport. The server sets `osfType`.
   `of`, sorted, as text). `where` is a `condition` over the child's fields,
   the subset `appliesWhen` takes. An empty collection sums and counts to 0; its
   `avg`, `min` and `max` are blank. Blank values do not count.
+- A rollup is one SQL aggregate over the child's columns and the typed index,
+  under a lock on the parent; it never reads the collection into memory. So
+  `of` and `where` must say something SQL can: a single value of a scalar type,
+  and for `where` a literal of the field's type (`contains` on text only, no
+  order on a boolean). A tenant field whose default depends on `appliesWhen`
+  cannot be read, because the index does not hold that condition. The definition
+  is refused with the reason, and such a default cannot be added to a field a
+  rollup reads.
+- A text result is bounded as a formula's is, at 1,000 characters and 2,000
+  bytes of UTF-8, for a lookup and for `arrayUnique`. Beyond that the record
+  holds the error code `textTooLong`; the write that caused it never fails.
 - The result type follows the target field or the aggregate, and is fixed when
   the definition is saved. A lookup returns a text, number, boolean, date or
   timestamp. A lookup or rollup takes no `appliesWhen` and none of `unique`,
@@ -864,7 +875,7 @@ remain are recomputed. Deleting a child recomputes the rollup of its parent.
 value with its definition (`kind`, `lookup` or `rollup`) only while the field is
 `ready`, `{ unavailable: "<state>" }` otherwise, `{ unavailable: "stale" }` while
 the journal still has to bring it up to date, and `{ error: "<code>" }` for a
-record in error (`textTooLong` from `arrayUnique`).
+record in error (`textTooLong` from a lookup or `arrayUnique`).
 
 A collection may also be presented as a tree:
 `interfaces.web.views.collection.tree: { children, label, count }`, where

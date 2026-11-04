@@ -33,7 +33,8 @@
  * reader sees the last known value with `extensionsMeta.<key>.stale`, derived
  * from the open journal rows of its page in one query.
  */
-import { sql, type Transaction } from "kysely";
+import { randomUUID } from "node:crypto";
+import { sql, type RawBuilder, type Transaction } from "kysely";
 import { operationFailure } from "@openshapeforge/operations";
 import type { RuntimeExtensionRelation } from "@openshapeforge/plugin-runtime";
 import { MAX_RESULT_TEXT_LENGTH, ROUNDING_DECIMALS } from "@openshapeforge/formula";
@@ -41,6 +42,7 @@ import type { DB } from "../../../generated/db/types.js";
 import { currentDbSessionTransaction, type DbSessionInput } from "../../../db/session.js";
 import { entityTableName, entityColumnName } from "../../../db/manifest-lookup.js";
 import { jsonbLiteral } from "../../../db/sql-helpers.js";
+import { isCalendarDate } from "../../../platform/structured-filter.js";
 import { enqueueJob } from "../../../jobs/store.js";
 import { actorSessionOf, type JobActorSession } from "../../../jobs/actor-session.js";
 import type { ModuleJobHandler } from "../../../modules/contract.js";
@@ -54,6 +56,8 @@ import {
   evaluateCondition,
   extensionError,
   extensionShape,
+  indexColumnRef,
+  inheritedSuspension,
   isClassified,
   linkedResultType,
   mapConditionPaths,
@@ -81,6 +85,8 @@ export const RECOMPUTE_BATCH_SIZE = 200;
 const TENANT_PATH = "extensions.";
 /** A chain of recomputes deeper than this is a graph the save-time check should have refused. */
 const MAX_PROPAGATION_DEPTH = 32;
+/** The most distinct values an arrayUnique within the text bounds can list: one character and a separator each. */
+const MOST_UNIQUE_VALUES = Math.floor((MAX_RESULT_TEXT_LENGTH + 2) / 3);
 
 export type LinkedDependency = { entity: string; field: string; via: string | null };
 
@@ -141,6 +147,9 @@ type ResolvedRollup = {
   link: string;
   aggregate: RollupAggregate;
   of?: TargetField;
+  /** `of` and `where` as SQL over the child's row (`child`). */
+  ofSql?: RawBuilder<unknown>;
+  whereSql?: RawBuilder<unknown>;
   where?: unknown;
   whereFields: TargetField[];
 };
@@ -275,7 +284,101 @@ async function resolveRollup(sets: Sets, set: ExtensionFieldSet, rollup: Record<
       where = mapConditionPaths(rollup.where, (key) => childSet?.byKey.get(key)?.fieldId ?? key);
     }
   }
-  return { kind: "rollup", collection: resolved, child, link, aggregate: aggregate as RollupAggregate, ...(of ? { of } : {}), ...(where !== undefined ? { where } : {}), whereFields };
+  const childSet = await sets(child);
+  const ofSql = of ? fieldSql(childSet, of, "rollup.of") : undefined;
+  const whereSql = where === undefined ? undefined
+    : conditionSql(where, new Map(whereFields.map((field) => [field.path, { field, sql: fieldSql(childSet, field, "rollup.where") }])));
+  return { kind: "rollup", collection: resolved, child, link, aggregate: aggregate as RollupAggregate, ...(of ? { of } : {}), ...(ofSql ? { ofSql } : {}),
+    ...(whereSql ? { whereSql } : {}), ...(where !== undefined ? { where } : {}), whereFields };
+}
+
+const SQL_TYPES: Readonly<Record<string, string>> = { text: "text", number: "numeric", boolean: "boolean", date: "date", timestamp: "timestamptz" };
+
+/**
+ * One field of a rollup's child as SQL over the row `child`: an authored
+ * column, or a tenant field's index row (which holds nothing for a computed
+ * field in error, the blank a reader sees). The default of a field that applies
+ * to every record is the value of a record without one, as a reader sees it;
+ * a default under `appliesWhen` depends on a condition the index does not hold,
+ * so such a field is refused, as a collection or a measurement is.
+ */
+function fieldSql(set: ExtensionFieldSet | undefined, field: TargetField, purpose: string): RawBuilder<unknown> {
+  const type = SQL_TYPES[field.type];
+  if (!type) extensionError(`${purpose}: ${field.label} is a ${field.type} field; a rollup reads one text, number, boolean, date or timestamp per record.`);
+  if (field.authored) return sql`${sql.id("child", field.authored)}::${sql.raw(type!)}`;
+  const tenant = field.field!;
+  if (tenant.definition.defaultValue !== undefined && tenant.appliesWhen) {
+    extensionError(`${purpose}: the default of ${field.label} depends on appliesWhen, which the index does not hold, so a rollup cannot compute it.`);
+  }
+  const shape = extensionShape(set!.entry, tenant.definition);
+  const indexed = sql`(select ${indexColumnRef(shape.column, "item")} from ${qualifiedTable(set!.entry.valuesTable)} as item
+    where item.tenant_id = child.tenant_id and item.record_id = child.id and item.field_id = ${tenant.fieldId}::uuid and item.ordinal = 0)`;
+  return tenant.definition.defaultValue === undefined ? sql`${indexed}::${sql.raw(type!)}`
+    : sql`coalesce(${indexed}::${sql.raw(type!)}, cast(${String(tenant.definition.defaultValue)} as ${sql.raw(type!)}))`;
+}
+
+/**
+ * A rollup's `where` as SQL, meaning what evaluateCondition means: a blank
+ * number compares as 0 and a blank text is empty. What SQL cannot say that way
+ * (a literal of another type than its field, an order on a boolean, `contains`
+ * on anything but text) is refused with the reason when the rollup is saved.
+ */
+function conditionSql(condition: unknown, fields: ReadonlyMap<string, { field: TargetField; sql: RawBuilder<unknown> }>): RawBuilder<unknown> {
+  const rule = condition as Record<string, unknown>;
+  const children = (rule.all ?? rule.any ?? rule.conditions) as unknown[] | undefined;
+  if (Array.isArray(children)) {
+    const any = rule.any !== undefined || rule.mode === "any";
+    return sql`(${sql.join(children.map((child) => conditionSql(child, fields)), any ? sql` or ` : sql` and `)})`;
+  }
+  const path = String((rule.left as { path?: unknown }).path);
+  const operand = fields.get(path);
+  if (!operand) extensionError(`rollup.where: ${path} is not a field of the collection.`);
+  const { field, sql: left } = operand!;
+  const type = SQL_TYPES[field.type]!;
+  const refuse = (detail: string): never => extensionError(`rollup.where: ${field.label} is a ${field.type} field; ${detail}, so a rollup cannot compute this condition.`);
+  const literal = (value: unknown): RawBuilder<unknown> => {
+    const fits = field.type === "number" ? typeof value === "number" && Number.isFinite(value)
+      : field.type === "boolean" ? typeof value === "boolean"
+      : field.type === "date" ? typeof value === "string" && isCalendarDate(value)
+      : field.type === "timestamp" ? typeof value === "string" && Number.isFinite(Date.parse(value))
+      : typeof value === "string";
+    if (!fits) refuse(`${JSON.stringify(value)} is no value of it`);
+    return sql`cast(${String(value)} as ${sql.raw(type)})`;
+  };
+  const right = (rule.right as { value?: unknown } | undefined)?.value;
+  const blank = field.type === "text" ? sql`coalesce(${left}, '') = ''` : sql`${left} is null`;
+  const list = () => {
+    const items = Array.isArray(right) ? right : [right];
+    if (!items.length) refuse("the list is empty");
+    const values = items.filter((item) => item !== null);
+    const member = values.length ? sql`coalesce(${left} in (${sql.join(values.map(literal))}), false)` : sql`false`;
+    return values.length < items.length ? sql`(${member} or ${left} is null)` : member;
+  };
+  const order = (operator: RawBuilder<unknown>) => {
+    if (field.type === "boolean") refuse("it has no order");
+    const value = literal(right);
+    if (field.type === "number") return sql`coalesce(${left}, 0) ${operator} ${value}`;
+    return field.type === "text" ? sql`coalesce(${left} collate "C" ${operator} ${value}, false)` : sql`coalesce(${left} ${operator} ${value}, false)`;
+  };
+  const contains = () => {
+    if (field.type !== "text") refuse("only text contains text");
+    return sql`coalesce(strpos(${left}, ${literal(right)}) > 0, false)`;
+  };
+  switch (rule.operator) {
+    case "equals": return right === null ? sql`${left} is null` : sql`coalesce(${left} = ${literal(right)}, false)`;
+    case "notEquals": return right === null ? sql`${left} is not null` : sql`${left} is distinct from ${literal(right)}`;
+    case "in": return list();
+    case "notIn": return sql`not ${list()}`;
+    case "isEmpty": return sql`(${blank})`;
+    case "isNotEmpty": return sql`not (${blank})`;
+    case "contains": return contains();
+    case "notContains": return sql`not ${contains()}`;
+    case "greaterThan": return order(sql`>`);
+    case "greaterThanOrEquals": return order(sql`>=`);
+    case "lessThan": return order(sql`<`);
+    case "lessThanOrEquals": return order(sql`<=`);
+    default: return extensionError(`rollup.where: ${String(rule.operator)} is not a condition a rollup can compute.`);
+  }
 }
 
 function resolveStored(sets: Sets, set: ExtensionFieldSet, field: Pick<ExtensionField, "kind" | "definition">): Promise<ResolvedLookup | ResolvedRollup> {
@@ -588,22 +691,66 @@ function typed(type: string, value: unknown): unknown {
   return value;
 }
 
-function aggregateOf(aggregate: RollupAggregate, type: string, values: unknown[], members: number): LinkedResult {
-  const present = values.map((value) => typed(type, value)).filter((value) => value !== null);
-  switch (aggregate) {
-    case "countAll": return { ok: true, value: members };
-    case "count": return { ok: true, value: present.length };
-    case "sum": return { ok: true, value: round((present as number[]).reduce((total, value) => total + value, 0)) };
-    case "avg": return { ok: true, value: present.length ? round((present as number[]).reduce((total, value) => total + value, 0) / present.length) : null };
-    case "min": case "max": {
-      if (!present.length) return { ok: true, value: null };
-      const sorted = [...present].sort((left, right) => typeof left === "number" ? (left as number) - (right as number)
-        : Date.parse(String(left)) - Date.parse(String(right)) || String(left).localeCompare(String(right)));
-      return { ok: true, value: aggregate === "min" ? sorted[0] : sorted.at(-1) };
+const textTooLong = (value: string) => value.length > MAX_RESULT_TEXT_LENGTH || Buffer.byteLength(value, "utf8") > MAX_RESULT_TEXT_BYTES;
+
+/** A value as a lookup or rollup stores it: text beyond the bounds of a formula's is that record's `textTooLong`, never a database error. */
+function bounded(value: unknown): LinkedResult {
+  return typeof value === "string" && textTooLong(value) ? { ok: false, error: "textTooLong" } : { ok: true, value };
+}
+
+function emptyRollup(aggregate: RollupAggregate): LinkedResult {
+  return { ok: true, value: aggregate === "count" || aggregate === "countAll" || aggregate === "sum" ? 0 : null };
+}
+
+/** How `value` (a text-free SQL expression of `type`) reads as text: what arrayUnique lists. */
+function asText(type: string, value: RawBuilder<unknown>): RawBuilder<unknown> {
+  switch (type) {
+    case "number": return sql`trim_scale(${value})::text`;
+    case "timestamp": return timestampText(value);
+    default: return sql`(${value})::text`;
+  }
+}
+
+const timestampText = (value: RawBuilder<unknown>): RawBuilder<unknown> => sql`to_char(${value} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+
+/**
+ * The aggregate of one parent's collection, in one statement over the child
+ * table and the typed index: nothing is read into this process but the
+ * result. Runs under the parent's `for no key update` (recomputeRecordFormulas),
+ * so a concurrent writer of a child waits for it, and reads what committed
+ * before it got the lock. `arrayUnique` stops at the first value past what the
+ * text bounds can hold: at most one character and a separator each.
+ */
+async function rollupValue(trx: Transaction<DB>, tenantId: string, resolved: ResolvedRollup, childTable: GeneratedCrudTable, recordId: string): Promise<LinkedResult> {
+  const members = resolved.collection.relation
+    ? sql`child.${sql.id(resolved.collection.relation.foreignKey)} = ${recordId}::uuid`
+    : sql`exists (select 1 from ${qualifiedTable(extensionRegistry.entity(resolved.child)!.valuesTable)} as link
+        where link.tenant_id = child.tenant_id and link.record_id = child.id
+          and link.field_id = ${resolved.collection.reference!.field.fieldId}::uuid and link.value_ref_id = ${recordId}::uuid)`;
+  const scope = sql`from ${sql.id(childTable.schema, childTable.table)} as child
+    where child.tenant_id = ${tenantId}::uuid and ${members} ${resolved.whereSql ? sql`and ${resolved.whereSql}` : sql``}`;
+  const type = resolved.of?.type ?? "number";
+  const value = resolved.ofSql ? (type === "text" ? sql`nullif(${resolved.ofSql}, '')` : resolved.ofSql) : undefined;
+  const one = async (expression: RawBuilder<unknown>) => (await sql<{ value: string | null }>`select (${expression})::text as value ${scope}`.execute(trx)).rows[0]?.value ?? null;
+  const number = (text: string | null) => text === null ? null : round(Number(text));
+  switch (resolved.aggregate) {
+    case "countAll": return { ok: true, value: Number(await one(sql`count(*)`)) };
+    case "count": return { ok: true, value: Number(await one(value ? sql`count(${value})` : sql`count(*)`)) };
+    case "sum": return { ok: true, value: number(await one(sql`coalesce(sum(${value!}), 0)`)) };
+    case "avg": return { ok: true, value: number(await one(sql`avg(${value!})`)) };
+    case "min":
+    case "max": {
+      const aggregate = resolved.aggregate === "min" ? sql`min(${value!})` : sql`max(${value!})`;
+      if (type === "timestamp") return { ok: true, value: await one(timestampText(aggregate)) };
+      const result = await one(aggregate);
+      return { ok: true, value: type === "number" ? number(result) : result };
     }
     case "arrayUnique": {
-      const text = [...new Set(present.map(String))].sort((left, right) => left.localeCompare(right)).join(", ");
-      return text.length > MAX_RESULT_TEXT_LENGTH ? { ok: false, error: "textTooLong" } : { ok: true, value: text || null };
+      const items = (await sql<{ items: string[] | null }>`select to_jsonb(array_agg(item)) as items from (
+          select distinct left(${asText(type, value!)}, ${MAX_RESULT_TEXT_LENGTH + 1}) as item ${scope} and ${value!} is not null
+          limit ${MOST_UNIQUE_VALUES + 1}) as items`.execute(trx)).rows[0]?.items ?? [];
+      if (items.length > MOST_UNIQUE_VALUES) return { ok: false, error: "textTooLong" };
+      return bounded([...items].sort((left, right) => left.localeCompare(right)).join(", ") || null);
     }
   }
 }
@@ -646,25 +793,13 @@ export async function computeLinkedValues(
         from ${sql.id(table.schema, table.table)} as target
         where target.tenant_id = ${tenantId}::uuid and target.id = ${targetId}::uuid ${share ? sql`for share` : sql``}`.execute(trx);
       const target = found.rows[0]?.row;
-      storeLinked(source, field.fieldId, { ok: true, value: target ? typed(resolved.field.type, valueOf(await sets(resolved.target), table, target, resolved.field.path)) : null });
+      storeLinked(source, field.fieldId, bounded(target ? typed(resolved.field.type, valueOf(await sets(resolved.target), table, target, resolved.field.path)) : null));
       continue;
     }
     const childTable = tableOf(resolved.child);
     const recordId = row.id;
-    if (!childTable || typeof recordId !== "string") { storeLinked(source, field.fieldId, aggregateOf(resolved.aggregate, "number", [], 0)); continue; }
-    const members = resolved.collection.relation
-      ? sql`child.${sql.id(resolved.collection.relation.foreignKey)} = ${recordId}::uuid`
-      : sql`exists (select 1 from ${qualifiedTable(extensionRegistry.entity(resolved.child)!.valuesTable)} as link
-          where link.tenant_id = child.tenant_id and link.record_id = child.id
-            and link.field_id = ${resolved.collection.reference!.field.fieldId}::uuid and link.value_ref_id = ${recordId}::uuid)`;
-    const children = await sql<{ row: Record<string, unknown> }>`select ${formulaRowObject(childTable, "child")} as row
-      from ${sql.id(childTable.schema, childTable.table)} as child
-      where child.tenant_id = ${tenantId}::uuid and ${members} order by child.id`.execute(trx);
-    const childSet = await sets(resolved.child);
-    const matching = children.rows.map((item) => item.row).filter((child) =>
-      resolved.where === undefined || evaluateCondition(resolved.where, (path) => valueOf(childSet, childTable, child, path)));
-    const values = resolved.of ? matching.map((child) => valueOf(childSet, childTable, child, resolved.of!.path)) : matching.map(() => 1);
-    storeLinked(source, field.fieldId, aggregateOf(resolved.aggregate, resolved.of?.type ?? "number", values, matching.length));
+    if (!childTable || typeof recordId !== "string") { storeLinked(source, field.fieldId, emptyRollup(resolved.aggregate)); continue; }
+    storeLinked(source, field.fieldId, await rollupValue(trx, tenantId, resolved, childTable, recordId));
   }
 }
 

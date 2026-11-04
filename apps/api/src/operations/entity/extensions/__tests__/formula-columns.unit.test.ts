@@ -85,7 +85,7 @@ describe("the worker's column grants", () => {
   const GROUP = "ExtensibleAssetGroup", GROUP_TABLE = "erp.extensible_asset_groups", LOCATION_TABLE = "erp.extensible_asset_locations";
   type EditableRegistry = { entities: Record<string, any>; readAccess: Record<string, any>; childRelations: Record<string, any> };
   const registryWith = (edit: (registry: EditableRegistry) => void) => {
-    const registry = structuredClone(manifest.extensionRegistry) as unknown as EditableRegistry;
+    const registry = structuredClone((manifest as unknown as { extensionRegistry: EditableRegistry }).extensionRegistry);
     for (const entry of Object.values(registry.entities)) { entry.targets = []; entry.relations = []; entry.ownedSingleChildren = []; }
     registry.readAccess[GROUP].roles.push("Test.Wider.Read");
     edit(registry);

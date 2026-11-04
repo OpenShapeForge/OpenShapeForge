@@ -270,9 +270,6 @@ function entityToolOutputSchema(
   };
 }
 
-/** Operations whose tools accept no entity fields, only identifiers/paging. */
-const READ_OPERATIONS = new Set(["list", "get"]);
-
 /** Fields carrying a restricting classification, for the runtime to withhold. */
 function classifiedFieldKeys(fields: CompiledField[]): string[] {
   return fields

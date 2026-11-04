@@ -423,10 +423,6 @@ function getCanonicalRoute(route: LocalizedText | string): string {
   return route.en ?? Object.values(route).find(Boolean) ?? "/";
 }
 
-function routeToNextPath(route: string): string {
-  return route.replace(/^\//, "").replace(/:(\w+)/g, "[$1]");
-}
-
 /**
  * Given a localized route map and a current route string, find which language
  * the current route belongs to, then return the matching value from the target

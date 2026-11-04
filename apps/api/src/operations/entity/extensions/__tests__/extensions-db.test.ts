@@ -678,4 +678,19 @@ describe("tenant fields on an extensible entity", () => {
     expect(await failure(define(designer, "update", { fieldId: made.fieldId, definition: money("9007199254740993.995") }))).toMatchObject(refused);
     expect((await created(designer, {})).extensions.prijs).toBe(12.5);
   });
+  test("text beyond the range of a double is refused, in a value and in a default, and not kept as text", async () => {
+    const tenant = randomUUID();
+    await fixture.addTenants(tenant);
+    const designer = sessionFor(tenant, [MANAGER_ROLE, WRITER_ROLE, READER_ROLE]);
+    const pub = { classification: { sensitivity: "public" } };
+    const beyond = `1${"0".repeat(400)}`;
+    await define(designer, "create", { key: "prijs", definition: { osfType: "number", label: label("Prijs"), ...pub } });
+    await define(designer, "create", { key: "gewicht", definition: { osfType: "measurement", label: label("Gewicht"), ...pub } });
+    for (const [key, value] of [["prijs", beyond], ["prijs", `-${beyond}`], ["gewicht", { value: beyond, unit: "kg" }]] as const) {
+      expect(await createAsset(designer, { [key]: value })).toMatchObject({ error: { code: "VALIDATION",
+        violations: [expect.objectContaining({ field: `extensions.${key}`, code: "NOT_REPRESENTABLE" })] } });
+    }
+    expect(await failure(define(designer, "create", { key: "standaard", definition: { osfType: "number", label: label("Standaard"), defaultValue: beyond, ...pub } })))
+      .toMatchObject({ code: "VALIDATION", violations: [expect.objectContaining({ field: "definition.defaultValue", code: "NOT_REPRESENTABLE" })] });
+  });
 });

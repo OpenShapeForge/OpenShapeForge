@@ -258,9 +258,9 @@ export function numericValue(definition: ExtensionDefinition, value: unknown, co
   const component = numericOsfType(definition.osfType) ? undefined : extensionRegistry.indexProjection(String(definition.osfType))?.number;
   if (component === undefined && !numericOsfType(definition.osfType)) return value;
   const number = (item: unknown): unknown => {
-    if (typeof item !== "string" || !item.trim() || !Number.isFinite(Number(item))) return item;
+    if (typeof item !== "string" || !item.trim() || Number.isNaN(Number(item))) return item;
     converted?.(item, Number(item));
-    return Number(item);
+    return Number.isFinite(Number(item)) ? Number(item) : item;
   };
   return component === undefined ? number(value)
     : record(value) && typeof value[component] === "string" ? { ...value, [component]: number(value[component]) } : value;

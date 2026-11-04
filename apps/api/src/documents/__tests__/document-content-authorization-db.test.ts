@@ -91,6 +91,12 @@ describe("document content authorization against PostgreSQL", () => {
     await failsWith(setup.handlers.createDocument!(foreignInput, setup.context), ["NOT_FOUND", "FORBIDDEN"]);
     const foreignDocument = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${foreignTitle}`.execute(privileged());
     expect(foreignDocument.rows[0]!.count).toBe(0);
+    const emptyTemplate = await seedTemplate();
+    await sql`update erp.templates set parameters = null where id = ${emptyTemplate.template}::uuid`.execute(privileged());
+    const emptyVersion = await publishTemplate(setup.context, emptyTemplate.template);
+    const emptyInput = { ...input, document: { ...input.document, title: `template-empty-${crypto.randomUUID()}` }, content: { ...input.content,
+      blocks: [{ definitionKey: "TemplateBlock", values: { version: emptyVersion, parameters: {} } }] } };
+    expect((await setup.handlers.createDocument!(emptyInput, setup.context)).value).toHaveProperty("id");
   });
 
   test("a document editor edits document blocks only through the variant, never template blocks", async () => {

@@ -13,6 +13,48 @@ export type ExtensionRegistry = {
   indexProjections: Record<string, OsfTypeIndexProjection>;
   /** Target entity -> the extensible entities whose tenant reference fields may point at it. */
   referencedBy: Record<string, Array<{ sourceEntity: string; valuesTable: string }>>;
+  /**
+   * Who may read each entity a tenant lookup or rollup can reach — every
+   * extensible entity, every reference target and every entity across an
+   * authored relation of an extensible one — from its compiled authorization
+   * contract. The runtime proves from this that a lookup or rollup shows no
+   * reader of the source anything the target would hide from them; an entity
+   * missing here is never a lookup or rollup target.
+   */
+  readAccess: Record<string, ExtensionReadAccess>;
+};
+
+export type ExtensionReadAccess = {
+  /** `schema.table` of the entity. */
+  table: string;
+  /** The roles that may read it (its `read` roles). */
+  roles: string[];
+  /** The principal classes its reads admit; absent means every class. */
+  principalClasses?: string[];
+  /**
+   * Set when its rows are visible to fewer than all its readers: the axis
+   * that narrows them (`rowScope`, `ownerAxis`, `recordPermissions`, `rowAccess`
+   * for an owner or group axis, `profileAuthorizations`). Absent means every
+   * reader sees every row of the tenant.
+   */
+  rowPolicy?: string;
+  /** Fields with read roles of their own (`fieldAuthorizations`), by field key. */
+  fieldReadRoles?: Record<string, string[]>;
+};
+
+/** An authored single relation or inverse collection of an extensible entity. */
+export type ExtensionRegistryRelation = {
+  /** The relation's field key: the reference on the entity, or the inverse collection. */
+  key: string;
+  /** `belongsTo`: the entity holds `foreignKey`; `hasMany`: the related entity holds it. */
+  kind: "belongsTo" | "hasMany";
+  entity: string;
+  /** `schema.table` of the related entity. */
+  table: string;
+  foreignKey: string;
+  ownership?: "owned" | "reference";
+  /** The collection's children are authorized through this entity. */
+  childAuthorization?: "owner";
 };
 
 export type ExtensionRegistryEntity = {
@@ -28,6 +70,8 @@ export type ExtensionRegistryEntity = {
   targets: Array<{ entity: string; table: string }>;
   /** Owned children of which a record has at most one; a formula may read their fields. */
   ownedSingleChildren: Array<{ relation: string; entity: string; table: string; foreignKey: string }>;
+  /** Authored relations a tenant lookup may follow (`belongsTo`) or a rollup aggregate (`hasMany`). */
+  relations: ExtensionRegistryRelation[];
 };
 
 export type { ExtensionIndexColumn };

@@ -18,6 +18,7 @@ import { projectGraphqlOperation } from "../../graphql/operation-error.js";
 import type { DerivedToolsCatalogEntry } from "../../mcp/derived-tools.js";
 import { toHttpError } from "../../rest/http-error.js";
 import { getGeneratedCrudTables } from "./catalog.js";
+import { EXTENSION_GRAPH_TABLES } from "./extensions/__tests__/graph-tables.js";
 import { createCollectionMutationExecutor, type CollectionMutationBinding } from "./collection-mutations.js";
 import { assertPublishableRelatedMutationInTransaction } from "./derived-execution-guards.js";
 import { mergeGeneratedEntityObjectForTable, updateGeneratedEntityForTable } from "./mutations.js";
@@ -281,6 +282,7 @@ const fails = (promise: Promise<unknown>, code: string) =>
       create table erp.alt_bindings(
         id uuid primary key, tenant_id uuid not null, parent uuid not null,
         operation_id uuid not null, sort_order integer not null, unique(tenant_id,id));
+      ${sql.raw(EXTENSION_GRAPH_TABLES)}
       create table platform.entity_events(
         id uuid primary key default gen_random_uuid(), tenant_id uuid not null,
         aggregate_type text not null, aggregate_id text not null, event_type text not null, payload jsonb,

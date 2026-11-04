@@ -67,7 +67,7 @@ export function carriesExtensionValues(table: GeneratedCrudTable): boolean {
 
 type DefinitionRow = {
   id: string; field_id: string; key: string; version: number; kind: ExtensionKind;
-  definition: Record<string, unknown>; applies_when: unknown; state: ExtensionState; position: number;
+  definition: Record<string, unknown>; applies_when: unknown; state: ExtensionState; position: number; suspended_reason: string | null;
 };
 
 const CACHE_LIMIT = 2048;
@@ -103,6 +103,7 @@ function toSet(entity: string, entry: RuntimeExtensibleEntity, hash: string, row
     .map((row) => Object.freeze({
       rowId: row.id, fieldId: row.field_id, key: row.key, version: Number(row.version), kind: row.kind,
       definition: row.definition, appliesWhen: row.applies_when ?? null, state: row.state, position: Number(row.position),
+      ...(row.suspended_reason ? { suspendedReason: row.suspended_reason } : {}),
     }))
     .sort((left, right) => left.position - right.position || left.key.localeCompare(right.key));
   const live = fields.filter((field) => field.state !== "deleted");
@@ -116,7 +117,7 @@ function toSet(entity: string, entry: RuntimeExtensibleEntity, hash: string, row
 /** The hash of the current versions; cheap enough to prove on every request. */
 async function currentHash(trx: Transaction<DB>, tenantId: string, entity: string): Promise<string> {
   const result = await sql<{ hash: string | null }>`
-    select md5(string_agg(id::text || ':' || state || ':' || position::text, ',' order by id)) as hash
+    select md5(string_agg(id::text || ':' || state || ':' || position::text || ':' || coalesce(suspended_reason, ''), ',' order by id)) as hash
     from platform.extension_field_definitions
     where tenant_id = ${tenantId}::uuid and entity = ${entity} and is_current
   `.execute(trx);
@@ -155,7 +156,7 @@ export async function loadExtensionFieldsFor(
   const cached = cache.get(`${scopeKey(tenantId!, entity)}:${hash}`);
   if (cached && cached.entry === entry) return bind(trx, tenantId!, cached);
   const rows = await sql<DefinitionRow>`
-    select id, field_id, key, version, kind, definition, applies_when, state, position
+    select id, field_id, key, version, kind, definition, applies_when, state, position, suspended_reason
     from platform.extension_field_definitions
     where tenant_id = ${tenantId}::uuid and entity = ${entity} and is_current
   `.execute(trx);
@@ -218,18 +219,21 @@ export async function insertFieldVersion(
   trx: Transaction<DB>,
   session: DbSessionInput,
   entity: string,
-  field: { fieldId: string; key: string; version: number; kind: ExtensionKind; definition: ExtensionDefinition; appliesWhen: unknown; state: ExtensionState; position: number },
+  field: { fieldId: string; key: string; version: number; kind: ExtensionKind; definition: ExtensionDefinition; appliesWhen: unknown; state: ExtensionState; position: number; suspendedReason?: string },
 ): Promise<ExtensionField> {
+  // A deprecation keeps why the field was suspended; every other new version starts clean.
+  const suspendedReason = field.state === "deprecated" || field.state === "suspended" ? field.suspendedReason : undefined;
   await sql`update platform.extension_field_definitions set is_current = false
     where tenant_id = ${session.tenantId}::uuid and field_id = ${field.fieldId}::uuid and is_current`.execute(trx);
   const id = randomUUID();
   await sql`insert into platform.extension_field_definitions
-      (tenant_id, id, field_id, entity, key, version, kind, definition, applies_when, state, position, is_current, created_at, created_by)
+      (tenant_id, id, field_id, entity, key, version, kind, definition, applies_when, state, position, is_current, created_at, created_by, suspended_reason)
     values (${session.tenantId}::uuid, ${id}::uuid, ${field.fieldId}::uuid, ${entity}, ${field.key}, ${field.version}, ${field.kind},
       ${jsonbLiteral(field.definition)}, ${field.appliesWhen === null ? null : jsonbLiteral(field.appliesWhen)}, ${field.state}, ${field.position}, true,
-      now(), ${session.userId ?? null}::uuid)`.execute(trx);
+      now(), ${session.userId ?? null}::uuid, ${suspendedReason ?? null})`.execute(trx);
   forgetExtensionFields(trx, session.tenantId!, entity);
   await announceFieldDefinitionChange(trx, session.tenantId!, entity, field.fieldId,
     field.version === 1 ? "created" : field.state === "deleted" ? "deleted" : "updated");
-  return { rowId: id, ...field };
+  const { suspendedReason: _previous, ...current } = field;
+  return { rowId: id, ...current, ...(suspendedReason ? { suspendedReason } : {}) };
 }

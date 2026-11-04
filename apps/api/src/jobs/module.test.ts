@@ -10,6 +10,7 @@
  * That regression is what this file exists to catch.
  */
 import { EXTENSION_BACKFILL_KIND, EXTENSION_RETENTION_KIND } from "../operations/entity/extensions/backfill.js";
+import { EXTENSION_RECOMPUTE_KIND, EXTENSION_REVALIDATE_KIND } from "../operations/entity/extensions/linked.js";
 import { expect, test } from "bun:test";
 import { MAIL_DELIVER_KIND } from "./mail/deliver.js";
 import { INBOUND_DISPATCH_KIND } from "./inbound/kind.js";
@@ -31,7 +32,7 @@ function worker(env: NodeJS.ProcessEnv) {
 test("both job kinds are registered whatever the host can authorize", () => {
   for (const env of [{}, configured]) {
     const { module } = worker(env);
-    expect(Object.keys(module.jobHandlers ?? {}).sort()).toEqual([INBOUND_DISPATCH_KIND, MAIL_DELIVER_KIND, EXTENSION_BACKFILL_KIND, EXTENSION_RETENTION_KIND].sort());
+    expect(Object.keys(module.jobHandlers ?? {}).sort()).toEqual([INBOUND_DISPATCH_KIND, MAIL_DELIVER_KIND, EXTENSION_BACKFILL_KIND, EXTENSION_RETENTION_KIND, EXTENSION_RECOMPUTE_KIND, EXTENSION_REVALIDATE_KIND].sort());
   }
 });
 

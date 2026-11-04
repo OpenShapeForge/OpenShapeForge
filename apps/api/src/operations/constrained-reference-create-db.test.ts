@@ -8,6 +8,7 @@ import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js
 import { applyAppHelpersMigration } from "../db/migrations/app-helpers.js";
 import { withDbSession } from "../db/session.js";
 import { getGeneratedCrudTables } from "./entity/catalog.js";
+import { EXTENSION_GRAPH_TABLES } from "./entity/extensions/__tests__/graph-tables.js";
 import { createGeneratedEntityForTable } from "./entity/mutations.js";
 import { listGeneratedEntitiesForTable } from "./entity/queries.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "./entity/types.js";
@@ -77,6 +78,7 @@ suite("atomic constrained reference creation against PostgreSQL", () => {
         check(relation_group_id = '${allowedGroup}'::uuid), unique(tenant_id,id), foreign key(tenant_id,relation_id) references erp.relations(tenant_id,id));
       create table erp.deals(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, relation_id uuid not null,
         unique(tenant_id,id), foreign key(tenant_id,relation_id) references erp.relations(tenant_id,id));
+      ${EXTENSION_GRAPH_TABLES}
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null, aggregate_type text not null,
         aggregate_id text not null, event_type text not null, payload jsonb, sequence bigint generated always as identity, occurred_at timestamptz not null);
       alter table erp.relations enable row level security; alter table erp.relations force row level security;

@@ -229,7 +229,7 @@ describe("extensible entity review findings", () => {
     expect((await get(t.reader, record.id))!.extensions).toEqual({ tint: "rood" });
   });
 
-  test("S7 the worker holds no MAINTAIN and only the definition columns a backfill changes", async () => {
+  test("S7 the worker holds no MAINTAIN, only the definition columns a backfill changes and reads the graph", async () => {
     const worker = "openshapeforge_worker";
     const [rights] = await privileged(sql<Record<string, boolean>>`select
       has_table_privilege(${worker}, ${VALUES_TABLE}, 'INSERT') as values_dml,
@@ -238,7 +238,8 @@ describe("extensible entity review findings", () => {
       has_table_privilege(${worker}, 'platform.extension_field_definitions', 'DELETE') as definitions_delete,
       has_column_privilege(${worker}, 'platform.extension_field_definitions', 'state', 'UPDATE') as definitions_state,
       has_column_privilege(${worker}, 'platform.extension_field_definitions', 'definition', 'UPDATE') as definitions_definition,
-      has_table_privilege(${worker}, 'platform.extension_field_dependencies', 'SELECT,INSERT,UPDATE,DELETE') as dependencies_any,
+      has_table_privilege(${worker}, 'platform.extension_field_dependencies', 'SELECT') as dependencies_select,
+      has_table_privilege(${worker}, 'platform.extension_field_dependencies', 'INSERT,UPDATE,DELETE') as dependencies_write,
       has_column_privilege(${worker}, 'erp.extensible_assets', 'name', 'UPDATE') as entity_name`);
     const maintain = {
       values_maintain: await holdsMaintain(fixture.privileged.db, worker, VALUES_TABLE),
@@ -247,7 +248,8 @@ describe("extensible entity review findings", () => {
     expect({ ...maintain, ...rights } as Record<string, boolean>).toEqual({
       values_maintain: false, entity_maintain: false, values_dml: true, unique_dml: true,
       definitions_select: true, definitions_delete: false, definitions_state: true, definitions_definition: false,
-      dependencies_any: false, entity_name: false,
+      // The worker reads the graph to carry a recompute on; only the definition Operations write it.
+      dependencies_select: true, dependencies_write: false, entity_name: false,
     });
   });
 

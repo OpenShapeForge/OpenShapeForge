@@ -1,0 +1,54 @@
+# Test fixture — records that point at an extensible asset but are read by a
+# role of their own (`Test.Bookings.Read`), which a reader of the asset need
+# not hold: a tenant rollup over `bookings` would show booking data to every
+# asset reader, so the definition is refused with the role that makes the
+# difference. Only in the test composition. Read-only: nothing writes one.
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ExtensibleAssetBooking
+title: Extensible asset booking
+description: A booking of an extensible test asset.
+language: en
+displayTemplate: "{{hours}}"
+labels: { en: Asset booking, nl: Objectboeking }
+pluralLabels: { en: Asset bookings, nl: Objectboekingen }
+domains: [relations]
+authorization:
+  roles:
+    read: [Test.Bookings.Read]
+    create: [Test.Bookings.Read]
+    update: [Test.Bookings.Read]
+    delete: [Test.Bookings.Read]
+fields:
+  - key: asset
+    osfType: ExtensibleAsset
+    required: true
+    relationship:
+      ownership: reference
+      inverse:
+        key: bookings
+        label: { en: Bookings, nl: Boekingen }
+  - key: hours
+    osfType: number
+    label: { en: Hours, nl: Uren }
+    persisted: { column: hours, storageClass: core }
+operations:
+  list:
+    name: List asset bookings
+    description: Read accessible asset bookings.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read asset booking
+    description: Read one accessible asset booking.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }

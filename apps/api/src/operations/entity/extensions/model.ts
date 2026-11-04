@@ -29,9 +29,27 @@ export type ExtensionField = {
   readonly appliesWhen: unknown;
   readonly state: ExtensionState;
   readonly position: number;
+  /** Why the field is suspended, when it is or was before a deprecation: a lost proof redacts its values. */
+  readonly suspendedReason?: string;
 };
 
-/** The current definitions of one (tenant, entity), loaded under its hash. */
+/**
+ * The reason a lookup or rollup is suspended when the authorization proof it
+ * was saved under no longer holds, and the reason of everything that reads
+ * it. Its stored values are target data a reader may no longer see, so the
+ * read projection redacts them (read.ts); every other reason keeps them.
+ */
+export const AUTHORIZATION_PROOF_LOST = "AUTHORIZATION_PROOF_LOST";
+
+/** Whether a field's stored values are redacted from readers: its proof is lost, whatever state it is in now. */
+export function proofLost(field: Pick<ExtensionField, "state" | "suspendedReason">): boolean {
+  return field.suspendedReason === AUTHORIZATION_PROOF_LOST && (field.state === "suspended" || field.state === "deprecated");
+}
+
+/** The reason of a field that reads a suspended one: a lost proof is inherited, anything else stays a reason to keep the value. */
+export function inheritedSuspension(input: Pick<ExtensionField, "suspendedReason">): string {
+  return input.suspendedReason === AUTHORIZATION_PROOF_LOST ? AUTHORIZATION_PROOF_LOST : "DEPENDENCY_SUSPENDED";
+}
 export type ExtensionFieldSet = {
   readonly entity: string;
   readonly entry: RuntimeExtensibleEntity;
@@ -87,6 +105,49 @@ export function fieldMeta(source: Readonly<Record<string, unknown>>, fieldId: st
 export function fieldChanged(field: Pick<ExtensionField, "fieldId" | "kind">, before: Readonly<Record<string, unknown>>, after: Readonly<Record<string, unknown>>): boolean {
   return !isDeepStrictEqual(before[field.fieldId], after[field.fieldId]) ||
     (field.kind !== "stored" && !isDeepStrictEqual(fieldMeta(before, field.fieldId), fieldMeta(after, field.fieldId)));
+}
+
+/** The aggregates a rollup computes over its collection. */
+export const ROLLUP_AGGREGATES = ["sum", "count", "countAll", "min", "max", "avg", "arrayUnique"] as const;
+export type RollupAggregate = typeof ROLLUP_AGGREGATES[number];
+/** The result types of a computed field, one per typed index column (as `@openshapeforge/formula` types them). */
+export const COMPUTED_RESULT_TYPES = ["text", "number", "boolean", "date", "timestamp"] as const;
+export type ComputedResultType = typeof COMPUTED_RESULT_TYPES[number];
+
+/**
+ * A lookup as it is stored: `via` and `field` name a tenant field as
+ * `extensions.<fieldId>` and an authored field or relation by its key.
+ */
+export type StoredLookup = { via: string; field: string; resultType: ComputedResultType };
+/**
+ * A rollup as it is stored: `collection` is an authored inverse relation by
+ * key or `<Entity>.extensions.<fieldId>` (the records of another entity whose
+ * tenant reference names this one); `of` and the paths of `where` name the
+ * child's fields as `via` and `field` do.
+ */
+export type StoredRollup = { collection: string; aggregate: RollupAggregate; of?: string; where?: unknown; resultType: ComputedResultType };
+
+const resultTyped = (value: unknown): value is { resultType: ComputedResultType } =>
+  record(value) && (COMPUTED_RESULT_TYPES as readonly string[]).includes(String(value.resultType));
+
+export function storedLookup(definition: ExtensionDefinition): StoredLookup | undefined {
+  const lookup = definition.lookup;
+  return resultTyped(lookup) && typeof (lookup as Record<string, unknown>).via === "string" &&
+    typeof (lookup as Record<string, unknown>).field === "string" ? lookup as unknown as StoredLookup : undefined;
+}
+
+export function storedRollup(definition: ExtensionDefinition): StoredRollup | undefined {
+  const rollup = definition.rollup;
+  return resultTyped(rollup) && typeof (rollup as Record<string, unknown>).collection === "string" &&
+    (ROLLUP_AGGREGATES as readonly string[]).includes(String((rollup as Record<string, unknown>).aggregate))
+    ? rollup as unknown as StoredRollup : undefined;
+}
+
+/** The result type of a lookup or rollup, as it was fixed when its definition was saved. */
+export function linkedResultType(field: Pick<ExtensionField, "kind" | "definition">): ComputedResultType | undefined {
+  if (field.kind === "lookup") return storedLookup(field.definition)?.resultType;
+  if (field.kind === "rollup") return storedRollup(field.definition)?.resultType;
+  return undefined;
 }
 
 export function isCollection(definition: ExtensionDefinition): boolean {

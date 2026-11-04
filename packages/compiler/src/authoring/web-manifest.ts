@@ -2215,7 +2215,7 @@ function withCustomFields(
         limits: { ...extensible.limits },
         allowedOsfTypes: [...extensible.allowedOsfTypes],
         targets: extensible.targets.map((target) => target.entity),
-        kinds: ["stored", "formula"],
+        kinds: ["stored", "formula", "lookup", "rollup"],
       };
     }
     if (registry.referencedBy[entity.entityId]?.length) entity.referencedByPath = referencedByPath(contract);

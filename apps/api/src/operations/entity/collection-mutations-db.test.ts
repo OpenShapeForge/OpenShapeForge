@@ -11,6 +11,7 @@ import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { createEntityValueRegistry } from "../../modules/entity-value-registry.js";
 import rawCatalog from "../../generated/operations/catalog.json" with { type: "json" };
 import { getGeneratedCrudTables, projectGeneratedEntityRow, projectRows } from "./catalog.js";
+import { EXTENSION_GRAPH_TABLES } from "./extensions/__tests__/graph-tables.js";
 import { createGeneratedEntityForTable, updateGeneratedEntityForTable } from "./mutations.js";
 import { serializeEntityRow } from "./serialize-result.js";
 import { listGeneratedEntitiesForTable } from "./queries.js";
@@ -168,6 +169,7 @@ test("generic CRUD remains fail-closed for collection arrays, child reparenting 
         check(definition_key<>'Text' or payload - array['caption']::text[] = '{}'::jsonb),
         unique(tenant_id,id), foreign key(tenant_id,parent_id) references erp.template_variants(tenant_id,id));
       create index blocks_parent on erp.blocks(tenant_id,parent_id,parent_id_position);
+      ${sql.raw(EXTENSION_GRAPH_TABLES)}
       create table platform.entity_events(id uuid primary key default gen_random_uuid(), tenant_id uuid not null,
         aggregate_type text not null, aggregate_id text not null, event_type text not null, payload jsonb,
         sequence bigint generated always as identity, occurred_at timestamptz not null);

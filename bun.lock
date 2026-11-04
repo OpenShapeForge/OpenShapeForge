@@ -183,7 +183,7 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.2.38",
+      "version": "0.2.39",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },
@@ -277,7 +277,7 @@
     },
     "packages/plugin-runtime": {
       "name": "@openshapeforge/plugin-runtime",
-      "version": "0.1.26",
+      "version": "0.1.27",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "fastify": "^5.8.2",

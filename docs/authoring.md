@@ -745,6 +745,182 @@ result type, only of a `ready` formula; an `updating`, `suspended` or
 deprecated one freezes as `{ unavailable: "<state>" }`, and a record's error
 code as `{ error: "<code>" }`.
 
+### Lookups and rollups
+
+A tenant field of `kind: "lookup"` or `kind: "rollup"` reads other records. The
+value is computed by the engine, stored in the source and the typed index like
+a formula's, and read-only on every transport. The server sets `osfType`.
+
+```jsonc
+// A lookup: one field of the record a single reference points at.
+{ "key": "placeName", "kind": "lookup", "definition": {
+  "label": { "en": "Place" }, "classification": { "sensitivity": "public" },
+  "lookup": { "via": "extensions.place", "field": "name" } } }
+
+// A rollup: an aggregate over a collection.
+{ "key": "partQuantity", "kind": "rollup", "definition": {
+  "label": { "en": "Quantity" }, "classification": { "sensitivity": "public" },
+  "rollup": { "collection": "parts", "aggregate": "sum", "of": "quantity",
+    "where": { "kind": "rule", "operator": "greaterThan",
+      "left": { "kind": "path", "path": "quantity" }, "right": { "kind": "literal", "value": 2 } } } } }
+```
+
+- `via` is a tenant reference field (`extensions.<key>`, single, not
+  classified) or an authored single relation by its field key, whose foreign
+  key is neither classified nor has read roles of its own. A collection's
+  foreign key is under the same rule: what a relation points at would show
+  through the value.
+- `field`, `of` and the paths of `where` name an authored field or
+  `extensions.<key>` of the target. A tenant field may itself be a formula,
+  lookup or rollup. Fields a formula may not read (classified, references,
+  platform-kept columns) are out of reach here too.
+- `collection` is an authored inverse relation by its key, or
+  `<Entity>.extensions.<key>`: the records of another extensible entity whose
+  single tenant reference names this record.
+- `aggregate` is `sum`, `avg` (numbers), `min`, `max` (numbers, dates and
+  timestamps), `count` (records with a value in `of`, every record without
+  `of`), `countAll` (every record) or `arrayUnique` (the distinct values of
+  `of`, sorted, as text). `where` is a `condition` over the child's fields,
+  the subset `appliesWhen` takes. An empty collection sums and counts to 0; its
+  `avg`, `min` and `max` are blank. Blank values do not count.
+- A rollup is one SQL aggregate over the child's columns and the typed index,
+  under a lock on the parent; it never reads the collection into memory. So
+  `of` and `where` must say something SQL can: a single value of a scalar type,
+  and for `where` a literal of the field's type (`contains` on text only, no
+  order on a boolean). A tenant field whose default depends on `appliesWhen`
+  cannot be read, because the index does not hold that condition. The definition
+  is refused with the reason, and such a default cannot be added to a field a
+  rollup reads.
+- A text result is bounded as a formula's is, at 1,000 characters and 2,000
+  bytes of UTF-8, for a lookup and for `arrayUnique`. Beyond that the record
+  holds the error code `textTooLong`; the write that caused it never fails.
+- The result type follows the target field or the aggregate, and is fixed when
+  the definition is saved. A lookup returns a text, number, boolean, date or
+  timestamp. A lookup or rollup takes no `appliesWhen` and none of `unique`,
+  `required`, `defaultValue`, `options`, `cardinality`, `onDelete`,
+  `validation`, `retention` or `unit`.
+
+**Authorization proof.** A computed value is written with the rights of the
+writer or the worker, never the reader's, so a definition is saved only when
+the target is provably not authorized more narrowly than the source. The
+manifest's `extensionRegistry.readAccess` carries, for every entity a lookup or
+rollup can reach, the read roles, the principal classes, the axis that narrows
+its rows and the fields with read roles of their own. For every link:
+
+- every role that reads the source also reads the target and the target field
+  (an owned collection with `childAuthorization: owner` is read through its
+  owner, so its roles need not repeat the owner's);
+- every principal class the source admits, the target admits;
+- the target's rows are narrowed by no axis: no row scope, owner axis, record
+  ACL or per-profile read roles. Plain `rowAccess: { enabled: true, empty:
+  public }` narrows nothing;
+- the target field is not classified and has no read roles of its own that
+  leave out a role of the source;
+- no authorization profile of the tenant manages the reads of the target or of
+  the source (`AuthorizationOperationPolicy`,
+  [authorization-profiles.md](authorization-profiles.md)). Managed access is per
+  tenant and per subject, so it cannot be compared with the other side's and
+  always counts as narrower: a subject granted the source by a profile alone
+  would read target data. A managed subtype counts for its base entity;
+- a target field that is itself computed is `ready` or `updating`, and was
+  proven link by link when it was saved.
+
+Otherwise the definition is refused (`FORBIDDEN`) with the role that makes the
+difference: "ExtensibleAssetBooking is readable for Test.Bookings.Read,
+ExtensibleAsset also for General.All.Read; that role would see
+ExtensibleAssetBooking values it may not read." There is no fallback to another
+kind of field.
+
+**Revalidation.** Authorization is a compile-time contract, so every run of the
+migration chain proves all lookups and rollups again against the manifest it
+installs, and every generic write of the authorization profile model proves
+those of its tenant again. A database trigger on that model places the same
+proof as an `extensions.revalidate` job, so a custom Operation or direct SQL
+reaches it too. A tenant whose revalidation fails in a migration does not stop
+it: its lookups and rollups are suspended, fail closed, and the migration report
+names the tenant under `linkedFieldsFailedTenants`, beside
+`linkedFieldsSuspended`.
+
+A definition whose proof no longer holds or that no longer resolves becomes
+`suspended`, with `AUTHORIZATION_PROOF_LOST`, and suspension follows the whole
+graph: every formula, lookup and rollup that reads it, on any entity, goes with
+it. Its stored value is target data a reader may no longer see, so a reader gets
+`null` with `extensionsMeta.<key>.suspended: true`; a filter or sort on it is
+refused, a snapshot freezes `{ unavailable: "suspended" }` and nothing
+recomputes it. The value stays in the source. Any other reason to suspend a
+field, such as a backfill that failed, keeps the last known value, and so do the
+fields that read it. The reason is in `backfill.error` of its
+`FieldDefinitionRecord`, and an event of `<Entity>FieldDefinition` announces it.
+Its designer decides: saving it again proves it again and recomputes every
+record, or deprecate and delete it. `rebuildIndex` is no way back from a lost
+proof, and a formula cannot be saved to read a field that lost its proof.
+
+**The graph.** Each definition keeps its dependencies in
+`platform.extension_field_dependencies`, with the reference or collection it
+reads through. Cycles and `limits.formulaDepth` are checked over the tenant's
+whole chain, formulas, lookups and rollups across entities alike, against each
+entity's own limit. A field a lookup or rollup reads cannot be deprecated or
+deleted while that reader exists; the refusal names it as `<Entity>.<key>`.
+Definition changes of one tenant run one at a time.
+
+**Recomputation.** A write of a record finds what reads it through the graph,
+under an audited tenant bypass, so row policies of the writer do not leave a
+record behind. A rollup is recomputed on the record's old and new parent, on
+create, update, a move and delete. A lookup is recomputed on the records that
+refer to the record. Formulas over either follow, and the recompute carries on
+along the chain. A record's lookup is computed in its own write when its
+reference changes. A write through a subtype counts as a write of its base.
+
+All of that happens in the transaction of the write, up to one budget for the
+whole transaction: `limits.syncFanOut` records, along every chain and on every
+path, the delete of a target and the `setNull` of its references included.
+Beyond it, the write leaves one row per (field, record) in
+`platform.extension_field_recomputes`; further writes of that record coalesce on
+it, and the `extensions.recompute` job drains it in batches of 200 after a
+debounce of one second. A pass over the referring records runs to its end
+whatever is written meanwhile, and a new pass then settles the latest
+generation. A job that fails is retried; a row left without a live job gets a
+new one at the next write of the record, and otherwise from the worker's
+periodic sweep. A recompute leaves a published head published: only a change of
+the record itself puts it back to draft.
+
+Before its first row write, a write locks what it will recompute, in one order
+(table, then id) and at once at the strength it needs: `for key share` for a
+reference target, `for share` for a lookup's target, `for no key update` for a
+record to recompute. Writers under one parent take turns; they do not deadlock.
+
+A change of a field's `defaultValue`, `appliesWhen` or formula starts a backfill
+for every lookup and rollup that reads it, on any entity. A formula typed again
+along such a change is refused while a lookup or rollup reads it, with the name.
+
+**Writes behind the runtime.** Only writes through the runtime's Operations
+reach the recompute. A plugin that writes an authored column with raw SQL, as
+`writtenBy` allows, leaves the lookups and rollups over that column as they were.
+`<Entity>.fieldDefinitions.rebuildIndex` computes them again from what they read
+and settles their open journal rows, for one field or all fields of the entity;
+a rebuild of a field also starts the lookups and rollups that read it.
+
+**Stale values.** Until the journal row is gone, the records it covers keep the
+last known value in source and index, so a filter on it is briefly behind: that
+is the price of materializing. Readers see `extensionsMeta.<key>.stale: true`,
+also on a formula over the lookup, derived from the open journal rows in one
+query per page and never stored per record. Staleness does not cross entities:
+a field that reads a stale value on another record is not marked. Each record
+the worker recomputes emits the usual realtime `updated` event, so a screen
+refreshes when its value lands.
+
+**Deleting a target.** A tenant reference's `onDelete` decides: `restrict`
+refuses while a record points at the target, `setNull` clears the reference, the
+lookups through it and every rollup over them, through the existing deletion
+guard. An authored relation follows its foreign key; the lookups on records that
+remain are recomputed. Deleting a child recomputes the rollup of its parent.
+
+**Snapshots.** A snapshot freezes a lookup or rollup as it does a formula: the
+value with its definition (`kind`, `lookup` or `rollup`) only while the field is
+`ready`, `{ unavailable: "<state>" }` otherwise, `{ unavailable: "stale" }` while
+the journal still has to bring it up to date, and `{ error: "<code>" }` for a
+record in error (`textTooLong` from a lookup or `arrayUnique`).
+
 A collection may also be presented as a tree:
 `interfaces.web.views.collection.tree: { children, label, count }`, where
 `children` is a collection relationship of the entity and `label` and `count`

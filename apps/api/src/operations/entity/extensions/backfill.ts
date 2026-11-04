@@ -38,6 +38,7 @@ import { enqueueJob } from "../../../jobs/store.js";
 import { actorSessionOf, type JobActorCredential, type JobActorSession } from "../../../jobs/actor-session.js";
 import type { ModuleJobHandler } from "../../../modules/contract.js";
 import { getGeneratedCrudTables } from "../catalog.js";
+import { sqlstateOf } from "../transition-lock-retry.js";
 import type { GeneratedCrudTable } from "../types.js";
 import {
   EXTENSION_META_KEY,
@@ -56,11 +57,16 @@ import { formulaGraph } from "./formulas.js";
 import { announceFieldDefinitionChange, forgetExtensionFields, insertFieldVersion, loadExtensionFieldsFor } from "./store.js";
 import { qualifiedTable, recomputeRecordFormulas, rewriteExtensionValues } from "./write.js";
 import { storedExtensionSource } from "./read.js";
+import { enqueueRevalidation } from "./linked.js";
 
 export const EXTENSION_BACKFILL_KIND = "extensions.backfill";
 export const EXTENSION_RETENTION_KIND = "extensions.retention";
-export type BackfillOperation = "retype" | "delete" | "unique" | "rebuild" | "formula";
+export type BackfillOperation = "retype" | "delete" | "unique" | "rebuild" | "formula" | "lookup" | "rollup";
+/** A backfill that computes a field (and what reads it) on every record, rather than rewriting stored values. */
+const COMPUTING: ReadonlySet<BackfillOperation> = new Set(["formula", "lookup", "rollup"]);
 export const BACKFILL_BATCH_SIZE = 500;
+
+const isDeadlock = (error: unknown) => sqlstateOf(error) === "40P01";
 
 export type BackfillRow = {
   id: string; entity: string; field_id: string; definition_version: number; operation: BackfillOperation;
@@ -79,6 +85,12 @@ export function jobActorSession(session: DbSessionInput & { credential?: string;
     scope: session.scope ?? "tenant",
     ...(session.oauthScopes ? { oauthScopes: session.oauthScopes } : {}),
   });
+}
+
+/** The tenant session a queued run works under: what it enqueues further carries the same credential. */
+export function jobSession(tenantId: string, userId: string, actorSession: JobActorSession): DbSessionInput {
+  const { roles, groups, relationGroupIds, scope, credential, oauthScopes } = actorSession;
+  return { tenantId, userId, roles, groups, relationGroupIds, scope, credential, ...(oauthScopes ? { oauthScopes } : {}) } as DbSessionInput;
 }
 
 /** Run maintenance over every record of the session's tenant (see the module comment). */
@@ -118,7 +130,7 @@ export async function startBackfill(
   session: DbSessionInput,
   input: { entity: string; field: ExtensionField; operation: BackfillOperation },
 ): Promise<BackfillRow> {
-  const total = input.operation === "formula"
+  const total = COMPUTING.has(input.operation)
     ? await recordsOfTenant(trx, session, input.entity)
     : await recordsWithField(trx, session, input.entity, input.field.fieldId);
   const id = randomUUID();
@@ -273,18 +285,18 @@ export async function runBackfillBatch(
   // A retype, unique or formula backfill works for one version; a later
   // version (a deprecation, unique turned off again, another formula)
   // supersedes it.
-  if ((row!.operation === "retype" || row!.operation === "unique" || row!.operation === "formula") && field!.version !== Number(row!.definition_version)) {
+  if ((row!.operation === "retype" || row!.operation === "unique" || COMPUTING.has(row!.operation)) && field!.version !== Number(row!.definition_version)) {
     await failBackfill(trx, tenantId, row!, { code: "SUPERSEDED", message: `${field!.key} changed while this backfill ran.` });
     return { state: "failed", processed: row!.processed, cursor: row!.cursor, more: false };
   }
   const table = entityTable(row!.entity);
-  if (row!.operation === "formula") return runFormulaBatch(trx, session, { row: row!, set, field: field!, table, batchSize });
+  if (COMPUTING.has(row!.operation)) return runFormulaBatch(trx, session, { row: row!, set, field: field!, table, batchSize });
   return acrossTenant(trx, session, `tenant field ${row!.operation} backfill ${row!.id}`, async () => {
     const records = await sql<{ id: string; extension_values: unknown }>`
       select id, extension_values from ${qualifiedTable(entry!.table)}
       where tenant_id = ${tenantId}::uuid and extension_values ? ${field!.fieldId}
         ${row!.cursor ? sql`and id > ${row!.cursor}::uuid` : sql``}
-      order by id limit ${batchSize} for update`.execute(trx);
+      order by id limit ${batchSize} for no key update`.execute(trx);
     for (const record of records.rows) {
       const source = storedExtensionSource(record);
       switch (row!.operation) {
@@ -392,17 +404,21 @@ async function runFormulaBatch(
       await sql`release savepoint formula_backfill_batch`.execute(trx);
       await announceFieldDefinitionChange(trx, tenantId, row.entity, row.field_id, "updated");
       return { state: more ? "running" as const : "done" as const, processed, cursor, more };
-    } catch {
+    } catch (error) {
       // The reason stays out of the backfill row: a database message may
       // quote values of records the designer cannot read.
       await sql`rollback to savepoint formula_backfill_batch`.execute(trx);
-      await sql`update platform.extension_field_definitions set state = 'suspended'
+      // Another transaction was in the way, not this record: the job runs the batch again.
+      if (isDeadlock(error)) throw error;
+      await sql`update platform.extension_field_definitions set state = 'suspended', suspended_reason = 'FORMULA_BACKFILL_FAILED'
         where tenant_id = ${tenantId}::uuid and id = ${field.rowId}::uuid and state in ('updating', 'ready')`.execute(trx);
       forgetExtensionFields(trx, tenantId, row.entity);
       await failBackfill(trx, tenantId, row, {
         code: "FORMULA_BACKFILL_FAILED",
-        message: `${field.key} could not be computed for every record and is suspended; save the formula again or rebuild its index to resume.`,
+        message: `${field.key} could not be computed for every record and is suspended; save the ${field.kind} again or rebuild its index to resume.`,
       });
+      // What reads this field follows it (linked.ts `revalidateLinkedFields`).
+      await enqueueRevalidation(trx, session, `backfill:${row.id}`);
       return { state: "failed" as const, processed: row.processed, cursor: row.cursor, more: false };
     }
   });
@@ -415,15 +431,20 @@ export const extensionBackfillJobHandler: ModuleJobHandler = async (payload, con
   const job = await sql<{ actor_session: unknown }>`select actor_session from platform.jobs
     where tenant_id = ${context.job.tenantId}::uuid and id = ${context.job.id}::uuid`.execute(context.db);
   const actorSession = actorSessionOf(job.rows[0]?.actor_session as JobActorSession);
-  const session: DbSessionInput = {
-    tenantId: context.job.tenantId, userId: context.job.actorId,
-    roles: actorSession.roles, groups: actorSession.groups, scope: actorSession.scope,
-  };
-  const result = await runBackfillBatch(context.db, session, backfillId);
-  if (result.more) {
-    await enqueueBackfillRun(context.db, context.job.tenantId, context.job.actorId, actorSession, backfillId, result.cursor ?? `after-${result.processed}`);
+  const session = jobSession(context.job.tenantId, context.job.actorId, actorSession);
+  await sql`savepoint extension_backfill_batch`.execute(context.db);
+  try {
+    const result = await runBackfillBatch(context.db, session, backfillId);
+    if (result.more) {
+      await enqueueBackfillRun(context.db, context.job.tenantId, context.job.actorId, actorSession, backfillId, result.cursor ?? `after-${result.processed}`);
+    }
+    await sql`release savepoint extension_backfill_batch`.execute(context.db);
+    return { outcome: "done", result: { state: result.state, processed: result.processed } };
+  } catch (error) {
+    if (!isDeadlock(error)) throw error;
+    await sql`rollback to savepoint extension_backfill_batch`.execute(context.db);
+    return { outcome: "retry", error: { code: "40P01", message: "A backfill batch met a deadlock; it runs again." } };
   }
-  return { outcome: "done", result: { state: result.state, processed: result.processed } };
 };
 
 /**
@@ -455,7 +476,7 @@ export async function applyExtensionRetention(
       const expired = await sql<{ id: string; extension_values: unknown }>`select id, extension_values from ${qualifiedTable(entry!.table)}
         where tenant_id = ${session.tenantId}::uuid and extension_values ? ${field.fieldId}
           and ${sql.ref(clock)} < now() - make_interval(days => ${retention.days as number})
-        order by id for update`.execute(trx);
+        order by id for no key update`.execute(trx);
       for (const record of expired.rows) {
         const before = storedExtensionSource(record);
         const after = { ...before };

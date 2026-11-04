@@ -5,6 +5,7 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
 import type { RuntimeExtensionRegistry } from "@openshapeforge/plugin-runtime";
 import { extensionRegistry } from "../../operations/entity/extensions/registry.js";
 import { formulaColumns } from "../../operations/entity/extensions/formula-columns.js";
+import { narrowerReadAccess } from "../../operations/entity/extensions/read-access.js";
 import { draftRule } from "../../operations/entity/versioned-head.js";
 import type { GeneratedCrudTable } from "../../operations/entity/types.js";
 
@@ -377,17 +378,30 @@ export async function applyWorkerRoleGrants(db: OpenShapeForgeDatabase) {
  *     (`extension_values`, `updated_at`, and a versioned head's lifecycle
  *     column) — no other column of the entity;
  *   - on each owned single child a formula may read, SELECT of its id, tenant,
- *     foreign key and formula-readable columns — and no other business table;
+ *     foreign key and formula-readable columns;
+ *   - on each entity a proven lookup or rollup can read (a reference target
+ *     or an entity across an authored relation, not authorized more narrowly
+ *     than the source by the compiled contract, read-access.ts), SELECT of
+ *     its id, tenant, clocks, the foreign key of that relation and the columns
+ *     a computed field may read (formula-columns.ts) — and nothing else of it;
+ *     a classified or field-policed column never is. This rule reaches no
+ *     other business table; what the worker holds on a table that declares
+ *     `workerDml` itself (`erp.tasks`, `erp.comments`) comes from that
+ *     declaration, not from here;
  *   - on `platform.extension_field_definitions`, SELECT, INSERT (the version
- *     that turns unique off again after a duplicate) and UPDATE of `state`
- *     and `is_current` only;
- *   - on `platform.extension_field_backfills`, SELECT and UPDATE of its
+ *     that turns unique off again after a duplicate) and UPDATE of `state`,
+ *     `suspended_reason` and `is_current` only;
+ *   - on `platform.extension_field_backfills`, SELECT, INSERT (the failed entry
+ *     a revalidation leaves when it suspends a field) and UPDATE of its
  *     progress columns;
  *   - INSERT on `platform.system_bypass_audit`, the trail of the audited
  *     tenant bypass every batch runs under.
  *
- * Nothing on `platform.extension_field_dependencies`: the definition
- * Operations write it, the worker never reads it. No MAINTAIN anywhere: a
+ *   - SELECT on `platform.extension_field_dependencies`, to carry a recompute
+ *     on along the graph, and full DML on `platform.extension_field_recomputes`,
+ *     the recompute journal it drains.
+ *
+ * No MAINTAIN anywhere: a
  * finished backfill leaves the planner statistics to autovacuum's ANALYZE.
  * The job runs under the replayed session, so RLS still scopes it to the
  * tenant that started the change; the bypass inside lifts the row policies,
@@ -408,7 +422,10 @@ export function extensionWorkerGrants(
     const draft = table ? draftRule(table)?.column : undefined;
     const update = ["extension_values", "updated_at", ...(draft ? [draft] : [])].filter((column) => present.has(column));
     const readable = table ? formulaColumns(table).map((column) => column.name) : [];
-    const select = [...new Set(["id", "tenant_id", "created_at", ...update, ...readable])].filter((column) => present.has(column)).sort();
+    // A lookup follows the foreign key of an authored single relation, never a classified or field-policed one.
+    const references = entry.relations.filter((relation) => relation.kind === "belongsTo").map((relation) => relation.foreignKey)
+      .filter((name) => { const column = table?.columns.find((candidate) => candidate.name === name); return !column?.classification && !column?.fieldPolicy; });
+    const select = [...new Set(["id", "tenant_id", "created_at", ...update, ...readable, ...references])].filter((column) => present.has(column)).sort();
     return { table: entry.table, select, update };
   });
   const childGrants = new Map<string, Set<string>>();
@@ -423,13 +440,41 @@ export function extensionWorkerGrants(
     }
     childGrants.set(child.table, columns);
   }
+  // What a lookup or rollup reads on the entities it reaches. An entity no
+  // lookup or rollup of this source can be proven against stays out: the
+  // worker never needs it.
+  const sources = new Set(entities.map((entry) => entry.table));
+  for (const source of registry.entityNames()) {
+    const entry = registry.entity(source)!;
+    const reached = [
+      ...entry.targets.map((target) => ({ entity: target.entity, table: target.table, foreignKey: undefined as string | undefined, owned: false })),
+      ...entry.relations.map((relation) => ({ entity: relation.entity, table: relation.table,
+        foreignKey: relation.kind === "hasMany" ? relation.foreignKey : undefined,
+        owned: relation.ownership === "owned" && relation.childAuthorization === "owner" })),
+    ];
+    for (const { entity, table: name, foreignKey, owned } of reached) {
+      if (sources.has(name) || narrowerReadAccess(source, entity, registry.readAccess(source), registry.readAccess(entity), owned)) continue;
+      const [schema, tableName] = name.split(".");
+      const table = tables.find((candidate) => candidate.schema === schema && candidate.table === tableName);
+      if (!table) continue;
+      const present = new Set(table.columns.map((column) => column.name));
+      const columns = childGrants.get(name) ?? new Set<string>();
+      const link = table.columns.find((column) => column.name === foreignKey);
+      for (const column of ["id", "tenant_id", "created_at", ...(link && !link.classification && !link.fieldPolicy ? [link.name] : []), ...formulaColumns(table).map((item) => item.name)]) {
+        if (present.has(column)) columns.add(column);
+      }
+      childGrants.set(name, columns);
+    }
+  }
   const grants: ExtensionWorkerGrant[] = [
     ...[...new Set(entities.flatMap((entry) => [entry.valuesTable, entry.uniqueTable]))]
       .map((table): ExtensionWorkerGrant => ({ table, select: "all", insert: true, update: "all", delete: true })),
     ...sourceGrants,
     ...[...childGrants].map(([table, columns]): ExtensionWorkerGrant => ({ table, select: [...columns].sort() })),
-    { table: "platform.extension_field_definitions", select: "all", insert: true, update: ["state", "is_current"] },
-    { table: "platform.extension_field_backfills", select: "all", update: ["state", "processed", "cursor", "error", "updated_at"] },
+    { table: "platform.extension_field_definitions", select: "all", insert: true, update: ["state", "suspended_reason", "is_current"] },
+    { table: "platform.extension_field_backfills", select: "all", insert: true, update: ["state", "processed", "cursor", "error", "updated_at"] },
+    { table: "platform.extension_field_dependencies", select: "all" },
+    { table: "platform.extension_field_recomputes", select: "all", insert: true, update: "all", delete: true },
     { table: "platform.system_bypass_audit", select: [], insert: true },
   ];
   return grants.sort((left, right) => left.table.localeCompare(right.table));

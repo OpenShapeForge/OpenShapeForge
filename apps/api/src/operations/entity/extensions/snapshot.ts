@@ -13,7 +13,8 @@
  *     options (with their labels), cardinality, and the default when the
  *     value is one. A formula's result is frozen as the value it had, but
  *     only while its definition is `ready`: an `updating` or `suspended`
- *     formula may hold the value of another generation, so it freezes as
+ *     formula may hold the value of another generation, and a suspended one
+ *     data its reader may no longer see, so it freezes as
  *     `{ unavailable: "<state>" }`; a record whose formula gave an error code
  *     freezes `{ error: "<code>" }`, not the absence of a value. Its
  *     definition carries `kind: "formula"` and `formula: { text, resultType }`
@@ -31,9 +32,11 @@ import { evaluateCondition, extensionError, fieldMeta, isClassified, record, typ
 import { conditionValues, readValue, storedExtensionSource } from "./read.js";
 import { extensionRegistry } from "./registry.js";
 import { loadExtensionFieldsFor } from "./store.js";
+import { isLinkedKind, presentLinkedDefinition, proveExtensionStaleness, staleExtensionFields, tenantFieldNames } from "./linked.js";
 
-function frozenDefinition(set: ExtensionFieldSet, field: ExtensionField, usedDefault: boolean): Record<string, unknown> {
+function frozenDefinition(set: ExtensionFieldSet, field: ExtensionField, usedDefault: boolean, names: ReadonlyMap<string, { key: string }>): Record<string, unknown> {
   const definition = field.definition;
+  const linked = isLinkedKind(field.kind) ? presentLinkedDefinition(field, names)[field.kind] as Record<string, unknown> | undefined : undefined;
   const formula = field.kind === "formula" ? storedFormula(presentFormulaDefinition(set, field)) : undefined;
   const currency = (definition.render as { props?: { currency?: unknown } } | undefined)?.props?.currency ?? definition.currency;
   const options = record(definition.options) && definition.options.type === "static" && Array.isArray(definition.options.items)
@@ -46,12 +49,18 @@ function frozenDefinition(set: ExtensionFieldSet, field: ExtensionField, usedDef
     ...(definition.cardinality !== undefined ? { cardinality: definition.cardinality } : {}),
     ...(usedDefault ? { defaultValue: definition.defaultValue } : {}),
     ...(formula ? { kind: "formula", formula: { text: formula.text, resultType: formula.resultType } } : {}),
+    ...(linked ? { kind: field.kind, [field.kind]: linked } : {}),
   };
 }
 
-/** What a snapshot freezes of a formula (see the module comment). */
-function frozenFormula(field: ExtensionField, source: Readonly<Record<string, unknown>>): unknown {
+/**
+ * What a snapshot freezes of a computed field (see the module comment): a
+ * lookup or rollup the recompute journal still has to bring up to date
+ * freezes as `{ unavailable: "stale" }`, as a formula of another state does.
+ */
+function frozenFormula(field: ExtensionField, source: Readonly<Record<string, unknown>>, stale?: ReadonlySet<string>): unknown {
   if (field.state !== "ready") return { unavailable: field.state };
+  if (stale?.has(field.fieldId)) return { unavailable: "stale" };
   const error = fieldMeta(source, field.fieldId);
   if (record(error) && typeof error.error === "string") return { error: error.error };
   return source[field.fieldId] ?? null;
@@ -69,14 +78,17 @@ export async function extensionSnapshot(
   const set = await loadExtensionFieldsFor(trx, session, entity, entry!);
   const source = storedExtensionSource(row);
   const values = conditionValues(table!, row, set, source);
+  await proveExtensionStaleness(trx, session, set, [row]);
+  const stale = staleExtensionFields(entity, row.id);
+  const names = set.fields.some((field) => isLinkedKind(field.kind)) ? await tenantFieldNames(trx, session.tenantId!) : new Map<string, { key: string }>();
   const extensions: Record<string, unknown> = {};
   const extensionDefinitions: Record<string, Record<string, unknown>> = {};
   for (const field of set.fields) {
     if (field.state === "deleted" || isClassified(field.definition)) continue;
-    const value = field.kind === "formula" ? frozenFormula(field, source) : readValue(field, source, evaluateCondition(field.appliesWhen, values));
+    const value = field.kind !== "stored" ? frozenFormula(field, source, stale) : readValue(field, source, evaluateCondition(field.appliesWhen, values));
     if (value === null || value === undefined) continue;
     extensions[field.fieldId] = value;
-    extensionDefinitions[field.fieldId] = frozenDefinition(set, field, field.kind !== "formula" && !Object.hasOwn(source, field.fieldId));
+    extensionDefinitions[field.fieldId] = frozenDefinition(set, field, field.kind === "stored" && !Object.hasOwn(source, field.fieldId), names);
   }
   return { extensions, extensionDefinitions };
 }

@@ -7,8 +7,13 @@
 #
 # Managing the fields is its own role, never the entity's write role, so the
 # database tests can prove a writer cannot change the record's shape.
-# `ExtensibleAssetSpec` is its owned single child (what a formula may read)
-# and `ExtensibleAssetLocation` the reference target the tests point at.
+# `ExtensibleAssetSpec` is its owned single child (what a formula may read),
+# `ExtensibleAssetLocation` the reference target the tests point at,
+# `ExtensibleAssetPart` an owned collection a rollup may aggregate,
+# `ExtensibleAssetBooking` a collection another role reads (a rollup over it
+# is refused) and `ExtensibleAssetGroup` a second extensible entity, for
+# lookups and rollups across two entities. `syncFanOut` is small so a test
+# reaches the recompute journal with a handful of records.
 # Only in the test composition (test/fixtures/authoring/test-composition.yaml).
 schemaVersion: 3
 kind: coreEntity
@@ -30,7 +35,7 @@ authorization:
     delete: [General.All.ReadWrite]
 extensible:
   authorization: { manage: [Test.Fields.Manage] }
-  limits: { fields: 10, filtersPerQuery: 3 }
+  limits: { fields: 10, filtersPerQuery: 3, syncFanOut: 3 }
   excludedTypes: [iban]
 fields:
   - key: name

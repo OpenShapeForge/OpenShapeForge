@@ -113,7 +113,7 @@ describe("tenant fields on an extensible entity", () => {
     expect(await failure(define(writer, "create", { key: "x", definition: { osfType: "string", classification: { sensitivity: "public" } } })))
       .toMatchObject({ code: "FORBIDDEN" });
     expect(await failure(define(manager, "create", { key: "f", kind: "lookup", definition: { osfType: "number", classification: { sensitivity: "public" } } })))
-      .toMatchObject({ code: "NOT_AVAILABLE" });
+      .toMatchObject({ code: "VALIDATION", message: expect.stringContaining("lookup: { ... }") });
     expect(await failure(define(manager, "create", { key: "x", definition: { osfType: "string" } })))
       .toMatchObject({ code: "VALIDATION", message: expect.stringContaining("classification") });
     expect(await failure(define(manager, "create", { key: "x", definition: { osfType: "iban", classification: { sensitivity: "pii" } } })))

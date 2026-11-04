@@ -44,6 +44,7 @@ import { conditionValues, storedExtensionSource } from "./read.js";
 import { extensibleEntityOf, loadExtensionFields, loadExtensionFieldsFor, lockExtensionFields } from "./store.js";
 import { extensionRegistry } from "./registry.js";
 import { operationFailure } from "@openshapeforge/operations";
+import { computedLinked, computeLinkedValues, linkedReadersOf, lookupsThrough, ownLinkedFields, propagateRecordChange } from "./linked.js";
 
 /** `schema.table` → a quoted identifier pair. */
 export function qualifiedTable(name: string): RawBuilder<unknown> {
@@ -104,7 +105,7 @@ function refuse(violations: readonly Violation[]): never {
   });
 }
 
-/** A valid reference names a row the writer may read, locked against deletion. */
+/** A valid reference names a row the writer may read, kept from being deleted (`for key share`, the weakest lock that does). */
 async function assertReferencesReadable(
   trx: Transaction<DB>,
   session: DbSessionInput,
@@ -122,7 +123,7 @@ async function assertReferencesReadable(
   requireEntityOperation(target!, isGeneratedCrudOperationEnabled(target!, "get") ? "get" : "list", session);
   for (const id of new Set(ids)) {
     const visible = await sql<{ id: string }>`select id from ${sql.id(target!.schema, target!.table)}
-      where id = ${id}::uuid and tenant_id = ${session.tenantId}::uuid for share`.execute(trx);
+      where id = ${id}::uuid and tenant_id = ${session.tenantId}::uuid for key share`.execute(trx);
     if (!visible.rows.length) {
       throw operationFailure({ code: "FORBIDDEN", message: `A record referenced by ${field.key} is unavailable.`, retryable: false });
     }
@@ -202,7 +203,7 @@ function affectedFormulas(
     }
   }
   for (const field of set.fields) {
-    if (field.kind === "stored" && !isDeepStrictEqual(before[field.fieldId], after[field.fieldId])) changed.push({ entity: set.entity, field: field.fieldId });
+    if (field.kind !== "formula" && fieldChanged(field, before, after)) changed.push({ entity: set.entity, field: field.fieldId });
   }
   return new Set(formulaGraph(set).affectedBy(changed).map((field) => field.fieldId));
 }
@@ -236,12 +237,18 @@ export async function ownedChildValues(
 /**
  * The columns of a row a formula needs, as one JSON object (the shape
  * `to_jsonb` gives the write path): the id, the clocks, the tenant field
- * source and the formula-readable columns. Named one by one, because the
+ * source, the formula-readable columns and the foreign keys a lookup follows. Named one by one, because the
  * worker holds column grants for exactly these (db/migrations/worker-role.ts).
  */
-function formulaRowObject(table: GeneratedCrudTable, alias: string): RawBuilder<unknown> {
+export function formulaRowObject(table: GeneratedCrudTable, alias: string): RawBuilder<unknown> {
+  // The foreign keys of an extensible entity's single relations, which its
+  // lookups follow; a classified or field-policed one is no lookup's to follow.
+  const entry = table.subtype ? undefined : extensionRegistry.entity(table.source?.authoringEntityName ?? "");
+  const references = entry?.table === `${table.schema}.${table.table}`
+    ? entry.relations.filter((relation) => relation.kind === "belongsTo").map((relation) => relation.foreignKey)
+      .filter((name) => { const column = table.columns.find((candidate) => candidate.name === name); return !column?.classification && !column?.fieldPolicy; }) : [];
   const names = [...new Set(["id", "created_at", ...(table.columns.some((column) => column.name === EXTENSION_VALUES_COLUMN) ? [EXTENSION_VALUES_COLUMN] : []),
-    ...formulaColumns(table).map((column) => column.name)])].filter((name) => table.columns.some((column) => column.name === name));
+    ...formulaColumns(table).map((column) => column.name), ...references])].filter((name) => table.columns.some((column) => column.name === name));
   return sql`jsonb_build_object(${sql.join(names.map((name) => sql`${sql.lit(name)}::text, ${sql.id(alias, name)}`))})`;
 }
 
@@ -330,10 +337,14 @@ async function prepareFormulas(
     after: Record<string, unknown>;
   },
 ): Promise<PreparedExtensionWrite["formulas"]> {
-  if (!formulaGraph(set).order.length) return undefined;
+  if (!formulaGraph(set).order.length && !computedLinked(set).length) return undefined;
   const current = input.operation === "update" ? input.current ?? undefined : undefined;
   const children = await ownedChildValues(trx, session.tenantId!, set, current ? String(current.id) : undefined);
   const row = plainRow(input.row, current);
+  // Lookups and rollups first (they read other records, never this one's
+  // computed fields); the formulas below read their results.
+  await computeLinkedValues(trx, session, set, row, input.after,
+    ownLinkedFields(set, { create: !current, current, row, before: input.before, after: input.after }));
   const only = current ? affectedFormulas(set, table, current, row, input.before, input.after) : undefined;
   if (!only || only.size) evaluateFormulas(set, table, { row, source: input.after, children, ...(only ? { only } : {}) });
   return { ...(current ? { current } : {}), children };
@@ -349,10 +360,23 @@ export async function prepareFormulaOnlyCreate(
   trx: Transaction<DB>,
   session: DbSessionInput,
   table: GeneratedCrudTable,
+  row: Readonly<Record<string, unknown>> = {},
 ): Promise<PreparedExtensionWrite | undefined> {
   const set = await loadExtensionFields(trx, session, table, { lock: "shared" });
-  if (!set || !formulaGraph(set).order.length) return undefined;
-  return { table, set, before: {}, after: {}, changed: [], formulas: { children: await ownedChildValues(trx, session.tenantId!, set, undefined) } };
+  if (!set || (!formulaGraph(set).order.length && !computedLinked(set).length)) return undefined;
+  const after: Record<string, unknown> = {};
+  await computeLinkedValues(trx, session, set, plainRow(row, undefined), after, computedLinked(set));
+  return { table, set, before: {}, after, changed: changedFields(set, {}, after),
+    formulas: { children: await ownedChildValues(trx, session.tenantId!, set, undefined) } };
+}
+
+/** Carry one computed field's value and `$meta` entry from one source to another. */
+function copyComputed(from: Readonly<Record<string, unknown>>, to: Record<string, unknown>, fieldId: string): void {
+  if (Object.hasOwn(from, fieldId)) to[fieldId] = from[fieldId]; else delete to[fieldId];
+  const meta = record(from[EXTENSION_META_KEY]) ? (from[EXTENSION_META_KEY] as Record<string, unknown>)[fieldId] : undefined;
+  const target: Record<string, unknown> = record(to[EXTENSION_META_KEY]) ? { ...to[EXTENSION_META_KEY] as Record<string, unknown> } : {};
+  if (meta === undefined) delete target[fieldId]; else target[fieldId] = meta;
+  if (Object.keys(target).length) to[EXTENSION_META_KEY] = target; else delete to[EXTENSION_META_KEY];
 }
 
 /** A deleted field's value is stripped by its backfill; a write that touches the record anyway drops what remains of it. */
@@ -431,6 +455,8 @@ export async function completeExtensionWrite(
       operation: "create", row, before: {}, after, supplied: prepared.create.supplied,
     });
     if (violations.length) refuse(violations);
+    // The lookups and rollups computed before the insert read other records, not this row's defaults.
+    for (const field of computedLinked(prepared.set)) copyComputed(prepared.after, after, field.fieldId);
   }
   if (prepared.formulas && row) {
     // The formulas once more, against the row as stored.
@@ -475,10 +501,11 @@ export async function completeExtensionWrite(
  * written with the rest.
  *
  * `draft: false` leaves a published head as it is: a write that follows from
- * a definition change (a formula backfill, a retype, a rebuild) changes no
- * content its publisher wrote. A value that changes for the record itself
- * (retention, setNull, the delete of a field, an owned child's write) puts
- * the head back to draft, as a caller's write does.
+ * a definition change (a formula backfill, a retype, a rebuild) or from another
+ * record (a lookup or rollup recomputed because something it reads changed)
+ * changes no content its publisher wrote. A value that changes for the record
+ * itself (retention, setNull, the delete of a field, an owned child's write)
+ * puts the head back to draft, as a caller's write does.
  */
 export async function rewriteExtensionValues(
   trx: Transaction<DB>,
@@ -514,7 +541,11 @@ export async function rewriteExtensionValues(
   // The record itself is named as the event's subject: the audit envelope
   // would otherwise read the whole entity row to derive it, which the
   // worker may not (it holds only the columns this write needs).
-  if (changed.length) await appendExtensionAudit(trx, session, { table, before, after, changed }, recordId, true);
+  if (changed.length) {
+    await appendExtensionAudit(trx, session, { table, before, after, changed }, recordId, true);
+    // What reads this record elsewhere follows, in this transaction or through the journal (linked.ts).
+    await propagateRecordChange(trx, session, table, { before: { id: recordId, extension_values: before }, after: { id: recordId, extension_values: after } });
+  }
 }
 
 /**
@@ -529,17 +560,21 @@ async function withDependentFormulas(
 ): Promise<{ after: Readonly<Record<string, unknown>>; fields: readonly ExtensionField[] }> {
   const { table, set, recordId } = input;
   const stored = input.fields.filter((field) => field.kind === "stored");
-  const affected = stored.length ? formulaGraph(set).affectedBy(stored.map((field) => ({ entity: set.entity, field: field.fieldId }))) : [];
-  if (!affected.length) return input;
+  // A lookup through a reference this write changes (a setNull, a deleted field) reads its new target.
+  const linked = lookupsThrough(set, new Set(stored.map((field) => field.fieldId))).filter((field) => !input.fields.includes(field));
+  const inputs = [...input.fields.filter((field) => field.kind !== "formula"), ...linked];
+  const affected = inputs.length ? formulaGraph(set).affectedBy(inputs.map((field) => ({ entity: set.entity, field: field.fieldId }))) : [];
+  if (!affected.length && !linked.length) return input;
   const found = await sql<{ row: Record<string, unknown> }>`select ${formulaRowObject(table, "record")} as row
     from ${sql.id(table.schema, table.table)} as record
     where record.tenant_id = ${session.tenantId}::uuid and record.id = ${recordId}::uuid`.execute(trx);
   const row = found.rows[0]?.row;
   if (!row) return input;
   const after = { ...input.after };
+  await computeLinkedValues(trx, session, set, row, after, linked);
   const children = await ownedChildValues(trx, session.tenantId!, set, recordId);
-  evaluateFormulas(set, table, { row, source: after, children, only: new Set(affected.map((field) => field.fieldId)) });
-  const recomputed = affected.filter((field) => !input.fields.includes(field) && fieldChanged(field, input.before, after));
+  if (affected.length) evaluateFormulas(set, table, { row, source: after, children, only: new Set(affected.map((field) => field.fieldId)) });
+  const recomputed = [...linked, ...affected].filter((field) => !input.fields.includes(field) && fieldChanged(field, input.before, after));
   return { after, fields: [...input.fields, ...recomputed] };
 }
 
@@ -603,23 +638,26 @@ export async function recomputeRecordFormulas(
   session: DbSessionInput,
   input: {
     table: GeneratedCrudTable; set: ExtensionFieldSet; recordId: string; fields?: readonly ExtensionField[]; rebuild?: boolean;
-    /** False when a definition change, not the record, is the cause (rewriteExtensionValues). */
+    /** False when a definition change or another record, not the record itself, is the cause (rewriteExtensionValues). */
     draft?: boolean;
   },
 ): Promise<boolean> {
   const { table, set, recordId } = input;
-  const order = formulaGraph(set).order;
+  // Lookups and rollups first, then the formulas in the graph's order.
+  const order = [...computedLinked(set), ...formulaGraph(set).order];
   const fields = input.fields ? order.filter((field) => input.fields!.includes(field)) : order;
   const locked = await sql<{ row: Record<string, unknown> }>`select ${formulaRowObject(table, "record")} as row
     from ${sql.id(table.schema, table.table)} as record
-    where record.tenant_id = ${session.tenantId}::uuid and record.id = ${recordId}::uuid for update`.execute(trx);
+    where record.tenant_id = ${session.tenantId}::uuid and record.id = ${recordId}::uuid for no key update`.execute(trx);
   const row = locked.rows[0]?.row;
   if (!row) return false;
   if (!fields.length) return true;
   const before = storedExtensionSource(row);
   const after = { ...before };
-  const children = await ownedChildValues(trx, session.tenantId!, set, recordId);
-  evaluateFormulas(set, table, { row, source: after, children, only: new Set(fields.map((field) => field.fieldId)) });
+  await computeLinkedValues(trx, session, set, row, after, fields.filter((field) => field.kind !== "formula"));
+  const formulas = fields.filter((field) => field.kind === "formula");
+  const children = formulas.length ? await ownedChildValues(trx, session.tenantId!, set, recordId) : {};
+  if (formulas.length) evaluateFormulas(set, table, { row, source: after, children, only: new Set(formulas.map((field) => field.fieldId)) });
   const written = input.rebuild ? fields : fields.filter((field) => fieldChanged(field, before, after));
   if (written.length) {
     await rewriteExtensionValues(trx, session, { table, set, recordId, before, after, fields: written, claims: false,
@@ -631,7 +669,17 @@ export async function recomputeRecordFormulas(
 /** Share the tenant field lock of every extensible owner of this child table, before a row lock. */
 export async function lockOwnerExtensionFields(trx: Transaction<DB>, session: DbSessionInput, childTable: GeneratedCrudTable): Promise<void> {
   if (!session.tenantId) return;
-  for (const entity of ownersOf(childTable)) await lockExtensionFields(trx, session.tenantId, entity, "shared");
+  // Also every entity whose lookups or rollups may read this one: the write recomputes them (linked.ts).
+  for (const entity of [...new Set([...ownersOf(childTable), ...linkedReadersOf(childTable)])].sort()) {
+    await lockExtensionFields(trx, session.tenantId, entity, "shared");
+  }
+}
+
+/** How this table is an owned single child: its owners, with the relation and the foreign key that name them. */
+export function ownerLinks(childTable: GeneratedCrudTable): Array<{ entity: string; relation: string; foreignKey: string }> {
+  const physical = `${childTable.schema}.${childTable.table}`;
+  return ownersOf(childTable).flatMap((entity) => extensionRegistry.entity(entity)!.ownedSingleChildren
+    .filter((child) => child.table === physical).map((child) => ({ entity, relation: child.relation, foreignKey: child.foreignKey })));
 }
 
 /** The extensible entities this table is an owned single child of, sorted (the order locks are taken in). */

@@ -1,0 +1,90 @@
+# Test fixture — a second extensible entity, read by the same roles as
+# extensible-asset.yaml: tenant lookups and rollups across two entities (a
+# lookup from an asset to its group and back, a rollup over the assets whose
+# tenant reference names a group) and the cycle between them that a
+# definition must not close. `location` is an authored single relation a
+# lookup may follow. Only in the test composition.
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ExtensibleAssetGroup
+title: Extensible asset group
+description: A group of extensible test assets whose tenants may add fields of their own.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels: { en: Asset group, nl: Objectgroep }
+pluralLabels: { en: Asset groups, nl: Objectgroepen }
+domains: [relations]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite]
+    create: [General.All.ReadWrite]
+    update: [General.All.ReadWrite]
+    delete: [General.All.ReadWrite]
+extensible:
+  authorization: { manage: [Test.Fields.Manage] }
+  limits: { fields: 10, filtersPerQuery: 3, syncFanOut: 3 }
+fields:
+  - key: name
+    osfType: string
+    required: true
+    label: { en: Name, nl: Naam }
+    validation: { minLength: 1, maxLength: 200 }
+    persisted: { column: name, storageClass: core }
+  - key: location
+    osfType: ExtensibleAssetLocation
+    label: { en: Location, nl: Locatie }
+    relationship:
+      ownership: reference
+      inverse: false
+  # A lookup through this one would show what it points at to a reader who may
+  # not see the relation itself, so it is refused.
+  - key: confidentialLocation
+    osfType: ExtensibleAssetLocation
+    label: { en: Confidential location, nl: Vertrouwelijke locatie }
+    classification: { sensitivity: confidential, category: operational }
+    relationship:
+      ownership: reference
+      inverse: false
+operations:
+  list:
+    name: List asset groups
+    description: Read accessible asset groups.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read asset group
+    description: Read one accessible asset group.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create asset group
+    description: Create asset group.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update asset group
+    description: Update asset group.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  delete:
+    name: Delete asset group
+    description: Delete asset group.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }

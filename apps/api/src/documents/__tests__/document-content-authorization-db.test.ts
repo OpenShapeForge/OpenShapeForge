@@ -34,6 +34,24 @@ describe("document content authorization against PostgreSQL", () => {
   beforeAll(openScratch, 120_000);
   afterAll(closeScratch);
 
+  test("creating a document and its owned content rolls back together when a block is invalid", async () => {
+    const setup = platformFor(caseUser);
+    const title = `atomic-content-${crypto.randomUUID()}`;
+    const input = { document: { title, documentType: "outgoing_mail", status: "draft" },
+      version: { versionLabel: "1", status: "draft", isMajorVersion: false },
+      content: { variant: { channel: "document", locale: "nl" }, blocks: [
+        { definitionKey: "TextBlock", values: { markdown: "First" } },
+        { definitionKey: "NotAllowed", values: {} },
+      ] } };
+    await expect(setup.handlers.createDocument!(input, setup.context)).rejects.toBeDefined();
+    const remaining = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${title}`.execute(privileged());
+    expect(remaining.rows[0]!.count).toBe(0);
+    input.content.blocks[1] = { definitionKey: "TextBlock", values: { markdown: "Second" } };
+    const created = (await setup.handlers.createDocument!(input, setup.context)).value as { id: string };
+    const child = await variant(created.id, "document", "nl");
+    expect((await variantBlocks(child.id)).map(block => block.markdown)).toEqual(["First", "Second"]);
+  });
+
   test("a document editor edits document blocks only through the variant, never template blocks", async () => {
     const setup = platformFor(editor);
     const ids = await seedTemplate();

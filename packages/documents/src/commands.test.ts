@@ -219,6 +219,32 @@ describe("Document commands", () => {
     );
   });
 
+  test("creates authored content through the canonical collection operations in order", async () => {
+    const fixture = context({ results: [[{ documentId, documentVersionId }]] });
+    const variantId = "60000000-0000-4000-8000-000000000001";
+    const calls: Array<{ id: string; input: Record<string, unknown> }> = [];
+    const platform = fixture.operationContext.platform!;
+    const write = (id: string) => ({ id, entityName: id.split(".")[0], intent: "invoke", effects: { data: "write", external: "none" } });
+    const read = (entityName: string) => ({ id: `${entityName}.get`, entityName, intent: "get", effects: { data: "read", external: "none" } });
+    (platform.operations as any).list = async () => [read("Document"), read("DocumentVariant"), write("Document.insertVariant"), write("DocumentVariant.insertBlock")];
+    (platform.operations as any).execute = async (_session: unknown, request: { operation: { id: string }; input: Record<string, unknown> }) => {
+      calls.push({ id: request.operation.id, input: request.input });
+      if (request.operation.id === "Document.get") return { data: { ...documentRow(), updatedAt: "2026-09-13T10:00:00Z" } };
+      if (request.operation.id === "Document.insertVariant") return { data: { childId: variantId } };
+      if (request.operation.id === "DocumentVariant.get") return { data: { id: variantId, updatedAt: "2026-09-13T10:00:00Z" } };
+      return { data: { parent: { updatedAt: `2026-09-13T10:00:0${calls.length}Z` } } };
+    };
+    const content = { variant: { channel: "document", locale: "nl" }, blocks: [
+      { definitionKey: "TextBlock", values: { markdown: "Hello" } },
+      { definitionKey: "TextBlock", values: { markdown: "World" } },
+    ] };
+    await createDocument({ document, version, content }, fixture.operationContext);
+    expect(calls.map(call => call.id)).toEqual(["Document.get", "Document.insertVariant", "DocumentVariant.get", "DocumentVariant.insertBlock", "DocumentVariant.insertBlock", "Document.get"]);
+    expect(calls[3]!.input.values).toEqual(content.blocks[0]);
+    expect(calls[4]!.input.values).toEqual(content.blocks[1]);
+    expect(calls[4]!.input.expectedVersion).toBe("2026-09-13T10:00:04Z");
+  });
+
   test("authorizes the parent Document before appending and returns the authored version head", async () => {
     const nextVersion = { ...version, versionLabel: "2", changeSummary: "Clarified" };
     const fixture = context({

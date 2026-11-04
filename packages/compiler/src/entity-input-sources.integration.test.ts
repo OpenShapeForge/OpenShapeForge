@@ -29,6 +29,10 @@ function assertCanonicalDocumentInput(schema: JsonObject): void {
   const properties = object(schema.properties);
   const document = object(properties.document);
   const documentProperties = object(document.properties);
+  const content = object(properties.content);
+  const contentProperties = object(content.properties);
+  expect(contentProperties.blocks).toMatchObject({ type: "array", "x-osf-collection": { entity: "DocumentVariant", field: "blocks" },
+    items: { properties: { values: { "x-osf-type": "entityValue" } } } });
   const version = object(properties.version);
   const versionProperties = object(version.properties);
   expect(schema.required).not.toContain("artifact");

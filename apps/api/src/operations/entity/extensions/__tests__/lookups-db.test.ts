@@ -1489,4 +1489,76 @@ describe("tenant lookups and rollups", () => {
       expect((await get(t.reader, asset.id)).extensions.total).toBe(2);
     });
   });
+
+  describe("the classification floor", () => {
+    const internal = { classification: { sensitivity: "internal" } };
+    const tooLow = (reads: string) => ({ code: "VALIDATION", message: expect.stringContaining(`it reads ${reads}, which is internal`),
+      violations: [expect.objectContaining({ field: "definition.classification", code: "CLASSIFICATION_TOO_LOW" })], data: { reason: "CLASSIFICATION_TOO_LOW" } });
+    const save = (t: Tenant, key: string, kind: string, definition: Record<string, unknown>, entity = ENTITY) =>
+      failure(define(t.manager, "create", { key, kind, definition }, entity));
+
+    test("a formula is at least as sensitive as the tenant field, the authored field or the computed field it reads", async () => {
+      const t = await tenant();
+      await field(t, "cost", { ...number("Cost"), ...internal });
+      expect(await save(t, "double", "formula", formula("{Cost} * 2", "Double"))).toMatchObject(tooLow("cost"));
+      expect(await save(t, "weighted", "formula", formula("spec.unitCost * 2", "Weighted"))).toMatchObject(tooLow("spec.unitCost"));
+      await field(t, "double", { ...formula("{Cost} * 2", "Double"), ...internal }, "formula");
+      // Along the chain: what reads an internal computed field is internal too.
+      expect(await save(t, "quadruple", "formula", formula("{Double} * 2", "Quadruple"))).toMatchObject(tooLow("double"));
+      expect((await listed(t, "double")).state).toBe("ready");
+      // Higher than the input is no refusal, and classified inputs stay out altogether.
+      await field(t, "secret", { ...number("Secret"), classification: { sensitivity: "confidential" } });
+      expect(await save(t, "shown", "formula", { ...formula("{Secret} * 2", "Shown"), ...internal })).toMatchObject({ code: "VALIDATION" });
+    });
+
+    test("a lookup: the field it reads and the reference it follows", async () => {
+      const t = await tenant();
+      await field(t, "secretName", { ...text("Secret name"), ...internal }, undefined, GROUP);
+      await field(t, "group", reference(GROUP, "Group"));
+      await field(t, "hiddenGroup", { ...reference(GROUP, "Hidden group"), ...internal });
+      await field(t, "groupName", text("Group name"), undefined, GROUP);
+      expect(await save(t, "shown", "lookup", lookup("extensions.group", "extensions.secretName"))).toMatchObject(tooLow(`${GROUP}.secretName`));
+      expect(await save(t, "through", "lookup", lookup("extensions.hiddenGroup", "extensions.groupName"))).toMatchObject(tooLow(`${ENTITY}.hiddenGroup`));
+      await field(t, "kept", { ...lookup("extensions.group", "extensions.secretName"), ...internal }, "lookup");
+      expect((await listed(t, "kept")).state).toBe("ready");
+      expect(await save(t, "onward", "formula", formula("{Lookup} & \"!\"", "Onward"))).toMatchObject(tooLow("kept"));
+    });
+
+    test("a rollup: the field of the child, where, the step and the reference it counts through", async () => {
+      const t = await tenant();
+      const big = { kind: "rule", operator: "greaterThan", left: { kind: "path", path: "unitCost" }, right: { kind: "literal", value: 2 } };
+      expect(await save(t, "total", "rollup", rollup({ collection: "parts", aggregate: "sum", of: "unitCost" }))).toMatchObject(tooLow("ExtensibleAssetPart.unitCost"));
+      expect(await save(t, "dear", "rollup", rollup({ collection: "parts", aggregate: "countAll", where: big }))).toMatchObject(tooLow("ExtensibleAssetPart.unitCost"));
+      await field(t, "secret", { ...number("Secret"), ...internal }, undefined, GROUP);
+      expect(await save(t, "stepped", "rollup", rollup({ collection: "members", aggregate: "sum", of: "group.extensions.secret" }))).toMatchObject(tooLow(`${GROUP}.secret`));
+      await field(t, "hidden", { ...reference(ENTITY, "Hidden"), ...internal }, undefined, GROUP);
+      expect(await save(t, "groups", "rollup", rollup({ collection: `${GROUP}.extensions.hidden`, aggregate: "countAll" }))).toMatchObject(tooLow(`${GROUP}.hidden`));
+      await field(t, "total", { ...rollup({ collection: "parts", aggregate: "sum", of: "unitCost" }), ...internal }, "rollup");
+      const asset = await create(t.writer, ENTITY, { name: "A" });
+      await parts(t.writer, "insert", { id: asset.id, expectedVersion: String(asset.updated_at), values: { quantity: 1, unitCost: 7 } });
+      expect((await get(t.reader, asset.id)).extensions.total).toBe(7);
+    });
+
+    test("a field saved below what it reads is suspended by the revalidation, and redacted; so is what reads it", async () => {
+      const t = await tenant();
+      const cost = await field(t, "cost", number("Cost"));
+      await field(t, "double", formula("{Cost} * 2", "Double"), "formula");
+      const name = await field(t, "secretName", text("Secret name"), undefined, GROUP);
+      await field(t, "group", reference(GROUP, "Group"));
+      await field(t, "groupName", lookup("extensions.group", "extensions.secretName"), "lookup");
+      const group = await create(t.writer, GROUP, { name: "G", extensions: { secretName: "x" } });
+      const asset = await create(t.writer, ENTITY, { name: "A", extensions: { cost: 2, group: group.id } });
+      expect((await get(t.reader, asset.id)).extensions).toMatchObject({ double: 4, groupName: "x" });
+      // A definition of before the floor: only SQL can leave one now.
+      await privileged(sql`update platform.extension_field_definitions set definition = jsonb_set(definition, '{classification,sensitivity}', '"internal"'), position = position + 100
+        where tenant_id = ${t.id}::uuid and field_id in (${cost}::uuid, ${name}::uuid)`);
+      const suspended = await withDbSession(fixture.app.db, t.manager, (trx) => revalidateLinkedFields(trx, t.manager));
+      expect(suspended.map((item) => item.key).sort()).toEqual(["double", "groupName"]);
+      expect(suspended.find((item) => item.key === "double")!.reason).toContain("it reads cost, which is internal");
+      for (const key of ["double", "groupName"]) expect((await listed(t, key)).backfill?.error).toMatchObject({ code: "AUTHORIZATION_PROOF_LOST" });
+      const read = await get(t.reader, asset.id);
+      expect(read.extensions).toMatchObject({ double: null, groupName: null });
+      expect(read.extensionsMeta.double).toMatchObject({ suspended: true });
+    });
+  });
 });

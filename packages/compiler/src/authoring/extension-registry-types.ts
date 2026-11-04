@@ -46,6 +46,12 @@ export type ExtensionReadAccess = {
   rowPolicy?: string;
   /** Fields with read roles of their own (`fieldAuthorizations`), by field key. */
   fieldReadRoles?: Record<string, string[]>;
+  /**
+   * The fields authored `sensitivity: internal`, by field key. `internal`
+   * restricts no reader, so no column carries it, but a computed field that
+   * reads one is `internal` at least.
+   */
+  internalFields?: string[];
 };
 
 /** An authored single relation or inverse collection of an extensible entity. */

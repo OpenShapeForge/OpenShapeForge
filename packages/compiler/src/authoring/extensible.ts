@@ -505,7 +505,7 @@ function extensionRelations(
 /**
  * Who may read an entity, from its compiled authorization contract: the read
  * roles, the principal classes, the axis that narrows its rows (if any) and
- * the fields with read roles of their own. A lookup or rollup is proven
+ * the fields with read roles of their own or authored `internal`. A lookup or rollup is proven
  * against exactly this; anything that narrows rows is named, never folded
  * into the roles, so the runtime refuses it rather than guess.
  */
@@ -521,12 +521,14 @@ function readAccessOf(entry: { contract: CompiledEntityContract; table: TableDef
   const fieldReadRoles = Object.fromEntries((authorization?.fieldAuthorizations ?? [])
     .map((field) => [field.fieldKey, [...new Set(field.readRoles)].sort()] as const)
     .sort(([left], [right]) => left.localeCompare(right)));
+  const internalFields = entry.contract.model.fields.filter((field) => field.classification?.sensitivity === "internal").map((field) => field.key).sort();
   return {
     table: qualified(entry.table),
     roles: [...new Set(authorization?.roles.read ?? [])].sort(),
     ...(authorization?.principalClasses ? { principalClasses: [...new Set(authorization.principalClasses)].sort() } : {}),
     ...(rowPolicy ? { rowPolicy } : {}),
     ...(Object.keys(fieldReadRoles).length ? { fieldReadRoles } : {}),
+    ...(internalFields.length ? { internalFields } : {}),
   };
 }
 

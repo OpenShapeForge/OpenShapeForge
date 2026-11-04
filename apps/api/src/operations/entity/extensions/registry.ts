@@ -81,7 +81,8 @@ function readAccessEntry(name: string, value: unknown): RuntimeExtensionReadAcce
       (value.principalClasses !== undefined && !strings(value.principalClasses, /^[a-z]+$/)) ||
       (value.rowPolicy !== undefined && !ROW_POLICIES.includes(String(value.rowPolicy))) ||
       (value.fieldReadRoles !== undefined && (!record(value.fieldReadRoles) ||
-        !Object.entries(value.fieldReadRoles).every(([field, roles]) => fieldKey.test(field) && strings(roles, /^\S+$/))))) {
+        !Object.entries(value.fieldReadRoles).every(([field, roles]) => fieldKey.test(field) && strings(roles, /^\S+$/)))) ||
+      (value.internalFields !== undefined && !strings(value.internalFields, fieldKey))) {
     invalid(`readAccess.${name} is invalid`);
   }
   return structuredClone(value) as unknown as RuntimeExtensionReadAccess;

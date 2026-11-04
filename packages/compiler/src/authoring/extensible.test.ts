@@ -350,6 +350,16 @@ describe("extensible: the manifest registry", () => {
     expect(access((document) => { document.authorization.roles.read = ["Spec.Reader"]; }).roles).toEqual(["Spec.Reader"]);
   });
 
+  it("names the fields authored internal: no column carries that, and what a computed field reads decides its floor", () => {
+    const access = (transform: (document: Record<string, any>) => void) =>
+      compile(() => {}, { dir: withDocument("extensible-part-spec", transform) }).extensionRegistry!.readAccess.ExtensiblePartSpec!;
+    expect(access(() => {}).internalFields).toBeUndefined();
+    expect(access((document) => {
+      document.fields.push({ key: "cost", osfType: "number", label: { en: "Cost" }, classification: { sensitivity: "internal" }, persisted: { column: "cost", storageClass: "core" } });
+      document.fields.push({ key: "open", osfType: "number", label: { en: "Open" }, classification: { sensitivity: "public" }, persisted: { column: "open", storageClass: "core" } });
+    }).internalFields).toEqual(["cost"]);
+  });
+
   it("does not list an owned child without a one-per-parent key", () => {
     const dir = withDocument("extensible-part-spec", (document) => { delete document.indexes; });
     expect(compile(() => {}, { dir }).extensionRegistry!.entities.ExtensiblePart!.ownedSingleChildren).toEqual([]);

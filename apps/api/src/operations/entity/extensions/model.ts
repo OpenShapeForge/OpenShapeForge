@@ -181,6 +181,38 @@ export function isClassified(definition: ExtensionDefinition): boolean {
   return CLASSIFIED.has(classificationOf(definition) ?? "");
 }
 
+/** One thing a computed field reads, or a reference its value travels along. */
+export type ComputedInput = { readonly label: string; readonly sensitivity: string | undefined };
+
+/** The sensitivity of an authored field in reach of a computed field: what is classified never is. */
+export function authoredSensitivity(entity: string, field: string): "public" | "internal" {
+  return extensionRegistry.readAccess(entity)?.internalFields?.includes(field) ? "internal" : "public";
+}
+
+/**
+ * Why a computed field may not be saved under its classification: what it
+ * shows is at least as sensitive as the most sensitive thing it reads, public
+ * below internal, and a public value goes where an internal one does not (a
+ * quote that leaves the house). Nothing classified reaches a computed field,
+ * and each link proved its own inputs when it was saved, so its direct inputs
+ * hold the floor of the whole chain.
+ */
+export function sensitivityShortfall(definition: ExtensionDefinition, inputs: readonly ComputedInput[]): string | undefined {
+  if (classificationOf(definition) !== "public") return undefined;
+  const input = inputs.find((candidate) => candidate.sensitivity === "internal");
+  return input && `it reads ${input.label}, which is internal, so it is internal at least.`;
+}
+
+export function refuseSensitivity(key: string, kind: string, reason: string): never {
+  throw operationFailure({
+    code: "VALIDATION",
+    message: `The ${kind} ${key} cannot be saved: ${reason}`,
+    violations: [{ field: "definition.classification", code: "CLASSIFICATION_TOO_LOW", message: reason }],
+    data: { reason: "CLASSIFICATION_TOO_LOW" },
+    retryable: false,
+  });
+}
+
 export function hasStaticOptions(definition: ExtensionDefinition): boolean {
   return record(definition.options) && definition.options.type === "static";
 }

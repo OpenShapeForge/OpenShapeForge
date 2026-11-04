@@ -705,7 +705,8 @@ A formula that reads no field at all and gives an error code (below) is
 refused with that code. Time functions (`NOW()`, `TODAY()`) are refused: a stored
 "now" is stale the moment it is written. A formula takes no `appliesWhen`,
 `unique`, `required`, `defaultValue` or options; its classification is
-required and never changes.
+required and never changes, and it is at least that of what it reads (below,
+"Classification").
 
 The stored definition keeps the text, the AST bound to field ids (renaming a
 field never breaks a formula; the text is printed with today's labels) and
@@ -860,10 +861,24 @@ ExtensibleAsset also for General.All.Read; that role would see
 ExtensibleAssetBooking values it may not read." There is no fallback to another
 kind of field.
 
+**Classification.** A computed field shows what it reads, and a `public` field
+goes where an `internal` one does not. So a formula, lookup or rollup is at least
+as sensitive as the most sensitive thing it reads, in the order `public` below
+`internal`: the fields of a formula, an owned child's included; a lookup's field
+and its `via`; a rollup's `of`, `where`, its step and the reference of
+`<Entity>.extensions.<key>`. An authored field counts as authored, by
+`internalFields` in `extensionRegistry.readAccess`. What is classified
+`confidential`, `pii` or `bsn` stays out of reach, so the floor stops at
+`internal`, and each link of a chain held to it when it was saved. A value below
+it is refused (`VALIDATION`, `CLASSIFICATION_TOO_LOW`) with what it reads; it is
+never raised silently, and a classification never changes, so a field that read
+too much is a new field.
+
 **Revalidation.** Authorization is a compile-time contract, so every run of the
 migration chain proves all lookups and rollups again against the manifest it
-installs, and every generic write of the authorization profile model proves
-those of its tenant again. A database trigger on that model places the same
+installs, every computed field against the sensitivity of what it reads, and
+every generic write of the authorization profile model proves those of its
+tenant again. A database trigger on that model places the same
 proof as an `extensions.revalidate` job, so a custom Operation or direct SQL
 reaches it too. A tenant whose revalidation fails in a migration does not stop
 it: its lookups and rollups are suspended, fail closed, and the migration report

@@ -308,6 +308,7 @@ export type RuntimeExtensionReadAccess = {
   readonly principalClasses?: readonly string[];
   readonly rowPolicy?: string;
   readonly fieldReadRoles?: Readonly<Record<string, readonly string[]>>;
+  readonly internalFields?: readonly string[];
 };
 
 /** The manifest's top-level `extensionRegistry`, as the compiler emits it. */

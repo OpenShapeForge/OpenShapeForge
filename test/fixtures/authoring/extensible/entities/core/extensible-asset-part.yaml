@@ -70,6 +70,12 @@ fields:
     label: { en: Kind, nl: Soort }
     validation: { maxLength: 100 }
     persisted: { column: kind, storageClass: core }
+  # Readable like the rest, but what reads it is internal at least.
+  - key: unitCost
+    osfType: number
+    label: { en: Unit cost, nl: Kostprijs }
+    classification: { sensitivity: internal, category: financial }
+    persisted: { column: unit_cost, storageClass: core }
 operations:
   list:
     name: List extensible asset parts

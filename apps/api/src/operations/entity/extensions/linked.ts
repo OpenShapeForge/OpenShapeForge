@@ -20,7 +20,8 @@
  * link, each when its own definition is saved; a rollup's step is a link of its
  * own, in the same definition, from the source to the entity the step reaches.
  * A relation the value travels along is under the same rule: classified or
- * field-policed, it is refused as a tenant reference is. The proof is repeated by every migration, by every
+ * field-policed, it is refused as a tenant reference is. And a computed field is
+ * at least as sensitive as what it reads (sensitivityShortfall). The proof is repeated by every migration, by every
  * change of a tenant's authorization profiles and by a database trigger on
  * them; a definition whose proof no longer holds is `suspended`, and so is
  * whatever reads it, across the whole graph: readers get null with
@@ -61,9 +62,11 @@ import { fieldNameForColumn } from "../columns.js";
 import { sqlstateOf } from "../transition-lock-retry.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "../types.js";
 import { acrossTenant, jobActorSession, jobSession, startBackfill, type BackfillOperation } from "./backfill.js";
-import { authoredFormulaFields, fieldValues, formulaGraph, labelText, storedFormula, tenantFieldType, formulaDependencies } from "./formulas.js";
+import { authoredFormulaFields, fieldValues, formulaGraph, formulaInputs, labelText, storedFormula, tenantFieldType, formulaDependencies } from "./formulas.js";
 import {
+  authoredSensitivity,
   AUTHORIZATION_PROOF_LOST,
+  classificationOf,
   conditionPaths,
   EXTENSION_META_KEY,
   EXTENSION_VALUES_COLUMN,
@@ -77,11 +80,14 @@ import {
   mapConditionPaths,
   record,
   referenceIds,
+  refuseSensitivity,
   ROLLUP_AGGREGATES,
   rollupPath,
+  sensitivityShortfall,
   SENSITIVITIES,
   storedLookup,
   storedRollup,
+  type ComputedInput,
   type ComputedResultType,
   type ExtensionDefinition,
   type ExtensionField,
@@ -589,6 +595,18 @@ function proofOf(resolved: ResolvedLookup | ResolvedRollup, source: string, mana
   return reason || !resolved.step ? reason : narrower(source, resolved.step.target, resolved.of, managed);
 }
 
+/** What a lookup or rollup reads and the references its value travels along, each with its sensitivity. */
+function linkedInputs(resolved: ResolvedLookup | ResolvedRollup, source: string): ComputedInput[] {
+  const read = (field: TargetField): ComputedInput => ({ label: field.label,
+    sensitivity: field.field ? classificationOf(field.field.definition) : authoredSensitivity(field.entity, field.path) });
+  const link = (entity: string, name: string, tenant?: ExtensionField): ComputedInput => tenant
+    ? { label: `${entity}.${tenant.key}`, sensitivity: classificationOf(tenant.definition) }
+    : { label: `${entity}.${name}`, sensitivity: authoredSensitivity(entity, name) };
+  if (resolved.kind === "lookup") return [link(source, resolved.via.path, resolved.via.tenant), read(resolved.field)];
+  return [link(resolved.child, resolved.link, resolved.collection.reference?.field), ...(resolved.step ? [link(resolved.child, resolved.step.link, resolved.step.reference)] : []),
+    ...(resolved.of ? [read(resolved.of)] : []), ...resolved.whereFields.map(read)];
+}
+
 /** The first field a lookup or rollup reads that is suspended itself. */
 function suspendedInput(resolved: ResolvedLookup | ResolvedRollup): TargetField | undefined {
   const fields = resolved.kind === "lookup" ? [resolved.field] : [resolved.of, ...resolved.whereFields];
@@ -644,6 +662,8 @@ export async function validateLinkedDefinition(
   const suspendedRead = suspendedInput(resolved);
   const reason = suspendedRead ? `${suspendedRead.label} is suspended.` : proofOf(resolved, set.entity, await managedEntities(trx, session));
   if (reason) refuseProof(input.key, input.kind, reason);
+  const shortfall = sensitivityShortfall(definition, linkedInputs(resolved, set.entity));
+  if (shortfall) refuseSensitivity(input.key, input.kind, shortfall);
   const resultType = resultTypeOf(resolved);
   const storedSpec = resolved.kind === "lookup"
     ? { via: resolved.via.path, field: resolved.field.path, resultType }
@@ -1785,7 +1805,8 @@ async function suspendField(trx: Transaction<DB>, tenantId: string, entity: stri
 /**
  * Prove every lookup and rollup of the session's tenant again, against the
  * registry this process runs and the tenant's authorization profiles now, and
- * follow what no longer holds down the whole graph. A lookup or rollup whose
+ * every computed field against what it reads (sensitivityShortfall), and
+ * follow what no longer holds down the whole graph. A field whose
  * proof no longer holds, or that no longer resolves, becomes `suspended` with
  * AUTHORIZATION_PROOF_LOST: readers get null with `extensionsMeta.suspended`
  * (read.ts), no filter or sort takes it, a snapshot freezes `{ unavailable }`,
@@ -1816,15 +1837,17 @@ export async function revalidateLinkedFields(
         let code = AUTHORIZATION_PROOF_LOST;
         let reason: string | undefined;
         if (field.kind === "formula") {
-          const reads = formulaDependencies(set, storedFormula(field.definition)?.ast ?? { kind: "literal", value: null });
+          const ast = storedFormula(field.definition)?.ast ?? { kind: "literal" as const, value: null };
+          const reads = formulaDependencies(set, ast);
           const input = reads.flatMap((read) => read.via === null ? [set.byId.get(read.field)] : []).find((item) => item?.state === "suspended");
-          if (!input) continue;
-          code = inheritedSuspension(input);
-          reason = `${entity}.${input.key} is suspended.`;
+          if (input) {
+            code = inheritedSuspension(input);
+            reason = `${entity}.${input.key} is suspended.`;
+          } else reason = sensitivityShortfall(field.definition, formulaInputs(set, ast));
         } else {
           try {
             const resolved = await resolveStored(sets, set, field);
-            reason = proofOf(resolved, entity, managed!);
+            reason = proofOf(resolved, entity, managed!) ?? sensitivityShortfall(field.definition, linkedInputs(resolved, entity));
             const input = reason ? undefined : suspendedInput(resolved);
             if (input) {
               code = inheritedSuspension(input.field!);

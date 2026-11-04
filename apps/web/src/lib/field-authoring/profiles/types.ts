@@ -19,8 +19,7 @@ export type FieldAuthoringProfileId =
   | "fullFieldDefinition"
   | "caseVariable"
   | "runtimeNotificationParameter"
-  | "templateParameter"
-  | "formDefinitionField";
+  | "templateParameter";
 
 type FieldValueAuthoringConfig = {
   label: {

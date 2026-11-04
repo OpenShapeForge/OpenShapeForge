@@ -376,7 +376,7 @@ export interface ItemAction {
 /**
  * Canonical action definition — single source of truth for all action shapes
  * across the platform: view actions, workflow awaitAction/userInput nodes,
- * and formDefinition action bars.
+ * and action bars.
  *
  * When this interface changes, all downstream consumers automatically align
  * because they extend or import from here.

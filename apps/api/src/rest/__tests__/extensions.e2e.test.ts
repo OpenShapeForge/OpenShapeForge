@@ -5,9 +5,11 @@
  * all three interfaces. A field is defined over REST, records carry it,
  * filters and sorts reach it on REST and GraphQL, the location it points at
  * reports who references it, a deprecated field stays readable but closed,
- * a delete is confirmed and carried out by the backfill worker, and a
+ * a delete is confirmed and carried out by the backfill worker, a
  * formula field is backfilled, computed on write and queried like a stored
- * one. MCP sees the fields through the generic Operations only.
+ * one, and a lookup and a rollup are proven when saved and follow the records
+ * they read, across two entities. MCP sees the fields through the generic
+ * Operations only.
  *
  * The suite works in a tenant of its own, so the fields it defines never
  * reach another suite's records; tenant B of the harness is the other
@@ -43,6 +45,7 @@ const SECRET = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ?? null;
 const REST = "/api/rest/v1";
 const ASSETS = `${REST}/extensible-assets`;
 const LOCATIONS = `${REST}/extensible-asset-locations`;
+const GROUPS = `${REST}/extensible-asset-groups`;
 
 const tenantId = randomUUID();
 const as = (roles: string[]): Identity => ({ tenantId, userId: randomUUID(), roles });
@@ -77,8 +80,9 @@ afterAll(async () => {
   const db = getSeedRuntime().db;
   // The records cascade to their index rows and claims.
   await sql`delete from erp.extensible_assets where tenant_id = ${tenantId}::uuid`.execute(db);
+  await sql`delete from erp.extensible_asset_groups where tenant_id = ${tenantId}::uuid`.execute(db);
   await sql`delete from erp.extensible_asset_locations where tenant_id = ${tenantId}::uuid`.execute(db);
-  for (const table of ["extension_field_backfills", "extension_field_dependencies", "extension_field_definitions", "jobs"]) {
+  for (const table of ["extension_field_backfills", "extension_field_dependencies", "extension_field_recomputes", "extension_field_definitions", "jobs"]) {
     await sql`delete from ${sql.id("platform", table)} where tenant_id = ${tenantId}::uuid`.execute(db);
   }
   await worker?.close();
@@ -275,5 +279,44 @@ describe("tenant fields over REST, GraphQL and MCP", () => {
     expect(ids(await list(reader, { filter: scope, sortField: "extensions.dubbel", sortDirection: "desc" })))
       .toEqual([records.b!.id, records.c!.id, records.mcp!.id, records.a!.id, written.body.data.id, records.d!.id]);
     expect(ids(await list(tenantB, { filter: scope }))).toEqual([]);
+  });
+
+  test.skipIf(!available)("a lookup and a rollup over REST: proven when saved, computed on write and across entities", async () => {
+    const pub = { classification: { sensitivity: "public" } };
+    // A collection another role reads: refused, naming the role.
+    const refused = await http(manager, "POST", `${ASSETS}/field-definitions/create`,
+      { key: "uren", kind: "rollup", definition: { label: label("Uren"), ...pub, rollup: { collection: "bookings", aggregate: "sum", of: "hours" } } });
+    expect(refused).toMatchObject({ status: 403, body: { error: { code: "FORBIDDEN", message: expect.stringContaining("Test.Bookings.Read") } } });
+
+    const lookup = await http(manager, "POST", `${ASSETS}/field-definitions/create`,
+      { key: "plekNaam", kind: "lookup", definition: { label: label("Plek naam"), ...pub, lookup: { via: "extensions.plek", field: "name" } } });
+    expect(lookup).toMatchObject({ status: 200, body: { kind: "lookup", state: "updating",
+      definition: { osfType: "string", lookup: { via: "extensions.plek", field: "name", resultType: "text" } } } });
+    await drainBackfills();
+    const dock = await http(writer, "POST", LOCATIONS, { name: `${tag} dok` });
+    const asset = await http(writer, "POST", ASSETS, { name: `${tag}-l`, extensions: { plek: dock.body.data.id } });
+    expect(asset).toMatchObject({ status: 201, body: { data: { extensions: { plekNaam: `${tag} dok` }, extensionsMeta: { plekNaam: { applicable: true } } } } });
+    const renamed = await http(writer, "PATCH", `${LOCATIONS}/${dock.body.data.id}`, { name: `${tag} kade`, expectedVersion: dock.body.data.updatedAt });
+    expect(renamed.status).toBe(200);
+    expect((await http(reader, "GET", `${ASSETS}/${asset.body.data.id}`)).body.data.extensions.plekNaam).toBe(`${tag} kade`);
+    expect(ids(await list(reader, { filter: { ...scope, extensions: { plekNaam: { eq: `${tag} kade` } } } }))).toEqual([asset.body.data.id]);
+    expect(await http(writer, "PATCH", `${ASSETS}/${asset.body.data.id}`, { extensions: { plekNaam: "x" },
+      expectedVersion: (await http(reader, "GET", `${ASSETS}/${asset.body.data.id}`)).body.data.updatedAt }))
+      .toMatchObject({ status: 422, body: { error: { violations: [expect.objectContaining({ code: "COMPUTED_FIELD" })] } } });
+
+    // A rollup on another extensible entity over the assets whose reference names it.
+    const reference = await http(manager, "POST", `${ASSETS}/field-definitions/create`,
+      { key: "groep", definition: definition("ExtensibleAssetGroup", { onDelete: "setNull" }) });
+    expect(reference.status).toBe(200);
+    const members = await http(manager, "POST", `${GROUPS}/field-definitions/create`,
+      { key: "leden", kind: "rollup", definition: { label: label("Leden"), ...pub, rollup: { collection: "ExtensibleAsset.extensions.groep", aggregate: "countAll" } } });
+    expect(members).toMatchObject({ status: 200, body: { kind: "rollup", definition: { rollup: { collection: "ExtensibleAsset.extensions.groep", aggregate: "countAll" } } } });
+    await drainBackfills();
+    const group = await http(writer, "POST", GROUPS, { name: `${tag} groep` });
+    expect(group).toMatchObject({ status: 201, body: { data: { extensions: { leden: 0 } } } });
+    const current = (await http(reader, "GET", `${ASSETS}/${asset.body.data.id}`)).body.data;
+    expect((await http(writer, "PATCH", `${ASSETS}/${asset.body.data.id}`, { extensions: { groep: group.body.data.id }, expectedVersion: current.updatedAt })).status).toBe(200);
+    expect((await http(reader, "GET", `${GROUPS}/${group.body.data.id}`)).body.data.extensions.leden).toBe(1);
+    expect((await http(tenantB, "GET", `${GROUPS}/${group.body.data.id}`)).status).toBe(404);
   });
 });

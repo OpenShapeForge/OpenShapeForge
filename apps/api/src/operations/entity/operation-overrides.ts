@@ -345,12 +345,22 @@ export async function takeOverEntityOperation(
   // under the same takeover id and idempotency key: the owner answers with
   // the run it already has for it, or starts the one that never started.
   const open = await lookup();
+  const openAccepted = open && acceptedFromRow(open);
   let takeoverId: string | undefined;
-  if (open) {
-    const accepted = acceptedFromRow(open);
-    if (accepted) return { kind: "accepted", accepted };
+  if (open && !openAccepted) {
     takeoverId = open.id;
   } else {
+    if (open && openAccepted) {
+      // A retry while the owner works answers with its run. An owner that
+      // finished without the original lets the call go: this one is new.
+      const finished = await registration.activate(session, async (live) =>
+        binding.override.finished?.(live, { takeoverId: open.id, by: openAccepted.by }));
+      if (!finished) return { kind: "accepted", accepted: openAccepted };
+      await withDbSession(db, session, (trx) => sql`
+        update platform.operation_takeovers set completed_at = now()
+        where id = ${open.id}::uuid and tenant_id = ${tenantId}::uuid and completed_at is null
+      `.execute(trx));
+    }
     takeoverId = await withDbSession(db, session, async (trx) => {
       await request.consumeControls(trx as Transaction<unknown>);
       return (await sql<{ id: string }>`

@@ -116,6 +116,7 @@ if (process.env.OSF_OVERRIDE_RUNTIME_ISOLATED !== "1") {
 
   // One fake override module; each test sets what it answers.
   type Behaviour = {
+    finished?: (request: any) => boolean;
     takes?: (request: any) => boolean;
     execute?: (context: any, request: any) => Promise<any>;
   };
@@ -138,6 +139,9 @@ if (process.env.OSF_OVERRIDE_RUNTIME_ISOLATED !== "1") {
             return behaviour.execute
               ? behaviour.execute(context, request)
               : { accepted: { by: { kind: "workflow", ref: `run-${executed.length}` }, status: "waiting" } };
+          },
+          async finished(_session: any, request: any) {
+            return behaviour.finished?.(request) ?? false;
           },
         },
       },
@@ -262,6 +266,25 @@ if (process.env.OSF_OVERRIDE_RUNTIME_ISOLATED !== "1") {
     // A different input is a different takeover.
     const other: any = await run("Owner.update", await updateInput(owner.id, "Other"));
     expect(other.accepted.by.ref).toBe("run-2");
+  });
+
+  test("a takeover whose owner finished without the original answers the next call anew", async () => {
+    const asked: any[] = [];
+    behaviour = { takes: takesOwnerUpdate, finished: (request: any) => { asked.push(request); return false; } };
+    const owner = await newOwner();
+    const input = await updateInput(owner.id, "After");
+    await run("Owner.update", input);
+    // The owner is still working: the same run, and it was asked about that one.
+    const retry: any = await run("Owner.update", input);
+    expect(retry.accepted.by.ref).toBe("run-1");
+    expect(asked).toEqual([{ takeoverId: executed[0].takeoverId, by: { kind: "workflow", ref: "run-1" } }]);
+    behaviour.finished = () => true;
+    const next: any = await run("Owner.update", input);
+    expect(next.accepted).toEqual({ by: { kind: "workflow", ref: "run-2" }, status: "waiting" });
+    expect(executed[1].takeoverId).not.toBe(executed[0].takeoverId);
+    const rows = await takeovers(owner.id);
+    expect(rows.map((row: any) => row.completed_at === null)).toEqual([false, true]);
+    expect((await stored("owners", owner.id)).row.name).toBe("Before");
   });
 
   test("a replay by the tenant's service identity performs the original once, skipping the caller's challenge", async () => {

@@ -626,6 +626,16 @@ export type RuntimeOperationOverride = {
     context: RuntimeOperationOverrideExecutionContext,
     request: RuntimeOperationOverrideExecuteRequest,
   ): Promise<RuntimeOperationOverrideResult>;
+  /**
+   * Whether the owner of an accepted takeover has finished without performing
+   * the original, such as a rejected approval. Core then closes the takeover,
+   * so the next identical call is a new one instead of an answer from the
+   * finished run. Without this, a takeover stays open until its replay.
+   */
+  finished?(
+    session: PluginSessionContext,
+    request: { takeoverId: string; by: OperationAcceptance["by"] },
+  ): Promise<boolean>;
 };
 
 /** The database capabilities exposed by the host to a runtime plugin. */

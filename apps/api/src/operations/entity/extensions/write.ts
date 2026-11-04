@@ -44,7 +44,7 @@ import { childEntityTable, evaluateFormulas, fieldValues, formulaGraph, type Own
 import { conditionValues, storedExtensionSource } from "./read.js";
 import { extensibleEntityOf, loadExtensionFields, loadExtensionFieldsFor, lockExtensionFields } from "./store.js";
 import { extensionRegistry } from "./registry.js";
-import { exactNumericEquals, operationFailure } from "@openshapeforge/operations";
+import { operationFailure } from "@openshapeforge/operations";
 import { computedLinked, computeLinkedValues, linkedReadersOf, lookupsThrough, ownLinkedFields, propagateRecordChange } from "./linked.js";
 
 /** `schema.table` → a quoted identifier pair. */
@@ -305,8 +305,8 @@ export async function prepareExtensionWrite(
       // Valid numeric text is stored as the number it is; what a JSON number cannot hold is refused, never rounded.
       for (const key of Object.keys(checked)) {
         const field = set.byKey.get(key)!;
-        after[field.fieldId] = numericValue(field.definition, after[field.fieldId], (text, number) => {
-          if (!exactNumericEquals(text, number)) violations.push({ field: `extensions.${key}`, code: "NOT_REPRESENTABLE", message: `extensions.${key} has more digits than a number holds.` });
+        after[field.fieldId] = numericValue(field.definition, after[field.fieldId], () => {
+          violations.push({ field: `extensions.${key}`, code: "NOT_REPRESENTABLE", message: `extensions.${key} has more digits than a number holds.` });
         });
       }
     }

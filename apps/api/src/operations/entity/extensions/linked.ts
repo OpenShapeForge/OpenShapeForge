@@ -46,7 +46,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { sql, type RawBuilder, type Transaction } from "kysely";
-import { operationFailure } from "@openshapeforge/operations";
+import { exactNumericEquals, operationFailure } from "@openshapeforge/operations";
 import type { RuntimeExtensionRelation, RuntimeJobOutcome } from "@openshapeforge/plugin-runtime";
 import { MAX_RESULT_TEXT_BYTES, MAX_RESULT_TEXT_LENGTH, ROUNDING_DECIMALS } from "@openshapeforge/formula";
 import type { DB } from "../../../generated/db/types.js";
@@ -919,11 +919,11 @@ function valueOf(set: ExtensionFieldSet | undefined, table: GeneratedCrudTable, 
 
 function typed(type: string, value: unknown): unknown {
   if (value === null || value === undefined || value === "") return null;
-  if (type === "number") {
-    const number = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(number) ? number : null;
-  }
-  return value;
+  if (type !== "number") return value;
+  // Text no JSON number holds exactly stays the text a reader of the target sees (model.ts `numericValue`).
+  const number = Number(value);
+  if (Number.isNaN(number)) return null;
+  return typeof value !== "string" || exactNumericEquals(value, number) ? number : value;
 }
 
 const textTooLong = (value: string) => value.length > MAX_RESULT_TEXT_LENGTH || Buffer.byteLength(value, "utf8") > MAX_RESULT_TEXT_BYTES;

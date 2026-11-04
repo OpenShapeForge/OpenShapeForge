@@ -10,7 +10,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { sql, type Transaction } from "kysely";
-import { exactNumericEquals, operationFailure } from "@openshapeforge/operations";
+import { operationFailure } from "@openshapeforge/operations";
 import type { RuntimeExtensibleEntity } from "@openshapeforge/plugin-runtime";
 import type { DB } from "../../../generated/db/types.js";
 import type { DbSessionInput } from "../../../db/session.js";
@@ -261,8 +261,7 @@ export function validateFieldDefinition(
     if (!result.valid) extensionError("The default value does not fit the field's type.");
     if (shape.reference) extensionError("A reference field has no default value.");
     // Every record that takes the default stores it as a JSON number; nothing rounds it there.
-    numericValue(definition, definition.defaultValue, (text, number) => {
-      if (exactNumericEquals(text, number)) return;
+    numericValue(definition, definition.defaultValue, () => {
       const message = "The default value has more digits than a number holds.";
       throw operationFailure({ code: "VALIDATION", message, violations: [{ field: "definition.defaultValue", code: "NOT_REPRESENTABLE", message }], retryable: false });
     });

@@ -1562,6 +1562,20 @@ describe("tenant lookups and rollups", () => {
     });
   });
 
+  test("a lookup of text a JSON number cannot hold shows what a reader of the target sees", async () => {
+    const t = await tenant();
+    const price = await field(t, "price", number("Price"), undefined, GROUP);
+    await field(t, "group", reference(GROUP, "Group"));
+    await field(t, "groupPrice", lookup("extensions.group", "extensions.price"), "lookup");
+    const group = await create(t.writer, GROUP, { name: "G", extensions: { price: 1 } });
+    const asset = await create(t.writer, ENTITY, { name: "A", extensions: { group: group.id } });
+    const exact = "9007199254740993.995";
+    await privileged(sql`update erp.extensible_asset_groups set extension_values = jsonb_set(extension_values, ${`{${price}}`}::text[], to_jsonb(${exact}::text)) where id = ${group.id}::uuid`);
+    await update(t.writer, ENTITY, asset.id, { extensions: { group: null } });
+    await update(t.writer, ENTITY, asset.id, { extensions: { group: group.id } });
+    expect((await get(t.reader, asset.id)).extensions.groupPrice).toBe(exact);
+  });
+
   describe("a writer and the journal worker", () => {
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     /** Until a backend of this database waits for a lock: the worker, for what the writer holds. */

@@ -618,7 +618,8 @@ additive, so a built database rolls forward:
   and so are more digits than a JSON number holds, never rounded
   (`NOT_REPRESENTABLE`), in a value and in a definition's `defaultValue`. A value
   stored as text before this rule stays until it is written, and reads as a
-  number.
+  number, unless a JSON number cannot hold it exactly: then it reads as the text
+  it is, also in a snapshot and through a lookup.
 - `<table>_field_values`: one typed row per record, field and collection
   element (`ordinal`), keyed `(tenant_id, record_id, field_id, ordinal)` with a
   composite reference to the record that cascades, and the partial indexes of

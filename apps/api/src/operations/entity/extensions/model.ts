@@ -7,7 +7,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { sql, type RawBuilder } from "kysely";
 import type { RuntimeExtensibleEntity, RuntimeExtensionIndexColumn } from "@openshapeforge/plugin-runtime";
-import { operationFailure, type OperationFieldBaseType } from "@openshapeforge/operations";
+import { exactNumericEquals, operationFailure, type OperationFieldBaseType } from "@openshapeforge/operations";
 import fieldSchemaRegistry from "../../../generated/operations/field-schema-registry.json" with { type: "json" };
 import { generatedRuntimeFieldSchemas, storedFieldBaseType } from "../../../modules/field-schemas.js";
 import { extensionRegistry } from "./registry.js";
@@ -251,16 +251,18 @@ const numericOsfType = (osfType: unknown): boolean => {
  * numbers: in the source, and from there in every read, snapshot and formula.
  * Covers integer, number and the types on them (money, percentage), and the
  * number of an object type that projects one (measurement). Reads apply it too, so a value stored as text before reads
- * the same. Text that is no number is left to the validator. `converted` hears
- * every text with the number it became.
+ * the same. Text that is no number is left to the validator, and text no JSON
+ * number holds exactly stays what it is, for `unrepresentable` to hear: a write
+ * refuses it, and a read delivers what was stored rather than round it.
  */
-export function numericValue(definition: ExtensionDefinition, value: unknown, converted?: (text: string, number: number) => void): unknown {
+export function numericValue(definition: ExtensionDefinition, value: unknown, unrepresentable?: (text: string) => void): unknown {
   const component = numericOsfType(definition.osfType) ? undefined : extensionRegistry.indexProjection(String(definition.osfType))?.number;
   if (component === undefined && !numericOsfType(definition.osfType)) return value;
   const number = (item: unknown): unknown => {
     if (typeof item !== "string" || !item.trim() || Number.isNaN(Number(item))) return item;
-    converted?.(item, Number(item));
-    return Number.isFinite(Number(item)) ? Number(item) : item;
+    if (exactNumericEquals(item, Number(item))) return Number(item);
+    unrepresentable?.(item);
+    return item;
   };
   return component === undefined ? number(value)
     : record(value) && typeof value[component] === "string" ? { ...value, [component]: number(value[component]) } : value;

@@ -693,4 +693,26 @@ describe("tenant fields on an extensible entity", () => {
     expect(await failure(define(designer, "create", { key: "standaard", definition: { osfType: "number", label: label("Standaard"), defaultValue: beyond, ...pub } })))
       .toMatchObject({ code: "VALIDATION", violations: [expect.objectContaining({ field: "definition.defaultValue", code: "NOT_REPRESENTABLE" })] });
   });
+  test("text stored before that a JSON number cannot hold exactly is delivered as stored, never rounded", async () => {
+    const tenant = randomUUID();
+    await fixture.addTenants(tenant);
+    const designer = sessionFor(tenant, [MANAGER_ROLE, WRITER_ROLE, READER_ROLE]);
+    const pub = { classification: { sensitivity: "public" } };
+    const ids: Record<string, string> = {};
+    for (const [key, osfType] of [["prijs", "money"], ["bereik", "number"], ["gewicht", "measurement"], ["kwh", "integer"]] as const) {
+      ids[key] = (await define(designer, "create", { key, definition: { osfType, label: label(key), ...pub } }) as { fieldId: string }).fieldId;
+    }
+    const exact = "9007199254740993.995", beyond = `1${"0".repeat(400)}`;
+    const asset = await created(designer, {});
+    const stored = { [ids.prijs!]: exact, [ids.bereik!]: beyond, [ids.gewicht!]: { value: exact, unit: "kg" }, [ids.kwh!]: "60" };
+    await sql`update erp.extensible_assets set extension_values = extension_values || ${jsonbLiteral(stored)} where id = ${asset.id}::uuid`.execute(fixture.privileged.db);
+    const expected = { prijs: exact, bereik: beyond, gewicht: { value: exact, unit: "kg" }, kwh: 60 };
+    expect((await get(reader_(tenant), asset.id))!.extensions).toMatchObject(expected);
+    const frozen = await withDbSession(fixture.app.db, designer, async (trx) => {
+      const row = (await sql<{ row: Record<string, unknown> }>`select to_jsonb(a.*) as row from erp.extensible_assets a where id = ${asset.id}::uuid`.execute(trx)).rows[0]!.row;
+      await loadExtensionFields(trx, designer, fixture.table, { lock: "shared" });
+      return extensionSnapshot(trx, designer, ENTITY, row);
+    });
+    expect(frozen.extensions).toMatchObject({ [ids.prijs!]: exact, [ids.gewicht!]: { value: exact, unit: "kg" } });
+  });
 });

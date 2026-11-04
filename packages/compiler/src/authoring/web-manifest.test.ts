@@ -2286,7 +2286,7 @@ test("an extensible entity offers its tenant-field routes, and a target its refe
     limits: { fields: 100, filtersPerQuery: 5, formulaDepth: 5, syncFanOut: 100 },
     allowedOsfTypes: ["measurement", "string"],
     targets: ["Product", "Supplier"],
-    kinds: ["stored"],
+    kinds: ["stored", "formula"],
   });
   expect(manifest.entities.Product!.referencedByPath).toBe("/api/rest/v1/products/:id/referenced-by");
   expect(manifest.entities.Supplier!.customFields).toBeUndefined();

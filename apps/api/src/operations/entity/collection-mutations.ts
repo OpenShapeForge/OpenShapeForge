@@ -27,6 +27,7 @@ import { hasConsumedCollectionLease } from "./collection-lease-context.js";
 import { subtypeScopeWhere } from "./subtype-scope.js";
 import { assertAdmittedBeforeEffects, assertEffectsWereAdmitted } from "../execution-policy.js";
 import { loadExtensionFields } from "./extensions/store.js";
+import { recomputeOwnerFormulas } from "./extensions/write.js";
 
 /** Compiler/boot-owned binding, never a request-selected table or FK. */
 export type CollectionMutationBinding = { entityName: string; field: string; action: "insert" | "move" | "update" | "remove" };
@@ -309,6 +310,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
             const row = updated.rows[0]?.row;
             if (row) {
               changed = true;
+              await recomputeOwnerFormulas(trx, session, target, row);
             } else if (!(await sql<{ id: string }>`select id from ${sql.id(target.schema, target.table)} where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid`.execute(trx)).rows[0]) {
               throw generatedCrudError("Child update was refused.", "FORBIDDEN");
             }
@@ -320,6 +322,8 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
             where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid returning to_jsonb(${sql.id(target.table)}.*) as row`.execute(trx);
           const row = deleted.rows[0]?.row;
           if (!row) throw generatedCrudError("Child removal was refused.", "FORBIDDEN");
+          // An owner formula over this child now reads none.
+          await recomputeOwnerFormulas(trx, session, target, row);
           ordered.splice(ordered.indexOf(childId), 1);
           changed = true;
         }

@@ -51,6 +51,7 @@
         "@modelcontextprotocol/server": "2.3.0",
         "@openshapeforge/auth": "workspace:*",
         "@openshapeforge/documents": "workspace:*",
+        "@openshapeforge/formula": "workspace:*",
         "@openshapeforge/observability": "workspace:*",
         "@openshapeforge/operations": "workspace:*",
         "@openshapeforge/plugin-runtime": "workspace:*",
@@ -182,7 +183,7 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.2.37",
+      "version": "0.2.38",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },
@@ -217,6 +218,14 @@
       "peerDependencies": {
         "@openshapeforge/compiler": ">=0.2.24 <0.3.0",
         "@openshapeforge/plugin-runtime": ">=0.1.0 <0.2.0",
+      },
+    },
+    "packages/formula": {
+      "name": "@openshapeforge/formula",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "typescript": "^5.9.0",
       },
     },
     "packages/interface-web": {
@@ -549,6 +558,8 @@
     "@openshapeforge/documents": ["@openshapeforge/documents@workspace:packages/documents"],
 
     "@openshapeforge/example-plugin-notebook": ["@openshapeforge/example-plugin-notebook@workspace:examples/plugins/notebook"],
+
+    "@openshapeforge/formula": ["@openshapeforge/formula@workspace:packages/formula"],
 
     "@openshapeforge/interface-web": ["@openshapeforge/interface-web@workspace:packages/interface-web"],
 

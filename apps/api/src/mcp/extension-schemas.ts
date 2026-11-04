@@ -7,6 +7,9 @@
  * listing advertises, `osf_describe` returns and the dispatch validates — is
  * enriched with `extensions` typed per key. Listing and dispatch derive from
  * the same function, so the list never advertises what the call refuses.
+ * A computed field (a formula) is read-only: never a property of the create
+ * or update input — which refuses any key it does not list — and marked
+ * `readOnly` where a list may filter or sort on it.
  */
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
@@ -75,13 +78,15 @@ export function withExtensionInputSchema(
   const live = set.fields.filter((field) => field.state !== "deleted");
   if (operation === "create" || operation === "update") {
     const writable = live.filter((field) => field.kind === "stored" && field.state !== "deprecated");
+    const computed = live.filter((field) => field.kind !== "stored" && field.state !== "deprecated").map((field) => field.key).sort();
     const properties = Object.fromEntries(writable.map((field) => {
       const property = extensionPropertySchema(set, field.key) ?? {};
       return [field.key, operation === "update" ? { anyOf: [property, { type: "null" }], description: property.description } : property];
     }));
     const extensions = {
       type: "object", additionalProperties: false, properties,
-      description: "Tenant-defined fields of this record, by key. On update a missing key is unchanged and null clears it.",
+      description: "Tenant-defined fields of this record, by key. On update a missing key is unchanged and null clears it." +
+        (computed.length ? ` Computed and read-only, so never accepted here: ${computed.join(", ")}.` : ""),
     };
     const properties0 = object(schema.properties) ? schema.properties : {};
     if (operation === "create") return { ...schema, properties: { ...properties0, extensions } };
@@ -99,7 +104,8 @@ export function withExtensionInputSchema(
       next.filter = { ...filter, properties: { ...filterProperties, extensions: {
         type: "object", additionalProperties: false,
         description: `Tenant field predicates (at most ${set.entry.limits.filtersPerQuery} per query); a multi-valued field takes contains only.`,
-        properties: Object.fromEntries(queryable.map((field) => [field.key, { type: "object" }])),
+        properties: Object.fromEntries(queryable.map((field) => [field.key, field.kind === "stored" ? { type: "object" }
+          : { type: "object", readOnly: true, description: `Computed by a ${field.kind}${typeof field.definition.osfType === "string" ? ` (${field.definition.osfType})` : ""}; read-only.` }])),
       } } };
     }
     if (object(properties0.sortField) && Array.isArray(properties0.sortField.enum)) {

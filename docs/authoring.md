@@ -647,6 +647,104 @@ additive, so a built database rolls forward:
 - `customFields` on the entity's web interface and `referencedByPath` on each
   target's.
 
+### Formulas
+
+A tenant field of `kind: formula` is computed, never entered:
+`definition: { label, classification, formula: { text: "{Capacity kWh} * {Price per kWh}" } }`.
+The language is spreadsheet (Airtable) grammar, implemented by
+`@openshapeforge/formula` and compiled to the canonical expression AST:
+
+- Fields by label in braces (`{Capacity kWh}`) or by key (`capacityKwh`), an
+  owned single child's field under its relation (`spec.weight`); numbers,
+  strings in either quote, `TRUE()`/`FALSE()`; `+ - * /`, `&` to join text,
+  `= != <> < > <= >=`.
+- Functions: text `CONCATENATE LEFT RIGHT MID LEN TRIM UPPER LOWER SUBSTITUTE`;
+  logical `IF AND OR NOT SWITCH BLANK ISERROR`; numeric `ROUND ROUNDUP
+  ROUNDDOWN MIN MAX SUM AVERAGE ABS VALUE MOD POWER SQRT CEILING FLOOR`; date
+  `DATEADD DATETIME_DIFF DATETIME_FORMAT YEAR MONTH DAY` with a unit in quotes
+  (`'days'`, `'months'`, …); record `RECORD_ID CREATED_TIME`.
+- In reach: the record's authored fields that its read contract names, its
+  current tenant fields (formulas included, up to `limits.formulaDepth` deep)
+  and the authored fields of its owned single children. Anything across a
+  reference or collection is out of scope, and a classified or field-policed
+  field is never in reach: the result would reveal it. Nor is anything the
+  platform changes outside the record's own write — `updatedAt`, a field
+  `writtenBy` an Operation, a versioned head's `lifecycleStatus` and
+  `latestVersion*`/`publishedVersion*` — refused as `outOfScope` with that
+  reason: a formula over it would be stale.
+- A stored tenant field reads as a reader sees it: a record written before
+  the field existed reads its default, when the field applies. A new default
+  or `appliesWhen` computes the formulas over the field again.
+- An owned single child is in reach only when the compiler can prove that it
+  is authorized through its owner: the relation declares
+  `childAuthorization: owner`, or the child has exactly the owner's read,
+  create, update and delete roles. Either way the child has no row scope,
+  owner axis, record ACL, profile or field read roles, and no classified or
+  field-policed column. Otherwise a reader of the owner could see, through a
+  formula, a value of a child they may not read, so such a child is not in
+  the registry's `ownedSingleChildren` and a formula naming it is
+  `outOfScope`.
+
+Saving refuses with every reason in `data.errors` (`code`, `message`, the
+`start`/`end` of the text it is about): `syntaxError`, `unknownField`,
+`ambiguousField`, `unknownFunction`, `argumentCount`, `typeMismatch`,
+`mixedBranches` (every branch of `IF`/`SWITCH` has one type), `timeFunction`,
+`outOfScope`, `unsupportedFieldType`, `classifiedField`, `cycle` (through any
+formula of the entity) and `depthExceeded` (by this formula, or by a formula
+that reads it, a deprecated one included: its restore is no way past the
+limit). A change of a formula types every formula that reads it again,
+transitively: one that no longer types refuses the change, naming that
+reader and why; one whose result type follows (`{F}`) gets a new version and
+its own backfill. A restore checks the restored formula as a save would.
+A formula that reads no field at all and gives an error code (below) is
+refused with that code. Time functions (`NOW()`, `TODAY()`) are refused: a stored
+"now" is stale the moment it is written. A formula takes no `appliesWhen`,
+`unique`, `required`, `defaultValue` or options; its classification is
+required and never changes.
+
+The stored definition keeps the text, the AST bound to field ids (renaming a
+field never breaks a formula; the text is printed with today's labels) and
+the static `resultType` (`text`, `number`, `boolean`, `date`, `timestamp`),
+which sets `osfType` and the index column: a formula filters and sorts like a
+stored field of that type. Every create evaluates every formula, and every
+update the ones it affects, in dependency order inside the write transaction;
+a write of an owned child recomputes its owner, and so does every write of a
+tenant value outside the record's own write — retention, `onDelete: setNull`,
+the delete and retype backfills — in its transaction. A blank input counts as
+blank or 0, as in a spreadsheet. A per-record failure (`divideByZero`,
+`invalidNumber`, `numberOutOfRange`, `invalidDate`, `textTooLong`,
+`typeError`) is `null` with the code in `extensionsMeta.<key>.error`, and no
+index value; it is never a database error. A new, changed or restored formula
+is `updating` while a backfill recomputes every record and every formula that
+reads it. A recompute that a definition change causes leaves a published
+versioned head published; one that a write of the record or its child causes
+puts it back to draft, as that write would.
+
+Limits, so that every result fits its index column: a text result is at most
+1000 characters and 2000 bytes as UTF-8, and text on the way at most 10000
+characters — `&`, `CONCATENATE` and `SUBSTITUTE` are refused (`textTooLong`)
+before they build a longer text, so no formula grows a text without bound; a
+date or timestamp result lies in the years 0001 to 9999 (`invalidDate`); a
+number is finite (`numberOutOfRange`, `invalidNumber`).
+
+Precision: formulas compute in IEEE 754 doubles, about 15 significant digits.
+A number result is rounded to 10 decimals before it is stored, so `0.1 + 0.2`
+is `0.3` in the record and the index. An input with more significant digits
+(a stored `numeric` such as `12345678901234567.89`) is computed, but loses
+the digits beyond those 15: compute exact money amounts elsewhere.
+
+An error code in one record never stops a backfill: that record gets the code
+and the backfill goes on. Only a database failure fails a batch: the batch is
+rolled back and the formula is `suspended`. Records of earlier batches then
+hold the new formula's values and the rest the old one's, so readers see
+`extensionsMeta.<key>.suspended: true` (from the definition, not stored per
+record), filtering or sorting on it is refused with that reason, and new
+writes do not compute it. Saving the formula again, or `rebuildIndex`, starts
+a new backfill. A snapshot freezes the value, with the formula's text and
+result type, only of a `ready` formula; an `updating`, `suspended` or
+deprecated one freezes as `{ unavailable: "<state>" }`, and a record's error
+code as `{ error: "<code>" }`.
+
 A collection may also be presented as a tree:
 `interfaces.web.views.collection.tree: { children, label, count }`, where
 `children` is a collection relationship of the entity and `label` and `count`

@@ -59,6 +59,10 @@ function fieldFor(set: ExtensionFieldSet, key: string): { field: ExtensionField;
   if (!field) extensionError(`Unknown tenant field extensions.${key} for ${set.entity}.`, "BAD_USER_INPUT");
   const shape = extensionShape(set.entry, field!.definition);
   refuseClassified(field!, shape, set.entity);
+  // Its index holds values of two formula generations: no answer from it would be right.
+  if (field!.state === "suspended") {
+    extensionError(`extensions.${key} is suspended: its backfill stopped halfway, so it cannot be filtered or sorted on until the formula is saved again or its index rebuilt.`, "BAD_USER_INPUT");
+  }
   return { field: field!, shape };
 }
 

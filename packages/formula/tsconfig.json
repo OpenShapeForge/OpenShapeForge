@@ -1,0 +1,23 @@
+{
+  "//": [
+    "No DOM lib. The package runs in the browser editor and in the API's",
+    "write transaction, so it may not assume either host's globals."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["esnext"],
+    "types": ["bun"],
+    "skipLibCheck": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules"]
+}

@@ -5,8 +5,9 @@
  * all three interfaces. A field is defined over REST, records carry it,
  * filters and sorts reach it on REST and GraphQL, the location it points at
  * reports who references it, a deprecated field stays readable but closed,
- * and a delete is confirmed and carried out by the backfill worker. MCP sees
- * the fields through the generic Operations only.
+ * a delete is confirmed and carried out by the backfill worker, and a
+ * formula field is backfilled, computed on write and queried like a stored
+ * one. MCP sees the fields through the generic Operations only.
  *
  * The suite works in a tenant of its own, so the fields it defines never
  * reach another suite's records; tenant B of the harness is the other
@@ -250,5 +251,29 @@ describe("tenant fields over REST, GraphQL and MCP", () => {
     // The key is free again.
     expect(await http(manager, "POST", `${ASSETS}/field-definitions/create`, { key: "soort", definition: definition("string") }))
       .toMatchObject({ status: 200, body: { key: "soort", version: 1, state: "ready" } });
+  });
+
+  test.skipIf(!available)("a formula field is backfilled, computed on write, read-only, and filters and sorts over REST", async () => {
+    const formula = (text: string) => ({ label: label("Dubbel"), classification: { sensitivity: "public" }, formula: { text } });
+    const refused = await http(manager, "POST", `${ASSETS}/field-definitions/create`, { key: "dubbel", kind: "formula", definition: formula("accu * TODAY()") });
+    expect(refused).toMatchObject({ status: 422, body: { error: { code: "VALIDATION",
+      data: { errors: [{ code: "timeFunction", start: 7, end: 14, message: expect.stringContaining("TODAY()") }] } } } });
+    const created = await http(manager, "POST", `${ASSETS}/field-definitions/create`, { key: "dubbel", kind: "formula", definition: formula("accu * 2") });
+    expect(created).toMatchObject({ status: 200, body: { key: "dubbel", kind: "formula", state: "updating",
+      definition: { osfType: "number", formula: { text: "{number} * 2", resultType: "number" } }, backfill: { state: "queued", total: 5 } } });
+    await drainBackfills();
+    expect((await http(reader, "POST", `${ASSETS}/field-definitions/list`, {})).body.items.find((item: { key: string }) => item.key === "dubbel"))
+      .toMatchObject({ state: "ready", backfill: { state: "done", processed: 5 } });
+
+    expect((await http(reader, "GET", `${ASSETS}/${records.a!.id}`)).body.data.extensions).toMatchObject({ accu: 5, dubbel: 10 });
+    const written = await http(writer, "POST", ASSETS, { name: `${tag}-f`, extensions: { accu: 1.5 } });
+    expect(written).toMatchObject({ status: 201, body: { data: { extensions: { dubbel: 3 } } } });
+    expect(await http(writer, "POST", ASSETS, { name: `${tag}-g`, extensions: { dubbel: 1 } }))
+      .toMatchObject({ status: 422, body: { error: { violations: [expect.objectContaining({ field: "extensions.dubbel", code: "COMPUTED_FIELD" })] } } });
+
+    expect(ids(await list(reader, { filter: { ...scope, extensions: { dubbel: { gte: 20 } } } })).sort()).toEqual([records.b!.id, records.c!.id].sort());
+    expect(ids(await list(reader, { filter: scope, sortField: "extensions.dubbel", sortDirection: "desc" })))
+      .toEqual([records.b!.id, records.c!.id, records.mcp!.id, records.a!.id, written.body.data.id, records.d!.id]);
+    expect(ids(await list(tenantB, { filter: scope }))).toEqual([]);
   });
 });

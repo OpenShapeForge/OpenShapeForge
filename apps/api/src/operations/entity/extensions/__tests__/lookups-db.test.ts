@@ -1691,4 +1691,69 @@ describe("tenant lookups and rollups", () => {
       expect(child.updated_at).toBe((await get(t.reader, child.id)).updated_at);
     });
   });
+
+  describe("removing an owned child through its collection", () => {
+    const inserted = async (t: Tenant, asset: Row, values: Record<string, unknown>) =>
+      (await parts(t.writer, "insert", { id: asset.id, expectedVersion: String((await get(t.reader, asset.id)).updated_at), values })).childId;
+    const removed = async (t: Tenant, asset: Row, childId: string) =>
+      parts(t.writer, "remove", { id: asset.id, expectedVersion: String((await get(t.reader, asset.id)).updated_at), childId });
+
+    test("a tenant reference that restricts refuses it, naming what points at it", async () => {
+      const t = await tenant();
+      await field(t, "partOf", reference("ExtensibleAssetPart", "Part"));
+      const asset = await create(t.writer, ENTITY, { name: "A" });
+      const child = await inserted(t, asset, { quantity: 2 });
+      const other = await create(t.writer, ENTITY, { name: "B", extensions: { partOf: child } });
+      expect(await failure(removed(t, asset, child))).toMatchObject({ code: "OPERATION_REFUSED", message: expect.stringContaining(`by 1 ${ENTITY} record(s) through "partOf"`) });
+      await update(t.writer, ENTITY, other.id, { extensions: { partOf: null } });
+      await removed(t, asset, child);
+      expect((await get(t.reader, asset.id)).id).toBe(asset.id);
+    });
+
+    test("a tenant reference that is set null leaves no orphan and no lookup through it", async () => {
+      const t = await tenant();
+      await field(t, "partOf", reference("ExtensibleAssetPart", "Part", { onDelete: "setNull" }));
+      await field(t, "partQuantity", lookup("extensions.partOf", "quantity"), "lookup");
+      const asset = await create(t.writer, ENTITY, { name: "A" });
+      const child = await inserted(t, asset, { quantity: 2 });
+      const other = await create(t.writer, ENTITY, { name: "B", extensions: { partOf: child } });
+      expect(other.extensions.partQuantity).toBe(2);
+      await removed(t, asset, child);
+      expect((await get(t.reader, other.id)).extensions).toMatchObject({ partOf: null, partQuantity: null });
+      const { findExtensionReferenceOrphans } = await import("../references.js");
+      expect(await withDbSession(fixture.app.db, t.manager, (trx) => findExtensionReferenceOrphans(trx, t.manager))).toEqual([]);
+    });
+
+    test("more referring records than the budget go through the journal, in the same order of locks", async () => {
+      const t = await tenant();
+      await field(t, "partOf", reference("ExtensibleAssetPart", "Part", { onDelete: "setNull" }));
+      const asset = await create(t.writer, ENTITY, { name: "A" });
+      const child = await inserted(t, asset, { quantity: 2 });
+      const others = await Promise.all([1, 2, 3, 4].map((n) => create(t.writer, ENTITY, { name: `B${n}`, extensions: { partOf: child } })));
+      await removed(t, asset, child);
+      expect(await journal(t.id)).toHaveLength(1);
+      await drainJobs();
+      for (const other of others) expect((await get(t.reader, other.id)).extensions.partOf).toBeNull();
+    });
+
+    test("an authored relation whose foreign key lets go: the lookup through it is computed again", async () => {
+      const t = await tenant();
+      await field(t, "partQuantity", lookup("part", "quantity"), "lookup", GROUP);
+      const asset = await create(t.writer, ENTITY, { name: "A" });
+      const child = await inserted(t, asset, { quantity: 2 });
+      const group = await create(t.writer, GROUP, { name: "G", part: child });
+      expect(group.extensions.partQuantity).toBe(2);
+      const [constraint] = await privileged(sql<{ name: string }>`select conname as name from pg_constraint
+        where conrelid = 'erp.extensible_asset_groups'::regclass and confrelid = 'erp.extensible_asset_parts'::regclass`);
+      await sql.raw(`alter table erp.extensible_asset_groups drop constraint "${constraint!.name}"`).execute(fixture.privileged.db);
+      await sql.raw(`alter table erp.extensible_asset_groups add constraint "${constraint!.name}" foreign key (part_id) references erp.extensible_asset_parts (id) on delete set null`).execute(fixture.privileged.db);
+      try {
+        await removed(t, asset, child);
+        expect((await get(t.reader, group.id, GROUP)).extensions.partQuantity).toBeNull();
+      } finally {
+        await sql.raw(`alter table erp.extensible_asset_groups drop constraint "${constraint!.name}"`).execute(fixture.privileged.db);
+        await sql.raw(`alter table erp.extensible_asset_groups add constraint "${constraint!.name}" foreign key (part_id) references erp.extensible_asset_parts (id)`).execute(fixture.privileged.db);
+      }
+    });
+  });
 });

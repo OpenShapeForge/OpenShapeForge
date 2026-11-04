@@ -971,7 +971,8 @@ guard. An authored relation follows its foreign key; the lookups on records that
 remain are recomputed. Deleting a child recomputes the rollup of its parent. The
 step of a rollup's `of` follows the same rules: an authored relation's foreign
 key refuses the delete while a child points at the target, a tenant reference
-does what its `onDelete` says, and a child it clears recomputes its parent.
+does what its `onDelete` says, and a child it clears recomputes its parent. An
+owned child that its collection Operation removes is deleted under the same rules.
 
 **Snapshots.** A snapshot freezes a lookup or rollup as it does a formula: the
 value with its definition (`kind`, `lookup` or `rollup`) only while the field is

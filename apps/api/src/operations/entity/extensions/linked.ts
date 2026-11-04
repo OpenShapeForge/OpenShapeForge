@@ -1087,8 +1087,8 @@ export type LinkedWrite = {
   row?: Readonly<Record<string, unknown>>;
   /** Tenant field values by key. */
   extensions?: Readonly<Record<string, unknown>>;
-  /** A member of this record's collection written along with it (collection-mutations.ts), with its values by field name. */
-  member?: { table: GeneratedCrudTable; values?: Readonly<Record<string, unknown>> | undefined };
+  /** A member of this record's collection written along with it (collection-mutations.ts), with its values by field name, or `removed`: its id. */
+  member?: { table: GeneratedCrudTable; values?: Readonly<Record<string, unknown>> | undefined; removed?: string | undefined };
 };
 
 /**
@@ -1128,12 +1128,15 @@ export async function lockLinkedRecords(
   const entity = own.source?.authoringEntityName;
   if (!tenantId || !entity || !extensionRegistry.entityNames().length) return undefined;
   const entry = extensionRegistry.entity(entity);
-  const referenced = write.operation === "delete" ? extensionRegistry.referencedBy(entity) : [];
-  if (!entry && !extensionRegistry.readAccess(entity) && !referenced.length) return undefined;
+  const memberTable = write.member ? baseTableOf(write.member.table) : undefined;
+  const memberEntity = memberTable?.source?.authoringEntityName;
+  // What this write deletes: the record, or the member a collection removes from it.
+  const gone = write.operation === "delete" ? { entity, id: write.id! } : memberEntity && write.member?.removed ? { entity: memberEntity, id: write.member.removed } : undefined;
+  const referenced = gone ? extensionRegistry.referencedBy(gone.entity) : [];
+  if (!entry && !extensionRegistry.readAccess(entity) && !(memberEntity && extensionRegistry.readAccess(memberEntity)) && !referenced.length) return undefined;
   const sets = setLoader(trx, session);
   const set = entry ? await sets(entity) : undefined;
   const dependents = await linkedDependents(trx, tenantId, entity);
-  const memberEntity = write.member ? baseTableOf(write.member.table).source?.authoringEntityName : undefined;
   const memberDependents = memberEntity ? await linkedDependents(trx, tenantId, memberEntity) : new Map<string, Dependent>();
   // The owner of an owned single child is recomputed with it, when a formula reads the child.
   const owners: Array<{ table: string; foreignKey: string }> = [];
@@ -1205,6 +1208,7 @@ export async function lockLinkedRecords(
       table: own, entity, ...(write.id ? { id: write.id } : {}), written,
       ...(write.operation === "create" ? { created: true } : write.operation === "delete" ? { deleted: true } : { changed: new Set([...named, ...ids, ...computed]) }),
     });
+    if (memberTable && gone && write.member?.removed) await follow({ table: memberTable, entity: gone.entity, id: gone.id, deleted: true });
     for (const owner of owners) lock(owner.table, write.row?.[owner.foreignKey] ?? current?.[owner.foreignKey], "no key update");
     // A target a child's rollup newly reaches must not change before this write has committed: as for a lookup below.
     const reachedBy = async (from: ReadonlyMap<string, Dependent>, entityName: string, value: (step: RollupStep) => unknown) => {
@@ -1247,12 +1251,13 @@ export async function lockLinkedRecords(
       const sourceSet = await sets(source.sourceEntity);
       if (!sourceSet) continue;
       const records = await sql<{ id: string }>`select distinct record_id::text as id from ${qualifiedTable(source.valuesTable)}
-        where tenant_id = ${tenantId}::uuid and value_ref_id = ${write.id!}::uuid order by 1 limit ${sourceSet.entry.limits.syncFanOut + 1}`.execute(trx);
+        where tenant_id = ${tenantId}::uuid and value_ref_id = ${gone!.id}::uuid order by 1 limit ${sourceSet.entry.limits.syncFanOut + 1}`.execute(trx);
       if (!withinBudget(budget, sourceSet, records.rows.map((record) => record.id))) continue;
       for (const record of records.rows) lock(sourceSet.entry.table, record.id, "no key update");
     }
     if (!plan.size) return;
     if (write.id) lock(entry?.table ?? `${own.schema}.${own.table}`, write.id, write.operation === "delete" ? "update" : "no key update");
+    if (memberTable) lock(`${memberTable.schema}.${memberTable.table}`, write.member?.removed, "update");
     const ordered = [...plan.entries()].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([, item]) => item);
     for (const item of ordered) {
       await sql`select id from ${qualifiedTable(item.table)} where tenant_id = ${tenantId}::uuid and id = ${item.id}::uuid for ${sql.raw(item.mode)}`.execute(trx);

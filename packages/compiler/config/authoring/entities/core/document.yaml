@@ -385,6 +385,9 @@ operations:
     input:
       schema:
         type: object
+        not:
+          properties: { artifact: {}, content: {} }
+          required: [artifact, content]
         required:
           - document
           - version

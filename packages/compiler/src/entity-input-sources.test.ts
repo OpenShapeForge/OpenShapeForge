@@ -93,7 +93,7 @@ test("version-sourced fields resolve only a stored field-definition collection o
   const head = { ...contract, entity: { ...contract.entity, name: "Head" }, versioning: { versionEntity: "HeadVersion" },
     storage: { columns: [{ field: "schema", column: "schema_definitions", type: "jsonb" }] },
     model: { ...contract.model, fields: [{ key: "schema", osfType: "fieldDefinition", cardinality: "collection" }] }, entityOperations: {} } as unknown as CompiledEntityContract;
-  const value = { ...contract, entity: { ...contract.entity, name: "Value" }, entityOperations: {}, model: { ...contract.model, fields: [
+  const value = { ...contract, entity: { ...contract.entity, name: "Value", valueDefinition: true }, entityOperations: {}, model: { ...contract.model, fields: [
     { key: "version", cardinality: "single", relationship: { target: "HeadVersion" } },
     { key: "values", baseType: "object", cardinality: "single", valueFieldsFrom: { reference: "version", field: "schema" } },
   ] } } as unknown as CompiledEntityContract;
@@ -102,4 +102,7 @@ test("version-sourced fields resolve only a stored field-definition collection o
   const bad = structuredClone(value);
   bad.model.fields[1]!.valueFieldsFrom!.field = "missing";
   expect(() => materializeEntityInputSources([head, bad], {})).toThrow("stored FieldDefinition collection");
+  const ordinary = structuredClone(value);
+  ordinary.entity.valueDefinition = false;
+  expect(() => materializeEntityInputSources([head, ordinary], {})).toThrow("only on entity-value definitions");
 });

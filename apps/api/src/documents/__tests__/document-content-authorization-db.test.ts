@@ -43,7 +43,7 @@ describe("document content authorization against PostgreSQL", () => {
         { definitionKey: "TextBlock", values: { markdown: "First" } },
         { definitionKey: "NotAllowed", values: {} },
       ] } };
-    await expect(setup.handlers.createDocument!(input, setup.context)).rejects.toBeDefined();
+    await failsWith(setup.handlers.createDocument!(input, setup.context), ["BAD_USER_INPUT", "VALIDATION"]);
     const remaining = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${title}`.execute(privileged());
     expect(remaining.rows[0]!.count).toBe(0);
     input.content.blocks[1] = { definitionKey: "TextBlock", values: { markdown: "Second" } };
@@ -62,7 +62,7 @@ describe("document content authorization against PostgreSQL", () => {
       content: { variant: { channel: "document", locale: "nl" }, blocks: [
         { definitionKey: "TemplateBlock", values: { version: versionId, parameters: { name: 42 } } },
       ] } };
-    await expect(setup.handlers.createDocument!(input, setup.context)).rejects.toBeDefined();
+    await fails(setup.handlers.createDocument!(input, setup.context), "VALIDATION_FAILED");
     const remaining = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${title}`.execute(privileged());
     expect(remaining.rows[0]!.count).toBe(0);
     input.content.blocks[0]!.values.parameters.name = "Ada" as any;
@@ -70,9 +70,18 @@ describe("document content authorization against PostgreSQL", () => {
     expect((await variantBlocks((await variant(created.id, "document", "nl")).id)).length).toBe(1);
     const deniedTitle = `template-denied-${crypto.randomUUID()}`;
     const deniedSetup = platformFor(caseUser);
-    await expect(deniedSetup.handlers.createDocument!({ ...input, document: { ...input.document, title: deniedTitle } }, deniedSetup.context)).rejects.toBeDefined();
+    await fails(deniedSetup.handlers.createDocument!({ ...input, document: { ...input.document, title: deniedTitle } }, deniedSetup.context), "FORBIDDEN");
     const denied = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${deniedTitle}`.execute(privileged());
     expect(denied.rows[0]!.count).toBe(0);
+    const otherTenant = crypto.randomUUID();
+    const foreign = await seedTemplate(otherTenant);
+    const foreignVersion = await publishTemplate(platformFor({ ...editor, tenantId: otherTenant }).context, foreign.template);
+    const foreignTitle = `template-foreign-${crypto.randomUUID()}`;
+    const foreignInput = { ...input, document: { ...input.document, title: foreignTitle }, content: { ...input.content,
+      blocks: [{ definitionKey: "TemplateBlock", values: { version: foreignVersion, parameters: { name: "Ada" } } }] } };
+    await failsWith(setup.handlers.createDocument!(foreignInput, setup.context), ["NOT_FOUND", "FORBIDDEN"]);
+    const foreignDocument = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${foreignTitle}`.execute(privileged());
+    expect(foreignDocument.rows[0]!.count).toBe(0);
   });
 
   test("a document editor edits document blocks only through the variant, never template blocks", async () => {

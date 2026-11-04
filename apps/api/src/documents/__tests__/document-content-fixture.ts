@@ -168,13 +168,13 @@ export const collections = createCollectionMutationExecutor({
 export const tableName = (entity: string) => getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === entity)!.name;
 
 export const parameters = [{ key: "name", osfType: "string", required: true, label: { en: "Name", nl: "Naam" } }];
-export async function seedTemplate() {
+export async function seedTemplate(templateTenant = tenant) {
   const ids = { template: randomUUID(), variant: randomUUID(), first: randomUUID(), second: randomUUID() };
-  await sql`insert into erp.templates (id, tenant_id, key, name, parameters) values (${ids.template}::uuid, ${tenant}::uuid, ${`welcome-${ids.template.slice(0, 8)}`}, 'Welcome', ${jsonbLiteral(parameters)})`.execute(privileged());
-  await sql`insert into erp.template_variants (id, tenant_id, template_id, channel, locale) values (${ids.variant}::uuid, ${tenant}::uuid, ${ids.template}::uuid, 'document', 'nl')`.execute(privileged());
+  await sql`insert into erp.templates (id, tenant_id, key, name, parameters) values (${ids.template}::uuid, ${templateTenant}::uuid, ${`welcome-${ids.template.slice(0, 8)}`}, 'Welcome', ${jsonbLiteral(parameters)})`.execute(privileged());
+  await sql`insert into erp.template_variants (id, tenant_id, template_id, channel, locale) values (${ids.variant}::uuid, ${templateTenant}::uuid, ${ids.template}::uuid, 'document', 'nl')`.execute(privileged());
   await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, "values") values
-    (${ids.first}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, 0, 'TextBlock', ${jsonbLiteral({ markdown: "Hello {{local.name}}" })}),
-    (${ids.second}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, 1, 'TextBlock', ${jsonbLiteral({ markdown: "Second" })})`.execute(privileged());
+    (${ids.first}::uuid, ${templateTenant}::uuid, ${ids.variant}::uuid, 0, 'TextBlock', ${jsonbLiteral({ markdown: "Hello {{local.name}}" })}),
+    (${ids.second}::uuid, ${templateTenant}::uuid, ${ids.variant}::uuid, 1, 'TextBlock', ${jsonbLiteral({ markdown: "Second" })})`.execute(privileged());
   return ids;
 }
 export async function publishTemplate(context: ModuleOperationContext, templateId: string) {

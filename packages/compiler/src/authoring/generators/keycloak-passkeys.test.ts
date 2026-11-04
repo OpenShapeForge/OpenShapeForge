@@ -36,7 +36,7 @@ function browserFlowAuthenticators(p: ReturnType<typeof profile>): string[] {
 describe("passkey profile — no password path for a human", () => {
   it("puts no password authenticator anywhere in the browser flow", () => {
     const reachable = browserFlowAuthenticators(profile());
-    expect(reachable).toContain("webauthn-authenticator-passwordless");
+    expect(profile().webAuthnPolicyPasswordlessPasskeysEnabled).toBe(true);
     expect(reachable).toContain("auth-username-form");
     // The one execution that would put a password box back on the page.
     expect(reachable).not.toContain("auth-username-password-form");
@@ -181,21 +181,18 @@ describe("passkey profile — a person always chooses passkey or e-mail", () => 
   const p = profile();
   const byAlias = new Map(p.authenticationFlows.map((f) => [f.alias, f]));
 
-  it("identifies the person, then offers a passkey OR an e-mail code as alternatives", () => {
+  it("requires email authentication only when a passkey has not already been verified", () => {
     expect(
       byAlias.get("passkey-browser-forms")!.authenticationExecutions.map((e) => [e.authenticator ?? e.flowAlias, e.requirement]),
     ).toEqual([
       ["auth-username-form", "REQUIRED"],
-      [PASSKEY_SIGN_IN_FLOW, "REQUIRED"],
+      [PASSKEY_SIGN_IN_FLOW, "CONDITIONAL"],
     ]);
-    // Order is behaviour: Keycloak asks for a credential the person has first
-    // and lists the e-mail step under "try another way".
-    expect(
-      byAlias.get(PASSKEY_SIGN_IN_FLOW)!.authenticationExecutions.map((e) => [e.authenticator, e.requirement]),
-    ).toEqual([
-      ["webauthn-authenticator-passwordless", "ALTERNATIVE"],
-      ["osf-email-sign-in", "ALTERNATIVE"],
+    expect(byAlias.get(PASSKEY_SIGN_IN_FLOW)!.authenticationExecutions).toMatchObject([
+      { authenticator: "conditional-credential", authenticatorConfig: "passkey-not-yet-used", requirement: "REQUIRED" },
+      { authenticator: "osf-email-sign-in", requirement: "REQUIRED" },
     ]);
+    expect(p.authenticatorConfig).toContainEqual({ alias: "passkey-not-yet-used", config: { credentials: "webauthn-passwordless", included: "false" } });
   });
 });
 
@@ -203,6 +200,8 @@ describe("passkey profile — the WebAuthn policy is a decision, not a default",
   const p = profile({ realmDisplayName: "Acme B.V." });
 
   it("pins the values that make it a passkey", () => {
+    expect(p.webAuthnPolicyPasswordlessPasskeysEnabled).toBe(true);
+    expect(p.webAuthnPolicyPasswordlessMediation).toBe("none");
     expect(p.webAuthnPolicyPasswordlessRequireResidentKey).toBe("Yes");
     expect(p.webAuthnPolicyPasswordlessUserVerificationRequirement).toBe("required");
     expect(p.webAuthnPolicyPasswordlessSignatureAlgorithms).toEqual(["ES256", "RS256"]);

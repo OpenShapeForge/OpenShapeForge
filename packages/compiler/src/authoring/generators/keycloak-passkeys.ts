@@ -100,6 +100,7 @@ export const INVITATION_EMAIL_VERIFIED_ACTION = "osf-invitation-email-verified";
 
 export interface KeycloakAuthenticationExecutionExport {
   authenticator?: string;
+  authenticatorConfig?: string;
   flowAlias?: string;
   requirement: "REQUIRED" | "ALTERNATIVE" | "CONDITIONAL" | "DISABLED";
   priority: number;
@@ -122,7 +123,10 @@ export interface PasskeyProfile {
   directGrantFlow: string;
   registrationFlow: string;
   authenticationFlows: KeycloakAuthenticationFlowExport[];
+  authenticatorConfig: { alias: string; config: Record<string, string> }[];
   requiredActions: KeycloakRequiredActionExport[];
+  webAuthnPolicyPasswordlessPasskeysEnabled: boolean;
+  webAuthnPolicyPasswordlessMediation: string;
   webAuthnPolicyPasswordlessRpEntityName: string;
   webAuthnPolicyPasswordlessRpId: string;
   webAuthnPolicyPasswordlessSignatureAlgorithms: string[];
@@ -290,12 +294,15 @@ export function buildPasskeyProfile(options: {
         ],
       },
     ],
+    authenticatorConfig: [{ alias: "passkey-not-yet-used", config: { credentials: "webauthn-passwordless", included: "false" } }],
     requiredActions: PASSKEY_REQUIRED_ACTIONS,
     // The name a browser shows in the system passkey prompt ("Sign in to
     // ..."). Left at Keycloak's shipped "keycloak" it would read as somebody
     // else's product.
     webAuthnPolicyPasswordlessRpEntityName: realmDisplayName?.trim() || realmName,
     webAuthnPolicyPasswordlessRpId: resolvePasskeyRpId(rpId, dev, realmName),
+    webAuthnPolicyPasswordlessPasskeysEnabled: true,
+    webAuthnPolicyPasswordlessMediation: "none",
     // ES256 covers Apple, Android and every FIDO2 key; RS256 covers Windows
     // Hello's TPM-backed credentials. RS1 (SHA-1) is deliberately absent.
     webAuthnPolicyPasswordlessSignatureAlgorithms: ["ES256", "RS256"],

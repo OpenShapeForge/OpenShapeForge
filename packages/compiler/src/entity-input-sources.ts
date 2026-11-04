@@ -1,5 +1,5 @@
-import { operationForm } from "./authoring/operation-form-presentation.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { operationForm } from "./authoring/operation-form-presentation.js";
 import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import { compiledObjectSchema, splitBundledDefinitions } from "./field-json-schema.js";
@@ -120,6 +120,7 @@ export function materializeEntityInputSources(
   for (const contract of contracts) validateEntityOptions(contract.model.fields);
   for (const contract of contracts) {
     for (const operation of Object.values(contract.entityOperations)) {
+      if (operation?.implementation.type === "entity" && operation.interfaces?.web && operation.interfaces.web.form) throw new Error(`${operation.id}: use record create or update groups for entity CRUD.`);
       if (operation?.input.kind === "json-schema") {
         operation.input.schema = resolveEntityInputSources(operation.input.schema, contracts, referentiedata);
         if (operation.interfaces?.web && operation.interfaces.web.form) operationForm(operation.interfaces.web.form, operation.input.schema, operation.id);

@@ -36,5 +36,26 @@ test("version projection requires the matching visible owner and never changes t
   expect(readTenant).toBe("tenant-a");
   expect(await withFrozenFieldDefinitions({} as any, { ...viewer, tenantId: "tenant-b" }, version, data, deps)).toEqual(data);
   expect(await withFrozenFieldDefinitions({} as any, viewer, version, data, { ...deps, requireRead: () => { throw operationFailure({ code: "FORBIDDEN", message: "denied" }); } })).toEqual(data);
+  const protectedOwner = { ...owner, source: { ...owner.source, authorization: { ...owner.source?.authorization, recordPermissions: { view: true } } } } as unknown as GeneratedCrudTable;
+  let reads = 0;
+  const protectedDeps = { ...deps, tables: () => [protectedOwner], read: async () => { reads++; return { id: "owner-1" }; } };
+  expect((await withFrozenFieldDefinitions({} as any, viewer, version, data, protectedDeps)).frozenFieldDefinitions).toEqual({ parameters: [{ key: "name" }] });
+  reads = 0;
+  expect(await withFrozenFieldDefinitions({} as any, viewer, version, data, { ...protectedDeps, recordPermission: async () => { throw operationFailure({ code: "FORBIDDEN", message: "denied" }); } })).toEqual(data);
+  expect(reads).toBe(0);
   expect(await withFrozenFieldDefinitions({} as any, viewer, version, { snapshot: { ...data.snapshot, entity: "Other" } }, deps)).not.toHaveProperty("frozenFieldDefinitions");
+});
+
+test("compiled version output admits the logical fields declared by the value registry", async () => {
+  const { default: catalog } = await import("../../generated/operations/catalog.json", { with: { type: "json" } });
+  const { default: manifest } = await import("../../generated/db/manifest.json", { with: { type: "json" } });
+  const operation = (catalog as any).entityOperations.find((item: any) => item.id === "TemplateVersion.get");
+  const projected = operation.outputSchema.anyOf.find((item: any) => item.type === "object").properties.frozenFieldDefinitions;
+  const bindings = (manifest as any).entityValues.carriers.flatMap((carrier: any) => Object.values(carrier.definitions).flatMap((definition: any) =>
+    definition.fields.filter((field: any) => field.valueFieldsFrom && definition.references.some((ref: any) => ref.fieldKey === field.valueFieldsFrom.reference && ref.targetEntity === "TemplateVersion")).map((field: any) => field.valueFieldsFrom.field)));
+  expect(Object.keys(projected.properties).sort()).toEqual([...new Set(bindings)].sort());
+  const { default: Ajv } = await import("ajv");
+  const validate = new Ajv({ strict: false }).compile(projected);
+  expect(validate({ parameters: [{ key: "name", osfType: "string" }] })).toBe(true);
+  expect(validate({ unknown: [] })).toBe(false);
 });

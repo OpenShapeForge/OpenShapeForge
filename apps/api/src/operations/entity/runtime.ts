@@ -1,5 +1,5 @@
-import { withFrozenFieldDefinitions } from "./frozen-field-definitions.js";
 import { assertCurrentAccountAuthority } from "../../accounts/account-current-authority.js";
+import { withFrozenFieldDefinitions } from "./frozen-field-definitions.js";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { classifyDatabaseError } from "../../db/database-refusals.js";

@@ -2,6 +2,7 @@
 /** Presentation paths never remove inputs from the canonical Operation. */
 export function operationForm(form: { groups: Array<{ title: { en?: string; nl?: string }; fields: string[]; collapsed?: boolean }> } | undefined, schema: Readonly<Record<string, unknown>>, origin: string) {
   if (!form) return undefined;
+  if (form.groups.some(group => !group.title.en && !group.title.nl)) throw new Error(`${origin}: form group requires an English or Dutch title.`);
   const used: string[] = [];
   const groups = form.groups.map(group => ({ ...group, title: { en: group.title.en ?? group.title.nl ?? "", nl: group.title.nl ?? group.title.en ?? "" }, fields: group.fields.map(path => {
     if (used.some(previous => previous === path || previous.startsWith(`${path}.`) || path.startsWith(`${previous}.`))) throw new Error(`${origin}: overlapping form field ${path}.`);
@@ -15,6 +16,7 @@ export function operationForm(form: { groups: Array<{ title: { en?: string; nl?:
         break; // The entity source is resolved and validated before final output.
       }
       const properties = node && typeof node === "object" && !Array.isArray(node) ? (node as { properties?: Record<string, unknown> }).properties : undefined;
+      if (index > 0 && ((node as { oneOf?: unknown }).oneOf || (node as { anyOf?: unknown }).anyOf)) throw new Error(`${origin}: form field ${path} traverses a choice.`);
       if (index < parts.length - 1 && !(node as { required?: string[] }).required?.includes(key)) throw new Error(`${origin}: form field ${path} traverses an optional object.`);
       const required = (node as { required?: string[] }).required?.includes(key);
       node = properties?.[key];

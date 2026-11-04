@@ -784,7 +784,7 @@ export function entityOperationJsonSchemas(
         const binding = field.valueFieldsFrom;
         const ref = binding && candidate.model.fields.find(item => item.key === binding.reference);
         return binding && ref?.relationship?.target === contract.entity.name ? [binding.field] : [];
-      })))];
+      })))].sort();
       if (fields.length && Object.hasOwn(record.properties as object, "frozenFieldDefinitions")) throw new Error(`${contract.entity.name}: frozenFieldDefinitions is reserved.`);
       const projected = fields.length ? { ...record, properties: { ...(record.properties as JsonObject), frozenFieldDefinitions: {
         type: "object", additionalProperties: false, properties: Object.fromEntries(fields.map(field => [field, { type: "array", items: { type: "object", additionalProperties: true } }]))

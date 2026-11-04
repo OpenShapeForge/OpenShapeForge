@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { operationForm } from "./operation-form-presentation.js";
 import { collectBlueprintOperations } from "../blueprint-operations.js";
 import { fieldDefinitionsPath, referencedByPath } from "../extension-operations.js";
 import type { ExtensionRegistry } from "./extension-registry-types.js";
@@ -99,7 +100,6 @@ function contextFor(contract: CompiledEntityContract, preferred: string): Compil
     ?? Object.entries(contract.views).sort(([left], [right]) => left.localeCompare(right))[0]?.[1];
 }
 
-import { operationForm } from "./operation-form-presentation.js";
 
 function operation(
   source: CompiledEntityOperation | undefined,

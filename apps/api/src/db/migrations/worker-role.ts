@@ -386,9 +386,10 @@ export async function applyWorkerRoleGrants(db: OpenShapeForgeDatabase) {
  *     a computed field may read (formula-columns.ts) — and no other business
  *     table, nor any other column (a classified or field-policed one never is);
  *   - on `platform.extension_field_definitions`, SELECT, INSERT (the version
- *     that turns unique off again after a duplicate) and UPDATE of `state`
- *     and `is_current` only;
- *   - on `platform.extension_field_backfills`, SELECT and UPDATE of its
+ *     that turns unique off again after a duplicate) and UPDATE of `state`,
+ *     `suspended_reason` and `is_current` only;
+ *   - on `platform.extension_field_backfills`, SELECT, INSERT (the failed entry
+ *     a revalidation leaves when it suspends a field) and UPDATE of its
  *     progress columns;
  *   - INSERT on `platform.system_bypass_audit`, the trail of the audited
  *     tenant bypass every batch runs under.
@@ -418,8 +419,9 @@ export function extensionWorkerGrants(
     const draft = table ? draftRule(table)?.column : undefined;
     const update = ["extension_values", "updated_at", ...(draft ? [draft] : [])].filter((column) => present.has(column));
     const readable = table ? formulaColumns(table).map((column) => column.name) : [];
-    // A lookup follows the foreign key of an authored single relation.
-    const references = entry.relations.filter((relation) => relation.kind === "belongsTo").map((relation) => relation.foreignKey);
+    // A lookup follows the foreign key of an authored single relation, never a classified or field-policed one.
+    const references = entry.relations.filter((relation) => relation.kind === "belongsTo").map((relation) => relation.foreignKey)
+      .filter((name) => { const column = table?.columns.find((candidate) => candidate.name === name); return !column?.classification && !column?.fieldPolicy; });
     const select = [...new Set(["id", "tenant_id", "created_at", ...update, ...readable, ...references])].filter((column) => present.has(column)).sort();
     return { table: entry.table, select, update };
   });
@@ -454,7 +456,8 @@ export function extensionWorkerGrants(
       if (!table) continue;
       const present = new Set(table.columns.map((column) => column.name));
       const columns = childGrants.get(name) ?? new Set<string>();
-      for (const column of ["id", "tenant_id", "created_at", ...(foreignKey ? [foreignKey] : []), ...formulaColumns(table).map((item) => item.name)]) {
+      const link = table.columns.find((column) => column.name === foreignKey);
+      for (const column of ["id", "tenant_id", "created_at", ...(link && !link.classification && !link.fieldPolicy ? [link.name] : []), ...formulaColumns(table).map((item) => item.name)]) {
         if (present.has(column)) columns.add(column);
       }
       childGrants.set(name, columns);
@@ -465,8 +468,8 @@ export function extensionWorkerGrants(
       .map((table): ExtensionWorkerGrant => ({ table, select: "all", insert: true, update: "all", delete: true })),
     ...sourceGrants,
     ...[...childGrants].map(([table, columns]): ExtensionWorkerGrant => ({ table, select: [...columns].sort() })),
-    { table: "platform.extension_field_definitions", select: "all", insert: true, update: ["state", "is_current"] },
-    { table: "platform.extension_field_backfills", select: "all", update: ["state", "processed", "cursor", "error", "updated_at"] },
+    { table: "platform.extension_field_definitions", select: "all", insert: true, update: ["state", "suspended_reason", "is_current"] },
+    { table: "platform.extension_field_backfills", select: "all", insert: true, update: ["state", "processed", "cursor", "error", "updated_at"] },
     { table: "platform.extension_field_dependencies", select: "all" },
     { table: "platform.extension_field_recomputes", select: "all", insert: true, update: "all", delete: true },
     { table: "platform.system_bypass_audit", select: [], insert: true },

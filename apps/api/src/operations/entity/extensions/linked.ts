@@ -15,23 +15,31 @@
  * read the target and the target field, the target's rows are narrowed by no
  * axis, the target field is not classified and has no read roles of its own
  * that leave a source reader out, and no authorization profile of the tenant
- * manages the target's reads. A chain is proven link by link, each when its
- * own definition is saved. The proof is repeated by every migration and by
- * every change of a tenant's authorization profiles; a definition whose
- * proof no longer holds is `suspended` — its values stay readable as the
- * last known ones, marked, and are no filter or sort key — until its
- * designer saves it again or removes it.
+ * manages the reads of the source or the target. A chain is proven link by
+ * link, each when its own definition is saved. A relation the value travels
+ * along is under the same rule: classified or field-policed, it is refused as
+ * a tenant reference is. The proof is repeated by every migration, by every
+ * change of a tenant's authorization profiles and by a database trigger on
+ * them; a definition whose proof no longer holds is `suspended`, and so is
+ * whatever reads it, across the whole graph: readers get null with
+ * `extensionsMeta.suspended`, no filter or sort takes it and a snapshot freezes
+ * `{ unavailable }`, until its designer saves it again or removes it. The value
+ * stays in the source, so that saving it again can start from what is there.
  *
  * Recomputation follows the dependency graph in
  * `platform.extension_field_dependencies` across entities: a write of a
- * record recomputes, in its own transaction, the lookups that read it on up
- * to `limits.syncFanOut` referring records, and the rollups of its old and
- * new parent. Beyond that limit the write leaves one row per (field, record)
- * in the recompute journal (`platform.extension_field_recomputes`), which
- * coalesces further writes of that record; the journal worker recomputes the
- * referring records in batches after a short debounce. Until it has, a
- * reader sees the last known value with `extensionsMeta.<key>.stale`, derived
- * from the open journal rows of its page in one query.
+ * record recomputes, in its own transaction, the lookups that read it and the
+ * rollups of its old and new parent, down the chain, on at most
+ * `limits.syncFanOut` records in all. A record's neighbours are locked in one
+ * order before its write (lockLinkedRecords). Beyond that budget the write
+ * leaves one row per (field, record) in the recompute journal
+ * (`platform.extension_field_recomputes`), which coalesces further writes of
+ * that record; the journal worker recomputes the referring records in batches
+ * after a short debounce. Until it has, a reader sees the last known value with
+ * `extensionsMeta.<key>.stale`, derived from the open journal rows of its page
+ * in one query. A rollup is one aggregate over the child table and the typed
+ * index, never a collection in memory, so `where` and `of` are refused when
+ * saved if SQL cannot say what they mean.
  */
 import { randomUUID } from "node:crypto";
 import { sql, type RawBuilder, type Transaction } from "kysely";
@@ -53,6 +61,7 @@ import type { GeneratedCrudColumn, GeneratedCrudTable } from "../types.js";
 import { acrossTenant, jobActorSession, jobSession, startBackfill, type BackfillOperation } from "./backfill.js";
 import { authoredFormulaFields, fieldValues, formulaGraph, labelText, storedFormula, tenantFieldType, formulaDependencies } from "./formulas.js";
 import {
+  AUTHORIZATION_PROOF_LOST,
   conditionPaths,
   EXTENSION_META_KEY,
   EXTENSION_VALUES_COLUMN,
@@ -76,7 +85,7 @@ import {
   type ExtensionFieldSet,
   type RollupAggregate,
 } from "./model.js";
-import { narrowerReadAccess } from "./read-access.js";
+import { AUTHORIZATION_MODEL, narrowerReadAccess } from "./read-access.js";
 import { conditionValues, readValue, storedExtensionSource } from "./read.js";
 import { unlinkReferences } from "./references.js";
 import { extensionRegistry } from "./registry.js";
@@ -140,8 +149,13 @@ export function computedLinked(set: ExtensionFieldSet): ExtensionField[] {
 
 const tenantPathId = (path: string): string | undefined => path.startsWith(TENANT_PATH) ? path.slice(TENANT_PATH.length) : undefined;
 
-/** The entities whose reads an authorization profile of this tenant manages (docs/authorization-profiles.md). */
-async function managedEntities(trx: Transaction<DB>, tenantId: string): Promise<Set<string>> {
+/**
+ * The entities whose reads an authorization profile of this tenant manages
+ * (docs/authorization-profiles.md), across the tenant: what the proof needs is
+ * every policy, not those the writer may see. A managed subtype shares its
+ * base's table, so its base counts as managed too.
+ */
+async function managedEntities(trx: Transaction<DB>, session: DbSessionInput): Promise<Set<string>> {
   let table: string, entity: string, managed: string;
   try {
     table = entityTableName("AuthorizationOperationPolicy");
@@ -150,9 +164,17 @@ async function managedEntities(trx: Transaction<DB>, tenantId: string): Promise<
   } catch {
     return new Set();
   }
-  const rows = await sql<{ entity: string }>`select distinct ${sql.ref(entity)} as entity from ${qualifiedTable(table)}
-    where tenant_id = ${tenantId}::uuid and ${sql.ref(managed)}`.execute(trx);
-  return new Set(rows.rows.map((row) => row.entity));
+  const rows = await acrossTenant(trx, session, "read the managed entities of the tenant", () =>
+    sql<{ entity: string }>`select distinct ${sql.ref(entity)} as entity from ${qualifiedTable(table)}
+      where tenant_id = ${session.tenantId}::uuid and ${sql.ref(managed)}`.execute(trx));
+  return withBases(rows.rows.map((row) => row.entity));
+}
+
+/** Entities as the proof compares them: a subtype and the base whose table it shares. */
+function withBases(entities: readonly string[]): Set<string> {
+  const subtypes = new Map(getGeneratedCrudTables().flatMap((item) => item.subtype && item.source?.authoringEntityName
+    ? [[item.source.authoringEntityName, item.subtype.base.entityName] as const] : []));
+  return new Set(entities.flatMap((entity) => subtypes.has(entity) ? [entity, subtypes.get(entity)!] : [entity]));
 }
 
 /** Every current field key of the tenant by field id, for presenting stored paths. */
@@ -239,6 +261,17 @@ async function resolveField(sets: Sets, entity: string, name: unknown, stored: b
 
 const SCALAR = new Set(["text", "number", "boolean", "date", "timestamp"]);
 
+/**
+ * The refusal for a relation a computed value would travel along: what it
+ * points at would show through the value, so a classified or field-policed
+ * foreign key is out of reach as a classified tenant reference is.
+ */
+function assertRelationReadable(column: GeneratedCrudColumn | undefined, purpose: string, label: string): void {
+  if (column?.classification || column?.fieldPolicy) {
+    extensionError(`${purpose}: ${label} is ${column.classification ? "classified" : "protected by a field policy"}; what it points at would show through the computed field.`);
+  }
+}
+
 async function resolveLookup(sets: Sets, set: ExtensionFieldSet, lookup: Record<string, unknown>, stored: boolean): Promise<ResolvedLookup> {
   const via = lookup.via;
   if (typeof via !== "string" || !via) extensionError("A lookup names its reference: lookup.via.");
@@ -258,6 +291,7 @@ async function resolveLookup(sets: Sets, set: ExtensionFieldSet, lookup: Record<
   } else {
     const relation = set.entry.relations.find((candidate) => candidate.key === via && candidate.kind === "belongsTo");
     if (!relation) extensionError(`lookup.via: ${via} is neither a tenant reference field (extensions.<key>) nor a single relation of ${set.entity}.`);
+    assertRelationReadable(tableOf(set.entity)?.columns.find((candidate) => candidate.name === relation!.foreignKey), "lookup.via", `${set.entity}.${relation!.key}`);
     resolvedVia = { path: relation!.key, label: relation!.key, relation: relation! };
     target = relation!.entity;
   }
@@ -297,6 +331,7 @@ async function resolveRollup(sets: Sets, set: ExtensionFieldSet, rollup: Record<
     const childTable = tableOf(child);
     const column = childTable?.columns.find((candidate) => candidate.name === relation!.foreignKey);
     if (!childTable || !column) extensionError(`rollup.collection: ${collection} has no readable foreign key.`);
+    assertRelationReadable(column, "rollup.collection", `${child}.${fieldNameForColumn(column!)}`);
     link = fieldNameForColumn(column!);
     resolved = { path: relation!.key, label: relation!.key, relation: relation! };
   }
@@ -442,6 +477,9 @@ function narrower(
   const to = extensionRegistry.readAccess(target);
   const reason = narrowerReadAccess(source, target, from, to, owned);
   if (reason || !from || !to) return reason;
+  if (managed.has(source)) {
+    return `an authorization profile of this tenant manages the reads of ${source}, so a subject granted ${source} by a profile alone could read ${target} values.`;
+  }
   if (field?.authored) {
     const roles = to.fieldReadRoles?.[field.path];
     const missing = roles ? from.roles.filter((role) => !roles.includes(role)) : [];
@@ -454,20 +492,22 @@ function narrower(
 }
 
 function proofOf(resolved: ResolvedLookup | ResolvedRollup, source: string, managed: ReadonlySet<string>): string | undefined {
-  if (resolved.kind === "lookup") {
-    if (resolved.field.field?.state === "suspended") return `${resolved.field.label} is suspended.`;
-    return narrower(source, resolved.target, resolved.field, managed);
-  }
+  if (resolved.kind === "lookup") return narrower(source, resolved.target, resolved.field, managed);
   const owned = resolved.collection.relation?.ownership === "owned" && resolved.collection.relation.childAuthorization === "owner";
   for (const field of [resolved.of, ...resolved.whereFields]) {
-    if (field?.field?.state === "suspended") return `${field.label} is suspended.`;
     const reason = narrower(source, resolved.child, field, managed, owned);
     if (reason) return reason;
   }
   return narrower(source, resolved.child, undefined, managed, owned);
 }
 
-function refuseProof(key: string, kind: string, reason: string): never {
+/** The first field a lookup or rollup reads that is suspended itself. */
+function suspendedInput(resolved: ResolvedLookup | ResolvedRollup): TargetField | undefined {
+  const fields = resolved.kind === "lookup" ? [resolved.field] : [resolved.of, ...resolved.whereFields];
+  return fields.find((field) => field?.field?.state === "suspended");
+}
+
+export function refuseProof(key: string, kind: string, reason: string): never {
   throw operationFailure({
     code: "FORBIDDEN",
     message: `The ${kind} ${key} cannot be saved: ${reason}`,
@@ -513,7 +553,8 @@ export async function validateLinkedDefinition(
   const resolved = input.kind === "lookup"
     ? await resolveLookup(sets, set, spec as Record<string, unknown>, false)
     : await resolveRollup(sets, set, spec as Record<string, unknown>, false);
-  const reason = proofOf(resolved, set.entity, await managedEntities(trx, session.tenantId!));
+  const suspendedRead = suspendedInput(resolved);
+  const reason = suspendedRead ? `${suspendedRead.label} is suspended.` : proofOf(resolved, set.entity, await managedEntities(trx, session));
   if (reason) refuseProof(input.key, input.kind, reason);
   const resultType = resultTypeOf(resolved);
   const storedSpec = resolved.kind === "lookup"
@@ -1475,20 +1516,41 @@ export function staleExtensionFields(entity: string, recordId: unknown): Readonl
 // ---------------------------------------------------------------------------
 // Revalidation.
 
+/** Put one field in `suspended`: the reason in a failed backfill entry and on the definition, an event for whoever follows the definitions. */
+async function suspendField(trx: Transaction<DB>, tenantId: string, entity: string, field: Pick<ExtensionField, "rowId" | "fieldId" | "key" | "kind" | "version">, code: string, reason: string): Promise<void> {
+  await sql`update platform.extension_field_definitions set state = 'suspended', suspended_reason = ${code}
+    where tenant_id = ${tenantId}::uuid and id = ${field.rowId}::uuid and state in ('ready', 'updating')`.execute(trx);
+  await sql`insert into platform.extension_field_backfills
+      (tenant_id, id, entity, field_id, definition_version, operation, state, processed, total, cursor, error, created_at, updated_at)
+    values (${tenantId}::uuid, gen_random_uuid(), ${entity}, ${field.fieldId}::uuid, ${field.version}, ${field.kind}, 'failed', 0, 0, null,
+      ${jsonbLiteral({ code, message: `${field.key} is suspended: ${reason}` })}, clock_timestamp(), clock_timestamp())`.execute(trx);
+  forgetExtensionFields(trx, tenantId, entity);
+  await announceFieldDefinitionChange(trx, tenantId, entity, field.fieldId, "updated");
+}
+
 /**
  * Prove every lookup and rollup of the session's tenant again, against the
- * registry this process runs and the tenant's authorization profiles now: a
- * definition whose proof no longer holds — or that no longer resolves, or
- * reads a field that is suspended — becomes `suspended` (its last values
- * stay, marked, and are no filter or sort key), with the reason in a failed
- * backfill entry, until its designer saves it again or deletes it. Repeated
- * until nothing changes, so a chain suspends link by link. Returns the
- * suspended fields.
+ * registry this process runs and the tenant's authorization profiles now, and
+ * follow what no longer holds down the whole graph. A lookup or rollup whose
+ * proof no longer holds, or that no longer resolves, becomes `suspended` with
+ * AUTHORIZATION_PROOF_LOST: readers get null with `extensionsMeta.suspended`
+ * (read.ts), no filter or sort takes it, a snapshot freezes `{ unavailable }`,
+ * and the stored value stays until its designer saves the field again. A
+ * computed field that reads a suspended one, a formula as much as a lookup or
+ * rollup on another entity, is suspended with it; it inherits a lost proof, and
+ * any other reason keeps its last value. Repeated until nothing changes, so a
+ * chain suspends link by link. Returns the suspended fields. `managed` stands in
+ * for the tenant's policies where they are out of reach: the worker holds no
+ * grant on the authorization model, so its job is told what the trigger saw.
  */
-export async function revalidateLinkedFields(trx: Transaction<DB>, session: DbSessionInput): Promise<Array<{ entity: string; key: string; reason: string }>> {
+export async function revalidateLinkedFields(
+  trx: Transaction<DB>,
+  session: DbSessionInput,
+  managed?: ReadonlySet<string>,
+): Promise<Array<{ entity: string; key: string; reason: string }>> {
   const tenantId = session.tenantId!;
   const suspended: Array<{ entity: string; key: string; reason: string }> = [];
-  const managed = await managedEntities(trx, tenantId);
+  managed ??= await managedEntities(trx, session);
   for (let round = 0; round < 16; round += 1) {
     let changed = false;
     for (const entity of extensionRegistry.entityNames()) {
@@ -1496,23 +1558,31 @@ export async function revalidateLinkedFields(trx: Transaction<DB>, session: DbSe
       const set = await loadExtensionFieldsFor(trx, session, entity, entry);
       const sets = setLoader(trx, session, set);
       for (const field of set.fields) {
-        if ((field.kind !== "lookup" && field.kind !== "rollup") || (field.state !== "ready" && field.state !== "updating")) continue;
+        if (field.kind === "stored" || (field.state !== "ready" && field.state !== "updating")) continue;
+        let code = AUTHORIZATION_PROOF_LOST;
         let reason: string | undefined;
-        try {
-          reason = proofOf(await resolveStored(sets, set, field), entity, managed);
-        } catch (error) {
-          reason = (error as { operationError?: { message?: string } }).operationError?.message ?? (error instanceof Error ? error.message : String(error));
+        if (field.kind === "formula") {
+          const reads = formulaDependencies(set, storedFormula(field.definition)?.ast ?? { kind: "literal", value: null });
+          const input = reads.flatMap((read) => read.via === null ? [set.byId.get(read.field)] : []).find((item) => item?.state === "suspended");
+          if (!input) continue;
+          code = inheritedSuspension(input);
+          reason = `${entity}.${input.key} is suspended.`;
+        } else {
+          try {
+            const resolved = await resolveStored(sets, set, field);
+            reason = proofOf(resolved, entity, managed!);
+            const input = reason ? undefined : suspendedInput(resolved);
+            if (input) {
+              code = inheritedSuspension(input.field!);
+              reason = `${input.label} is suspended.`;
+            }
+          } catch (error) {
+            reason = (error as { operationError?: { message?: string } }).operationError?.message ?? (error instanceof Error ? error.message : String(error));
+          }
         }
         if (!reason) continue;
         await lockExtensionFields(trx, tenantId, entity, "exclusive");
-        await sql`update platform.extension_field_definitions set state = 'suspended'
-          where tenant_id = ${tenantId}::uuid and id = ${field.rowId}::uuid and state in ('ready', 'updating')`.execute(trx);
-        await sql`insert into platform.extension_field_backfills
-            (tenant_id, id, entity, field_id, definition_version, operation, state, processed, total, cursor, error, created_at, updated_at)
-          values (${tenantId}::uuid, gen_random_uuid(), ${entity}, ${field.fieldId}::uuid, ${field.version}, ${field.kind}, 'failed', 0, 0, null,
-            ${jsonbLiteral({ code: "AUTHORIZATION_PROOF_LOST", message: `${field.key} is suspended: ${reason}` })}, clock_timestamp(), clock_timestamp())`.execute(trx);
-        forgetExtensionFields(trx, tenantId, entity);
-        await announceFieldDefinitionChange(trx, tenantId, entity, field.fieldId, "updated");
+        await suspendField(trx, tenantId, entity, field, code, reason);
         suspended.push({ entity, key: field.key, reason });
         changed = true;
       }
@@ -1522,36 +1592,112 @@ export async function revalidateLinkedFields(trx: Transaction<DB>, session: DbSe
   return suspended;
 }
 
-/** The entities whose writes change what a lookup's proof reads: the authorization profile model. */
-const AUTHORIZATION_MODEL = new Set([
-  "AuthorizationOperationPolicy", "AuthorizationProfile", "AuthorizationProfileAssignment", "AuthorizationProfilePolicy", "AuthorizationProfileVersion",
-]);
-
 /** After a write of the authorization profile model: revalidate the tenant's lookups and rollups in the same transaction. */
 export async function revalidateAfterAuthorizationChange(trx: Transaction<DB>, session: DbSessionInput, table: GeneratedCrudTable): Promise<void> {
   const entity = table.source?.authoringEntityName;
-  if (!entity || !AUTHORIZATION_MODEL.has(entity) || !session.tenantId || !extensionRegistry.entityNames().length) return;
+  if (!entity || !AUTHORIZATION_MODEL.includes(entity) || !session.tenantId || !extensionRegistry.entityNames().length) return;
+  // Under the lock: a lookup saved concurrently is either seen here or sees this change.
+  await lockExtensionGraph(trx, session.tenantId);
   const any = await sql<{ found: boolean }>`select exists (select 1 from platform.extension_field_definitions
     where tenant_id = ${session.tenantId}::uuid and is_current and kind in ('lookup', 'rollup') and state in ('ready', 'updating')) as found`.execute(trx);
   if (!any.rows[0]?.found) return;
-  await lockExtensionGraph(trx, session.tenantId);
   await revalidateLinkedFields(trx, session);
 }
 
 /**
+ * The `extensions.revalidate` job: what the database trigger on the
+ * authorization profile model places (db/migrations/authorization-profiles.ts),
+ * so that a custom Operation or direct SQL reaches the proof as a generic write
+ * does, and what a failed backfill places so that readers of the field follow it.
+ * The payload names the entities the tenant's profiles managed as the writer saw
+ * them. A later change has a job of its own, and a job only ever suspends.
+ */
+export const extensionRevalidateJobHandler: ModuleJobHandler = async (payload, context) => {
+  const { session } = await replayedSession(context);
+  const managed = Array.isArray(payload.managed) ? payload.managed.filter((entity): entity is string => typeof entity === "string") : [];
+  await sql`savepoint extension_revalidate`.execute(context.db);
+  try {
+    await lockExtensionGraph(context.db, context.job.tenantId);
+    const suspended = await revalidateLinkedFields(context.db, session, withBases(managed));
+    await sql`release savepoint extension_revalidate`.execute(context.db);
+    return { outcome: "done", result: { suspended: suspended.length } };
+  } catch (error) {
+    await sql`rollback to savepoint extension_revalidate`.execute(context.db);
+    return retryOutcome(error, "REVALIDATION_FAILED", "Proving the tenant's lookups and rollups again failed; it runs again.");
+  }
+};
+
+/** Place one revalidation of the session's tenant, after a change that may have suspended something. */
+export async function enqueueRevalidation(trx: Transaction<DB>, session: DbSessionInput, key: string): Promise<void> {
+  await enqueueJob(trx, { tenantId: session.tenantId!, actorId: session.userId!, actorSession: jobActorSession(session),
+    kind: EXTENSION_REVALIDATE_KIND, payload: {}, deliveryKey: key });
+}
+
+/**
+ * Fail closed, for a tenant whose revalidation failed: every lookup and rollup
+ * it holds, and whatever reads them, suspended as if its proof were lost. Plain
+ * SQL over the definitions and the graph: whatever failed cannot have been
+ * needed here. Returns the suspended fields.
+ */
+async function suspendLinkedFieldsOfTenant(trx: Transaction<DB>, tenantId: string, message: string): Promise<Array<{ entity: string; key: string; reason: string }>> {
+  const rows = await sql<{ row_id: string; entity: string; field_id: string; key: string; kind: ExtensionField["kind"]; version: number }>`
+    with recursive reach as (
+      select d.field_id, d.entity, d.id, d.key, d.kind, d.version, d.state from platform.extension_field_definitions d
+      where d.tenant_id = ${tenantId}::uuid and d.is_current and d.kind in ('lookup', 'rollup') and d.state in ('ready', 'updating', 'suspended')
+      union
+      select reader.field_id, reader.entity, reader.id, reader.key, reader.kind, reader.version, reader.state
+      from reach
+      join platform.extension_field_dependencies edge on edge.tenant_id = ${tenantId}::uuid
+        and edge.depends_on_entity = reach.entity and edge.depends_on_field = reach.field_id::text
+      join platform.extension_field_definitions reader on reader.tenant_id = edge.tenant_id and reader.field_id = edge.field_id and reader.is_current
+    )
+    select id::text as row_id, entity, field_id::text as field_id, key, kind, version from reach
+    where state in ('ready', 'updating') order by 1`.execute(trx);
+  const suspended: Array<{ entity: string; key: string; reason: string }> = [];
+  for (const row of rows.rows) {
+    await suspendField(trx, tenantId, row.entity, { rowId: row.row_id, fieldId: row.field_id, key: row.key, kind: row.kind, version: row.version },
+      AUTHORIZATION_PROOF_LOST, message);
+    suspended.push({ entity: row.entity, key: row.key, reason: message });
+  }
+  return suspended;
+}
+
+export type LinkedRevalidationReport = {
+  /** The fields this run suspended, a failed tenant's included. */
+  suspended: number;
+  /** The tenants whose revalidation failed: their lookups and rollups are suspended, fail closed. */
+  failedTenants: string[];
+};
+
+/**
  * The migration's step: every tenant holding a lookup or rollup, proven
- * again against the manifest this migration installed. Runs on the
- * migration connection, which names each tenant in every statement.
+ * again against the manifest this migration installed, each within a failure
+ * boundary of its own: a tenant that cannot be proven is suspended, fail closed,
+ * and the chain goes on. One tenant never holds up a deployment (the report says
+ * which failed). Runs on the migration connection, which names each tenant in
+ * every statement.
  */
 export async function revalidateLinkedFieldsOfEveryTenant(
   run: <T>(tenantId: string, work: (trx: Transaction<DB>) => Promise<T>) => Promise<T>,
   tenants: readonly string[],
-): Promise<number> {
-  let suspended = 0;
+  log: (fields: Record<string, unknown>, message: string) => void = () => undefined,
+): Promise<LinkedRevalidationReport> {
+  const report: LinkedRevalidationReport = { suspended: 0, failedTenants: [] };
   for (const tenantId of tenants) {
-    suspended += (await run(tenantId, (trx) => revalidateLinkedFields(trx, { tenantId, userId: null, roles: [], scope: "tenant" }))).length;
+    try {
+      report.suspended += (await run(tenantId, (trx) => revalidateLinkedFields(trx, { tenantId, userId: null, roles: [], scope: "tenant" }))).length;
+    } catch (error) {
+      report.failedTenants.push(tenantId);
+      log({ tenantId, error: error instanceof Error ? error.message : String(error) }, "Revalidating the tenant's lookups and rollups failed; they are suspended.");
+      try {
+        report.suspended += (await run(tenantId, (trx) => suspendLinkedFieldsOfTenant(trx, tenantId,
+          "the migration could not prove it again, so it is suspended until it is saved again."))).length;
+      } catch (failure) {
+        log({ tenantId, error: failure instanceof Error ? failure.message : String(failure) }, "Suspending the tenant's lookups and rollups failed as well.");
+      }
+    }
   }
-  return suspended;
+  return report;
 }
 
 /** Whether a definition kind is one of this module's. */

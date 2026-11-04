@@ -18,6 +18,7 @@ import {
   EXTENSION_VALUES_COLUMN,
   evaluateCondition,
   isClassified,
+  proofLost,
   record,
   type ExtensionField,
   type ExtensionFieldSet,
@@ -98,7 +99,10 @@ export function projectExtensionRow(
   for (const field of set.fields) {
     if (field.state === "deleted") continue;
     const applicable = evaluateCondition(field.appliesWhen, values);
-    const value = readValue(field, source, applicable);
+    // A lost proof redacts: the stored value is data of another record that
+    // this reader may no longer see. It stays in the source, for when the
+    // field is saved again.
+    const value = proofLost(field) ? null : readValue(field, source, applicable);
     extensions[field.key] = redactFieldValue(value, extensionFieldPolicy(field), session ?? undefined, classified);
     const fieldMeta = record(meta[field.fieldId]) ? meta[field.fieldId] as Record<string, unknown> : {};
     extensionsMeta[field.key] = {
@@ -106,8 +110,8 @@ export function projectExtensionRow(
       ...(fieldMeta.stale === true || stale?.has(field.fieldId) ? { stale: true as const } : {}),
       ...(typeof fieldMeta.error === "string" ? { error: fieldMeta.error } : {}),
       // From the definition, never stored per record: a suspended formula's
-      // values are of two generations until its backfill runs to the end, a
-      // suspended lookup's are the last ones its lost proof covered.
+      // values are of two generations until its backfill runs to the end, and
+      // a field whose proof is lost reads as null.
       ...(field.state === "suspended" ? { suspended: true as const } : {}),
       ...(field.state === "deprecated" ? { deprecated: true as const } : {}),
     };

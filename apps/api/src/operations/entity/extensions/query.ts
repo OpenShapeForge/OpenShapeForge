@@ -30,7 +30,7 @@ import type { DbSessionInput } from "../../../db/session.js";
 import { isCalendarDate, structuredFilter, type QueryField } from "../../../platform/structured-filter.js";
 import { filterLeaves } from "../filter-groups.js";
 import type { GeneratedCrudTable, ListPageInput } from "../types.js";
-import { extensionError, extensionShape, record, type ExtensionField, type ExtensionFieldSet, type ExtensionShape } from "./model.js";
+import { extensionError, extensionShape, proofLost, record, type ExtensionField, type ExtensionFieldSet, type ExtensionShape } from "./model.js";
 import { extensibleEntityOf, provenExtensionFields } from "./store.js";
 import { qualifiedTable } from "./write.js";
 
@@ -59,11 +59,13 @@ function fieldFor(set: ExtensionFieldSet, key: string): { field: ExtensionField;
   if (!field) extensionError(`Unknown tenant field extensions.${key} for ${set.entity}.`, "BAD_USER_INPUT");
   const shape = extensionShape(set.entry, field!.definition);
   refuseClassified(field!, shape, set.entity);
-  // Its index holds values of two formula generations: no answer from it would be right.
+  // Its index holds what a reader may no longer see, or values of two formula
+  // generations: no answer from it would be right.
+  if (proofLost(field!)) {
+    extensionError(`extensions.${key} is suspended: its authorization proof no longer holds, so it cannot be filtered or sorted on until it is saved again.`, "BAD_USER_INPUT");
+  }
   if (field!.state === "suspended") {
-    extensionError(field!.kind === "lookup" || field!.kind === "rollup"
-      ? `extensions.${key} is suspended: its authorization proof no longer holds, so it cannot be filtered or sorted on until it is saved again.`
-      : `extensions.${key} is suspended: its backfill stopped halfway, so it cannot be filtered or sorted on until the formula is saved again or its index rebuilt.`, "BAD_USER_INPUT");
+    extensionError(`extensions.${key} is suspended: its backfill stopped halfway, so it cannot be filtered or sorted on until the field is saved again or its index rebuilt.`, "BAD_USER_INPUT");
   }
   return { field: field!, shape };
 }

@@ -14,6 +14,10 @@ import accessPolicy from '../../generated/compiler/access-policy.json' with {typ
 import { databaseRole } from '../database-roles.js';
 import { APP_ROLE } from './app-role.js';
 import { WORKER_ROLE } from './worker-role.js';
+import { AUTHORIZATION_MODEL } from '../../operations/entity/extensions/read-access.js';
+
+/** The job that proves a tenant's lookups and rollups again (operations/entity/extensions/linked.ts). */
+const EXTENSION_REVALIDATE_KIND = 'extensions.revalidate';
 
 type InventorySeed = { checksum: string; rows: Array<{ id:string; entity:string; roles:string[]; grantable:boolean; fields:Record<string,{column:string;type:string}> }> };
 export async function applyAuthorizationProfilesMigration(db: OpenShapeForgeDatabase) {
@@ -37,6 +41,56 @@ export async function applyAuthorizationProfilesMigration(db: OpenShapeForgeData
   await sql`revoke insert,update,delete,truncate on platform.authorization_operation_inventory from ${sql.id(APP_ROLE)}`.execute(db);
   await installAuthorizationPolicyFunctions(db);
   await installAuthorizationRowPolicies(db);
+  await installLinkedRevalidationTriggers(db);
+}
+
+/**
+ * Whatever changes the authorization profile model, a generic write or a custom
+ * Operation or direct SQL, a tenant's lookups and rollups are proven against it
+ * again: the trigger places one `extensions.revalidate` job per transaction,
+ * for a tenant that holds any, naming the entities its profiles manage as this
+ * transaction sees them, since the worker that runs the job holds no grant on
+ * this model. It runs as the writer, and the job does the work where it holds
+ * no lock of the write's.
+ */
+async function installLinkedRevalidationTriggers(db: OpenShapeForgeDatabase) {
+  const {entityTableName,entityColumnName}=await import('../manifest-lookup.js');
+  const policies=sql.table(entityTableName('AuthorizationOperationPolicy'));
+  const entityType=sql.ref(entityColumnName('AuthorizationOperationPolicy','entityType'));
+  const managed=sql.ref(entityColumnName('AuthorizationOperationPolicy','managed'));
+  const uuid = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$';
+  await sql`
+    create or replace function app.enqueue_linked_revalidation() returns trigger
+    language plpgsql as $function$
+    declare
+      tenant uuid := coalesce(new.tenant_id, old.tenant_id);
+      actor text := current_setting('app.user_id', true);
+    begin
+      if not exists (select 1 from platform.extension_field_definitions
+        where tenant_id = tenant and is_current and kind in ('lookup', 'rollup') and state in ('ready', 'updating')) then
+        return null;
+      end if;
+      insert into platform.jobs (tenant_id, actor_id, actor_session, kind, payload, delivery_key)
+      values (tenant,
+        -- Direct SQL has no session: the job then names no one, and needs no one's rights.
+        case when actor ~ ${sql.lit(uuid)} then actor::uuid else '00000000-0000-4000-8000-000000000000'::uuid end,
+        jsonb_build_object('credential', 'trusted-context', 'roles', '[]'::jsonb, 'groups', '[]'::jsonb, 'relationGroupIds', '[]'::jsonb, 'scope', 'tenant'),
+        ${sql.lit(EXTENSION_REVALIDATE_KIND)},
+        jsonb_build_object('managed', coalesce((select jsonb_agg(distinct ${entityType}) from ${policies} where tenant_id = tenant and ${managed}), '[]'::jsonb)),
+        'authorization:' || txid_current()::text)
+      on conflict (tenant_id, kind, delivery_key) where delivery_key is not null do update set payload = excluded.payload;
+      return null;
+    end;
+    $function$;
+  `.execute(db);
+  const tables = manifest.tables as unknown as GeneratedCrudTable[];
+  for (const entity of AUTHORIZATION_MODEL) {
+    const table = tables.find((candidate) => candidate.source?.authoringEntityName === entity && candidate.tenantScoped);
+    if (!table) continue;
+    const target = sql.id(table.schema, table.table);
+    await sql`drop trigger if exists linked_revalidation on ${target}`.execute(db);
+    await sql`create trigger linked_revalidation after insert or update or delete on ${target} for each row execute function app.enqueue_linked_revalidation()`.execute(db);
+  }
 }
 
 /** Same bounded canonical AST used by the application validator, evaluated inside RLS. */

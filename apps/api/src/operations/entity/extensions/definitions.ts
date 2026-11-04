@@ -29,6 +29,7 @@ import {
   isCollection,
   linkedResultType,
   mapConditionPaths,
+  proofLost,
   record,
   schemaFieldOf,
   SENSITIVITIES,
@@ -318,10 +319,19 @@ async function validateAnyDefinition(
   } else {
     valid = validateFieldDefinition(set, table, input, existing);
   }
+  if (valid.kind === "formula") assertReadsNoLostProof(set, input.key, valid.dependsOn);
   if (valid.kind !== "stored") {
     await assertTenantGraph(trx, session, { entity: set.entity, fieldId: input.fieldId, key: input.key, kind: valid.kind, definition: valid.definition, dependsOn: valid.dependsOn });
   }
   return valid;
+}
+
+/** A formula over a field whose proof is lost would show what its readers no longer see: it waits for that field to be saved again. */
+function assertReadsNoLostProof(set: ExtensionFieldSet, key: string, dependsOn: readonly { entity?: string; field: string; via?: string | null }[]): void {
+  for (const dependency of dependsOn) {
+    const input = (dependency.entity ?? set.entity) === set.entity && !dependency.via ? set.byId.get(dependency.field) : undefined;
+    if (input && proofLost(input)) refuseProof(key, "formula", `${input.key} is suspended.`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -690,7 +700,7 @@ export async function executeFieldDefinitionAction(
       // the meantime — and its backfill brings every record up to date.
       const recompute = action === "restore" && field.kind !== "stored";
       const restored = recompute && field.kind === "formula"
-        ? validateFormulaDefinition(withRestoredField(set, field.fieldId), { fieldId: field.fieldId, key: field.key, definition: presentFormulaDefinition(set, field) })
+        ? restoredFormula(set, field)
         : recompute
           ? { ...await validateAnyDefinition(trx, session, withRestoredField(set, field.fieldId), table,
             { fieldId: field.fieldId, key: field.key, kind: field.kind, definition: presentDefinition(set, field, names) }, field), readers: [] as RetypedReader[] }
@@ -761,6 +771,13 @@ export async function executeFieldDefinitionAction(
       return { items: reloaded.fields.filter((field) => field.state !== "deleted").map((field) => toRecord(reloaded, field, undefined, names)) };
     }
   }
+}
+
+/** A formula as it is restored: checked as if it were saved now, and not over a field whose proof is lost. */
+function restoredFormula(set: ExtensionFieldSet, field: ExtensionField) {
+  const restored = validateFormulaDefinition(withRestoredField(set, field.fieldId), { fieldId: field.fieldId, key: field.key, definition: presentFormulaDefinition(set, field) });
+  assertReadsNoLostProof(set, field.key, restored.dependsOn);
+  return restored;
 }
 
 /**

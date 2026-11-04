@@ -10,6 +10,11 @@
  */
 import type { RuntimeExtensionReadAccess } from "@openshapeforge/plugin-runtime";
 
+/** The entities whose writes change what a lookup's proof reads: the authorization profile model. */
+export const AUTHORIZATION_MODEL: readonly string[] = [
+  "AuthorizationOperationPolicy", "AuthorizationProfile", "AuthorizationProfileAssignment", "AuthorizationProfilePolicy", "AuthorizationProfileVersion",
+];
+
 const EVERY_CLASS = ["person", "application", "service", "unknown"];
 const classes = (access: RuntimeExtensionReadAccess) => access.principalClasses ?? EVERY_CLASS;
 

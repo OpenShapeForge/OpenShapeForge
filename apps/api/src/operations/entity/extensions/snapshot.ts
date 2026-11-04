@@ -13,7 +13,8 @@
  *     options (with their labels), cardinality, and the default when the
  *     value is one. A formula's result is frozen as the value it had, but
  *     only while its definition is `ready`: an `updating` or `suspended`
- *     formula may hold the value of another generation, so it freezes as
+ *     formula may hold the value of another generation, and a suspended one
+ *     data its reader may no longer see, so it freezes as
  *     `{ unavailable: "<state>" }`; a record whose formula gave an error code
  *     freezes `{ error: "<code>" }`, not the absence of a value. Its
  *     definition carries `kind: "formula"` and `formula: { text, resultType }`

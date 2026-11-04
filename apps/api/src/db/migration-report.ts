@@ -41,6 +41,10 @@ export function renderMigrationReport(
     ...(result.pluginConstraintsRemoved.length === 0
       ? {}
       : { pluginConstraintsRemoved: result.pluginConstraintsRemoved }),
+    ...(result.linkedFieldsSuspended === 0 ? {} : { linkedFieldsSuspended: result.linkedFieldsSuspended }),
+    ...(result.linkedFieldsFailedTenants.length === 0
+      ? {}
+      : { linkedFieldsFailedTenants: result.linkedFieldsFailedTenants }),
     ...(moduleLoadFailures.length === 0
       ? {}
       : {

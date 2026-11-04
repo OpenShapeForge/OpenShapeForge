@@ -30,7 +30,13 @@ import {
   extensionBackfillJobHandler,
   extensionRetentionJobHandler,
 } from "../operations/entity/extensions/backfill.js";
-import { EXTENSION_RECOMPUTE_KIND, extensionRecomputeJobHandler } from "../operations/entity/extensions/linked.js";
+import {
+  EXTENSION_RECOMPUTE_KIND,
+  EXTENSION_REVALIDATE_KIND,
+  extensionRecomputeJobHandler,
+  extensionRevalidateJobHandler,
+  sweepExtensionRecomputes,
+} from "../operations/entity/extensions/linked.js";
 
 export { JOBS_PLUGIN, JOB_WORKER_ROLE };
 
@@ -112,6 +118,7 @@ export function createJobsRuntimeModule(options: JobsRuntimeModuleOptions): Runt
     [EXTENSION_BACKFILL_KIND]: extensionBackfillJobHandler,
     [EXTENSION_RETENTION_KIND]: extensionRetentionJobHandler,
     [EXTENSION_RECOMPUTE_KIND]: extensionRecomputeJobHandler,
+    [EXTENSION_REVALIDATE_KIND]: extensionRevalidateJobHandler,
   };
   const module: RuntimeModule = {
     name: JOBS_PLUGIN,
@@ -131,7 +138,10 @@ export function createJobsRuntimeModule(options: JobsRuntimeModuleOptions): Runt
             },
             "Draining platform.jobs.",
           );
-          return startJobWorker(db, handlers, log, readJobWorkerOptions(env));
+          return startJobWorker(db, handlers, log, {
+            ...readJobWorkerOptions(env),
+            sweeps: { "recompute journal rows given a new job": sweepExtensionRecomputes },
+          });
         },
         // Core's own durable work store: the inbound delivery receipts
         // (jobs/inbound/work.ts). `roles/worker.ts` binds these into

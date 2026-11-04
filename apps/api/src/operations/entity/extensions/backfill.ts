@@ -57,6 +57,7 @@ import { formulaGraph } from "./formulas.js";
 import { announceFieldDefinitionChange, forgetExtensionFields, insertFieldVersion, loadExtensionFieldsFor } from "./store.js";
 import { qualifiedTable, recomputeRecordFormulas, rewriteExtensionValues } from "./write.js";
 import { storedExtensionSource } from "./read.js";
+import { enqueueRevalidation } from "./linked.js";
 
 export const EXTENSION_BACKFILL_KIND = "extensions.backfill";
 export const EXTENSION_RETENTION_KIND = "extensions.retention";
@@ -416,6 +417,8 @@ async function runFormulaBatch(
         code: "FORMULA_BACKFILL_FAILED",
         message: `${field.key} could not be computed for every record and is suspended; save the ${field.kind} again or rebuild its index to resume.`,
       });
+      // What reads this field follows it (linked.ts `revalidateLinkedFields`).
+      await enqueueRevalidation(trx, session, `backfill:${row.id}`);
       return { state: "failed" as const, processed: row.processed, cursor: row.cursor, more: false };
     }
   });

@@ -766,7 +766,10 @@ a formula's, and read-only on every transport. The server sets `osfType`.
 ```
 
 - `via` is a tenant reference field (`extensions.<key>`, single, not
-  classified) or an authored single relation by its field key.
+  classified) or an authored single relation by its field key, whose foreign
+  key is neither classified nor has read roles of its own. A collection's
+  foreign key is under the same rule: what a relation points at would show
+  through the value.
 - `field`, `of` and the paths of `where` name an authored field or
   `extensions.<key>` of the target. A tenant field may itself be a formula,
   lookup or rollup. Fields a formula may not read (classified, references,
@@ -813,10 +816,12 @@ its rows and the fields with read roles of their own. For every link:
   public }` narrows nothing;
 - the target field is not classified and has no read roles of its own that
   leave out a role of the source;
-- no authorization profile of the tenant manages the target's reads
-  (`AuthorizationOperationPolicy`, [authorization-profiles.md](authorization-profiles.md)).
-  Managed access is per tenant and per subject, so it cannot be compared with
-  the source's and always counts as narrower;
+- no authorization profile of the tenant manages the reads of the target or of
+  the source (`AuthorizationOperationPolicy`,
+  [authorization-profiles.md](authorization-profiles.md)). Managed access is per
+  tenant and per subject, so it cannot be compared with the other side's and
+  always counts as narrower: a subject granted the source by a profile alone
+  would read target data. A managed subtype counts for its base entity;
 - a target field that is itself computed is `ready` or `updating`, and was
   proven link by link when it was saved.
 
@@ -829,13 +834,26 @@ kind of field.
 **Revalidation.** Authorization is a compile-time contract, so every run of the
 migration chain proves all lookups and rollups again against the manifest it
 installs, and every generic write of the authorization profile model proves
-those of its tenant again. A definition whose proof no longer holds, that no
-longer resolves, or that reads a suspended field becomes `suspended`: its values
-stay readable as the last known ones with `extensionsMeta.<key>.suspended:
-true`, a filter or sort on it is refused, and nothing recomputes it. The reason
-is in `backfill.error` of its `FieldDefinitionRecord`. Its designer decides:
-saving it again proves it again and recomputes every record, or deprecate and
-delete it.
+those of its tenant again. A database trigger on that model places the same
+proof as an `extensions.revalidate` job, so a custom Operation or direct SQL
+reaches it too. A tenant whose revalidation fails in a migration does not stop
+it: its lookups and rollups are suspended, fail closed, and the migration report
+names the tenant under `linkedFieldsFailedTenants`, beside
+`linkedFieldsSuspended`.
+
+A definition whose proof no longer holds or that no longer resolves becomes
+`suspended`, with `AUTHORIZATION_PROOF_LOST`, and suspension follows the whole
+graph: every formula, lookup and rollup that reads it, on any entity, goes with
+it. Its stored value is target data a reader may no longer see, so a reader gets
+`null` with `extensionsMeta.<key>.suspended: true`; a filter or sort on it is
+refused, a snapshot freezes `{ unavailable: "suspended" }` and nothing
+recomputes it. The value stays in the source. Any other reason to suspend a
+field, such as a backfill that failed, keeps the last known value, and so do the
+fields that read it. The reason is in `backfill.error` of its
+`FieldDefinitionRecord`, and an event of `<Entity>FieldDefinition` announces it.
+Its designer decides: saving it again proves it again and recomputes every
+record, or deprecate and delete it. `rebuildIndex` is no way back from a lost
+proof, and a formula cannot be saved to read a field that lost its proof.
 
 **The graph.** Each definition keeps its dependencies in
 `platform.extension_field_dependencies`, with the reference or collection it

@@ -639,6 +639,34 @@ describe("tenant lookups and rollups", () => {
     expect(JSON.stringify(read.parameters)).not.toContain(other.id);
   });
 
+  test("a source under a profile: refused when saved, suspended when it comes later, and redacted for its readers", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    await manage(t, ENTITY);
+    expect(await failure(define(t.manager, "create", { key: "placeName", kind: "lookup", definition: lookup("extensions.place", "name") })))
+      .toMatchObject({ code: "FORBIDDEN", message: expect.stringContaining(`manages the reads of ${ENTITY}`) });
+
+    const later = await tenant();
+    await field(later, "place", reference(TARGET_ENTITY, "Place"));
+    await field(later, "placeName", lookup("extensions.place", "name"), "lookup");
+    const location = await create(later.writer, TARGET_ENTITY, { name: "Depot" });
+    const asset = await create(later.writer, ENTITY, { name: "A", extensions: { place: location.id } });
+    await manage(later, ENTITY);
+    await adminWrite(later);
+    expect((await listed(later, "placeName")).state).toBe("suspended");
+    expect((await listed(later, "placeName")).backfill?.error).toMatchObject({ code: "AUTHORIZATION_PROOF_LOST" });
+    const read = await withDbSession(fixture.privileged.db, later.reader, async (trx) => {
+      const { loadExtensionFieldsFor } = await import("../store.js");
+      const { extensionRegistry } = await import("../registry.js");
+      const { projectExtensionRow } = await import("../read.js");
+      await loadExtensionFieldsFor(trx, later.reader, ENTITY, extensionRegistry.entity(ENTITY)!);
+      const stored = (await sql<{ row: Record<string, unknown> }>`select to_jsonb(a.*) as row from erp.extensible_assets a where id = ${asset.id}::uuid`.execute(trx)).rows[0]!.row;
+      return projectExtensionRow(tableOf(ENTITY), later.reader, stored as never) as Row;
+    });
+    expect(read.extensions.placeName).toBeNull();
+    expect(read.extensionsMeta.placeName).toMatchObject({ suspended: true });
+  });
+
   test("a record the writer's row policies hide still follows a write of its target", async () => {
     const t = await tenant();
     await field(t, "place", reference(TARGET_ENTITY, "Place"));
@@ -705,6 +733,80 @@ describe("tenant lookups and rollups", () => {
     expect(await status()).toBe("published");
     await write(t.writer, EDITION, edition.id, { name: "E2" });
     expect(await status()).toBe("draft");
+  });
+
+  test("a classified or field-policed relation carries no lookup and no rollup, and the worker cannot read it", async () => {
+    const t = await tenant();
+    for (const [via, entity] of [["confidentialLocation", GROUP], ["restrictedLocation", EDITION]] as const) {
+      const refused = await failure(define(t.manager, "create", { key: "behind", kind: "lookup", definition: lookup(via, "name") }, entity));
+      expect(refused).toMatchObject({ code: "VALIDATION", message: expect.stringMatching(/classified|field policy/) });
+    }
+    for (const collection of ["auditedParts", "restrictedParts"]) {
+      const refused = await failure(define(t.manager, "create", { key: `r${collection.length}`, kind: "rollup", definition: rollup({ collection, aggregate: "countAll" }) }));
+      expect(refused).toMatchObject({ code: "VALIDATION", message: expect.stringMatching(/classified|field policy/) });
+    }
+    const worker = async (table: string, column: string) => (await privileged(sql<{ held: boolean }>`select has_column_privilege('openshapeforge_worker', ${table}, ${column}, 'select') as held`))[0]!.held;
+    expect(await worker("erp.extensible_asset_groups", "location_id")).toBe(true);
+    expect(await worker("erp.extensible_asset_groups", "confidential_location_id")).toBe(false);
+    expect(await worker("erp.extensible_asset_editions", "restricted_location_id")).toBe(false);
+    expect(await worker("erp.extensible_asset_parts", "audited_asset_id")).toBe(false);
+  });
+
+  test("a lost proof suspends the whole graph: formulas and readers on other entities turn null, no filter, no snapshot value", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    await field(t, "placeName", lookup("extensions.place", "name", "Place name"), "lookup");
+    await field(t, "shout", formula('{Place name} & "!"', "Shout"), "formula");
+    await field(t, "lead", reference(ENTITY, "Lead"), undefined, GROUP);
+    await field(t, "leadShout", lookup("extensions.lead", "extensions.shout", "Lead shout"), "lookup", GROUP);
+    const location = await create(t.writer, TARGET_ENTITY, { name: "Depot" });
+    const asset = await create(t.writer, ENTITY, { name: "A", extensions: { place: location.id } });
+    const group = await create(t.writer, GROUP, { name: "G", extensions: { lead: asset.id } });
+    expect(group.extensions.leadShout).toBe("Depot!");
+
+    await manage(t, TARGET_ENTITY);
+    await adminWrite(t);
+    for (const [key, entity] of [["placeName", ENTITY], ["shout", ENTITY], ["leadShout", GROUP]] as const) {
+      const item = await listed(t, key, entity);
+      expect(item.state).toBe("suspended");
+      expect(item.backfill?.error).toMatchObject({ code: "AUTHORIZATION_PROOF_LOST" });
+    }
+    const read = await get(t.reader, asset.id);
+    expect(read.extensions).toMatchObject({ placeName: null, shout: null });
+    expect(read.extensionsMeta.shout).toMatchObject({ suspended: true });
+    expect((await get(t.reader, group.id, GROUP)).extensions.leadShout).toBeNull();
+    expect(await list(t.reader, { extensions: { shout: { eq: "Depot!" } } })).toMatchObject({ error: { code: "BAD_USER_INPUT" } });
+    const frozen = await withDbSession(fixture.app.db, t.reader, async (trx) => {
+      const row = (await sql<{ row: Record<string, unknown> }>`select to_jsonb(a.*) as row from erp.extensible_assets a where id = ${asset.id}::uuid`.execute(trx)).rows[0]!.row;
+      return extensionSnapshot(trx, t.reader, ENTITY, row);
+    });
+    expect(frozen.extensions[(await listed(t, "shout")).fieldId]).toEqual({ unavailable: "suspended" });
+    // A formula over it cannot be saved to read what the lost proof hides, and rebuildIndex is no way back.
+    expect(await failure(define(t.manager, "create", { key: "again", kind: "formula", definition: formula('{Place name} & "?"', "Again") })))
+      .toMatchObject({ code: "FORBIDDEN" });
+    expect(await failure(define(t.manager, "rebuildIndex", { fieldId: (await listed(t, "shout")).fieldId }))).toMatchObject({ code: "CONFLICT" });
+    // The source keeps the value, for when it is saved again.
+    expect((await privileged(sql<{ value: string }>`select extension_values->>${(await listed(t, "placeName")).fieldId} as value from erp.extensible_assets where id = ${asset.id}::uuid`))[0]!.value).toBe("Depot");
+  });
+
+  test("another reason to suspend keeps the last value, along the graph as well", async () => {
+    const t = await tenant();
+    await field(t, "group", reference(GROUP, "Group"));
+    await field(t, "size", number("Size"), undefined, GROUP);
+    const twice = await field(t, "twice", formula("{Size} * 2", "Twice"), "formula", GROUP);
+    await field(t, "groupTwice", lookup("extensions.group", "extensions.twice", "Group twice"), "lookup");
+    const group = await create(t.writer, GROUP, { name: "G", extensions: { size: 4 } });
+    const asset = await create(t.writer, ENTITY, { name: "A", extensions: { group: group.id } });
+    await sql`update platform.extension_field_definitions set state = 'suspended', suspended_reason = 'FORMULA_BACKFILL_FAILED'
+      where tenant_id = ${t.id}::uuid and field_id = ${twice}::uuid and is_current`.execute(fixture.privileged.db);
+    await withDbSession(fixture.app.db, t.manager, (trx) => revalidateLinkedFields(trx, t.manager));
+    const reader = await listed(t, "groupTwice");
+    expect(reader.state).toBe("suspended");
+    expect(reader.backfill?.error).toMatchObject({ code: "DEPENDENCY_SUSPENDED" });
+    const read = await get(t.reader, asset.id);
+    expect(read.extensions.groupTwice).toBe(8);
+    expect(read.extensionsMeta.groupTwice).toMatchObject({ suspended: true });
+    expect((await get(t.reader, group.id, GROUP)).extensions.twice).toBe(8);
   });
 
   test("one budget per write along the whole chain: a lookup's records, then the parents of their rollups through the journal", async () => {
@@ -812,6 +914,121 @@ describe("tenant lookups and rollups", () => {
     const plain = (await listed(t, "plain")).fieldId;
     expect(await failure(define(t.manager, "update", { fieldId: plain, definition: { osfType: "number", label: label("Plain"), ...pub, defaultValue: 1 }, appliesWhen: applies })))
       .toMatchObject({ code: "CONFLICT", message: expect.stringContaining(`${GROUP}.sum`) });
+  });
+
+  test("a tenant that cannot be proven is suspended, fail closed; the chain goes on and reports it", async () => {
+    const broken = await tenant();
+    const healthy = await tenant();
+    for (const t of [broken, healthy]) {
+      await field(t, "place", reference(TARGET_ENTITY, "Place"));
+      await field(t, "placeName", lookup("extensions.place", "name", "Place name"), "lookup");
+      await field(t, "shout", formula('{Place name} & "!"', "Shout"), "formula");
+    }
+    let failed = false;
+    const report = await revalidateLinkedFieldsOfEveryTenant((tenantId, work) => fixture.privileged.db.transaction().execute(async (trx) => {
+      await sql`select set_config('app.tenant_id', ${tenantId}, true), set_config('app.bypass_rls', 'true', true)`.execute(trx);
+      if (tenantId === broken.id && !failed) { failed = true; throw new Error("injected"); }
+      return work(trx);
+    }), [broken.id, healthy.id]);
+    expect(report).toEqual({ suspended: 2, failedTenants: [broken.id] });
+    expect((await listed(broken, "placeName")).state).toBe("suspended");
+    expect((await listed(broken, "placeName")).backfill?.error).toMatchObject({ code: "AUTHORIZATION_PROOF_LOST" });
+    expect((await listed(broken, "shout")).state).toBe("suspended");
+    expect((await listed(healthy, "placeName")).state).toBe("ready");
+    const fieldId = (await listed(broken, "placeName")).fieldId;
+    expect(await privileged(sql<{ aggregate_type: string }>`select aggregate_type from platform.entity_events
+      where tenant_id = ${broken.id}::uuid and aggregate_id = ${fieldId} and event_type = 'updated'
+      order by sequence desc limit 1`)).toEqual([{ aggregate_type: `${ENTITY}FieldDefinition` }]);
+  });
+
+  test("what a migration suspends is in its result and in an event of the field definition", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    const placeName = await field(t, "placeName", lookup("extensions.place", "name"), "lookup");
+    const registry = structuredClone((manifest as unknown as { extensionRegistry: Record<string, any> }).extensionRegistry);
+    registry.readAccess[TARGET_ENTITY] = { ...registry.readAccess[TARGET_ENTITY], rowPolicy: "rowScope" };
+    const events = () => privileged(sql<{ count: string }>`select count(*)::text as count from platform.entity_events
+      where tenant_id = ${t.id}::uuid and aggregate_type = ${`${ENTITY}FieldDefinition`} and aggregate_id = ${placeName}`).then((rows) => Number(rows[0]!.count));
+    const before = await events();
+    const restore = __setExtensionRegistryForTests(registry as never);
+    try {
+      const result = await fixture.privileged.db.connection().execute((connection) => runMigrationChain(connection));
+      expect(result.linkedFieldsSuspended).toBeGreaterThanOrEqual(1);
+      expect(result.linkedFieldsFailedTenants).toEqual([]);
+    } finally {
+      restore();
+      // The chain granted the worker what that contract let it reach; the tests after this one run under the real one.
+      await fixture.privileged.db.connection().execute((connection) => runMigrationChain(connection));
+    }
+    expect(await events()).toBeGreaterThan(before);
+    expect((await listed(t, "placeName")).state).toBe("suspended");
+  }, 120_000);
+
+  test("direct SQL on the authorization model reaches the proof: a trigger places the revalidation", async () => {
+    const t = await tenant();
+    await field(t, "place", reference(TARGET_ENTITY, "Place"));
+    await field(t, "placeName", lookup("extensions.place", "name"), "lookup");
+    await fixture.privileged.db.transaction().execute(async (trx) => {
+      await sql`alter table erp.authorization_operation_policies disable trigger authorization_content_guard`.execute(trx);
+      await sql`insert into erp.authorization_operation_policies (tenant_id, operation_id, entity_type, managed)
+        values (${t.id}::uuid, ${`${TARGET_ENTITY}.list`}, ${TARGET_ENTITY}, true)`.execute(trx);
+      await sql`alter table erp.authorization_operation_policies enable trigger authorization_content_guard`.execute(trx);
+    });
+    expect((await listed(t, "placeName")).state).toBe("ready");
+    expect(await privileged(sql<{ count: string }>`select count(*)::text as count from platform.jobs
+      where tenant_id = ${t.id}::uuid and kind = ${EXTENSION_REVALIDATE_KIND} and status = 'queued'`)).toEqual([{ count: "1" }]);
+    await drainJobs();
+    const item = await listed(t, "placeName");
+    expect(item.state).toBe("suspended");
+    expect(item.backfill?.error).toMatchObject({ code: "AUTHORIZATION_PROOF_LOST" });
+    expect(await privileged(sql<{ status: string }>`select status from platform.jobs where tenant_id = ${t.id}::uuid and kind = ${EXTENSION_REVALIDATE_KIND}`))
+      .toEqual([{ status: "done" }]);
+  });
+
+  test("a write of the authorization model takes the graph lock before it looks for lookups, so none is saved past it", async () => {
+    const t = await tenant();
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    let locked!: () => void;
+    const held = new Promise<void>((resolve) => { locked = resolve; });
+    const designer = fixture.privileged.db.transaction().execute(async (trx) => {
+      await sql`select pg_advisory_xact_lock(hashtextextended(${`osf-extensions-graph:${t.id}`}, 0))`.execute(trx);
+      locked();
+      await hold;
+    });
+    await held;
+    let written = false;
+    const write = adminWrite(t).then(() => { written = true; });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(written).toBe(false);
+    release();
+    await designer;
+    await write;
+    expect(written).toBe(true);
+  });
+
+  test("a write through a subtype is a write of its base, and a managed subtype is a managed base", async () => {
+    const t = await tenant();
+    const roles = ["Relations.RelationGroups.ReadWrite", "Relations.All.Read"];
+    const registry = structuredClone((manifest as unknown as { extensionRegistry: Record<string, any> }).extensionRegistry);
+    registry.readAccess[ENTITY] = { ...registry.readAccess[ENTITY], roles: ["Relations.All.Read"] };
+    const restore = __setExtensionRegistryForTests(registry as never);
+    try {
+      await field(t, "team", reference("RelationGroup", "Team"));
+      await field(t, "teamName", lookup("extensions.team", "name", "Team name"), "lookup");
+      const writer = sessionFor(t.id, [...roles, WRITER_ROLE]);
+      const team = await create(writer, "Team", { name: "Blue" });
+      const asset = await create(writer, ENTITY, { name: "A", extensions: { team: team.id } });
+      expect(asset.extensions.teamName).toBe("Blue");
+      await write(writer, "Team", team.id, { name: "Red" });
+      expect((await get(t.reader, asset.id)).extensions.teamName).toBe("Red");
+
+      await manage(t, "Team");
+      await adminWrite(t);
+      expect((await listed(t, "teamName")).state).toBe("suspended");
+    } finally {
+      restore();
+    }
   });
 
   test("a deadlock in a formula backfill is a retry, not a suspended field", async () => {

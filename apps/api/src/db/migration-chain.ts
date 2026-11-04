@@ -129,7 +129,7 @@ import { runRegisteredSeedJob, type InitializedMaintenanceOwner } from "../modul
 import type { RuntimeModule } from "../modules/contract.js";
 import type { ModuleSeed } from "../modules/contract.js";
 import type { CatalogSeedResult } from "./migrations/catalog-seed.js";
-import { revalidateLinkedFieldsOfEveryTenant } from "../operations/entity/extensions/linked.js";
+import { revalidateLinkedFieldsOfEveryTenant, type LinkedRevalidationReport } from "../operations/entity/extensions/linked.js";
 import { extensionRegistry } from "../operations/entity/extensions/registry.js";
 
 export type MigrationChainOptions = {
@@ -161,8 +161,10 @@ export type MigrationChainResult = GeneratedSchemaMigrationResult & {
   pageConfigs: EntityPageConfigsSeedResult;
   /** Outcome of each module-contributed seed, keyed by its reporting name. */
   moduleSeeds: Record<string, CatalogSeedResult>;
-  /** Tenant lookups and rollups this run suspended because their authorization proof no longer holds. */
+  /** Tenant computed fields this run suspended because an authorization proof no longer holds. */
   linkedFieldsSuspended: number;
+  /** Tenants whose revalidation failed: their lookups and rollups are suspended, and this run went on. */
+  linkedFieldsFailedTenants: string[];
 };
 
 export async function runMigrationChain(
@@ -256,10 +258,11 @@ export async function runMigrationChain(
     } finally { active = false; await Promise.allSettled(pending.map(job => job.work)); }
   }
   await seedTenantOwnRelations(db);
-  const linkedFieldsSuspended = await revalidateLinkedFields(db);
+  const linked = await revalidateLinkedFields(db);
   return {
     ...generated,
-    linkedFieldsSuspended,
+    linkedFieldsSuspended: linked.suspended,
+    linkedFieldsFailedTenants: linked.failedTenants,
     versioned,
     pluginMigrationsApplied: pluginMigrations.applied,
     pluginConstraintsRemoved: pluginMigrations.removed,
@@ -272,14 +275,15 @@ export async function runMigrationChain(
  * Authorization is a compile-time contract, so every migration proves the
  * tenants' lookups and rollups again against the manifest it installed
  * (operations/entity/extensions/linked.ts); one that no longer holds is
- * suspended. Each tenant in a transaction of its own, scoped to it.
+ * suspended. Each tenant in a transaction of its own, scoped to it: one that
+ * fails is suspended fail closed and the chain goes on, in the migration report.
  */
-async function revalidateLinkedFields(db: Kysely<DB>): Promise<number> {
-  if (!extensionRegistry.entityNames().length) return 0;
+async function revalidateLinkedFields(db: Kysely<DB>): Promise<LinkedRevalidationReport> {
+  if (!extensionRegistry.entityNames().length) return { suspended: 0, failedTenants: [] };
   const tenants = await sql<{ tenant_id: string }>`select distinct tenant_id::text as tenant_id from platform.extension_field_definitions
     where is_current and kind in ('lookup', 'rollup') and state in ('ready', 'updating') order by 1`.execute(db);
   return revalidateLinkedFieldsOfEveryTenant((tenantId, work) => db.transaction().execute(async (trx) => {
     await sql`select set_config('app.tenant_id', ${tenantId}, true), set_config('app.bypass_rls', 'true', true)`.execute(trx);
     return work(trx);
-  }), tenants.rows.map((row) => row.tenant_id));
+  }), tenants.rows.map((row) => row.tenant_id), (fields, message) => console.error(JSON.stringify({ ...fields, message })));
 }

@@ -37,6 +37,24 @@ test("references cannot override rules or select missing or server-owned fields"
   expect(() => resolveEntityInputSources({ ...reference("Example", ["title"]), additionalProperties: true }, [contract], {})).toThrow("override");
 });
 
+test("collection input admits only a matching owned collection and canonical item source", () => {
+  const owner = { ...contract, entity: { ...contract.entity, name: "Owner" }, model: { ...contract.model,
+    relationships: [{ key: "items", kind: "hasMany", ownership: "owned", target: "Example" }],
+  } } as unknown as CompiledEntityContract;
+  const collection = { type: "array", "x-osf-collection": { entity: "Owner", field: "items" },
+    items: { "x-osf-entityInput": { entity: "Example", fields: ["title"] } } };
+  const compiled = resolveEntityInputSources(collection, [owner, contract], {});
+  expect(compiled).toMatchObject({
+    "x-osf-collection": { entity: "Owner", field: "items" }, items: { properties: { title: { minLength: 1 } } },
+  });
+  expect(resolveEntityInputSources(compiled, [owner, contract], {})).toEqual(compiled);
+  expect(() => resolveEntityInputSources({ ...collection, type: "object" }, [owner, contract], {})).toThrow("requires an array");
+  expect(() => resolveEntityInputSources({ ...collection, "x-osf-collection": { entity: "Owner", field: "missing" } }, [owner, contract], {})).toThrow("owned collection");
+  const nonOwned = { ...owner, model: { ...owner.model, relationships: [{ ...owner.model.relationships[0]!, ownership: "reference" as const }] } };
+  expect(() => resolveEntityInputSources(collection, [nonOwned, contract], {})).toThrow("owned collection");
+  expect(() => resolveEntityInputSources({ ...collection, items: { "x-osf-entityInput": { entity: "Other", fields: ["title"] } } }, [owner, contract], {})).toThrow("matching canonical items");
+});
+
 test("input and output sources lower identically in both canonical operation projections", () => {
   const operation = () => ({ input: { kind: "json-schema", schema: structuredClone(input) }, output: { kind: "json-schema", schema: structuredClone(input) } });
   const entity = { ...contract, entityOperations: { create: operation() },

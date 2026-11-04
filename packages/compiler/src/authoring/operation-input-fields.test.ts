@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { operationInputFieldsKeyword } from "@openshapeforge/operations";
+import { operationCollectionKeyword, operationInputFieldsKeyword } from "@openshapeforge/operations";
 import { loadEntity } from "./loader.js";
 import { assertEntityAuthoring } from "./entity-authoring.js";
 import { compile } from "./compiler/index.js";
@@ -65,6 +65,17 @@ test("shared AJV keyword is presentation only and validates its source-key shape
   const validate = ajv.compile({ type: "object", "x-osf-inputFields": "parameters" });
   expect(validate({ arbitrary: "still requires canonical handler validation" })).toBe(true);
   expect(() => ajv.compile({ type: "object", "x-osf-inputFields": ["parameters"] })).toThrow();
+});
+
+test("collection annotation validates metadata shape but does not replace input validation", () => {
+  const ajv = new Ajv2020({ strict: true });
+  ajv.addKeyword(operationCollectionKeyword);
+  const validate = ajv.compile({ type: "array", items: { type: "string" },
+    "x-osf-collection": { entity: "Owner", field: "items" } });
+  expect(validate(["one"])).toBe(true);
+  expect(validate([1])).toBe(false);
+  expect(() => ajv.compile({ type: "array", "x-osf-collection": { entity: "Owner" } })).toThrow();
+  expect(() => ajv.compile({ type: "array", "x-osf-collection": { entity: "Owner", field: "items", extra: true } })).toThrow();
 });
 
 test("input.field names the collection of the record a sibling reference input picks; the sibling must be a reference", () => {

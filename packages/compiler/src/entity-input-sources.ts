@@ -19,6 +19,33 @@ export function resolveEntityInputSources(
     if (Array.isArray(value)) return value.map(visit);
     if (!value || typeof value !== "object") return value;
     const object = value as ObjectSchema;
+    if ("x-osf-collection" in object) {
+      const source = object["x-osf-collection"] as { entity?: unknown; field?: unknown } | null;
+      const items = object.items as ObjectSchema | undefined;
+      const itemSource = items?.[KEY] as { entity?: unknown } | undefined;
+      if (object.type !== "array" || !source || typeof source !== "object" || Array.isArray(source) ||
+        Object.keys(source).some(key => !["entity", "field"].includes(key)) || typeof source.entity !== "string" ||
+        typeof source.field !== "string" || !items || typeof items !== "object" || Array.isArray(items)) {
+        throw new Error("Collection input requires an array, an owner and field, and canonical entity input items.");
+      }
+      const owners = contracts.filter(contract => contract.entity.name === source.entity);
+      const relations = owners.length === 1 ? owners[0]!.model.relationships.filter(relation =>
+        (relation.fieldKey ?? relation.key) === source.field && relation.kind === "hasMany" && relation.ownership === "owned") : [];
+      if (relations.length !== 1 || (itemSource && relations[0]!.target !== itemSource.entity)) {
+        throw new Error(`Collection input must name an owned collection with matching canonical items: ${source.entity}.${source.field}.`);
+      }
+      if (!itemSource) {
+        const properties = items.properties;
+        if (items.type !== "object" || !properties || typeof properties !== "object" || Array.isArray(properties)) {
+          throw new Error("Collection input requires canonical entity input items.");
+        }
+        const canonical = visit({ [KEY]: { entity: relations[0]!.target, fields: Object.keys(properties) },
+          ...(items.title !== undefined ? { title: items.title } : {}),
+          ...(items.description !== undefined ? { description: items.description } : {}),
+          ...(items["x-osf-i18n"] !== undefined ? { "x-osf-i18n": items["x-osf-i18n"] } : {}) });
+        if (JSON.stringify(canonical) !== JSON.stringify(items)) throw new Error("Collection input items must match the canonical entity input.");
+      }
+    }
     if (!(KEY in object)) return Object.fromEntries(Object.entries(object).map(([key, child]) => [key, visit(child)]));
     if (Object.keys(object).some(key => ![KEY, "title", "description", "x-osf-i18n"].includes(key))) {
       throw new Error("Entity input sources cannot override canonical field validation.");

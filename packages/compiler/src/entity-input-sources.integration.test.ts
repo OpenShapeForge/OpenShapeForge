@@ -93,6 +93,12 @@ test("canonical entity input sources reach every generated operation interface",
     // A host can generate its frontend directly from the public compile API,
     // before (or without) running the all-artifact generator.
     const active = await loadActivePlatformCompile(root);
+    const blockInput = resolveEntityInputSources({ type: "array", items: {
+      "x-osf-entityInput": { entity: "Block", fields: ["definitionKey", "definitionVersion", "values"] },
+    } }, active.entities.map(entity => entity.contract), {});
+    expect(blockInput).toMatchObject({ type: "array", items: { type: "object", properties: {
+      definitionKey: { type: "string" }, values: { type: "object", "x-osf-type": "entityValue" },
+    } } });
     const directWeb = buildWebManifest(active.entities, {}, corpusWebOperations(resolveActiveAuthoringDir(root)));
     const directCreate = object(JSON.parse(JSON.stringify(directWeb.entities.Document!.operations.create)));
     expect(object(directCreate.input).kind).toBe("json-schema");

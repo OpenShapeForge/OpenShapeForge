@@ -594,15 +594,23 @@ extensible:
   every catalog type, minus `typedValue`, `fieldDefinition`, `entityValue`,
   `keyValueMap`, `variableTemplate`, `labelSet`, `condition`, `excludedTypes`
   and every object type without an `indexProjection`. A reference names a
-  target entity: any tenant-scoped, generated-CRUD entity with a `get`, outside
-  `excludedTargets` and the `platform` schema. Never a target, whatever the
-  host: a tenant registry (`Tenant`, whose row is its tenant), an entity with
-  no generated create, update or delete of its own (version snapshots, runs,
-  sequences, renditions, owned children: the deletion guard of a reference
-  would not run where their rows go), and the access-control model
+  target entity: any tenant-scoped, generated-CRUD entity whose `get` some
+  interface projects, outside `excludedTargets` and the `platform` schema.
+  Never a target, whatever the host: a tenant registry (`Tenant`, whose row is
+  its tenant), an entity with no generated create, update or delete of its own
+  (version snapshots, runs, sequences, renditions, owned children: the deletion
+  guard of a reference would not run where their rows go), an entity no
+  interface can read (`interfaces: { rest: null, graphql: null, mcp: null,
+  web: null }` in an `entityPatch` hides an inherited entity, and so does `get`
+  disabled on each interface) and the access-control model
   (`AuthorizationProfile*`, `AuthorizationOperationPolicy`,
   `OrganizationPermission`, `UserOrganizationPermission`;
   `EXTENSION_TARGET_DENYLIST`). Such an entity carries no `referencedBy`.
+  `excludedTargets` may still name one. An entity no interface can read is out
+  of reach of every tenant field: no lookup or rollup follows a relation to it,
+  no rollup aggregates it as a collection, and no formula reads it as an owned
+  child. Hiding an extensible entity itself does not undo `extensible:`: its
+  `fieldDefinitions` Operations stay, so remove the block in the same patch.
 - `indexProjection` on an object type in `osf-types.yaml` says which child
   lands in which index column (`text`, `number`, `boolean`, `date`,
   `timestamp`); `measurement` has `{ number: value, text: unit }`. An object

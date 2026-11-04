@@ -106,3 +106,10 @@ test("version-sourced fields resolve only a stored field-definition collection o
   ordinary.entity.valueDefinition = false;
   expect(() => materializeEntityInputSources([head, ordinary], {})).toThrow("only on entity-value definitions");
 });
+
+test("entity CRUD uses record view groups instead of silently ignoring an operation form", () => {
+  const entity = { ...contract, entityOperations: { create: {
+    id: "Example.create", implementation: { type: "entity" }, interfaces: { web: { form: { groups: [{ title: { en: "Main", nl: "Basis" }, fields: ["title"] }] } } },
+  } } } as unknown as CompiledEntityContract;
+  expect(() => materializeEntityInputSources([entity], {})).toThrow("use record create or update groups");
+});

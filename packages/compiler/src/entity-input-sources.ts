@@ -120,7 +120,7 @@ export function materializeEntityInputSources(
   for (const contract of contracts) validateEntityOptions(contract.model.fields);
   for (const contract of contracts) {
     for (const operation of Object.values(contract.entityOperations)) {
-      if (operation?.implementation.type === "entity" && operation.interfaces?.web && operation.interfaces.web.form) throw new Error(`${operation.id}: use record create or update groups for entity CRUD.`);
+      if (operation?.implementation?.type === "entity" && operation.interfaces?.web && operation.interfaces.web.form) throw new Error(`${operation.id}: use record create or update groups for entity CRUD.`);
       if (operation?.input.kind === "json-schema") {
         operation.input.schema = resolveEntityInputSources(operation.input.schema, contracts, referentiedata);
         if (operation.interfaces?.web && operation.interfaces.web.form) operationForm(operation.interfaces.web.form, operation.input.schema, operation.id);
@@ -130,7 +130,7 @@ export function materializeEntityInputSources(
     for (const operation of contract.pluginOperations ?? []) {
       if (operation.definition.input) {
         operation.definition.input.schema = resolveEntityInputSources(operation.definition.input.schema, contracts, referentiedata);
-        if (operation.interfaces.web && operation.interfaces.web.form) operationForm(operation.interfaces.web.form, operation.definition.input.schema, operation.id);
+        if (operation.interfaces?.web && operation.interfaces.web.form) operationForm(operation.interfaces.web.form, operation.definition.input.schema, operation.id);
       }
       if (operation.definition.output) operation.definition.output.schema = resolveEntityInputSources(operation.definition.output.schema, contracts, referentiedata);
     }

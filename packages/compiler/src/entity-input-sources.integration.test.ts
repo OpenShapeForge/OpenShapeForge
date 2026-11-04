@@ -197,3 +197,15 @@ test("canonical entity input sources reach every generated operation interface",
     await rm(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+test("authored document form reaches both web artifacts with resolved input paths", async () => {
+  const root = new URL("../../../", import.meta.url).pathname;
+  const artifacts = await collectAllArtifacts(root);
+  const entry = artifacts.all.find(item => item.path === "apps/web/src/generated/web-manifest.json");
+  expect(entry).toBeDefined();
+  const web = JSON.parse(entry!.contents as string);
+  const create = web.entities.Document.operations.create;
+  expect(create.form.groups.map((group: { fields: string[] }) => group.fields)).toContainEqual(["document.title", "document.documentType", "document.status"]);
+  expect(create.input.schema.properties.document.properties.title).toBeDefined();
+  expect(JSON.stringify(create.input.schema)).not.toContain("x-osf-entityInput");
+}, 30_000);

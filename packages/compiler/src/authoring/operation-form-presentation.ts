@@ -9,12 +9,6 @@ export function operationForm(form: { groups: Array<{ title: { en?: string; nl?:
     let node: unknown = schema;
     const parts = path.split(".");
     for (const [index, key] of parts.entries()) {
-      const unresolved = node && typeof node === "object" && !Array.isArray(node) ? (node as Record<string, unknown>)["x-osf-entityInput"] : undefined;
-      if (unresolved && typeof unresolved === "object" && !Array.isArray(unresolved)) {
-        const fields = (unresolved as { fields?: unknown }).fields;
-        if (index !== parts.length - 1 || !Array.isArray(fields) || !fields.includes(key)) throw new Error(`${origin}: unknown form field ${path}.`);
-        break; // The entity source is resolved and validated before final output.
-      }
       const properties = node && typeof node === "object" && !Array.isArray(node) ? (node as { properties?: Record<string, unknown> }).properties : undefined;
       if (index > 0 && ((node as { oneOf?: unknown }).oneOf || (node as { anyOf?: unknown }).anyOf)) throw new Error(`${origin}: form field ${path} traverses a choice.`);
       if (index < parts.length - 1 && !(node as { required?: string[] }).required?.includes(key)) throw new Error(`${origin}: form field ${path} traverses an optional object.`);

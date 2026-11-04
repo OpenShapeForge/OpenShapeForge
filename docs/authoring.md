@@ -1726,7 +1726,7 @@ runtime validation, subscriptions, storage, provider mappings or delivery.
 
 A plugin-backed entity Operation may arrange its existing input fields under
 `interfaces.web.operations.<operation>.form.groups`. Each group has a localized
-`title`, ordered dot-separated input `fields`, and optional `collapsed: true`.
+`title` (English or Dutch), ordered dot-separated input `fields`, and optional `collapsed: true`.
 For example, `fields: [record.title, record.description]` groups two fields
 of the required `record` input. This is a web presentation: the Operation's
 input, authorization, validation, other interfaces and submission are unchanged.

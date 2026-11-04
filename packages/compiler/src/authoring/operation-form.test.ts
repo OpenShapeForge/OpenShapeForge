@@ -17,9 +17,5 @@ test("form groups project logical paths without changing the input contract", ()
   expect(() => operationForm({ groups: [{ title, fields: ["record.title"], collapsed: true }] }, schema, "Thing.create")).toThrow("cannot start collapsed");
   const choice = { ...schema, properties: { ...schema.properties, record: { ...schema.properties.record, oneOf: [{ properties: { kind: { const: "a" } } }] } } };
   expect(() => operationForm({ groups: [{ title, fields: ["record.title"] }] }, choice, "Thing.create")).toThrow("traverses a choice");
-  const unresolved = { type: "object", required: ["record"], properties: { record: { "x-osf-entityInput": { entity: "Record", fields: ["title"] } } } };
-  expect(operationForm({ groups: [{ title, fields: ["record.title"] }] }, unresolved, "Thing.create")).toBeDefined();
-  expect(() => operationForm({ groups: [{ title, fields: ["record.unknown"] }] }, unresolved, "Thing.create")).toThrow("unknown form field");
-  expect(() => operationForm({ groups: [{ title, fields: ["record.title.part"] }] }, unresolved, "Thing.create")).toThrow("unknown form field");
   expect(() => operationForm({ groups: [{ title: {}, fields: ["record.title"] }] }, schema, "Thing.create")).toThrow("requires an English or Dutch title");
 });

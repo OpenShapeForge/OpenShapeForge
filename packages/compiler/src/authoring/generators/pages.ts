@@ -312,40 +312,6 @@ type GeneratedWorkspaceConfig = {
   queriesByBodyGroup: Record<string, string>;
 };
 
-function generatedAppPagePath(route: string): string {
-  return `app/${GENERATED_ROUTE_GROUP}/${routeToNextPath(route)}/page.tsx`;
-}
-
-function generatedAppRouteDir(route: string): string {
-  return `app/${GENERATED_ROUTE_GROUP}/${routeToNextPath(route)}`;
-}
-
-function generatedSharedFormSchemaBasePath(
-  contract: CompiledEntityContract,
-  mode: "create" | "edit"
-): string {
-  return `app/${GENERATED_ROUTE_GROUP}/_generated/${contract.entity.name.toLowerCase()}/${mode}-form-schema-base.ts`;
-}
-
-function generatedSharedListConfigBasePath(contract: CompiledEntityContract): string {
-  return `app/${GENERATED_ROUTE_GROUP}/_generated/${contract.entity.name.toLowerCase()}/list-config-base.ts`;
-}
-
-function generatedSharedDetailConfigBasePath(contract: CompiledEntityContract): string {
-  return `app/${GENERATED_ROUTE_GROUP}/_generated/${contract.entity.name.toLowerCase()}/detail-config-base.ts`;
-}
-
-function generatedSharedWorkspaceConfigBasePath(contract: CompiledEntityContract): string {
-  return `app/${GENERATED_ROUTE_GROUP}/_generated/${contract.entity.name.toLowerCase()}/workspace-config-base.ts`;
-}
-
-function generatedSharedPageModulePath(
-  contract: CompiledEntityContract,
-  kind: "list" | "detail" | "create" | "edit"
-): string {
-  return `app/${GENERATED_ROUTE_GROUP}/_generated/${contract.entity.name.toLowerCase()}/${kind}-page.tsx`;
-}
-
 /**
  * Generate per-entity config bases, form schema bases, and server actions.
  * Route page generation has moved to dynamic routes (see manifest.ts).
@@ -452,11 +418,6 @@ export function generateViewPages(
   return { files, manifestEntry, pageConfigBundle };
 }
 
-function uniqueRoutes(route: LocalizedText | string): string[] {
-  if (typeof route === "string") return [route];
-  return [...new Set(Object.values(route).filter(Boolean) as string[])];
-}
-
 function getCanonicalRoute(route: LocalizedText | string): string {
   if (typeof route === "string") return route;
   return route.en ?? Object.values(route).find(Boolean) ?? "/";
@@ -464,18 +425,6 @@ function getCanonicalRoute(route: LocalizedText | string): string {
 
 function routeToNextPath(route: string): string {
   return route.replace(/^\//, "").replace(/:(\w+)/g, "[$1]");
-}
-
-function toRelativeImportPath(fromFile: string, targetFile: string): string {
-  const relative = path.posix.relative(path.posix.dirname(fromFile), targetFile);
-  const normalized = relative.startsWith(".") ? relative : `./${relative}`;
-  return normalized.replace(/\.(ts|tsx|js|jsx)$/, "");
-}
-
-function getParentRoute(route: LocalizedText | string | undefined): string {
-  if (!route) return "/";
-  if (typeof route === "string") return route;
-  return route.en ?? route.nl ?? "/";
 }
 
 /**
@@ -499,155 +448,6 @@ function getMatchingRoute(
     }
   }
   return targetRouteMap.en ?? targetRouteMap.nl ?? "/";
-}
-
-function writeGeneratedFormRoute(
-  files: Map<string, string>,
-  {
-    contract,
-    contexts,
-    route,
-    routes,
-    views,
-    mode,
-    viewDefinitionCache,
-  }: {
-    contract: CompiledEntityContract;
-    contexts: string[];
-    route: string;
-    routes: Record<string, LocalizedText | string>;
-    views: Record<string, CompiledViewContext>;
-    mode: "create" | "edit";
-    viewDefinitionCache?: Map<string, ViewDefinition>;
-  }
-) {
-  const routeDir = generatedAppRouteDir(route);
-  const currentConfigs = buildFormConfigs(contract, contexts, views, routes, route, mode, viewDefinitionCache);
-  const successRoutesByContext = Object.fromEntries(
-    Object.entries(currentConfigs).map(([context, config]) => [context, config.successRoute])
-  );
-  const baseSchemaPath = generatedSharedFormSchemaBasePath(contract, mode);
-  const canonicalRoute = getCanonicalRoute(mode === "edit" ? routes.edit : routes.create);
-  const canonicalConfigs = buildFormConfigs(contract, contexts, views, routes, canonicalRoute, mode, viewDefinitionCache);
-  const formFieldKeys = [...new Set(
-    Object.values(canonicalConfigs).flatMap((config) => config.fields.map((field) => field.key))
-  )];
-  const sharedPagePath = generatedSharedPageModulePath(contract, mode);
-
-  if (!files.has(baseSchemaPath)) {
-    files.set(baseSchemaPath, renderTemplate("app/generated-form-schema-base.ts.ejs", {
-      configs: canonicalConfigs,
-    }));
-  }
-
-  if (!files.has(sharedPagePath)) {
-    files.set(sharedPagePath, renderTemplate(
-      mode === "edit" ? "app/generated-edit-page.tsx.ejs" : "app/generated-form-page.tsx.ejs",
-      { contract }
-    ));
-  }
-
-  files.set(`${routeDir}/form-schema.ts`, renderTemplate("app/generated-form-schema.ts.ejs", {
-    baseImportPath: toRelativeImportPath(`${routeDir}/form-schema.ts`, baseSchemaPath),
-    successRoutesByContext,
-    formFieldKeys,
-  }));
-  files.set(generatedAppPagePath(route), renderTemplate(
-    mode === "edit" ? "app/entity-edit.tsx.ejs" : "app/entity-form.tsx.ejs",
-    {
-      contract,
-      sharedPageImportPath: toRelativeImportPath(generatedAppPagePath(route), sharedPagePath),
-    }
-  ));
-}
-
-function writeGeneratedListRoute(
-  files: Map<string, string>,
-  {
-    contract,
-    contexts,
-    route,
-    routes,
-    views,
-  }: {
-    contract: CompiledEntityContract;
-    contexts: string[];
-    route: string;
-    routes: Record<string, LocalizedText | string>;
-    views: Record<string, CompiledViewContext>;
-  }
-) {
-  const baseConfigPath = generatedSharedListConfigBasePath(contract);
-  const canonicalConfigs = buildListConfigs(contract, contexts, views, routes);
-  const sharedPagePath = generatedSharedPageModulePath(contract, "list");
-
-  if (!files.has(baseConfigPath)) {
-    files.set(baseConfigPath, renderTemplate("app/generated-list-config-base.ts.ejs", {
-      configs: canonicalConfigs,
-    }));
-  }
-
-  if (!files.has(sharedPagePath)) {
-    files.set(sharedPagePath, renderTemplate("app/generated-list-page.tsx.ejs", {
-      contract,
-      gql: contract.graphql,
-    }));
-  }
-
-  files.set(
-    generatedAppPagePath(route),
-    renderTemplate("app/re-export-default.ts.ejs", {
-      exportPath: toRelativeImportPath(generatedAppPagePath(route), sharedPagePath),
-    }),
-  );
-}
-
-/**
- * Detail UI is a single Next.js `page.tsx` per route (`entity-detail.tsx.ejs`), which composes
- * the shared `Renderer` from the web client. This generator does not emit `detail.tsx`,
- * `detail-action.ts`, or a UI registry file—avoid parallel detail modules; extend the shared
- * renderer/detail mapping instead.
- */
-function writeGeneratedDetailRoute(
-  files: Map<string, string>,
-  {
-    contract,
-    contexts,
-    route,
-    routes,
-    views,
-    viewDefinitionCache,
-  }: {
-    contract: CompiledEntityContract;
-    contexts: string[];
-    route: string;
-    routes: Record<string, LocalizedText | string>;
-    views: Record<string, CompiledViewContext>;
-    viewDefinitionCache?: Map<string, ViewDefinition>;
-  }
-) {
-  const baseConfigPath = generatedSharedDetailConfigBasePath(contract);
-  const canonicalConfigs = buildDetailConfigs(contract, contexts, views, routes, viewDefinitionCache);
-  const sharedPagePath = generatedSharedPageModulePath(contract, "detail");
-
-  if (!files.has(baseConfigPath)) {
-    files.set(baseConfigPath, renderTemplate("app/generated-detail-config-base.ts.ejs", {
-      configs: canonicalConfigs,
-    }));
-  }
-
-  if (!files.has(sharedPagePath)) {
-    files.set(sharedPagePath, renderTemplate("app/generated-detail-page.tsx.ejs", {
-      contract,
-    }));
-  }
-
-  files.set(
-    generatedAppPagePath(route),
-    renderTemplate("app/re-export-default.ts.ejs", {
-      exportPath: toRelativeImportPath(generatedAppPagePath(route), sharedPagePath),
-    }),
-  );
 }
 
 function buildFormConfigs(
@@ -1911,23 +1711,6 @@ function normalizeFieldOverrides(overrides: Record<string, unknown>): Partial<Ge
   }
 
   return normalized;
-}
-
-function collectDetailSelectionPaths(
-  contract: CompiledEntityContract,
-  context: string,
-  detail: NonNullable<CompiledViewContext["detail"]>,
-  contractCache?: Map<string, CompiledEntityContract>,
-): string[] {
-  const paths = collectDetailHeaderSelectionPaths(contract, context, detail);
-
-  for (const group of detail.groups.items) {
-    for (const path of collectDetailGroupSelectionPaths(contract, context, group, contractCache)) {
-      appendUnique(paths, path);
-    }
-  }
-
-  return paths;
 }
 
 function collectDetailHeaderSelectionPaths(

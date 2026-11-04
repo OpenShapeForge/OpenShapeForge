@@ -57,6 +57,8 @@ import { classifyDatabaseError } from "../db/database-refusals.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "./field-schemas.js";
 import { generatedEntityValues } from "./entity-value-registry.js";
 import { generatedVersioning } from "./versioning-registry.js";
+import { extensionRegistry } from "../operations/entity/extensions/registry.js";
+import { extensionSnapshot } from "../operations/entity/extensions/snapshot.js";
 import { organizationServiceIdentities } from "../auth/organization-service-identities.js";
 import { operationContractFingerprint } from "../operations/contract-fingerprint.js";
 import { executeKeyedOperation } from "../operations/execution-receipts.js";
@@ -654,6 +656,12 @@ export class ModulePlatformRuntime {
         json: runtimeJsonSchemas,
         entityValues: generatedEntityValues,
         versioning: generatedVersioning,
+        ...(extensionRegistry.entityNames().length ? {
+          extensions: {
+            snapshot: (transaction: unknown, session: unknown, entityName: string, row: Readonly<Record<string, unknown>>) =>
+              extensionSnapshot(transaction as Transaction<DB>, session as import("../db/session.js").DbSessionInput, entityName, row),
+          },
+        } : {}),
       },
       events: {
         append: async (session, event) => {

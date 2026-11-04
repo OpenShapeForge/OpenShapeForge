@@ -1,0 +1,69 @@
+# Test fixture — a plain tenant entity that tenant reference fields on
+# extensible-asset.yaml point at: it gets the `referencedBy` read and the
+# deletion guard. Only in the test composition.
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ExtensibleAssetLocation
+title: Extensible asset location
+description: A location extensible test assets may refer to.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels: { en: Asset location, nl: Objectlocatie }
+pluralLabels: { en: Asset locations, nl: Objectlocaties }
+domains: [relations]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite]
+    create: [General.All.ReadWrite]
+    update: [General.All.ReadWrite]
+    delete: [General.All.ReadWrite]
+fields:
+  - key: name
+    osfType: string
+    required: true
+    label: { en: Name, nl: Naam }
+    validation: { minLength: 1, maxLength: 200 }
+    persisted: { column: name, storageClass: core }
+operations:
+  list:
+    name: List asset locations
+    description: Read accessible asset locations.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read asset location
+    description: Read one accessible asset location.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create asset location
+    description: Create asset location.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update asset location
+    description: Update asset location.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+  delete:
+    name: Delete asset location
+    description: Delete asset location.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }

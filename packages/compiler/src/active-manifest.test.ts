@@ -21,3 +21,18 @@ test("active composition retains generated entityValue metadata and cross-module
   const artifact = generateArtifacts(result).find((entry) => entry.path.endsWith("db/manifest.json"))!;
   expect(JSON.parse(artifact.contents).entityValues).toEqual(promoted.entityValues);
 });
+
+test("active composition carries the extension registry into manifest.json, and moves the checksum with it", () => {
+  const extensionRegistry = {
+    entities: {}, indexProjections: { measurement: { number: "value", text: "unit" } },
+    referencedBy: { Product: [{ sourceEntity: "Product", valuesTable: "erp.products_field_values" }] },
+  };
+  const base: PlatformSchemaManifest = { version: 1, tables: [] };
+  const result = mergePromotedTables(base, { version: 1, tables: [], extensionRegistry });
+  expect(result.extensionRegistry).toEqual(extensionRegistry);
+  const rendered = (manifest: PlatformSchemaManifest) =>
+    JSON.parse(generateArtifacts(manifest).find((entry) => entry.path.endsWith("db/manifest.json"))!.contents);
+  expect(rendered(result).extensionRegistry).toEqual(extensionRegistry);
+  expect(rendered(mergePromotedTables(base, { version: 1, tables: [] })).extensionRegistry).toBeUndefined();
+  expect(rendered(result).checksum).not.toBe(rendered(mergePromotedTables(base, { version: 1, tables: [] })).checksum);
+});

@@ -2257,3 +2257,55 @@ test("a board does not expose a reference as a raw scalar without a readable rel
   owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", body: ["customerId"] } };
   expect(() => buildWebManifest([owner, entity("Customer", "customer", [field("displayName")], coreView())])).toThrow("invalid board path");
 });
+
+test("an extensible entity offers its tenant-field routes, and a target its referenced-by route, from the registry", () => {
+  const product = entity("Product", "product", [field("displayName")], coreView());
+  const supplier = entity("Supplier", "supplier", [field("displayName")], coreView());
+  const other = entity("Other", "other", [field("displayName")], coreView());
+  const registry = {
+    entities: {
+      Product: {
+        table: "erp.products", valuesTable: "erp.products_field_values", uniqueTable: "erp.products_field_unique_values",
+        manageRoles: ["Catalogue.Manage", "Organization.All.ReadWrite"],
+        limits: { fields: 100, filtersPerQuery: 5, formulaDepth: 5, syncFanOut: 100 },
+        allowedOsfTypes: ["measurement", "string"],
+        targets: [{ entity: "Product", table: "erp.products" }, { entity: "Supplier", table: "erp.suppliers" }],
+        ownedSingleChildren: [],
+      },
+    },
+    indexProjections: { measurement: { number: "value", text: "unit" } },
+    referencedBy: {
+      Product: [{ sourceEntity: "Product", valuesTable: "erp.products_field_values" }],
+      Supplier: [{ sourceEntity: "Product", valuesTable: "erp.products_field_values" }],
+    },
+  };
+  const manifest = buildWebManifest([product, supplier, other], {}, undefined, {}, registry);
+  expect(manifest.entities.Product!.customFields).toEqual({
+    manageRoles: ["Catalogue.Manage", "Organization.All.ReadWrite"],
+    definitionsPath: "/api/rest/v1/products/field-definitions",
+    limits: { fields: 100, filtersPerQuery: 5, formulaDepth: 5, syncFanOut: 100 },
+    allowedOsfTypes: ["measurement", "string"],
+    targets: ["Product", "Supplier"],
+    kinds: ["stored", "formula"],
+  });
+  expect(manifest.entities.Product!.referencedByPath).toBe("/api/rest/v1/products/:id/referenced-by");
+  expect(manifest.entities.Supplier!.customFields).toBeUndefined();
+  expect(manifest.entities.Supplier!.referencedByPath).toBe("/api/rest/v1/suppliers/:id/referenced-by");
+  expect(manifest.entities.Other!.referencedByPath).toBeUndefined();
+  // Without a registry nothing is offered.
+  expect(buildWebManifest([product, supplier, other]).entities.Product!.customFields).toBeUndefined();
+});
+
+test("a collection tree names a stored collection of the entity and fields for its heading", () => {
+  const product = entity("Product", "products", [field("displayName"), field("variantCount", { osfType: "integer", baseType: "integer" })], coreView(),
+    [{ key: "bundleItems", kind: "hasMany", target: "BundleItem", foreignKey: "bundle_id" }]);
+  const item = entity("BundleItem", "bundle-items", [field("role")], coreView());
+  product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", label: "displayName", count: "variantCount" };
+  const build = () => buildWebManifest([product, item]);
+  expect(build().entities.Product!.views.collection.tree).toEqual({ children: "bundleItems", label: "displayName", count: "variantCount" });
+  expect(build().entities.BundleItem!.views.collection.tree).toBeUndefined();
+  product.contract.interfaces!.web!.collectionTree = { children: "displayName" };
+  expect(build).toThrow("Product: collection tree children displayName must be a stored collection relationship of Product.");
+  product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", count: "missing" };
+  expect(build).toThrow("Product: collection tree count missing is not a field of Product.");
+});

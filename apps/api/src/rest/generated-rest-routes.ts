@@ -16,6 +16,7 @@
  * sourceField/camelCase mapping the GraphQL object resolvers use, so both
  * APIs present identical field names.
  */
+import { extensibleEntityOf } from "../operations/entity/extensions/store.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { isOperationAccepted, OperationFailure } from "@openshapeforge/operations";
 import { API_BUILD_IDENTITY } from "../config/build-identity.js";
@@ -169,6 +170,9 @@ function assertWritableBody(
       .filter((column) => isCallerWritableColumn(table, column, operation))
       .map(fieldNameForColumn),
   );
+  // Tenant fields travel as one `extensions` object, validated per key by
+  // the runtime against this tenant's definitions (operations/entity/extensions).
+  if (extensibleEntityOf(table)) writable.add("extensions");
   // A field written only by an operation gets its own message: "unknown field"
   // would send the caller looking for a typo, when the field exists and the
   // answer is to call the operation that guards it.

@@ -2,6 +2,7 @@
 import { fieldNameForColumn } from "./columns.js";
 import { entityValuePhysicalColumns } from "./entity-value-io.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
+import { extensibleEntityOf } from "./extensions/store.js";
 import { decimalText } from "@openshapeforge/operations";
 import type {
   EntityOperationResult,
@@ -44,6 +45,11 @@ export function serializeEntityRow(
     table.columns.filter((column) => !hidden.has(column.name)).map((column) => [fieldNameForColumn(column), normalized[column.name]]),
   );
   for (const field of table.source?.computedFields ?? []) result[field.field] = row[field.field];
+  // Already projected and redacted per key (extensions/read.ts).
+  if (extensibleEntityOf(table) && Object.hasOwn(row, "extensions")) {
+    result.extensions = row.extensions;
+    result.extensionsMeta = row.extensionsMeta;
+  }
   return result;
 }
 

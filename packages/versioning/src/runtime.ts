@@ -67,6 +67,16 @@ function content(row: Row, ...excluded: readonly string[][]): Row {
 }
 
 /**
+ * The raw source of tenant fields (`extension_values`) is never content of a
+ * snapshot, on any row: an extensible head freezes its fields through the
+ * platform's extension snapshot (values as a reader sees them, without
+ * classified fields, with the definitions needed to read them), and the
+ * column is stripped from every other row as well, in case a child table
+ * carries one (the compiler refuses `extensible` on an owned child).
+ */
+const EXTENSION_SOURCE = ["extension_values"];
+
+/**
  * The walk follows the ownership tree the compiler bound from the authored
  * `ownership: owned` collections (`snapshot.ownedRelationships: recursive`),
  * never the catalog: a cascading foreign key from a bookkeeping table is not
@@ -84,7 +94,7 @@ async function snapshotNode(executor: unknown, table: string, row: Row, owned: r
     const ordered = orderSnapshotChildren(found.map((entry) => entry.row), relation.childColumns);
     children[relation.table] = await Promise.all(ordered.map((row) => snapshotNode(executor, relation.table, row, relation.children)));
   }
-  return { table, row: content(row, BOOKKEEPING), children };
+  return { table, row: content(row, BOOKKEEPING, EXTENSION_SOURCE), children };
 }
 
 /**
@@ -115,7 +125,15 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
       // direct write to the version table (documents: core-invariants.ts).
       await rows(transaction, "select set_config('app.publishing_entity', $1::text, true)", [sourceEntity]);
       const tree = await snapshotNode(transaction, head.table, source, owned);
-      const snapshot = { schemaVersion: 1, entity: sourceEntity, head: { ...tree, row: content(tree.row, PUBLICATION) } };
+      // An extensible head carries its tenant fields as `extensions`, never
+      // as the raw source column (see EXTENSION_SOURCE).
+      const extensible = Object.hasOwn(source, "extension_values");
+      const service = context.platform?.schemas.extensions;
+      if (extensible && !service) fail("OPERATION_UNAVAILABLE", `${sourceEntity} carries tenant fields this host cannot snapshot.`);
+      const extension = extensible ? await service!.snapshot(transaction, session, sourceEntity, source) : undefined;
+      const snapshot = { schemaVersion: 1, entity: sourceEntity, head: {
+        ...tree, row: content(tree.row, PUBLICATION), ...(extension ? { extensions: extension.extensions, extensionDefinitions: extension.extensionDefinitions } : {}),
+      } };
       const canonical = stable(snapshot);
       const contentHash = createHash("sha256").update(canonical).digest("hex");
       // Content is what a version is: a head whose content still hashes like

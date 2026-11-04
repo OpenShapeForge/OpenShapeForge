@@ -86,6 +86,7 @@ jobs:
           bun run typecheck:connectors && bun run typecheck:layout &&
           bun run --cwd packages/documents typecheck &&
           bun run --cwd packages/versioning typecheck &&
+          bun run --cwd packages/formula typecheck &&
           bun run --cwd packages/operations typecheck &&
           bun run --cwd packages/interface-web typecheck &&
           bun run --cwd packages/plugin-runtime typecheck
@@ -115,6 +116,7 @@ jobs:
         run: >-
           bun test packages/auth packages/operations packages/interface-web
           packages/documents packages/versioning packages/plugin-runtime
+          packages/formula
 
       - name: Admin unit tests
         run: bun test apps/admin/src

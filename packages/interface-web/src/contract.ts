@@ -238,6 +238,13 @@ export type WebTimelinePresentation = {
 };
 
 export type WebCollectionView = {
+  /**
+   * Collapsible tree presentation of this same collection: each record is a
+   * group of the records its `children` relationship holds, nested without a
+   * depth limit. `label` and `count` name fields of the entity shown on the
+   * group heading; without `count` the renderer counts the children.
+   */
+  tree?: { children: string; label?: string; count?: string };
   board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: WebValuePath; currency: WebValuePath }; card: { title: WebValuePath[]; timestamp?: WebValuePath; indicator?: string; subtitle?: WebValuePath[]; amount?: { value: WebValuePath; currency: WebValuePath }; body: WebValuePath[] } };
   presentation?: WebTimelinePresentation;
   id: string;
@@ -461,7 +468,36 @@ export type WebEntityInterface = {
     named?: Record<string, WebNamedView>;
   };
   relationships: Record<string, WebRelationshipProjection>;
+  /**
+   * Present on an entity whose tenants may define fields of their own. The
+   * definitions are read and changed through `definitionsPath`/<action>
+   * (POST: list, create, update, deprecate, restore, delete, reorder,
+   * affected-records); only `manageRoles` may change them. Named
+   * `customFields` so it cannot be confused with a renderer's record
+   * extensions.
+   */
+  customFields?: WebCustomFields;
+  /**
+   * Present on an entity that a tenant reference field may point at: the
+   * POST route (`:id` is the record) that counts, per source entity and
+   * field, the records referring to it.
+   */
+  referencedByPath?: string;
 };
+
+export type WebCustomFields = {
+  manageRoles: string[];
+  definitionsPath: string;
+  limits: { fields: number; filtersPerQuery: number; formulaDepth: number; syncFanOut: number };
+  /** osfTypes a tenant field may use; a reference field names one of `targets` instead. */
+  allowedOsfTypes: string[];
+  /** Entities a tenant reference field may point at. */
+  targets: string[];
+  /** Field kinds this runtime accepts; computed kinds join as their engine work lands. */
+  kinds: WebCustomFieldKind[];
+};
+
+export type WebCustomFieldKind = "stored" | "formula" | "lookup" | "rollup";
 
 /**
  * A standalone Operation: authored in an operation catalog rather than on an

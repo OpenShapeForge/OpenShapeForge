@@ -1231,25 +1231,6 @@ function resolveSourceTable(
   return source.table;
 }
 
-/** Resolve an entity name to its physical table, failing closed at build. */
-function resolveEntityTable(
-  inputs: McpCatalogInput[],
-  entityName: string,
-  owningEntity: string,
-  option: string,
-): string {
-  const found = inputs.find(
-    (input) => input.contract.entity.name === entityName,
-  );
-  if (!found) {
-    throw new Error(
-      `mcp ${option} on entity "${owningEntity}" names entity "${entityName}", ` +
-        `which is not part of this catalog.`,
-    );
-  }
-  return found.table;
-}
-
 export function buildMcpCatalog(
   inputs: McpCatalogInput[],
   source: string,

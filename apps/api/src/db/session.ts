@@ -202,6 +202,11 @@ export function currentDbSessionDatabase(): Kysely<unknown> | undefined {
   return activeDbSession.getStore()?.db;
 }
 
+/** The transaction of the active session, for state that must not outlive it. */
+export function currentDbSessionTransaction(): Transaction<unknown> | undefined {
+  return activeDbSession.getStore()?.trx;
+}
+
 /**
  * The sessions this module derived, as the objects it froze.
  *
@@ -1001,5 +1006,46 @@ export async function withSystemSession<TDatabase, TResult>(
         // already lost the transaction. Keep silent.
       }
     }
+  }
+}
+
+/**
+ * A bypass of row-level security for part of an ALREADY OPEN tenant
+ * transaction, audited like {@link withSystemSession}: the work sees every
+ * row of the session's tenant, not only those the session's own policies
+ * show. For maintenance that must reach the same set of rows whoever started
+ * it — erasing a value everywhere it is stored, counting what an erasure
+ * will touch — and never for a read whose result a caller gets back as
+ * records. Every statement inside still names the tenant explicitly; the
+ * bypass lifts the policies, not the tenant boundary the caller writes.
+ *
+ * The audit row is written when the work succeeds, in the same transaction,
+ * so it commits exactly when the bypassed effects do. Only INSERT on
+ * `platform.system_bypass_audit` is needed (the worker role holds no more).
+ */
+export async function withTenantBypassInTransaction<TDatabase, TResult>(
+  trx: Transaction<TDatabase>,
+  input: { tenantId: string; actorSubject: string; reason: string },
+  work: () => Promise<TResult>,
+): Promise<TResult> {
+  assertUuid(input.tenantId, "tenantId");
+  if (!input.reason.trim()) throw new Error("A tenant bypass requires a non-empty reason for audit logging.");
+  const scoped = await sql<{ tenant_id: string | null; bypass: string | null }>`
+    select nullif(current_setting('app.tenant_id', true), '') as tenant_id,
+      current_setting('app.bypass_rls', true) as bypass`.execute(trx);
+  if (scoped.rows[0]?.tenant_id !== input.tenantId) {
+    throw new Error("A tenant bypass requires the transaction to be scoped to that tenant.");
+  }
+  const previous = scoped.rows[0]?.bypass ?? "";
+  const startedAt = new Date().toISOString();
+  await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
+  try {
+    const result = await work();
+    await sql`insert into platform.system_bypass_audit (id, actor_subject, reason, started_at, ended_at, succeeded, tenant_id)
+      values (${randomUUID()}, ${input.actorSubject}, ${input.reason}, ${startedAt}, ${new Date().toISOString()}, true, ${input.tenantId})`.execute(trx);
+    return result;
+  } finally {
+    // An aborted transaction rolls the setting back with everything else.
+    await sql`select set_config('app.bypass_rls', ${previous}, true)`.execute(trx).catch(() => undefined);
   }
 }

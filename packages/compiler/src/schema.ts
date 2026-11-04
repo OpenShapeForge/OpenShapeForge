@@ -37,6 +37,25 @@ export type IndexDefinition = {
 };
 
 /**
+ * An extended statistics object (`CREATE STATISTICS`) over columns whose
+ * values the planner must estimate together, such as a key and the value it
+ * selects in a key-value table. Emitted idempotently by name like an index:
+ * a changed column set under an existing name is not re-created.
+ */
+export type StatisticsDefinition = {
+  name: string;
+  kinds: Array<"mcv" | "ndistinct" | "dependencies">;
+  columns: string[];
+  /**
+   * Per-column statistics target (`ALTER COLUMN ... SET STATISTICS`) of every
+   * column in `columns`, which the object inherits as the largest of its
+   * columns' targets. Re-applied on every roll-forward, so a changed target
+   * takes effect in place. Absent keeps the server default.
+   */
+  target?: number;
+};
+
+/**
  * A table-level invariant contributed by a compiler plugin.
  *
  * Rendered as idempotent DDL (added when absent by name) that the migrate
@@ -628,6 +647,18 @@ export type TableDefinition = {
   generatedCrudEligible?: boolean;
   columns: ColumnDefinition[];
   indexes?: IndexDefinition[];
+  /** Extended planner statistics, emitted after the indexes. */
+  statistics?: StatisticsDefinition[];
+  /**
+   * A table whose rows describe rows of another tenant table (a derived
+   * index keyed by `column`): beside its own tenant policy it gets a
+   * restrictive policy `<table>_record_access` that admits a row only while
+   * the described row is visible to the session, so every row policy of
+   * that table (row scope, owner axis, authorization profiles) holds here as
+   * well. Referential actions bypass row security, so a cascade still
+   * reaches every row.
+   */
+  recordAccessFrom?: { schema: string; table: string; column: string };
   /** Compiler-owned storage for a field's collection references (never standalone CRUD). */
   relationStorage?: {
     sourceEntity: string;
@@ -784,6 +815,8 @@ export type PlatformSchemaManifest = {
    */
   entitySubtypes?: TableDefinition[];
   entityValues?: import("./authoring/entity-value-types.js").EntityValueRegistry;
+  /** Entities that accept tenant-defined fields (authoring/extensible.ts); absent when none does. */
+  extensionRegistry?: import("./authoring/extension-registry-types.js").ExtensionRegistry;
 };
 
 /**

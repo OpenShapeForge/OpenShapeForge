@@ -26,6 +26,8 @@ import { consumeEntityEditLeaseInTransaction } from "./edit-leases.js";
 import { hasConsumedCollectionLease } from "./collection-lease-context.js";
 import { subtypeScopeWhere } from "./subtype-scope.js";
 import { assertAdmittedBeforeEffects, assertEffectsWereAdmitted } from "../execution-policy.js";
+import { loadExtensionFields } from "./extensions/store.js";
+import { recomputeOwnerFormulas } from "./extensions/write.js";
 
 /** Compiler/boot-owned binding, never a request-selected table or FK. */
 export type CollectionMutationBinding = { entityName: string; field: string; action: "insert" | "move" | "update" | "remove" };
@@ -204,6 +206,9 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         and current_setting('app.user_groups_exact', true) = ${verified.groups.join(",")}
         and current_setting('app.relation_group_ids', true) = ${verified.relationGroupIds.join(",")} as matches`.execute(trx)).rows[0];
       if (!context?.matches) throw generatedCrudError("The transaction must use the same verified session as the collection Operation.", "FORBIDDEN");
+      // The parent is projected below; its tenant fields need definitions
+      // proven in this transaction (extensions/store.ts), before its row lock.
+      await loadExtensionFields(trx, session, owner, { lock: "shared" });
       const locked = await sql<{ row: GeneratedEntityRow; matches: boolean }>`select to_jsonb(${sql.id(owner.table)}.*) as row,
         ${sql.id("updated_at")} = ${normalizeTimestampToken(request.expectedVersion)}::timestamptz as matches
         from ${sql.id(owner.schema, owner.table)} where id = ${request.id}::uuid and tenant_id = ${session.tenantId}::uuid${subtypeScopeWhere(owner)} for update`.execute(trx);
@@ -305,6 +310,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
             const row = updated.rows[0]?.row;
             if (row) {
               changed = true;
+              await recomputeOwnerFormulas(trx, session, target, row);
             } else if (!(await sql<{ id: string }>`select id from ${sql.id(target.schema, target.table)} where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid`.execute(trx)).rows[0]) {
               throw generatedCrudError("Child update was refused.", "FORBIDDEN");
             }
@@ -316,6 +322,8 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
             where id = ${childId}::uuid and tenant_id = ${session.tenantId}::uuid and ${sql.id(foreignKey!.name)} = ${request.id}::uuid returning to_jsonb(${sql.id(target.table)}.*) as row`.execute(trx);
           const row = deleted.rows[0]?.row;
           if (!row) throw generatedCrudError("Child removal was refused.", "FORBIDDEN");
+          // An owner formula over this child now reads none.
+          await recomputeOwnerFormulas(trx, session, target, row);
           ordered.splice(ordered.indexOf(childId), 1);
           changed = true;
         }

@@ -11,13 +11,24 @@
 //  - path         → dot-walk the payload
 //  - literal      → raw value
 //  - function:today → today's date at 00:00 UTC (+ optional day offset)
+//  - function:recordId|createdTime → payload.id / payload.createdAt (as a Date)
 //  - formula(add|sub|mul|div|mod) → arithmetic over evaluated operands (left-fold)
 //  - formula(concat) → string join
 //  - formula(lower|upper|substring|matches) → string utilities
+//  - formula(left|right|mid|len|trim|substitute) → spreadsheet text functions
+//  - formula(not|negate|isError) → logical negation, unary minus, error test
+//  - formula(round|roundUp|roundDown|abs|value|power|sqrt|ceiling|floor) → numeric functions
+//  - formula(min|max|sum|average) → over the operands that are present
 //  - if            → evaluate condition; return then/else
+//  - switch        → first case whose `when` equals `subject`; else `default`
 //  - coalesce      → first non-null/undefined operand
 //  - aggregate     → walk payload[collection]; optionally filter by `where`; project via `of`; reduce
-//  - date(now|dateDiff) → runtime date helpers
+//  - date(now|dateDiff|dateAdd|datetimeFormat|year|month|day) → runtime date helpers (UTC)
+//
+// Arithmetic never throws: a division by zero is Infinity or NaN and an
+// impossible date is an invalid Date, exactly as JavaScript computes them, and
+// formula(isError) recognises both. A caller that needs a reason per value
+// classifies them (the customer-formula package does).
 //
 // These rules are open-world: a missing operand is an ordinary absent value. A
 // caller that needs a missing operand to never read as a match opts into the
@@ -60,7 +71,7 @@ export function evaluateExpression(
     case "literal":
       return (expr as LiteralExpr).value;
     case "function":
-      return evalFunction(expr as FunctionExpr);
+      return evalFunction(expr as FunctionExpr, payload);
     case "formula":
       return evalFormula(expr as FormulaExpr, payload);
     case "if":
@@ -71,6 +82,8 @@ export function evaluateExpression(
       return evalAggregate(expr as AggregateExpr, payload);
     case "date":
       return evalDate(expr as DateExpr, payload);
+    case "switch":
+      return evalSwitch(expr as SwitchExpr, payload);
     default:
       return undefined;
   }
@@ -97,6 +110,7 @@ type IfExpr = Extract<CompilerExpressionInput, { kind: "if" }>;
 type CoalesceExpr = Extract<CompilerExpressionInput, { kind: "coalesce" }>;
 type AggregateExpr = Extract<CompilerExpressionInput, { kind: "aggregate" }>;
 type DateExpr = Extract<CompilerExpressionInput, { kind: "date" }>;
+type SwitchExpr = Extract<CompilerExpressionInput, { kind: "switch" }>;
 
 function inferKind(expr: CompilerExpressionInput): string {
   const k = (expr as { kind?: string }).kind;
@@ -191,14 +205,21 @@ function evalPath(expr: PathExpr, payload: ExpressionPayload): unknown {
   return cursor;
 }
 
-function evalFunction(expr: FunctionExpr): unknown {
-  if (expr.name === "today") {
-    const now = new Date();
-    const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    if (expr.offset) today.setUTCDate(today.getUTCDate() + expr.offset.days);
-    return today;
+function evalFunction(expr: FunctionExpr, payload: ExpressionPayload): unknown {
+  switch (expr.name) {
+    case "today": {
+      const now = new Date();
+      const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+      if (expr.offset) today.setUTCDate(today.getUTCDate() + expr.offset.days);
+      return today;
+    }
+    case "recordId":
+      return payload.id;
+    case "createdTime":
+      return toDate(payload.createdAt);
+    default:
+      return undefined;
   }
-  return undefined;
 }
 
 function evalFormula(expr: FormulaExpr, payload: ExpressionPayload): unknown {
@@ -247,6 +268,60 @@ function evalFormula(expr: FormulaExpr, payload: ExpressionPayload): unknown {
         return false;
       }
     }
+    case "left":
+      return toText(values[0]).slice(0, wholeCount(values[1]));
+    case "right": {
+      const count = wholeCount(values[1]);
+      return count === 0 ? "" : toText(values[0]).slice(-count);
+    }
+    case "mid": {
+      // 1-based start, as in a spreadsheet.
+      const start = Math.max(1, Math.trunc(toNumber(values[1]))) - 1;
+      return toText(values[0]).slice(start, start + wholeCount(values[2]));
+    }
+    case "len":
+      return toText(values[0]).length;
+    case "trim":
+      return toText(values[0]).trim();
+    case "substitute":
+      return substitute(toText(values[0]), toText(values[1]), toText(values[2]), values[3]);
+    case "not":
+      return values[0] !== true;
+    case "negate":
+      return -toNumber(values[0]);
+    case "isError":
+      return isErrorValue(values[0]);
+    case "round":
+      return roundTo(toNumber(values[0]), precisionOf(values[1]), Math.round);
+    case "roundUp":
+      return roundTo(toNumber(values[0]), precisionOf(values[1]), Math.ceil);
+    case "roundDown":
+      return roundTo(toNumber(values[0]), precisionOf(values[1]), Math.floor);
+    case "abs":
+      return Math.abs(toNumber(values[0]));
+    case "value":
+      return parseNumberText(values[0]);
+    case "power":
+      return Math.pow(toNumber(values[0]), toNumber(values[1]));
+    case "sqrt":
+      return Math.sqrt(toNumber(values[0]));
+    case "ceiling":
+      return toMultiple(toNumber(values[0]), values[1], Math.ceil);
+    case "floor":
+      return toMultiple(toNumber(values[0]), values[1], Math.floor);
+    case "min":
+    case "max":
+    case "sum":
+    case "average": {
+      // Blank operands are skipped, as a spreadsheet skips empty cells; with
+      // nothing left, sum is 0 and the others are blank.
+      const numbers = values.filter((v) => v !== null && v !== undefined && v !== "").map(toNumber);
+      if (expr.op === "sum") return numbers.reduce((a, b) => a + b, 0);
+      if (numbers.length === 0) return undefined;
+      if (expr.op === "min") return Math.min(...numbers);
+      if (expr.op === "max") return Math.max(...numbers);
+      return numbers.reduce((a, b) => a + b, 0) / numbers.length;
+    }
     default:
       return undefined;
   }
@@ -256,6 +331,16 @@ function evalIf(expr: IfExpr, payload: ExpressionPayload): unknown {
   const cond = evaluateExpression(expr.condition, payload);
   const branch = cond === true ? expr.then : expr["else"];
   return evaluateExpression(branch, payload);
+}
+
+function evalSwitch(expr: SwitchExpr, payload: ExpressionPayload): unknown {
+  const subject = normalizeAbsent(evaluateExpression(expr.subject, payload));
+  for (const entry of expr.cases ?? []) {
+    if (isEqual(subject, normalizeAbsent(evaluateExpression(entry.when, payload)))) {
+      return evaluateExpression(entry.then, payload);
+    }
+  }
+  return expr["default"] === undefined ? undefined : evaluateExpression(expr["default"], payload);
 }
 
 function evalCoalesce(expr: CoalesceExpr, payload: ExpressionPayload): unknown {
@@ -306,7 +391,28 @@ function evalDate(expr: DateExpr, payload: ExpressionPayload): unknown {
       const l = toDate(left);
       const r = toDate(right);
       if (l === undefined || r === undefined) return undefined;
+      if (expr.unit !== undefined) return dateDifference(l, r, expr.unit);
       return Math.floor((l.getTime() - r.getTime()) / 86_400_000);
+    }
+    case "dateAdd": {
+      const base = toDate(expr.left === undefined ? undefined : evaluateExpression(expr.left, payload));
+      if (base === undefined) return undefined;
+      const amount = toNumber(expr.right === undefined ? undefined : evaluateExpression(expr.right, payload));
+      return addToDate(base, amount, expr.unit ?? "days");
+    }
+    case "datetimeFormat": {
+      const date = toDate(expr.left === undefined ? undefined : evaluateExpression(expr.left, payload));
+      if (date === undefined) return undefined;
+      const format = expr.right === undefined ? undefined : evaluateExpression(expr.right, payload);
+      return formatDate(date, typeof format === "string" && format !== "" ? format : undefined);
+    }
+    case "year":
+    case "month":
+    case "day": {
+      const date = toDate(expr.left === undefined ? undefined : evaluateExpression(expr.left, payload));
+      if (date === undefined) return undefined;
+      if (expr.op === "year") return date.getUTCFullYear();
+      return expr.op === "month" ? date.getUTCMonth() + 1 : date.getUTCDate();
     }
     default:
       return undefined;
@@ -359,6 +465,196 @@ function foldLeft(values: unknown[], fn: (a: unknown, b: unknown) => number): nu
   let acc: unknown = values[0];
   for (let i = 1; i < values.length; i++) acc = fn(acc, values[i]);
   return toNumber(acc);
+}
+
+// ---------------------------------------------------------------------------
+// Spreadsheet helpers (text, numeric and calendar functions)
+// ---------------------------------------------------------------------------
+
+function normalizeAbsent(v: unknown): unknown {
+  return v === undefined ? null : v;
+}
+
+function toText(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? "" : v.toISOString();
+  return String(v);
+}
+
+function wholeCount(v: unknown): number {
+  const n = Math.trunc(toNumber(v));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function precisionOf(v: unknown): number {
+  if (v === null || v === undefined) return 0;
+  const n = Math.trunc(toNumber(v));
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function isErrorValue(v: unknown): boolean {
+  if (typeof v === "number") return !Number.isFinite(v);
+  return v instanceof Date && Number.isNaN(v.getTime());
+}
+
+function substitute(text: string, needle: string, replacement: string, occurrence: unknown): string {
+  if (needle === "") return text;
+  if (occurrence === null || occurrence === undefined) return text.split(needle).join(replacement);
+  const nth = Math.trunc(toNumber(occurrence));
+  if (!(nth >= 1)) return text;
+  let from = 0;
+  let at = -1;
+  for (let i = 0; i < nth; i++) {
+    at = text.indexOf(needle, from);
+    if (at < 0) return text;
+    from = at + needle.length;
+  }
+  return text.slice(0, at) + replacement + text.slice(at + needle.length);
+}
+
+// Rounds the magnitude, so `round` is half away from zero, `roundUp` away from
+// zero and `roundDown` toward zero, as in a spreadsheet. The decimal shift goes
+// through the number's own decimal notation so 1.005 rounds as written rather
+// than as its binary approximation.
+function roundTo(value: number, digits: number, round: (n: number) => number): number {
+  if (!Number.isFinite(value)) return value;
+  const magnitude = round(shiftDecimal(Math.abs(value), digits));
+  const result = (value < 0 ? -1 : 1) * shiftDecimal(magnitude, -digits);
+  return result === 0 ? 0 : result;
+}
+
+function shiftDecimal(value: number, digits: number): number {
+  const [mantissa, exponent = "0"] = String(value).split("e");
+  return Number(`${mantissa}e${Number(exponent) + digits}`);
+}
+
+// The nearest multiple of `significance` (default 1) in the direction of `round`.
+function toMultiple(value: number, significance: unknown, round: (n: number) => number): number {
+  const step = significance === null || significance === undefined ? 1 : toNumber(significance);
+  if (!Number.isFinite(value) || !Number.isFinite(step)) return NaN;
+  if (step === 0) return 0;
+  const result = Number((round(Number((value / step).toPrecision(15))) * step).toPrecision(15));
+  return result === 0 ? 0 : result;
+}
+
+// Text to number: blank stays blank, currency symbols, spaces and thousands
+// separators are ignored, and text without a number is NaN.
+function parseNumberText(v: unknown): unknown {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v === "number") return v;
+  if (typeof v === "boolean") return v ? 1 : 0;
+  const text = String(v).trim();
+  if (text === "") return undefined;
+  const cleaned = text.replace(/[^0-9.eE+-]/g, "");
+  return /[0-9]/.test(cleaned) ? Number(cleaned) : NaN;
+}
+
+const FIXED_UNIT_MS: Record<string, number> = {
+  milliseconds: 1,
+  seconds: 1000,
+  minutes: 60_000,
+  hours: 3_600_000,
+  days: 86_400_000,
+  weeks: 604_800_000,
+};
+
+const CALENDAR_UNIT_MONTHS: Record<string, number> = { months: 1, quarters: 3, years: 12 };
+
+function addToDate(date: Date, amount: number, unit: string): Date {
+  const months = CALENDAR_UNIT_MONTHS[unit];
+  if (months !== undefined) return addMonths(date, Math.trunc(amount) * months);
+  const size = FIXED_UNIT_MS[unit];
+  return new Date(size === undefined ? NaN : date.getTime() + amount * size);
+}
+
+// Calendar months, clamped to the end of a shorter month (31 Jan + 1 month is
+// 28 or 29 Feb), keeping the time of day.
+function addMonths(date: Date, months: number): Date {
+  if (!Number.isFinite(months)) return new Date(NaN);
+  const year = date.getUTCFullYear();
+  const month = date.getUTCMonth() + months;
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return new Date(
+    Date.UTC(
+      year,
+      month,
+      Math.min(date.getUTCDate(), lastDay),
+      date.getUTCHours(),
+      date.getUTCMinutes(),
+      date.getUTCSeconds(),
+      date.getUTCMilliseconds(),
+    ),
+  );
+}
+
+// `left - right` in whole units, truncated toward zero. Calendar units count
+// whole months the way `addMonths` steps them.
+function dateDifference(left: Date, right: Date, unit: string): number | undefined {
+  const months = CALENDAR_UNIT_MONTHS[unit];
+  if (months !== undefined) {
+    let whole =
+      (left.getUTCFullYear() - right.getUTCFullYear()) * 12 + (left.getUTCMonth() - right.getUTCMonth());
+    const anchor = addMonths(right, whole).getTime();
+    if (whole > 0 && anchor > left.getTime()) whole -= 1;
+    else if (whole < 0 && anchor < left.getTime()) whole += 1;
+    const result = Math.trunc(whole / months);
+    return result === 0 ? 0 : result;
+  }
+  const size = FIXED_UNIT_MS[unit];
+  if (size === undefined) return undefined;
+  const result = Math.trunc((left.getTime() - right.getTime()) / size);
+  return result === 0 ? 0 : result;
+}
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const DATE_FORMAT_TOKEN =
+  /\[([^\]]*)\]|YYYY|YY|Q|MMMM|MMM|MM|M|DD|D|dddd|ddd|d|HH|H|hh|h|mm|m|ss|s|SSS|A|a|X|x|ZZ|Z/g;
+
+// Moment-style format tokens (the ones spreadsheet users meet in Airtable's
+// DATETIME_FORMAT), always in UTC. `[text]` is literal; without a format the
+// result is ISO 8601.
+function formatDate(date: Date, format: string | undefined): string {
+  if (Number.isNaN(date.getTime())) return "";
+  if (format === undefined) return date.toISOString();
+  const pad = (n: number, width = 2) => String(n).padStart(width, "0");
+  const hours = date.getUTCHours();
+  return format.replace(DATE_FORMAT_TOKEN, (token, literal) => {
+    if (literal !== undefined) return literal;
+    switch (token) {
+      case "YYYY": return pad(date.getUTCFullYear(), 4);
+      case "YY": return pad(date.getUTCFullYear() % 100);
+      case "Q": return String(Math.floor(date.getUTCMonth() / 3) + 1);
+      case "MMMM": return MONTH_NAMES[date.getUTCMonth()];
+      case "MMM": return MONTH_NAMES[date.getUTCMonth()].slice(0, 3);
+      case "MM": return pad(date.getUTCMonth() + 1);
+      case "M": return String(date.getUTCMonth() + 1);
+      case "DD": return pad(date.getUTCDate());
+      case "D": return String(date.getUTCDate());
+      case "dddd": return DAY_NAMES[date.getUTCDay()];
+      case "ddd": return DAY_NAMES[date.getUTCDay()].slice(0, 3);
+      case "d": return String(date.getUTCDay());
+      case "HH": return pad(hours);
+      case "H": return String(hours);
+      case "hh": return pad(hours % 12 === 0 ? 12 : hours % 12);
+      case "h": return String(hours % 12 === 0 ? 12 : hours % 12);
+      case "mm": return pad(date.getUTCMinutes());
+      case "m": return String(date.getUTCMinutes());
+      case "ss": return pad(date.getUTCSeconds());
+      case "s": return String(date.getUTCSeconds());
+      case "SSS": return pad(date.getUTCMilliseconds(), 3);
+      case "A": return hours < 12 ? "AM" : "PM";
+      case "a": return hours < 12 ? "am" : "pm";
+      case "X": return String(Math.floor(date.getTime() / 1000));
+      case "x": return String(date.getTime());
+      case "ZZ": return "+0000";
+      case "Z": return "+00:00";
+      default: return token;
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------

@@ -369,6 +369,10 @@ types:
     kind: object
     label: { en: Measurement, nl: Meetwaarde }
     baseType: object
+    # A tenant field of this type is indexed as its number and its unit, so it
+    # filters and sorts like any number and can be narrowed to one unit. Every
+    # other object type is excluded from tenant fields until it declares one.
+    indexProjection: { number: value, text: unit }
     icon: Ruler
     render:
       display: TextDisplay

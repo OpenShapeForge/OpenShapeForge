@@ -13,6 +13,8 @@ import { generatedCrudError, getGeneratedCrudTables, isGeneratedCrudOperationEna
 import { assertRecordPermissionInTransaction } from "./record-permissions.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
 import type { DerivedToolsCatalogEntry } from "../../mcp/derived-tools.js";
+import { carriesExtensionValues } from "./extensions/store.js";
+import { EXTENSION_VALUES_COLUMN } from "./extensions/model.js";
 
 /** Server-owned injection only; never accepted in a request body. */
 export type EntityValueIOContext = {
@@ -95,7 +97,11 @@ export function entityValueCarriers(table: GeneratedCrudTable, registry = genera
 }
 
 export function entityValuePhysicalColumns(table: GeneratedCrudTable, registry = generatedEntityValues): Set<string> {
-  return new Set(entityValueCarriers(table, registry).flatMap((carrier) => Object.values(carrier.definitions).flatMap((definition) => definition.references.flatMap((reference) => [reference.column, ...(reference.parameterColumn ? [reference.parameterColumn] : [])]))));
+  const physical = new Set(entityValueCarriers(table, registry).flatMap((carrier) => Object.values(carrier.definitions).flatMap((definition) => definition.references.flatMap((reference) => [reference.column, ...(reference.parameterColumn ? [reference.parameterColumn] : [])]))));
+  // The tenant field source is server-owned storage too: callers read and
+  // write `extensions`, never the column (extensions/read.ts, write.ts).
+  if (carriesExtensionValues(table)) physical.add(EXTENSION_VALUES_COLUMN);
+  return physical;
 }
 
 /** Called before normalization, so protected inputs cannot be silently discarded. */

@@ -65,7 +65,10 @@ export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelin
         return [[field.trackedField, relationship.target]];
       })),
       fields: Object.fromEntries(table.columns.filter(column => column.sourceField).map(column => [column.name, {
-        name: column.sourceField!, exact: ["numeric", "bigint"].includes(column.type), hidden: !!table.retention || !!column.classification || !!column.fieldPolicy || /password|secret|token|credential|private.?key|cipher|encrypted/i.test(column.name),
+        name: column.sourceField!, exact: ["numeric", "bigint"].includes(column.type),
+        // The tenant field source never enters before/after raw: its audit is
+        // per key, with classified keys redacted (operations/entity/extensions/write.ts).
+        hidden: !!table.retention || !!column.classification || !!column.fieldPolicy || column.name === "extension_values" || /password|secret|token|credential|private.?key|cipher|encrypted/i.test(column.name),
       }])), parents: (parentEdges.get(table.name) ?? []).map(edge => ({ column: edge.column, entity: edge.parent.source!.authoringEntityName! })) };
   }
   return business.map(table => config(table));

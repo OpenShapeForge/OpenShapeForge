@@ -3,6 +3,7 @@
  * The CRUD execution of an entity tool. Split out of the entity section of
  * tool dispatch, verbatim.
  */
+import { primeSessionExtensions, withExtensionTool } from "./extension-schemas.js";
 import { executeEntityOperation, entityOperationContract, entityOperationRef } from "../operations/entity/runtime.js";
 import { operationFailure } from "@openshapeforge/operations";
 import { actingRelationId } from "../db/acting-relation.js";
@@ -70,6 +71,10 @@ export async function crudToolCall(
     signal,
     tables,
   } = ctx;
+  // The advertised schema of this session, tenant fields included: the
+  // checks below hold the call to exactly what tools/list showed.
+  await primeSessionExtensions(db, session);
+  match = withExtensionTool(match, table, session);
   const crudArguments = withoutEntitySelector(
     match,
     request.params.arguments as Record<string, unknown> | undefined,

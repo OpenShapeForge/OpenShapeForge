@@ -27,7 +27,7 @@ import { renderTypeDefinition } from "../../../../graphql/generated-entity-schem
 import { createModuleSessionCapability, ModulePlatformRuntime } from "../../../../modules/platform.js";
 import { bindOperationHandlers, invokeOperation, type OperationContract } from "../../../runtime.js";
 import rawCatalog from "../../../../generated/operations/catalog.json" with { type: "json" };
-import { createExtensionFixture, ENTITY, MANAGER_ROLE, READER_ROLE, sessionFor, TARGET_ENTITY, WRITER_ROLE, type ExtensionFixture } from "./fixture.js";
+import { createExtensionFixture, ENTITY, holdsMaintain, MANAGER_ROLE, READER_ROLE, sessionFor, TARGET_ENTITY, WRITER_ROLE, type ExtensionFixture } from "./fixture.js";
 
 let fixture: ExtensionFixture;
 const tenantA = randomUUID();
@@ -435,10 +435,10 @@ describe("tenant fields on an extensible entity", () => {
     expect((await created(writer, { stuks: 2.5 })).extensions.stuks).toBe(2.5);
     // The worker holds no MAINTAIN: the planner statistics of the index
     // follow autovacuum's ANALYZE, not the backfill.
-    const maintain = await sql<{ index: boolean; entity: boolean }>`select
-        has_table_privilege('openshapeforge_worker', 'erp.extensible_assets_field_values', 'MAINTAIN') as index,
-        has_table_privilege('openshapeforge_worker', 'erp.extensible_assets', 'MAINTAIN') as entity`.execute(fixture.privileged.db);
-    expect(maintain.rows[0]).toEqual({ index: false, entity: false });
+    expect({
+      index: await holdsMaintain(fixture.privileged.db, "openshapeforge_worker", "erp.extensible_assets_field_values"),
+      entity: await holdsMaintain(fixture.privileged.db, "openshapeforge_worker", "erp.extensible_assets"),
+    }).toEqual({ index: false, entity: false });
 
     expect(await failure(define(manager, "update", { fieldId: fields.aantal, definition: { osfType: "date", classification: { sensitivity: "public" } } })))
       .toMatchObject({ message: expect.stringContaining("not a widening change") });

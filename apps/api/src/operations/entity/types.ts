@@ -7,6 +7,7 @@ import type {
   OperationPrerequisite,
   OperationConfirmation,
   OperationReference,
+  OperationAccepted,
   OperationResult,
 } from "@openshapeforge/operations";
 
@@ -376,16 +377,19 @@ export type EntityCollectionData = {
   boardTotals?: import("./board-aggregate.js").BoardGroupTotal[];
 };
 
+type EntityOfferIntent = GeneratedCrudExposureOperation | "invoke";
+/** Data or failure: the arms of an Operation no override can take. */
+type EntityDirectResult<TData> = Exclude<
+  OperationResult<TData, EntityOfferIntent>,
+  OperationAccepted<EntityOfferIntent>
+>;
+
+/**
+ * Only a record-scoped `update` or `delete` can be taken over by an
+ * operation override, so only those two carry the `accepted` arm.
+ */
 export type EntityOperationResult =
-  | ({ intent: "list" } & OperationResult<
-      EntityCollectionData,
-      GeneratedCrudExposureOperation | "invoke"
-    >)
-  | ({ intent: "get" | "create" | "update" } & OperationResult<
-      GeneratedEntityRow | null,
-      GeneratedCrudExposureOperation | "invoke"
-    >)
-  | ({ intent: "delete" } & OperationResult<
-      { deleted: boolean },
-      GeneratedCrudExposureOperation | "invoke"
-    >);
+  | ({ intent: "list" } & EntityDirectResult<EntityCollectionData>)
+  | ({ intent: "get" | "create" } & EntityDirectResult<GeneratedEntityRow | null>)
+  | ({ intent: "update" } & OperationResult<GeneratedEntityRow | null, EntityOfferIntent>)
+  | ({ intent: "delete" } & OperationResult<{ deleted: boolean }, EntityOfferIntent>);

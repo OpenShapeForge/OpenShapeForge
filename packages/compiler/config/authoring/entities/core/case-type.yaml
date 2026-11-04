@@ -30,10 +30,15 @@ authorization:
   rowAccess:
     enabled: true
     empty: public
+indexes:
+  - name: case_types_tenant_code_uidx
+    fields: [tenantId, code]
+    unique: true
 fields:
   - key: code
     osfType: string
     required: true
+    deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
     label:
       en: Code
       nl: Code

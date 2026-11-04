@@ -7,6 +7,10 @@
 import { actingRelationId } from "../db/acting-relation.js";
 import { randomUUID } from "node:crypto";
 import { resolveTemplate } from "./declarative-execution.js";
+import {
+  assertConnectionControls,
+  assertExpectedConnection,
+} from "./connection-expectation.js";
 import { connectionTokenSecretScope } from "../connectors/secrets.js";
 import {
   accessTokenNeedsRefresh,
@@ -67,6 +71,17 @@ export async function resolvePersonalConnection(
     actingRelationId(session),
   );
   if (!personal) {
+    // There is no row to be the expected one. The refusal comes before the
+    // guidance below so that a caller holding a durable identity gets the
+    // same answer whichever way its Connection became unreachable — replaced,
+    // retired, or deleted with nothing in its place. Without an expectation
+    // this is a no-op and the guidance is exactly as it was.
+    assertExpectedConnection({
+      expectation: input.controls?.expectedConnection,
+      session,
+      connectionTable: execution.connectionTable,
+      connection: undefined,
+    });
     // The organization's side comes first: a person cannot
     // sign in at a provider whose shared configuration (the
     // OAuth client, say) nobody has created yet.
@@ -97,6 +112,17 @@ export async function resolvePersonalConnection(
       connectTool: entry?.connect?.name ?? null,
     });
   }
+  // The credential boundary. The tenant row below only carries the OAuth
+  // client and the organization's URL-safe configuration; the account this
+  // call acts in is this personal row, so it is the row the expectation is
+  // checked against and the row recorded as used — before any value of it is
+  // read or refreshed.
+  assertConnectionControls({
+    controls: input.controls,
+    session,
+    connectionTable: execution.connectionTable,
+    connection: personal,
+  });
   if (providerAuth?.profile !== "oauth2AuthorizationCode") {
     connectionValues =
       personal[execution.connectionValuesField];

@@ -36,9 +36,25 @@ import {
   type LeaseProtectedOperation,
 } from "./edit-leases.js";
 import {
+  consumeEntityConfirmationInTransaction,
   issueEntityConfirmationChallenge,
   type ChallengeProtectedOperation,
 } from "./confirmation-challenges.js";
+import {
+  consumeEntityEditLeaseInTransaction,
+  validateEntityVersionInTransaction,
+} from "./edit-leases.js";
+import {
+  closeTakeoverReplay,
+  prepareTakeoverReplay,
+  takeOverEntityOperation,
+  takeoverInputHash,
+  takeoverStampSession,
+  takeTakeoverInput,
+  withinRelatedChanges,
+  type EntityTakeoverOutcome,
+  type PreparedTakeoverReplay,
+} from "./operation-overrides.js";
 import {
   createGeneratedEntity,
   createGeneratedEntityAfterElicitation,
@@ -957,6 +973,65 @@ function listPageInput(input: EntityOperationInput | undefined): ListPageInput {
 /** Interface-neutral dispatcher used by REST, MCP and future transports. */
 type SecureCompletion = { into: string; value: unknown; existingId?: string };
 
+type MutationGuard = {
+  operation: ChallengeProtectedOperation & LeaseProtectedOperation;
+  expectedVersion: string;
+  leaseToken?: string;
+  confirmationToken?: string;
+  confirmationAnswer?: string;
+};
+
+/**
+ * The contract a takeover replay writes under: the caller already satisfied
+ * the edit lease and the confirmation when the takeover was recorded, so
+ * neither is asked again — the version predicate stays.
+ */
+function replayControlOperation(operation: EntityOperationContract): EntityOperationContract {
+  const version = operation.concurrency?.version;
+  const { concurrency: _concurrency, ...rest } = operation;
+  return {
+    ...rest,
+    ...(version ? { concurrency: { version } } : {}),
+    interaction: { ...operation.interaction, confirmation: { mode: "none" } },
+  };
+}
+
+/** Prove and consume the caller's own controls when a takeover is recorded. */
+async function consumeTakeoverControls(
+  db: OpenShapeForgeDatabase,
+  trx: Parameters<typeof consumeEntityEditLeaseInTransaction>[0],
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  targetId: string,
+  guard: MutationGuard | undefined,
+): Promise<void> {
+  if (!guard) {
+    // No version to prove: still never record a takeover of a record this
+    // caller cannot see in its own tenant.
+    if (!await fetchGeneratedEntityRow(db, session, table, targetId, true)) {
+      throw operationFailure({ code: "NOT_FOUND", message: "Resource not found." });
+    }
+    return;
+  }
+  if (guard.operation.concurrency?.editLease) {
+    if (!guard.leaseToken) {
+      throw generatedCrudError("A valid edit lease is required for this operation.", "LEASE_INVALID");
+    }
+    await consumeEntityEditLeaseInTransaction(trx, session, {
+      operation: guard.operation, targetId, expectedVersion: guard.expectedVersion, leaseToken: guard.leaseToken,
+    });
+  }
+  if (guard.confirmationToken && guard.confirmationAnswer) {
+    await consumeEntityConfirmationInTransaction(trx, session, {
+      operation: guard.operation, targetId, expectedVersion: guard.expectedVersion,
+      confirmationToken: guard.confirmationToken, confirmationAnswer: guard.confirmationAnswer,
+    });
+  }
+  await validateEntityVersionInTransaction(trx, session, {
+    operation: guard.operation, table, targetId, expectedVersion: guard.expectedVersion,
+  });
+}
+
 async function executeEntityOperationWithContext(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
@@ -964,6 +1039,16 @@ async function executeEntityOperationWithContext(
   completion?: SecureCompletion,
 ): Promise<EntityOperationResult> {
   try {
+    // The reserved takeover member leaves the input before anything reads
+    // it: validation, hashing and the write only ever see the business input.
+    const taken = takeTakeoverInput(session, request.input);
+    const replayTakeoverId = taken.takeoverId;
+    if (replayTakeoverId) {
+      if (request.operation.intent !== "update" && request.operation.intent !== "delete") {
+        throw operationFailure({ code: "TAKEOVER_INVALID", message: "Only an update or delete can replay a takeover.", retryable: false });
+      }
+      request = { ...request, ...(taken.input ? { input: taken.input } : {}) };
+    }
     await resolveAuthorizationProfileAccess(session, db);
     const table = tableForEntityOperation(request.operation);
     // Authorization precedes request controls and database access. Otherwise
@@ -1001,6 +1086,41 @@ async function executeEntityOperationWithContext(
         return withInvocationSavepoint(trx, () =>
           withOwnedExecutionAdmission(trx, session, admit, mutate));
       });
+    /** The answer of a takeover, projected as the original Operation's result. */
+    const takeoverResult = async (
+      intent: "update" | "delete",
+      id: string,
+      outcome: EntityTakeoverOutcome,
+    ): Promise<EntityOperationResult> => {
+      if (intent === "delete") {
+        const operations = getEntityOperationOffers(entityName, session,
+          projectedOfferIntents(request, COLLECTION_OFFER_INTENTS));
+        if (outcome.kind === "accepted") return { intent, accepted: outcome.accepted, operations };
+        // Deleted is what the database says, not what the override claims:
+        // the row must be gone from the caller's own view.
+        const remaining = await fetchGeneratedEntityRow(db, session, table, id);
+        return { intent, data: { deleted: remaining === null }, operations };
+      }
+      // The record as it is now, under the caller's own projection: the
+      // override's own payload is never passed through as the record.
+      const current = await fetchGeneratedEntityRow(db, session, table, id);
+      const data = current ? projectGeneratedEntityRow(table, session, current) : null;
+      const operations = data
+        ? await currentRecordOffers(db, session, entityName, table, offerTarget(data, table),
+            projectedOfferIntents(request, RECORD_OFFER_INTENTS))
+        : [];
+      return outcome.kind === "accepted"
+        ? { intent, accepted: outcome.accepted, operations }
+        : { intent, data, operations };
+    };
+    const replayFor = (id: string): Promise<PreparedTakeoverReplay> | undefined => replayTakeoverId
+      ? prepareTakeoverReplay(db, session, {
+          takeoverId: replayTakeoverId,
+          operationId: request.operation.id,
+          recordId: id,
+          inputHash: takeoverInputHash(request.input),
+        })
+      : undefined;
     // Admission on actual execution, not on the offer: the ordinary CRUD
     // fast path is where REST, GraphQL and MCP all write, so the host
     // execution policies run here too — after authorization, so a refusal
@@ -1008,6 +1128,9 @@ async function executeEntityOperationWithContext(
     // before any mutation, lease, challenge or plugin handler.
     await admit();
     if (operation.implementation?.type === "plugin") {
+      if (replayTakeoverId) {
+        throw operationFailure({ code: "TAKEOVER_INVALID", message: "A plugin-backed Operation has no takeover to replay.", retryable: false });
+      }
       if (operation.intent !== "create" && operation.intent !== "update" &&
         operation.intent !== "delete") {
         throw generatedCrudError(
@@ -1220,7 +1343,8 @@ async function executeEntityOperationWithContext(
             permission,
           );
         }
-        const concurrencyGuard = mutationConcurrencyGuard(operation, request.input);
+        const controlOperation = replayTakeoverId ? replayControlOperation(operation) : operation;
+        const concurrencyGuard = mutationConcurrencyGuard(controlOperation, request.input);
         // Before any confirmation or lease work: an illegal payload must not
         // start a challenge it can only fail on the confirmed retry.
         const { values: supplied, extensions } = splitExtensionInput(table, requireValues(request.input));
@@ -1235,19 +1359,21 @@ async function executeEntityOperationWithContext(
         requireContractValues(operation, table, values, { partial: true }, session);
         const relatedChanges = request.input?.relatedChanges;
         if (relatedChanges !== undefined) assertOperationInputValid(operation, request.input ?? {});
-        const confirmation = await prepareMutationConfirmation(
-          db,
-          session,
-          operation,
-          table,
-          request.input,
-          concurrencyGuard,
-        );
+        const confirmation: PreparedMutationConfirmation = replayTakeoverId
+          ? { ready: true }
+          : await prepareMutationConfirmation(
+              db,
+              session,
+              operation,
+              table,
+              request.input,
+              concurrencyGuard,
+            );
         if (!confirmation.ready) return { intent: "update", error: confirmation.error };
-        const guard = concurrencyGuard
+        const guard: MutationGuard | undefined = concurrencyGuard
           ? {
               ...concurrencyGuard,
-              operation: operation as ChallengeProtectedOperation & LeaseProtectedOperation,
+              operation: controlOperation as ChallengeProtectedOperation & LeaseProtectedOperation,
               ...(confirmation.confirmationToken
                 ? {
                     confirmationToken: confirmation.confirmationToken,
@@ -1266,23 +1392,42 @@ async function executeEntityOperationWithContext(
           table: table.name, id: requireId(request.input), values: committed.values,
           ...(extensions ? { extensions } : {}),
           ...(committed.bindings ? { fieldBindings: committed.bindings } : {}),
-          ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation, session) } } : {}),
+          // A replay stamps the caller the takeover recorded, not the service identity.
+          ...(operation.stamps?.length ? { trusted: { operation: operation.id, values: trustedOperationStampValues(operation,
+            replay ? takeoverStampSession(session, replay) : session) } } : {}),
           ...(guard ? { guard } : {}),
         });
         };
-        const data = await governed(() => relatedChanges === undefined ? writeParent() : withDbSession(db, session, async trx => {
+        const targetId = requireId(request.input);
+        const replay = await replayFor(targetId);
+        if (!replay) {
+          // Everything the caller must satisfy has been asked; nothing is
+          // written yet. An override takes the call here or not at all.
+          const takeover = await takeOverEntityOperation(db, session, {
+            operation: { id: request.operation.id, intent: "update" },
+            input: request.input ?? {},
+            recordId: targetId,
+            carriesRelatedChanges: relatedChanges !== undefined,
+            consumeControls: (trx) => consumeTakeoverControls(db, trx as never, session, table, targetId, guard),
+          });
+          if (takeover) return takeoverResult("update", targetId, takeover);
+        }
+        const data = await governed(async () => {
+          if (replay) await closeTakeoverReplay(db, session, replay);
+          return relatedChanges === undefined ? writeParent() : withDbSession(db, session, async trx => {
           const parent = await writeParent();
           if (!parent) throw operationFailure({code:"NOT_FOUND",message:"Record not found.",retryable:false});
-          await applyRelatedChanges(trx, session, table, requireId(request.input), relatedChanges as never, getGeneratedCrudTables(), async (child, intent, input) => {
+          await withinRelatedChanges(() => applyRelatedChanges(trx, session, table, requireId(request.input), relatedChanges as never, getGeneratedCrudTables(), async (child, intent, input) => {
             const childOp = entityOperationContract(entityOperationRef(child, intent).id);
             if (childOp.implementation?.type !== "entity" || childOp.effects.external !== "none" || childOp.interaction.secureInput || childOp.prerequisites?.length || childOp.interaction.confirmation.mode !== "none" || (intent === "create" && childOp.concurrency?.editLease) || childOp.reliability.idempotency.mode === "keyed") throw operationFailure({code:"VALIDATION",message:"This related write requires its own guarded Operation.",retryable:false});
             const result = await executeEntityOperation(db, session, {operation:entityOperationRef(child,intent),input});
             if ("error" in result) throw operationFailure(result.error);
             if (!result.data) throw operationFailure({code:"NOT_FOUND",message:"Related record not found.",retryable:false});
             return result.data as never;
-          });
+          }));
           return parent;
-        }));
+        });
+        });
         return {
           intent: "update",
           data,
@@ -1302,20 +1447,23 @@ async function executeEntityOperationWithContext(
             permission,
           );
         }
-        const concurrencyGuard = mutationConcurrencyGuard(operation, request.input);
-        const confirmation = await prepareMutationConfirmation(
-          db,
-          session,
-          operation,
-          table,
-          request.input,
-          concurrencyGuard,
-        );
+        const controlOperation = replayTakeoverId ? replayControlOperation(operation) : operation;
+        const concurrencyGuard = mutationConcurrencyGuard(controlOperation, request.input);
+        const confirmation: PreparedMutationConfirmation = replayTakeoverId
+          ? { ready: true }
+          : await prepareMutationConfirmation(
+              db,
+              session,
+              operation,
+              table,
+              request.input,
+              concurrencyGuard,
+            );
         if (!confirmation.ready) return { intent: "delete", error: confirmation.error };
-        const guard = concurrencyGuard
+        const guard: MutationGuard | undefined = concurrencyGuard
           ? {
               ...concurrencyGuard,
-              operation: operation as ChallengeProtectedOperation & LeaseProtectedOperation,
+              operation: controlOperation as ChallengeProtectedOperation & LeaseProtectedOperation,
               ...(confirmation.confirmationToken
                 ? {
                     confirmationToken: confirmation.confirmationToken,
@@ -1324,11 +1472,26 @@ async function executeEntityOperationWithContext(
                 : {}),
             }
           : undefined;
-        const deleted = await governed(() => deleteGeneratedEntity(db, session, {
-          table: table.name,
-          id: requireId(request.input),
-          ...(guard ? { guard } : {}),
-        }));
+        const targetId = requireId(request.input);
+        const replay = await replayFor(targetId);
+        if (!replay) {
+          const takeover = await takeOverEntityOperation(db, session, {
+            operation: { id: request.operation.id, intent: "delete" },
+            input: request.input ?? {},
+            recordId: targetId,
+            carriesRelatedChanges: false,
+            consumeControls: (trx) => consumeTakeoverControls(db, trx as never, session, table, targetId, guard),
+          });
+          if (takeover) return takeoverResult("delete", targetId, takeover);
+        }
+        const deleted = await governed(async () => {
+          if (replay) await closeTakeoverReplay(db, session, replay);
+          return deleteGeneratedEntity(db, session, {
+            table: table.name,
+            id: targetId,
+            ...(guard ? { guard } : {}),
+          });
+        });
         return {
           intent: "delete",
           data: { deleted },

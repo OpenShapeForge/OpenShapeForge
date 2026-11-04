@@ -17,7 +17,11 @@ import { getEntityOperationContracts } from "../../operations/entity/index.js";
 import { generatedCrudTools } from "../../mcp/native-crud-tool.js";
 import { operationContractFingerprint } from "../../operations/contract-fingerprint.js";
 import { __setOperationExecutionReceiptExecutorForTests } from "../../operations/execution-receipts.js";
-import type { ModuleMcpServerBinding } from "../platform.js";
+import { DECLARATIVE_CONNECTION_CAPABILITIES } from "../../mcp/connection-expectation.js";
+import type {
+  ModuleDeclarativeServiceExecutor,
+  ModuleMcpServerBinding,
+} from "../platform.js";
 import {
   __assertSecretFreeModuleEventForTests,
   __isSensitiveModuleEventKeyForTests,
@@ -42,6 +46,21 @@ const operationClaims = (
   ...claims(tenantId),
   userId,
 });
+
+/**
+ * A stand-in for the core declarative engine, carrying the same capability
+ * claim the real one does. The claim is on the engine rather than beside it, so
+ * a test engine states what it enforces exactly as production wiring must.
+ */
+type DeclarativeEngineRun = (
+  ...args: Parameters<ModuleDeclarativeServiceExecutor>
+) => ReturnType<ModuleDeclarativeServiceExecutor>;
+
+const declarativeEngine = (
+  run: DeclarativeEngineRun,
+  capabilities: unknown = DECLARATIVE_CONNECTION_CAPABILITIES,
+): ModuleDeclarativeServiceExecutor =>
+  Object.assign(run, { capabilities }) as ModuleDeclarativeServiceExecutor;
 
 const testDatabase = () => new Kysely<DB>({
   dialect: {
@@ -229,17 +248,20 @@ describe("runtime module platform session authority", () => {
     };
     let declarativeSession: TrustedSessionContext | undefined;
     let providerExecutions = 0;
-    runtime.registerDeclarativeServiceExecutor(async (session, request, options) => {
-      options?.signal?.throwIfAborted();
-      declarativeSession = session;
-      return {
-        data: {
-          definition: request.definition.id,
-          idempotencyKey: request.idempotencyKey,
-        },
-        operations: [],
-      };
-    });
+    let advertised: unknown;
+    runtime.registerDeclarativeServiceExecutor(
+      declarativeEngine(async (session, request, options) => {
+        options?.signal?.throwIfAborted();
+        declarativeSession = session;
+        return {
+          data: {
+            definition: request.definition.id,
+            idempotencyKey: request.idempotencyKey,
+          },
+          operations: [],
+        };
+      }),
+    );
     runtime.registerOperationProviders([{
       name: "example",
       operationProviders: [{
@@ -249,6 +271,10 @@ describe("runtime module platform session authority", () => {
           operationId === definition.id ? definition : undefined,
         execute: async (context, request) => {
           providerExecutions += 1;
+          // What a plugin asks before it sets a declarative control: the
+          // provider context carries the registered engine's claim, so the
+          // question is answerable without invoking anything.
+          advertised = context.declarativeServiceCapabilities;
           return context.invokeDeclarativeService({
             definition: {
               entity: "Service",
@@ -293,6 +319,9 @@ describe("runtime module platform session authority", () => {
         });
         expect(providerExecutions).toBe(1);
         expect(declarativeSession).toBe(active);
+        expect(advertised).toEqual({
+          expectedConnection: ["every-provider-call"],
+        });
       });
       await expect(runtime.services.operations.get(retained, definition.id))
         .rejects.toThrow(/live verified session/);
@@ -316,6 +345,145 @@ describe("runtime module platform session authority", () => {
       { name: "one", operationProviders: [provider] },
       { name: "two", operationProviders: [provider] },
     ])).toThrow(/empty or duplicated/);
+  });
+
+  it("advertises the declarative controls only once an enforcing engine is registered", async () => {
+    // A runtime with no declarative engine refuses every invocation, so it
+    // enforces nothing and must claim nothing. This is the shape an OSF that
+    // predates the control presents to a plugin: no property to read.
+    const runtime = new ModulePlatformRuntime(testDatabase());
+    expect(runtime.services.declarativeServiceCapabilities).toBeUndefined();
+
+    // Nothing holding the shared services object can claim the control for
+    // every other module, withdraw it, or get the slot out of the way.
+    const forgeable = runtime.services as {
+      declarativeServiceCapabilities?: unknown;
+    };
+    expect(() => {
+      forgeable.declarativeServiceCapabilities = {
+        expectedConnection: ["every-provider-call"],
+      };
+    }).toThrow();
+    expect(() =>
+      Object.defineProperty(runtime.services, "declarativeServiceCapabilities", {
+        value: { expectedConnection: ["every-provider-call"] },
+      }),
+    ).toThrow();
+    expect(() => {
+      delete forgeable.declarativeServiceCapabilities;
+    }).toThrow();
+    expect(runtime.services.declarativeServiceCapabilities).toBeUndefined();
+
+    // An engine claiming something this core has no check for does not get
+    // registered at all: the alternative is publishing a refusal nothing
+    // performs, which a plugin reads INSTEAD of a post-call confirmation.
+    expect(() =>
+      runtime.registerDeclarativeServiceExecutor(
+        declarativeEngine(
+          async () => ({ data: {}, operations: [] }),
+          { expectedConnection: ["every-provider-call", "first-provider-call"] },
+        ),
+      ),
+    ).toThrow(/declarative Service engine/);
+    expect(runtime.services.declarativeServiceCapabilities).toBeUndefined();
+
+    runtime.registerDeclarativeServiceExecutor(
+      declarativeEngine(async () => ({ data: {}, operations: [] })),
+    );
+    expect(runtime.services.declarativeServiceCapabilities).toEqual({
+      expectedConnection: ["every-provider-call"],
+    });
+  });
+
+  it("omits the declarative capability from a provider context on a host that enforces nothing", async () => {
+    // The old-host case at the seam a plugin actually reads: a runtime with no
+    // engine hands the provider a context with no such property, the plugin
+    // refuses there, and core is never asked to run the Service. The control
+    // would otherwise be set on a host that ignores it — a success in the
+    // wrong provider account.
+    const db = testDatabase();
+    const runtime = new ModulePlatformRuntime(db);
+    const definition = {
+      id: "example.record.sync:one@1",
+      intent: "invoke",
+      name: "Sync record",
+      description: "Synchronizes one record.",
+      input: { kind: "json-schema", schema: { type: "object" } },
+      output: { kind: "json-schema", schema: {} },
+      effects: { data: "read" as const, external: "read" as const },
+      reliability: { idempotency: { mode: "none" as const } },
+    };
+    let coreCalls = 0;
+    let seen: unknown = "unset";
+    let had = true;
+    runtime.registerOperationProviders([{
+      name: "example",
+      operationProviders: [{
+        id: "example.records",
+        list: async () => [definition],
+        get: async (_session, operationId) =>
+          operationId === definition.id ? definition : undefined,
+        execute: async (context) => {
+          seen = context.declarativeServiceCapabilities;
+          had = "declarativeServiceCapabilities" in context;
+          if (
+            !context.declarativeServiceCapabilities?.expectedConnection.includes(
+              "every-provider-call",
+            )
+          ) {
+            return {
+              error: {
+                code: "EXPECTED_CONNECTION_UNSUPPORTED",
+                message: "This host does not enforce the expected Connection.",
+                retryable: false,
+              },
+            };
+          }
+          coreCalls += 1;
+          return context.invokeDeclarativeService({
+            definition: { entity: "Service", id: "s", key: "s", version: 1 },
+            expectedConnection: {
+              sourceReference: "msr1.whatever",
+              appliesTo: "every-provider-call",
+            },
+          });
+        },
+      }],
+    }]);
+    await runtime.withActiveOperationSession(operationClaims(), async (active) => {
+      await expect(runtime.services.operations.execute(active, {
+        operation: { id: definition.id, intent: definition.intent },
+      })).resolves.toMatchObject({
+        error: { code: "EXPECTED_CONNECTION_UNSUPPORTED", retryable: false },
+      });
+      // The property is absent, not present-and-falsy, and nothing was invoked.
+      expect(had).toBe(false);
+      expect(seen).toBeUndefined();
+      expect(coreCalls).toBe(0);
+
+      // The same plugin, on a runtime that does enforce it, proceeds — and an
+      // Operation this session may not reach is still refused identically:
+      // the signal is capability, never permission.
+      runtime.registerDeclarativeServiceExecutor(
+        declarativeEngine(async (_session, request) => ({
+          data: { expected: request.expectedConnection?.appliesTo },
+          operations: [],
+        })),
+      );
+      await expect(runtime.services.operations.execute(active, {
+        operation: { id: definition.id, intent: definition.intent },
+      })).resolves.toEqual({
+        data: { expected: "every-provider-call" },
+        operations: [],
+      });
+      expect(coreCalls).toBe(1);
+      await expect(runtime.services.operations.execute(active, {
+        operation: { id: "example.record.sync:absent@1", intent: "invoke" },
+      })).resolves.toMatchObject({
+        error: { code: "OPERATION_NOT_FOUND", retryable: false },
+      });
+      expect(coreCalls).toBe(1);
+    });
   });
 
   it("authorizes a module-owned resource handle only for its exact live session", async () => {

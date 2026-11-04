@@ -17,16 +17,21 @@ pluralLabels:
 domains:
   - finance
   - contracts
+indexes:
+  - name: agreement_component_types_tenant_code_uidx
+    fields: [tenantId, code]
+    unique: true
 fields:
   - key: code
     osfType: string
     required: true
+    deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
     label:
       en: Code
       nl: Code
     description:
-      en: Tenant-unique component-type code.
-      nl: Tenant-unieke componenttypecode.
+      en: Tenant-unique component-type code, made from the name when the type is created.
+      nl: Tenant-unieke componenttypecode, bij het aanmaken gemaakt uit de naam.
     validation:
       minLength: 1
       maxLength: 50

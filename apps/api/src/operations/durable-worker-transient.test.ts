@@ -179,9 +179,19 @@ test("helpers: Retry-After forms and what counts as canonical", async () => {
   expect(isCanonicalResult({ data: null })).toBe(true);
   expect(isCanonicalResult({ error: { code: "X" } })).toBe(true);
   expect(isCanonicalResult({ error: "Too Many Requests" })).toBe(false);
+  expect(isCanonicalResult({ accepted: { by: { kind: "workflow", ref: "run-1" }, status: "waiting" }, operations: [] })).toBe(true);
+  expect(isCanonicalResult({ accepted: { by: { kind: "workflow", ref: "run-1" }, status: "waiting" } })).toBe(false);
+  expect(isCanonicalResult({ accepted: "yes", operations: [] })).toBe(false);
   expect(await isLimiterRefusal(limiter())).toBe(true);
   expect(await isLimiterRefusal(Response.json({ error: { code: "LOCKED" } }, { status: 429 }))).toBe(false);
   // Neither the limiter's code nor its headers: not provably the limiter.
   expect(await isLimiterRefusal(Response.json({ error: "Too Many Requests" }, { status: 429 }))).toBe(false);
   expect(await isLimiterRefusal(Response.json({ error: "Too Many Requests" }, { status: 429, headers: { "x-ratelimit-limit": "600" } }))).toBe(true);
+});
+
+test("an accepted takeover is a settled answer for a non-keyed write, returned unchanged and not re-sent", async () => {
+  const accepted = { accepted: { by: { kind: "workflow", ref: "run-9" }, status: "waiting" as const }, operations: [] };
+  const f = fixture({ execute: [Response.json(accepted, { status: 202 })] }, "none", { tracked: true });
+  expect(await f.broker.execute(await f.broker.authorize(reference))).toEqual(accepted);
+  expect(f.calls.execute).toBe(1);
 });

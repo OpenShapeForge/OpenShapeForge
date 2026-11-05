@@ -96,4 +96,3 @@ export function operationForm(form: { showOnlyGroupedFields?: boolean; defaults?
   }));
   return { ...(form.showOnlyGroupedFields ? { showOnlyGroupedFields: true } : {}), ...(defaults ? { defaults } : {}), groups };
 }
-

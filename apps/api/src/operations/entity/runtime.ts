@@ -595,6 +595,11 @@ export function getEntityOperationContracts(): readonly EntityOperationContract[
   return entityOperations;
 }
 
+/** Withheld from every interface: only another Operation writes through it, under that one's guards. */
+export function isWithheldOperation(id: string): boolean {
+  return entityOperationsById.get(id)?.withheld === true;
+}
+
 /** Lease-protected Operations this identity may reach through the REST adapter. */
 export function restEditLeaseOperationIdsForSession(
   session: OperationAuthorizationSession,
@@ -793,6 +798,7 @@ export function getEntityOperationOffers(
       (operation) =>
         operation.entityName === entityName &&
         intents.includes(operation.intent) &&
+        !operation.withheld &&
         (authorizationProfileDecision(session, operation.id, operation.entityName) ?? operation.authorization.roles.some((role) => heldRoles.has(role))) &&
         (!target || hasRecordPermissions(operation.authorization.recordPermissions)),
     )

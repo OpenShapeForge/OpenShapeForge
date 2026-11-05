@@ -354,6 +354,15 @@ describe("entity operation runtime", () => {
     ).toEqual(["Relation.get"]);
   });
 
+  test("does not offer an Operation withheld from every interface", () => {
+    const update = getEntityOperationContracts().find((operation) => operation.id === "Relation.update")! as { authorization: { roles: readonly string[] }; withheld?: true };
+    const roles = update.authorization.roles;
+    const offered = () => getEntityOperationOffers("Relation", { roles: [...roles] }, ["update"]).map((offer) => offer.operation.id);
+    expect(offered()).toEqual(["Relation.update"]);
+    update.withheld = true;
+    try { expect(offered()).toEqual([]); } finally { delete update.withheld; }
+  });
+
   test("does not offer a source action with a missing required record binding", () => {
     const id = "00000000-0000-4000-8000-000000000001";
     const offers = getEntityOperationOffers("Account", { roles: ["Organization.Accounts.Manage"] }, [], {},

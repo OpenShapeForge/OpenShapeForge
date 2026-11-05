@@ -326,6 +326,8 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
   key: string;
   entityId: string;
   entityName: string;
+  /** Every declared interface switches it off: only another Operation reaches it. */
+  withheld?: true;
   name: string | LocalizedText;
   description: string | LocalizedText;
   /** Core storage execution or a plugin handler for the same CRUD intent. */

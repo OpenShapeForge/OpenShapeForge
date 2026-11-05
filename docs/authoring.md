@@ -498,6 +498,14 @@ but cannot add one. That bound is per compiled entity, not per layer: a later
 authoring layer's `entityPatch` may add an Operation the entity's own file left
 out ([layers.md](layers.md)).
 
+An Operation that every interface the entity declares excludes is withheld:
+another Operation writes through it, under that one's guards, and a caller
+cannot address it. `POST /api/operations/:id/execute` and GraphQL
+`executeOperation` answer `OPERATION_NOT_FOUND`, discovery and offers leave it
+out, and a source sync refuses the entity. An owned child's `update` under a
+leased owner is the usual case. Plugin handlers still reach it through the
+platform port. An entity that declares no interface at all is not affected.
+
 The stock generated entity pages are emitted only when all five intents are
 implemented, because those pages assume the complete list/detail/edit
 surface. Entities with a smaller set use a purpose-built UI, declared under

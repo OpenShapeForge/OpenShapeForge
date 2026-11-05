@@ -1,7 +1,7 @@
 import { validateDefaultTemplates } from "./compiler/default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { sortablePositionColumn } from "./sortable-position.js";
-import { relative } from "node:path";
+import { join, relative } from "node:path";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { compile } from "./compiler/index.js";
@@ -865,7 +865,7 @@ function buildSubtypeTable(
   // whole effective value contract, reference data included. A subtype
   // whose every create the database or validation would refuse is a build
   // failure, not a tool that never works.
-  const scopeValidator = new Ajv2020.default({ allErrors: true, strict: false });
+  const scopeValidator = new Ajv2020({ allErrors: true, strict: false });
   (addFormats as unknown as (instance: typeof scopeValidator) => unknown)(scopeValidator);
   for (const scope of subtype.scope) {
     if (!baseTable.columns.some((column) => column.name === scope.column)) {

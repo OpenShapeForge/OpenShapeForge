@@ -8,7 +8,7 @@
 import { connectProviderStep } from "./dispatch-connect-provider.js";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { withDbSession } from "../db/session.js";
-import { listGeneratedEntitiesForTable } from "../operations/entity/index.js";
+import { getGeneratedEntity, listGeneratedEntitiesForTable } from "../operations/entity/index.js";
 import { deriveToolName, derivedHelperAvailable, derivedToolsFromRows } from "./derived-tools.js";
 import { loadOrderedBindings } from "./execution-bindings.js";
 import { HttpError } from "../rest/http-error.js";
@@ -55,6 +55,30 @@ export async function connectToolCall(
           "VALIDATION",
           'Argument "tool" is required.',
         );
+      }
+      // An MCP server cannot publish its upstream tools until the person has
+      // signed in. Reuse this existing authorized connect operation with an
+      // explicit Adapter key; no synthetic Service or per-tool approval.
+      if (toolArg.startsWith("mcp:")) {
+        const key = toolArg.slice(4);
+        if (!/^[a-z][a-z0-9-]{0,39}$/.test(key)) throw new HttpError(400, "VALIDATION", "The MCP provider key is invalid.");
+        const row = await runtimeRowByFilter(db, session, tables, execution.providerTable, { key });
+        // Raw internal lookup supplies execution metadata, not authority: the
+        // caller must also be allowed to open this exact provider record.
+        if (row && typeof row.id === "string" && !(await getGeneratedEntity(db, session, { table: execution.providerTable, id: row.id }))) {
+          throw new HttpError(404, "NOT_FOUND", "No connectable MCP provider is available with that key.");
+        }
+        const auth = row?.auth;
+        if (!row || typeof row.id !== "string" || row.discovery !== "mcp" || !auth || typeof auth !== "object" || Array.isArray(auth) ||
+            (auth as Record<string, unknown>).profile !== "oauth2AuthorizationCode") {
+          throw new HttpError(404, "NOT_FOUND", "No connectable MCP provider is available with that key.");
+        }
+        const signIn = { id: row.id, row, auth: auth as Record<string, unknown> };
+        const connectedProviders: string[] = [];
+        const outcome = await connectProviderStep({ ...ctx, connectEntry, execution, requestedConnectionScope,
+          requiredScopesByProvider: new Map(), signInProviders: [signIn], connectedProviders }, 0, signIn);
+        return outcome ?? ok({ connected: true, providers: connectedProviders,
+          message: "The MCP provider is connected; its tools will appear after discovery." });
       }
       // Only a row the session could call can start a connection: the
       // same publication and audience rules the projection applies, so an

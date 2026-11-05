@@ -18,6 +18,14 @@ import type {
   RuntimeDeclarativeServiceConnectionUse,
 } from "./declarative-service.js";
 export { RUNTIME_EXPECTED_CONNECTION_UNAVAILABLE_CODE } from "./declarative-service.js";
+import type { RuntimeNativeMcpTool } from "./native-mcp-tool.js";
+export {
+  RUNTIME_NATIVE_MCP_EFFECTS,
+  RUNTIME_NATIVE_MCP_OUTPUT,
+  nativeMcpToolProblem,
+  parseNativeMcpToolResult,
+} from "./native-mcp-tool.js";
+export type { RuntimeNativeMcpTool, RuntimeNativeMcpToolResult } from "./native-mcp-tool.js";
 export type {
   RuntimeDeclarativeServiceCapabilities,
   RuntimeDeclarativeServiceConnectionExpectation,
@@ -411,6 +419,8 @@ export type RuntimeOperationDefinition = OperationReference & {
   prerequisites?: readonly OperationPrerequisite[];
   /** The declared failure catalogue: what a caller can be answered with. */
   errors?: readonly { status: number; code: string; description: string }[];
+  /** A tool of an external MCP server, offered as itself (native-mcp-tool.ts). */
+  nativeMcpTool?: RuntimeNativeMcpTool;
   concurrency?: {
     version?: { mode: "required"; field: string };
     editLease?: { mode: "required"; expiresAfterInactivity: string };
@@ -541,6 +551,10 @@ export type RuntimeOperationExecutionContext = {
  */
 export type RuntimeOperationProvider = {
   id: string;
+  /** An external catalog may fail independently of the application's own Operations. */
+  failureIsolation?: "external-catalog";
+  /** Refresh an external snapshot under a live session, independently of list/get. */
+  refresh?(session: PluginSessionContext, signal: AbortSignal): Promise<boolean>;
   list(session: PluginSessionContext): Promise<readonly RuntimeOperationDefinition[]>;
   get(
     session: PluginSessionContext,
@@ -698,6 +712,30 @@ export type RuntimeConnectionValues = {
   secretKeys: readonly string[];
   egressGrant: RuntimeConnectionGrant;
 };
+/** One finite HTTPS POST. The grant, not this request, decides what is reachable. */
+export type RuntimeConnectionHttpRequest = {
+  url: string;
+  /** Serialized by the host, which also sets `Content-Type` and `Accept`. */
+  json: unknown;
+  headers?: Readonly<Record<string, string>>;
+  /** Response headers to return; `Set-Cookie` is never returned. */
+  exposeHeaders?: readonly string[];
+  /** May narrow the host's budget, never exceed it. */
+  timeoutMs?: number;
+  /** May narrow the host's budget, never exceed it. */
+  maxResponseBytes?: number;
+  signal?: AbortSignal;
+};
+/**
+ * A complete, buffered answer. `body` is empty unless `format` says what it is.
+ * An SSE body is what the upstream sent before closing; this is no notification stream.
+ */
+export type RuntimeConnectionHttpResponse = {
+  status: number;
+  format: "json" | "sse" | null;
+  body: string;
+  headers: Readonly<Record<string, string>>;
+};
 export type RuntimeConnectionResolution =
   | { ok: true; connection: RuntimeConnectionValues }
   | { ok: false; code: "NOT_FOUND" | "FORBIDDEN" | "CONNECTION_REQUIRED" |
@@ -719,6 +757,11 @@ export type PluginPlatformServices = {
    * Absent on runtimes without this capability; consumers must fail closed. */
   readonly secrets?: {
     resolveConnectionValues(session: PluginSessionContext, selector: RuntimeConnectionSelector): Promise<RuntimeConnectionResolution>;
+  };
+  /** One POST on a single-use grant from `secrets`, in the session that resolved it. Never retried; a redirect
+   * is a refusal. Absent on runtimes without this capability; consumers must fail closed. */
+  readonly egress?: {
+    request(session: PluginSessionContext, grant: RuntimeConnectionGrant, request: RuntimeConnectionHttpRequest): Promise<RuntimeConnectionHttpResponse>;
   };
   /** Host-owned signing secret sealing and raw-body verification; no plaintext read API. */
   readonly webhookSecrets?: RuntimeWebhookSecretServices<PluginSessionContext>;

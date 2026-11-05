@@ -2,7 +2,7 @@
 import { HttpError } from "../rest/http-error.js";
 
 /** Enforce a byte budget while consuming, before decoding or parsing a provider body. */
-export async function readBoundedResponse(response: Response, maxBytes = 20 * 1024 * 1024): Promise<string> {
+export async function readBoundedResponse(response: Response, maxBytes = 20 * 1024 * 1024, signal?: AbortSignal): Promise<string> {
   const oversized = () => new HttpError(502, "PROVIDER_RESPONSE_TOO_LARGE", "Provider response exceeds the supported size.");
   const declared = response.headers.get("content-length");
   if (declared !== null && Number(declared) > maxBytes) {
@@ -11,11 +11,16 @@ export async function readBoundedResponse(response: Response, maxBytes = 20 * 10
   }
   if (!response.body) return "";
   const reader = response.body.getReader();
+  // Cancelling ends a pending read even when the source never answers again.
+  const abort = () => void reader.cancel().catch(() => {});
+  if (signal?.aborted) abort();
+  else signal?.addEventListener("abort", abort, { once: true });
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
     while (true) {
       const { done, value } = await reader.read();
+      signal?.throwIfAborted();
       if (done) break;
       size += value.byteLength;
       if (size > maxBytes) throw oversized();
@@ -29,6 +34,7 @@ export async function readBoundedResponse(response: Response, maxBytes = 20 * 10
     await reader.cancel().catch(() => {});
     throw error;
   } finally {
+    signal?.removeEventListener("abort", abort);
     reader.releaseLock();
   }
 }

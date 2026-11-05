@@ -14,6 +14,12 @@ describe("provider response budgets", () => {
     expect(cancelled).toBe(true);
     expect(pulls).toBeLessThan(5);
   });
+  test("ends a pending read at abort, even when the source never answers", async () => {
+    const controller = new AbortController();
+    const pending = readBoundedResponse(new Response(new ReadableStream({})), 16, controller.signal);
+    controller.abort(new Error("stop"));
+    await expect(pending).rejects.toThrow("stop");
+  });
   test("rejects declared size and accepts exact UTF-8 byte budget", async () => {
     await expect(readBoundedResponse(new Response("x", {headers:{"content-length":"99"}}), 4)).rejects.toThrow();
     expect(await readBoundedResponse(new Response("éé"), 4)).toBe("éé");

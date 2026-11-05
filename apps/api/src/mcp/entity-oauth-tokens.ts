@@ -8,7 +8,12 @@ import { readBoundedResponse } from "../modules/outbound-response.js";
  */
 
 import { hostAllowed } from "../connectors/executor.js";
-import { oauthExpiresIn, refreshOAuthTokenSet } from "../connectors/token-lifecycle.js";
+import {
+  oauthExpiresIn,
+  oauthScopeList,
+  refreshOAuthTokenSet,
+  type OAuthTokenResponse,
+} from "../connectors/token-lifecycle.js";
 import type { SecretKeyring } from "../connectors/secrets.js";
 import { fetchWithAllowedRedirects } from "./declarative-execution.js";
 import { encryptSecret, keyringFromEnv } from "../connectors/secrets.js";
@@ -21,10 +26,38 @@ import {
   type JsonRecord,
   type PendingAuthorization,
 } from "./entity-oauth.js";
+import {
+  tokenBindingOf,
+  tokenResponseAudienceMismatch,
+} from "./entity-oauth-profile.js";
 import { connectionTokenSecretScope } from "../connectors/secrets.js";
 export type ExchangedTokens = {
   values: JsonRecord;
 };
+
+/**
+ * What the response says about the grant, as stored fields. Only a stated
+ * `scope` becomes `grantedScopes`. RFC 6749 §5.1 permits omission when the
+ * granted scope is identical to the requested scope; retain that provenance.
+ */
+function grantValues(pending: PendingAuthorization, payload: OAuthTokenResponse): JsonRecord {
+  const granted = oauthScopeList(payload.scope);
+  if (payload.scope !== undefined && !granted) {
+    throw new HttpError(403, "OAUTH_GRANT_INCOMPLETE", "The provider returned an invalid scope.");
+  }
+  const effective = granted ?? [...pending.scopes];
+  if (pending.profile?.strictGrants) {
+    const missing = pending.scopes.filter((scope) => !effective.includes(scope));
+    if (missing.length > 0) {
+      throw new HttpError(
+        403,
+        "OAUTH_GRANT_INCOMPLETE",
+        "The provider did not confirm every requested scope.",
+      );
+    }
+  }
+  return { grantedScopes: effective, scopeProvenance: granted ? "provider" : "rfc6749-implicit" };
+}
 
 /**
  * Exchange the authorization code and shape the stored connection values:
@@ -62,8 +95,9 @@ export async function exchangeCodeForTokens(
     code,
     redirect_uri: pending.redirectUri,
     client_id: pending.clientId,
-    client_secret: pending.clientSecret,
+    ...(pending.clientSecret === undefined ? {} : { client_secret: pending.clientSecret }),
     code_verifier: pending.codeVerifier,
+    ...(pending.profile?.resource ? { resource: pending.profile.resource } : {}),
   });
   const response = await fetchWithAllowedRedirects(
     tokenUrl,
@@ -79,6 +113,8 @@ export async function exchangeCodeForTokens(
     pending.egress,
     fetchImpl,
     egress,
+    pending.profile?.strictGrants ? "https-only" : "http-or-https",
+    pending.profile?.strictGrants ? "deny" : "follow",
   );
   const text = await readBoundedResponse(response, 1024 * 1024);
   if (!response.ok) {
@@ -88,12 +124,7 @@ export async function exchangeCodeForTokens(
       `Token endpoint answered ${response.status}.`,
     );
   }
-  let payload: {
-    access_token?: unknown;
-    refresh_token?: unknown;
-    expires_in?: unknown;
-    scope?: unknown;
-  };
+  let payload: OAuthTokenResponse;
   try {
     payload = JSON.parse(text) as typeof payload;
   } catch {
@@ -110,19 +141,27 @@ export async function exchangeCodeForTokens(
       "Token endpoint returned no access_token.",
     );
   }
+  if (tokenResponseAudienceMismatch(pending.profile, payload)) {
+    throw new HttpError(
+      403,
+      "OAUTH_AUDIENCE_MISMATCH",
+      "The provider issued a token for another audience.",
+    );
+  }
 
   const scope = connectionTokenSecretScope(pending.connectionTable);
   const expiresIn = oauthExpiresIn(payload.expires_in);
   const values: JsonRecord = {
-    // Which scopes the provider actually granted: the token response's
-    // `scope` when present, else the requested set. The connect flow
-    // compares this against a definition's CURRENT requirements, so a scope
-    // change after consent triggers a fresh approval instead of silently
-    // reusing a token that can no longer satisfy the tool.
-    grantedScopes:
-      typeof payload.scope === "string"
-        ? payload.scope.split(" ").filter(Boolean)
-        : [...pending.scopes],
+    // The connect flow compares the grant against a definition's CURRENT
+    // requirements, so a scope change after consent triggers a fresh approval
+    // instead of silently reusing a token that can no longer satisfy the tool.
+    ...grantValues(pending, payload),
+    oauthBinding: tokenBindingOf(pending.profile),
+    // The merge into an existing row would otherwise pair this token with the
+    // previous grant's refresh token and expiry.
+    ...(pending.profile?.strictGrants
+      ? { refreshToken: null, accessTokenExpiresAt: null }
+      : {}),
     accessToken: encryptSecret(
       keyring,
       scope,
@@ -154,7 +193,8 @@ export async function exchangeCodeForTokens(
 export async function refreshTokens(input: {
   tokenUrl: string;
   clientId: string;
-  clientSecret: string;
+  clientSecret?: string | undefined;
+  resource?: string | undefined;
   refreshToken: string;
   egress: string[];
   connectionTable: string;
@@ -172,6 +212,7 @@ export async function refreshTokens(input: {
       tokenUrl: input.tokenUrl,
       clientId: input.clientId,
       clientSecret: input.clientSecret,
+      resource: input.resource,
       refreshToken: input.refreshToken,
       boundFetch: (url, init) =>
         fetchWithAllowedRedirects(
@@ -180,6 +221,8 @@ export async function refreshTokens(input: {
           input.egress,
           fetchImpl,
           input.moduleEgress,
+          input.resource ? "https-only" : "http-or-https",
+          input.resource ? "deny" : "follow",
         ),
     });
     const scope = connectionTokenSecretScope(input.connectionTable);
@@ -200,6 +243,9 @@ export async function refreshTokens(input: {
         accessTokenExpiresAt: new Date(
           refreshed.expiresAt * 1000,
         ).toISOString(),
+        ...(refreshed.grantedScopes
+          ? { grantedScopes: refreshed.grantedScopes }
+          : {}),
       },
     };
   } catch (error) {

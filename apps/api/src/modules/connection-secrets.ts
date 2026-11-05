@@ -47,6 +47,7 @@ import type { DB } from "../generated/db/types.js";
 import manifest from "../generated/db/manifest.json" with { type: "json" };
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import { ownedByActingRelation } from "../db/acting-relation.js";
 import { withDbSession } from "../db/session.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import {
@@ -70,6 +71,8 @@ import { mintSocketGrant } from "./socket-egress.js";
 import { liveConnectionValues, secretKeysOf } from "./connection-oauth-liveness.js";
 
 const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
+/** Keeps a long MCP session from outliving a changed Adapter on an old grant. */
+const EGRESS_GRANT_TTL_MS = 5 * 60_000;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -173,6 +176,7 @@ export type ResolveConnectionInput = {
   keyring?: SecretKeyring | undefined;
   /** Test seam for the token endpoint an expired OAuth sign-in is renewed at. */
   fetchImpl?: typeof fetch | undefined;
+  egressOwner?: import("./contract.js").RuntimeModule["egress"] | undefined;
   /** Generated host artifacts; omitted in production, injectable for tests. */
   artifacts?: {
     catalog: CatalogShape;
@@ -223,6 +227,8 @@ export async function resolveConnectionValues(
     transport: columnFor(providerTable, "transport"),
     egress: columnFor(providerTable, "egressHosts"),
     definitions: columnFor(providerTable, "configurationFields"),
+    discovery: columnFor(providerTable, "discovery"),
+    updatedAt: columnFor(providerTable, "updatedAt"),
   };
   const {
     key: providerKeyColumn,
@@ -255,6 +261,8 @@ export async function resolveConnectionValues(
     adapter_transport: string | null;
     adapter_egress: unknown;
     adapter_definitions: unknown;
+    adapter_discovery: string | null;
+    adapter_updated_at: Date | string | null;
   };
 
   const selector = input.selector;
@@ -276,7 +284,9 @@ export async function resolveConnectionValues(
       a.${sql.ref(providerAuthColumn)} as adapter_auth,
       a.${sql.ref(providerTransportColumn)} as adapter_transport,
       a.${sql.ref(providerEgressColumn)} as adapter_egress,
-      a.${sql.ref(providerDefinitionsColumn)} as adapter_definitions
+      a.${sql.ref(providerDefinitionsColumn)} as adapter_definitions,
+      ${providerColumns.discovery ? sql`a.${sql.ref(providerColumns.discovery)}` : sql`null`} as adapter_discovery,
+      ${providerColumns.updatedAt ? sql`a.${sql.ref(providerColumns.updatedAt)}::text` : sql`null`} as adapter_updated_at
     `;
     if ("connectionId" in selector) {
       const result = await sql<ConnectionRow>`
@@ -300,7 +310,7 @@ export async function resolveConnectionValues(
     // narrowed the visible set to this employee's own (plus any unowned one,
     // which gate 2 below rejects for a `user` Adapter).
     return (
-      result.rows.find((candidate) => candidate.owner === input.session.userId) ??
+      result.rows.find((candidate) => ownedByActingRelation(candidate.owner, input.session)) ??
       result.rows[0]
     );
   };
@@ -315,10 +325,13 @@ export async function resolveConnectionValues(
     );
   }
 
+  // A personal row is owned by the acting Relation, never by the login: the
+  // OAuth callback writes that id and row-level security compares against it.
+  const ownedByCaller = ownedByActingRelation(row.owner, input.session);
   const declaredScope = connectionScopeOf(row.adapter_auth);
   const scope =
     declaredScope === "both"
-      ? row.owner === input.session.userId
+      ? ownedByCaller
         ? "user"
         : "tenant"
       : declaredScope;
@@ -329,7 +342,7 @@ export async function resolveConnectionValues(
         "This Connection belongs to one employee, and this session acts as no employee.",
       );
     }
-    if (row.owner !== input.session.userId) {
+    if (!ownedByCaller) {
       // Reached only if RLS were ever widened; the message stays the same as
       // "no such connection" so it cannot be used to probe for other people's.
       return refuse(
@@ -337,7 +350,7 @@ export async function resolveConnectionValues(
         "No Connection to that Adapter is available to you.",
       );
     }
-  } else if (row.owner !== null && row.owner !== input.session.userId) {
+  } else if (row.owner !== null && !ownedByCaller) {
     return refuse("NOT_FOUND", "No Connection to that Adapter is available to you.");
   }
 
@@ -379,6 +392,8 @@ export async function resolveConnectionValues(
       id: row.id,
       owner: row.owner,
       adapterId: row.adapter_id,
+      adapterDiscovery: row.adapter_discovery,
+      adapterUpdatedAt: row.adapter_updated_at,
       auth: (row.adapter_auth ?? null) as JsonRecord | null,
       egress,
       definitions: row.adapter_definitions,
@@ -392,6 +407,7 @@ export async function resolveConnectionValues(
     elicitScope,
     tokenScope,
     fetchImpl: input.fetchImpl,
+    egressOwner: input.egressOwner,
   });
   if (!live.ok) return refuse(live.code, live.message);
 
@@ -439,6 +455,16 @@ export async function resolveConnectionValues(
       adapterKey: row.adapter_key,
       adapterName: row.adapter_key,
       tenantId: input.session.tenantId,
+      binding: {
+        session: input.session,
+        connectionId: row.id,
+        connectionTable: execution.connectionTable,
+        ownerUserId: row.owner,
+        expiresAtMs: Date.now() + EGRESS_GRANT_TTL_MS,
+        ...(typeof (row.adapter_auth as JsonRecord | null)?.resource === "string"
+          ? { resource: (row.adapter_auth as JsonRecord).resource as string }
+          : {}),
+      },
     }),
   };
   return { ok: true, connection };

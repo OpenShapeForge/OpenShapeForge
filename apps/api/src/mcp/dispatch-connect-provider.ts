@@ -10,6 +10,12 @@ import { selectOAuthConnectionRow } from "./session-connections.js";
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import { resolveTemplate } from "./declarative-execution.js";
 import { mintAuthorization, scopesCovered } from "./entity-oauth.js";
+import {
+  assertOAuthEndpoints,
+  grantedScopesOf,
+  oauthClientProfile,
+  tokenBindingCurrent,
+} from "./entity-oauth-profile.js";
 import { accessTokenNeedsRefresh, refreshConnectionRowLocked, refreshLeewaySeconds } from "./connection-token-refresh.js";
 import { connectionTokenSecretScope } from "../connectors/secrets.js";
 import { HttpError } from "../rest/http-error.js";
@@ -28,6 +34,8 @@ import {
   urlSafeConnectionValues,
 } from "./session-connections.js";
 import { ok } from "./tool-results.js";
+import { preparePublicMcpOAuth } from "./native-oauth-setup.js";
+import { productName } from "../config/product-name.js";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
 /** What one provider's sign-in step reads beyond the call: the derived entry and what the connect call resolved before the loop. */
@@ -93,8 +101,23 @@ export async function connectProviderStep(
       "This shared tenant connection requires an explicitly delegated organization role.",
     );
   }
-  const authorizationUrl = auth.authorizationUrl;
-  const tokenUrl = auth.tokenUrl;
+  const egress = Array.isArray(providerRow.egressHosts)
+    ? (providerRow.egressHosts as string[])
+    : [];
+  const autoMcp = providerRow.discovery === "mcp" && auth.clientAuthentication === "none";
+  let automatic: Awaited<ReturnType<typeof preparePublicMcpOAuth>> | undefined;
+  if (autoMcp) {
+    if (scope_ === "user") requireActingRelationId(session, "A personal connection");
+    if (typeof auth.resource !== "string" || (typeof providerRow.updatedAt !== "string" && !(providerRow.updatedAt instanceof Date))) {
+      throw new HttpError(400, "PROVIDER_MISCONFIGURED", "The MCP Adapter needs its protected resource and current version.");
+    }
+    automatic = await preparePublicMcpOAuth({ db, session, providerTable: execution.providerTable,
+      providerId: providerRowId, providerUpdatedAt: providerRow.updatedAt, resource: auth.resource,
+      redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`, clientName: productName(), auth, egress,
+      owner: scope.egressOwner, ...(scope.signal ? { signal: scope.signal } : {}) });
+  }
+  const authorizationUrl = automatic?.authorizationUrl ?? auth.authorizationUrl;
+  const tokenUrl = automatic?.tokenUrl ?? auth.tokenUrl;
   if (
     typeof authorizationUrl !== "string" ||
     typeof tokenUrl !== "string"
@@ -105,6 +128,7 @@ export async function connectProviderStep(
       "The provider declares no authorization and token endpoints.",
     );
   }
+  const oauthProfile = automatic?.profile ?? oauthClientProfile(auth);
   const adapterScopes = Array.isArray(auth.scopes)
     ? (auth.scopes as unknown[]).filter(
         (scope): scope is string => typeof scope === "string",
@@ -158,7 +182,11 @@ export async function connectProviderStep(
     (!needsRefresh ||
       looksLikeStoredSecret(existingValues.refreshToken)),
   );
-  const scopesStillCovered = scopesCovered(scopes, existingValues?.grantedScopes);
+  // A token minted for another resource or server is no sign-in for this one,
+  // whatever its scopes say: it goes back to consent, never to a refresh.
+  const scopesStillCovered =
+    scopesCovered(scopes, grantedScopesOf(auth, existingValues)) &&
+    tokenBindingCurrent(oauthProfile, existingValues);
   if (hasExistingTokens && scopesStillCovered && !needsRefresh) {
     connectedProviders.push(String(providerRow.name ?? providerRowId));
     return undefined;
@@ -170,10 +198,11 @@ export async function connectProviderStep(
       ?.sourceTable ?? execution.providerTable;
   let credentials: ReturnType<typeof readClientCredentials>;
   try {
-    credentials = readClientCredentials(
+    credentials = automatic ? { clientId: automatic.clientId } : readClientCredentials(
       tenantConnection,
       execution.connectionValuesField,
       secretScope,
+      oauthProfile.clientAuthentication,
     );
   } catch (error) {
     if (error instanceof HttpError && error.code === "CONNECTION_MISSING") {
@@ -228,6 +257,11 @@ export async function connectProviderStep(
     "auth.tokenUrl",
     tenantUrlValues.secretKeys,
   );
+  assertOAuthEndpoints(oauthProfile, {
+    authorizationUrl: resolvedAuthorizationUrl,
+    tokenUrl: resolvedTokenUrl,
+    egress,
+  });
 
   // A stored refresh token is not proof that the provider still accepts it.
   // Reuse the normal locked lifecycle and preserve transient failures; only a
@@ -244,8 +278,8 @@ export async function connectProviderStep(
         expectedOwnerUserId: scope_ === "user" ? actingRelationId(session) : null,
         refreshLeewaySeconds: refreshLeewaySeconds(auth),
         audit: { sourceTable: execution.providerTable, connectionId: String(existingForScope.id), scope: scope_, correlationId: String(scope.requestId) },
-        tokenUrl: resolvedTokenUrl, ...credentials,
-        egress: Array.isArray(providerRow.egressHosts) ? providerRow.egressHosts as string[] : [],
+        tokenUrl: resolvedTokenUrl, ...credentials, profile: oauthProfile,
+        egress,
         keyring, secretScope: connectionTokenSecretScope(execution.connectionTable),
         moduleEgress: { owner: scope.egressOwner, purpose: "oauth", scope: {
           tenantId: session.tenantId, actorId: session.userId, provider: providerRowId,
@@ -273,11 +307,9 @@ export async function connectProviderStep(
     connectionProviderRef: execution.connectionProviderRef,
     connectionValuesField: execution.connectionValuesField,
     tokenUrl: resolvedTokenUrl,
-    clientId: credentials.clientId,
-    clientSecret: credentials.clientSecret,
-    egress: Array.isArray(providerRow.egressHosts)
-      ? (providerRow.egressHosts as string[])
-      : [],
+    ...credentials,
+    profile: oauthProfile,
+    egress,
     scopes,
     redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`,
     providerName: String(providerRow.name ?? providerRowId),

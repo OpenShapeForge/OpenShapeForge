@@ -136,6 +136,7 @@ describe("renderEntityOAuthCallbackPage", () => {
     "invalid_state",
     "provider_refused",
     "no_code",
+    "grant_refused",
     "store_failed",
   ];
 

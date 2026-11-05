@@ -36,6 +36,15 @@ import {
   refreshConnectionRowLocked,
   refreshLeewaySeconds,
 } from "../mcp/connection-token-refresh.js";
+import {
+  oauthClientProfile,
+  tokenBindingCurrent,
+  type OAuthClientProfile,
+} from "../mcp/entity-oauth-profile.js";
+import { readPublicMcpOAuthClient } from "../mcp/native-oauth-client-store.js";
+import { preparedPublicMcpOAuth, type PreparedMcpOAuth } from "../mcp/native-oauth-setup.js";
+import { callbackOrigin, ENTITY_OAUTH_CALLBACK_PATH } from "../mcp/handoff-config.js";
+import type { RuntimeModule } from "./contract.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -128,6 +137,8 @@ export type LiveConnectionInput = {
     id: string;
     owner: string | null;
     adapterId: string;
+    adapterDiscovery?: string | null;
+    adapterUpdatedAt?: Date | string | null;
     auth: JsonRecord | null;
     egress: string[];
     definitions: unknown;
@@ -143,6 +154,7 @@ export type LiveConnectionInput = {
   elicitScope: string;
   tokenScope: string;
   fetchImpl?: typeof fetch | undefined;
+  egressOwner?: RuntimeModule["egress"] | undefined;
 };
 
 /**
@@ -158,7 +170,28 @@ export async function liveConnectionValues(
   const auth = row.auth;
   if (auth?.profile !== "oauth2AuthorizationCode") return { ok: true, values: row.values };
   const leeway = refreshLeewaySeconds(auth);
-  if (!accessTokenNeedsRefresh(row.values, leeway)) return { ok: true, values: row.values };
+  let profile: OAuthClientProfile;
+  let automatic: PreparedMcpOAuth | undefined;
+  try {
+    if (row.adapterDiscovery === "mcp" && auth.clientAuthentication === "none") {
+      if (typeof auth.resource !== "string" || !row.adapterUpdatedAt) {
+        return { ok: false, code: "REAUTHORIZATION_REQUIRED", message: "The MCP provider configuration changed; sign in again." };
+      }
+      const client = await readPublicMcpOAuthClient(input.db, { session: input.session, providerTable: input.providerTable,
+        providerId: row.adapterId, providerUpdatedAt: row.adapterUpdatedAt, resource: auth.resource,
+        redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}` });
+      if (!client) return { ok: false, code: "REAUTHORIZATION_REQUIRED", message: "The MCP provider registration is missing or changed; sign in again." };
+      automatic = preparedPublicMcpOAuth(auth, client, row.egress);
+    }
+    profile = automatic?.profile ?? oauthClientProfile(auth);
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    return { ok: false, code: "TOKEN_REFRESH_FAILED", message: error.message };
+  }
+  // A token minted for another resource is refused under the lock below; a
+  // row with no token, the organization's OAuth client, has nothing to bind.
+  const bound = !row.values.accessToken || tokenBindingCurrent(profile, row.values);
+  if (bound && !accessTokenNeedsRefresh(row.values, leeway)) return { ok: true, values: row.values };
   if (!input.keyring) {
     return {
       ok: false,
@@ -167,7 +200,7 @@ export async function liveConnectionValues(
     };
   }
   const keyring = input.keyring;
-  if (typeof auth.tokenUrl !== "string" || auth.tokenUrl.length === 0) {
+  if (!automatic && (typeof auth.tokenUrl !== "string" || auth.tokenUrl.length === 0)) {
     return {
       ok: false,
       code: "TOKEN_REFRESH_FAILED",
@@ -179,7 +212,7 @@ export async function liveConnectionValues(
 
   // The OAuth client belongs to the organization: it lives on the unowned
   // row of the same Adapter, which row-level security shows to every member.
-  const support = await withDbSession(input.db, input.session, async (trx) => {
+  const support = automatic ? undefined : await withDbSession(input.db, input.session, async (trx) => {
     const result = await sql<{ values: unknown }>`
       select ${sql.ref(input.columns.values)} as values
         from ${sql.table(input.table.name)}
@@ -192,18 +225,21 @@ export async function liveConnectionValues(
   const rawClientId = support?.clientId;
   const rawClientSecret = support?.clientSecret;
   const clientIdReadable = typeof rawClientId === "string" || looksLikeStoredSecret(rawClientId);
-  if (!support || !clientIdReadable || !looksLikeStoredSecret(rawClientSecret)) {
+  const publicClient = profile.clientAuthentication === "none";
+  if (!automatic && (!support || !clientIdReadable || (!publicClient && !looksLikeStoredSecret(rawClientSecret)))) {
     return { ok: false, code: "TOKEN_REFRESH_FAILED", message: CLIENT_CREDENTIALS_MISSING };
   }
 
   try {
-    const clientId =
+    const clientId = automatic?.clientId ?? (
       typeof rawClientId === "string"
         ? rawClientId
-        : decryptSecret(keyring, input.elicitScope, "clientId", rawClientId);
-    const clientSecret = decryptSecret(keyring, input.elicitScope, "clientSecret", rawClientSecret);
-    const urlValues = urlSafeValues(support, row.definitions, keyring, input.elicitScope);
-    const tokenUrl = resolveTemplate(auth.tokenUrl, urlValues.plain, "auth.tokenUrl", urlValues.barred);
+        : decryptSecret(keyring, input.elicitScope, "clientId", rawClientId as StoredSecret));
+    const clientSecret = publicClient
+      ? undefined
+      : decryptSecret(keyring, input.elicitScope, "clientSecret", rawClientSecret as StoredSecret);
+    const urlValues = urlSafeValues(support ?? {}, row.definitions, keyring, input.elicitScope);
+    const tokenUrl = automatic?.tokenUrl ?? resolveTemplate(auth.tokenUrl as string, urlValues.plain, "auth.tokenUrl", urlValues.barred);
     const values = await refreshConnectionRowLocked({
       db: input.db,
       session: input.session,
@@ -223,10 +259,15 @@ export async function liveConnectionValues(
       tokenUrl,
       clientId,
       clientSecret,
+      profile,
       egress: row.egress,
       keyring,
       secretScope: input.tokenScope,
       ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+      ...(input.egressOwner ? { moduleEgress: { owner: input.egressOwner, purpose: "oauth" as const, scope: {
+        tenantId: input.session.tenantId, actorId: input.session.userId, provider: row.adapterId,
+        operation: "refresh_access_token", kind: "mutation" as const,
+      } } } : {}),
     });
     return { ok: true, values };
   } catch (error) {

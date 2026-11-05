@@ -21,6 +21,7 @@ import {
 import { HttpError } from "../rest/http-error.js";
 import { connectionNeedsOf, connectionProblemError } from "./connection-guidance.js";
 import { entityForTable } from "./catalog.js";
+import { oauthClientProfile, tokenBindingCurrent } from "./entity-oauth-profile.js";
 import { elicitedKeyring } from "./handoff-config.js";
 import {
   organizationConnectionProblem,
@@ -146,11 +147,15 @@ export async function resolvePersonalConnection(
       connectTool: entry?.connect?.name ?? null,
     });
   }
+  // A stale binding takes the refresh path to be refused under the row lock,
+  // so it reaches the same reauthorization guidance as a refused refresh.
+  const oauthProfile = oauthClientProfile(providerAuth);
   if (
     accessTokenNeedsRefresh(
       values,
       refreshLeewaySeconds(providerAuth),
-    )
+    ) ||
+    !tokenBindingCurrent(oauthProfile, values)
   ) {
     const keyring = elicitedKeyring();
     const tenantConnection = selectOAuthConnectionRow(connectionRows, "tenant", session.userId);
@@ -160,6 +165,7 @@ export async function resolvePersonalConnection(
         tenantConnection,
         execution.connectionValuesField,
         elicitScope,
+        oauthProfile.clientAuthentication,
       );
     } catch (error) {
       if (
@@ -217,6 +223,7 @@ export async function resolvePersonalConnection(
       tokenUrl: resolveTemplate(providerAuth.tokenUrl as string, tenantUrlValues.plain, "auth.tokenUrl", tenantUrlValues.secretKeys),
       clientId: credentials.clientId,
       clientSecret: credentials.clientSecret,
+      profile: oauthProfile,
       egress: Array.isArray(providerRow.egressHosts) ? (providerRow.egressHosts as string[]) : [],
       keyring,
       secretScope: personalScope,

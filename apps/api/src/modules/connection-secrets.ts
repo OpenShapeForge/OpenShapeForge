@@ -451,6 +451,9 @@ export async function resolveConnectionValues(
         connectionTable: execution.connectionTable,
         ownerUserId: row.owner,
         expiresAtMs: Date.now() + EGRESS_GRANT_TTL_MS,
+        ...(typeof (row.adapter_auth as JsonRecord | null)?.resource === "string"
+          ? { resource: (row.adapter_auth as JsonRecord).resource as string }
+          : {}),
       },
     }),
   };

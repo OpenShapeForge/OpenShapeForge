@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, mock } from "bun:test";
 import { HttpError } from "../../rest/http-error.js";
 
 const owner = "person-1";
-const personal = { id: "connection-1", ownerUserId: owner, values: { accessToken: {}, refreshToken: { ciphertext: "fake", keyId: "fake" }, accessTokenExpiresAt: "2000-01-01T00:00:00Z", grantedScopes: ["calendar.read"] } };
+const personal: { id: string; ownerUserId: string; values: Record<string, unknown> } = { id: "connection-1", ownerUserId: owner, values: { accessToken: {}, refreshToken: { ciphertext: "fake", keyId: "fake" }, accessTokenExpiresAt: "2000-01-01T00:00:00Z", grantedScopes: ["calendar.read"] } };
 const organization = { id: "organization-1", ownerUserId: null, values: {} };
 let refreshCalls: Record<string, unknown>[] = [];
 let handoffs: Record<string, unknown>[] = [];
@@ -70,6 +70,62 @@ describe("connect recovers an expired personal grant", () => {
   it("does not create a consent handoff on temporary provider failure", async () => {
     refreshFailure = new HttpError(502, "TOKEN_REFRESH_FAILED", "temporary");
     await expect(connectProviderStep(context(), 0, provider)).rejects.toBe(refreshFailure);
+    expect(handoffs).toHaveLength(0);
+  });
+});
+
+describe("connect holds a sign-in to its grant", () => {
+  const resource = "https://example.test/mcp";
+  const scoped: any = { ...provider, auth: { ...provider.auth, resource, scopes: ["calendar.read", "calendar.write"] } };
+  const bound = { resource: `${resource}`, issuer: null };
+  const stored = personal.values;
+  beforeEach(() => { refreshCalls = []; handoffs = []; refreshFailure = undefined; personal.values = { ...stored }; });
+
+  it("refreshes a token bound to the declared resource, repeating that resource's profile", async () => {
+    personal.values = { ...stored, oauthBinding: bound };
+    expect(await connectProviderStep(context(), 0, scoped)).toBeUndefined();
+    expect(refreshCalls[0]).toMatchObject({ profile: { resource } });
+    expect(handoffs).toHaveLength(0);
+  });
+
+  it("sends a token bound elsewhere back to consent without spending its refresh token", async () => {
+    personal.values = { ...stored, oauthBinding: { resource: "https://example.test/rest", issuer: null } };
+    const result = await connectProviderStep(context(), 0, scoped);
+    expect(result?.structuredContent).toMatchObject({ action: "authorize" });
+    expect(refreshCalls).toHaveLength(0);
+    expect(handoffs[0]).toMatchObject({ profile: { resource } });
+  });
+
+  it("re-consents a legacy token when the Adapter starts declaring a resource", async () => {
+    await connectProviderStep(context(), 0, scoped);
+    expect(refreshCalls).toHaveLength(0);
+    expect(handoffs).toHaveLength(1);
+  });
+
+  it("steps up to the wider set instead of refreshing a narrower grant", async () => {
+    personal.values = { ...stored, oauthBinding: bound };
+    const ctx = context();
+    ctx.requiredScopesByProvider = new Map([["provider-1", new Set(["calendar.read", "calendar.write"])]]);
+    const result = await connectProviderStep(ctx, 0, scoped);
+    expect(result?.structuredContent).toMatchObject({ action: "authorize", scopes: ["calendar.read", "calendar.write"] });
+    expect(refreshCalls).toHaveLength(0);
+  });
+
+  it("does not take a strict Adapter's requested set for a grant", async () => {
+    personal.values = { ...stored, grantedScopes: null, requestedScopes: ["calendar.read"], oauthBinding: bound };
+    const result = await connectProviderStep(context(), 0, scoped);
+    expect(result?.structuredContent).toMatchObject({ action: "authorize" });
+  });
+
+  it("refuses unsupported client authentication before any handoff", async () => {
+    const unsupported: any = { ...provider, auth: { ...provider.auth, clientAuthentication: "private_key_jwt" } };
+    await expect(connectProviderStep(context(), 0, unsupported)).rejects.toMatchObject({ code: "OAUTH_CLIENT_AUTH_UNSUPPORTED" });
+    expect(handoffs).toHaveLength(0);
+  });
+
+  it("refuses a resource outside the Adapter's egress before any handoff", async () => {
+    const outside: any = { ...scoped, row: { ...scoped.row, egressHosts: [] } };
+    await expect(connectProviderStep(context(), 0, outside)).rejects.toMatchObject({ code: "EGRESS_DENIED" });
     expect(handoffs).toHaveLength(0);
   });
 });

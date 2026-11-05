@@ -204,6 +204,34 @@ describe("grant-bound connection HTTP", () => {
     expect(seen).toHaveLength(1);
   });
 
+  it("does not send a resource-bound token to a different allowed host or path", async () => {
+    const live = session();
+    const grant = mintSocketGrant({ allowlist: ["mcp.example.com", "other.example.com"],
+      adapterKey: "external-mcp", adapterName: "external-mcp", tenantId: TENANT,
+      binding: { session: live, connectionId: CONNECTION, connectionTable: "connections", ownerUserId: null,
+        expiresAtMs: Date.now() + 60_000, resource: "https://mcp.example.com/v2/mcp" } });
+    const { seen, dependencies } = harness();
+    for (const url of ["https://other.example.com/v2/mcp", "https://mcp.example.com/another"]) {
+      await expect(requestConnectionHttp(live, grant, call({ url }), dependencies))
+        .rejects.toMatchObject({ code: "EGRESS_DENIED" });
+    }
+    expect(seen).toHaveLength(0);
+    expect((await requestConnectionHttp(live, grant, call({ url: "https://mcp.example.com/v2/mcp?tools=all" }), dependencies)).status).toBe(200);
+  });
+
+  it("retains resource query constraints while allowing additional MCP options", async () => {
+    const live = session();
+    const grant = mintSocketGrant({ allowlist: ["mcp.example.com"], adapterKey: "external-mcp",
+      adapterName: "external-mcp", tenantId: TENANT,
+      binding: { session: live, connectionId: CONNECTION, connectionTable: "connections", ownerUserId: null,
+        expiresAtMs: Date.now() + 60_000, resource: "https://mcp.example.com/mcp?site=one" } });
+    const { seen, dependencies } = harness();
+    await expect(requestConnectionHttp(live, grant, call({ url: "https://mcp.example.com/mcp?site=two" }), dependencies))
+      .rejects.toMatchObject({ code: "EGRESS_DENIED" });
+    expect((await requestConnectionHttp(live, grant, call({ url: "https://mcp.example.com/mcp?site=one&tools=all" }), dependencies)).status).toBe(200);
+    expect(seen).toHaveLength(1);
+  });
+
   it("classifies public and non-public addresses", () => {
     for (const address of ["93.184.216.34", "1.1.1.1", "2606:4700:4700::1111"]) {
       expect(isPublicAddress(address)).toBe(true);

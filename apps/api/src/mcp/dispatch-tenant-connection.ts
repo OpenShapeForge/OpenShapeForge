@@ -22,6 +22,7 @@ import { HttpError } from "../rest/http-error.js";
 import { connectionProblemError, missingRequiredConnectionValues } from "./connection-guidance.js";
 import { isOrganizationAdministrator } from "./onboarding.js";
 import { entityForTable } from "./catalog.js";
+import { oauthClientProfile, tokenBindingCurrent } from "./entity-oauth-profile.js";
 import { elicitedKeyring } from "./handoff-config.js";
 import {
   organizationConnectionProblem,
@@ -128,11 +129,14 @@ export async function resolveTenantConnection(
         administrator: isOrganizationAdministrator(session.roles),
       });
     }
+    // A stale binding takes the refresh path to be refused under the row lock.
+    const oauthProfile = oauthClientProfile(providerAuth);
     if (
       accessTokenNeedsRefresh(
         tenantValues,
         refreshLeewaySeconds(providerAuth),
-      )
+      ) ||
+      !tokenBindingCurrent(oauthProfile, tenantValues)
     ) {
       const keyring = elicitedKeyring();
       let credentials: ReturnType<typeof readClientCredentials>;
@@ -141,6 +145,7 @@ export async function resolveTenantConnection(
           tenantConnection,
           execution.connectionValuesField,
           elicitScope,
+          oauthProfile.clientAuthentication,
         );
       } catch (error) {
         if (
@@ -205,6 +210,7 @@ export async function resolveTenantConnection(
         tokenUrl: resolveTemplate(providerAuth.tokenUrl as string, tenantUrlValues.plain, "auth.tokenUrl", tenantUrlValues.secretKeys),
         clientId: credentials.clientId,
         clientSecret: credentials.clientSecret,
+        profile: oauthProfile,
         egress: Array.isArray(providerRow.egressHosts) ? (providerRow.egressHosts as string[]) : [],
         keyring,
         secretScope: connectionTokenSecretScope(execution.connectionTable),

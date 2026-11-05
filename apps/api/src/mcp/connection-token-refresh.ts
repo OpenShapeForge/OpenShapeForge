@@ -45,6 +45,12 @@ import {
   type ModuleEgressDispatch,
 } from "../modules/egress.js";
 import { fetchWithAllowedRedirects } from "./declarative-execution.js";
+import {
+  assertOAuthTokenEndpoint,
+  tokenBindingCurrent,
+  tokenResponseAudienceMismatch,
+  type OAuthClientProfile,
+} from "./entity-oauth-profile.js";
 
 /**
  * The physical shape of the Connection table this needs: enough to lock one
@@ -147,7 +153,10 @@ export async function refreshConnectionRowLocked(input: {
   audit: ConnectionTokenAudit;
   tokenUrl: string;
   clientId: string;
-  clientSecret: string;
+  /** Absent for a public client. */
+  clientSecret?: string | undefined;
+  /** What the Adapter declares now; a row minted for anything else re-consents. */
+  profile: OAuthClientProfile;
   egress: string[];
   keyring: SecretKeyring;
   secretScope: string;
@@ -156,6 +165,7 @@ export async function refreshConnectionRowLocked(input: {
   signal?: AbortSignal;
 }): Promise<Record<string, unknown>> {
   input.signal?.throwIfAborted();
+  assertOAuthTokenEndpoint(input.profile, input.tokenUrl, input.egress);
   const egressInvocation = createModuleEgressInvocation(input.moduleEgress);
   const valuesColumn = input.table.columns.find(
     (column) =>
@@ -188,6 +198,16 @@ export async function refreshConnectionRowLocked(input: {
       tokenUrl: input.tokenUrl,
       clientId: input.clientId,
       clientSecret: input.clientSecret,
+      resource: input.profile.resource,
+      refreshUnsupported: input.profile.refreshUnsupported,
+      verifyTokenResponse: (payload) => {
+        if (tokenResponseAudienceMismatch(input.profile, payload)) {
+          throw new OAuthTokenLifecycleError(
+            "REAUTHORIZATION_REQUIRED",
+            "The refreshed token is for another audience; authorization is required again.",
+          );
+        }
+      },
       ...(input.signal ? { signal: input.signal } : {}),
       boundFetch: (url, init) =>
         fetchWithAllowedRedirects(
@@ -238,6 +258,12 @@ export async function refreshConnectionRowLocked(input: {
           }), input.signal),
         read: async () => current,
         decode: (values): OAuthTokenSet => {
+          if (!tokenBindingCurrent(input.profile, values)) {
+            throw new OAuthTokenLifecycleError(
+              "REAUTHORIZATION_REQUIRED",
+              "Stored OAuth tokens were issued for another resource or server; authorization is required again.",
+            );
+          }
           const expiresAt = values.accessTokenExpiresAt == null
             ? 0
             : Date.parse(String(values.accessTokenExpiresAt));
@@ -261,6 +287,9 @@ export async function refreshConnectionRowLocked(input: {
               ? { refreshToken: encryptSecret(input.keyring, input.secretScope, "refreshToken", tokens.refreshToken) }
               : {}),
             accessTokenExpiresAt: new Date(tokens.expiresAt * 1000).toISOString(),
+            ...(tokens.grantedScopes
+              ? { grantedScopes: tokens.grantedScopes, scopeProvenance: "provider" }
+              : {}),
           };
           // `::text::jsonb`: the parameter must reach Postgres as text. Typed
           // straight as jsonb, the driver JSON-encodes the already-serialized

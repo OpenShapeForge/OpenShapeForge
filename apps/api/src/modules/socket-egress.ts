@@ -54,6 +54,8 @@ type GrantState = {
     connectionTable: string;
     ownerUserId: string | null;
     expiresAtMs: number;
+    /** Protected OAuth resource, when this Connection is resource-bound. */
+    resource?: string;
   };
 };
 

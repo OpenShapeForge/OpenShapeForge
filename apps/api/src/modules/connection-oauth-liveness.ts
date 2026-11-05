@@ -36,6 +36,11 @@ import {
   refreshConnectionRowLocked,
   refreshLeewaySeconds,
 } from "../mcp/connection-token-refresh.js";
+import {
+  oauthClientProfile,
+  tokenBindingCurrent,
+  type OAuthClientProfile,
+} from "../mcp/entity-oauth-profile.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -158,7 +163,17 @@ export async function liveConnectionValues(
   const auth = row.auth;
   if (auth?.profile !== "oauth2AuthorizationCode") return { ok: true, values: row.values };
   const leeway = refreshLeewaySeconds(auth);
-  if (!accessTokenNeedsRefresh(row.values, leeway)) return { ok: true, values: row.values };
+  let profile: OAuthClientProfile;
+  try {
+    profile = oauthClientProfile(auth);
+  } catch (error) {
+    if (!(error instanceof HttpError)) throw error;
+    return { ok: false, code: "TOKEN_REFRESH_FAILED", message: error.message };
+  }
+  // A token minted for another resource is refused under the lock below; a
+  // row with no token, the organization's OAuth client, has nothing to bind.
+  const bound = !row.values.accessToken || tokenBindingCurrent(profile, row.values);
+  if (bound && !accessTokenNeedsRefresh(row.values, leeway)) return { ok: true, values: row.values };
   if (!input.keyring) {
     return {
       ok: false,
@@ -192,7 +207,8 @@ export async function liveConnectionValues(
   const rawClientId = support?.clientId;
   const rawClientSecret = support?.clientSecret;
   const clientIdReadable = typeof rawClientId === "string" || looksLikeStoredSecret(rawClientId);
-  if (!support || !clientIdReadable || !looksLikeStoredSecret(rawClientSecret)) {
+  const publicClient = profile.clientAuthentication === "none";
+  if (!support || !clientIdReadable || (!publicClient && !looksLikeStoredSecret(rawClientSecret))) {
     return { ok: false, code: "TOKEN_REFRESH_FAILED", message: CLIENT_CREDENTIALS_MISSING };
   }
 
@@ -201,7 +217,9 @@ export async function liveConnectionValues(
       typeof rawClientId === "string"
         ? rawClientId
         : decryptSecret(keyring, input.elicitScope, "clientId", rawClientId);
-    const clientSecret = decryptSecret(keyring, input.elicitScope, "clientSecret", rawClientSecret);
+    const clientSecret = publicClient
+      ? undefined
+      : decryptSecret(keyring, input.elicitScope, "clientSecret", rawClientSecret as StoredSecret);
     const urlValues = urlSafeValues(support, row.definitions, keyring, input.elicitScope);
     const tokenUrl = resolveTemplate(auth.tokenUrl, urlValues.plain, "auth.tokenUrl", urlValues.barred);
     const values = await refreshConnectionRowLocked({
@@ -223,6 +241,7 @@ export async function liveConnectionValues(
       tokenUrl,
       clientId,
       clientSecret,
+      profile,
       egress: row.egress,
       keyring,
       secretScope: input.tokenScope,

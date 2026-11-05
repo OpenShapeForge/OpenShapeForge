@@ -9,6 +9,7 @@ import { withDbSession } from "../session.js";
 import { operationErrorOf } from "@openshapeforge/operations";
 import { executeKeyedOperation } from "../../operations/execution-receipts.js";
 import { refreshConnectionRowLocked } from "../../mcp/connection-token-refresh.js";
+import { oauthClientProfile } from "../../mcp/entity-oauth-profile.js";
 import { toHttpError } from "../../rest/http-error.js";
 import { withAuditContext } from "../../platform/audit-context.js";
 
@@ -366,7 +367,7 @@ test("atomic maintenance survives the metadata budget and never starts when the 
         table: { schema: "public", table: "never_query", primaryKey: "id", columns: [{ name: "values" }, { name: "provider_id", sourceField: "providerId" }, { name: "owner_user_id", sourceField: "ownerUserId" }] } as never,
         expectedProviderId: crypto.randomUUID(), expectedOwnerUserId: null,
         audit: { sourceTable: "fixture", connectionId: crypto.randomUUID(), scope: "tenant", correlationId: "fixture" },
-        tokenUrl: "https://provider.example/token", clientId: "fixture", clientSecret: "fixture", egress: ["https://provider.example"], keyring: {} as never, secretScope: "fixture",
+        tokenUrl: "https://provider.example/token", clientId: "fixture", clientSecret: "fixture", profile: oauthClientProfile({}), egress: ["https://provider.example"], keyring: {} as never, secretScope: "fixture",
         fetchImpl: Object.assign(async () => { exchangeStarted = true; throw new Error("must not exchange"); }, { preconnect() {} }),
       }).catch(error => error);
       expect(toHttpError(failure)).toMatchObject({ status: 503, body: { error: { code: "DATABASE_BUSY", retryable: true } } });

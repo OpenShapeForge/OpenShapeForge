@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import { executeBindingStep, mergeOutputs } from "./declarative-execution.js";
 import { scopesCovered } from "./entity-oauth.js";
+import { grantedScopesOf } from "./entity-oauth-profile.js";
 import { recordConnectionTokenAudit } from "./connection-token-refresh.js";
 import { SecretError } from "../connectors/secrets.js";
 import { HttpError } from "../rest/http-error.js";
@@ -222,12 +223,7 @@ export async function runDerivedBinding(
           (scope): scope is string => typeof scope === "string",
         )
       : [];
-    const grantedScopes =
-      connectionValues && typeof connectionValues === "object"
-        ? (connectionValues as Record<string, unknown>)
-            .grantedScopes
-        : undefined;
-    if (!scopesCovered(operationScopes, grantedScopes)) {
+    if (!scopesCovered(operationScopes, grantedScopesOf(providerAuth, connectionValues))) {
       throw connectionProblemError({
         kind: "reauthorization",
         adapter: providerDisplayName(providerRow, execution),

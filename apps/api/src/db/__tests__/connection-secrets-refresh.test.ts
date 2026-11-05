@@ -180,7 +180,15 @@ type Seed = {
 };
 
 /** An OAuth Adapter, the organization's client credentials, and one person's expired sign-in. */
-async function seedOAuthMailbox(admin: Kysely<DB>, expiresAt: Date): Promise<Seed> {
+async function seedOAuthMailbox(
+  admin: Kysely<DB>,
+  expiresAt: Date,
+  overrides: {
+    auth?: Record<string, unknown>;
+    support?: Record<string, unknown>;
+    personal?: Record<string, unknown>;
+  } = {},
+): Promise<Seed> {
   const tenantId = randomUUID();
   const userId = randomUUID();
   const relationId = randomUUID();
@@ -192,13 +200,14 @@ async function seedOAuthMailbox(admin: Kysely<DB>, expiresAt: Date): Promise<See
     profile: "oauth2AuthorizationCode",
     connectionScope: "user",
     tokenUrl: TOKEN_URL,
+    ...overrides.auth,
   };
   const fields = [
     { key: "clientId", classification: { sensitivity: "internal" } },
     { key: "clientSecret", classification: { sensitivity: "confidential" } },
     { key: "address", classification: { sensitivity: "internal" } },
   ];
-  const support = {
+  const support = overrides.support ?? {
     clientId: "client",
     clientSecret: encryptSecret(KEYRING, ELICIT_SCOPE, "clientSecret", "secret"),
   };
@@ -207,6 +216,7 @@ async function seedOAuthMailbox(admin: Kysely<DB>, expiresAt: Date): Promise<See
     accessToken: encryptSecret(KEYRING, TOKEN_SCOPE, "accessToken", "access-1"),
     refreshToken: encryptSecret(KEYRING, TOKEN_SCOPE, "refreshToken", "refresh-1"),
     accessTokenExpiresAt: expiresAt.toISOString(),
+    ...overrides.personal,
   };
   await admin.connection().execute(async (conn) => {
     await sql`
@@ -258,6 +268,142 @@ function tokenEndpoint(reply: () => Response): { fetchImpl: typeof fetch; exchan
     exchanges: () => count,
   };
 }
+
+describe("a public client's token stays bound to its resource", () => {
+  const RESOURCE = "https://auth.provider.example/mcp";
+  const PUBLIC_AUTH = { clientAuthentication: "none", resource: RESOURCE };
+  const PUBLIC_SUPPORT = { clientId: "public-client" };
+  const BOUND = { oauthBinding: { resource: RESOURCE, issuer: null } };
+
+  function recordingEndpoint(reply: () => Response) {
+    const forms: URLSearchParams[] = [];
+    const fetchImpl = (async (_input: string | URL | Request, init?: RequestInit) => {
+      forms.push(new URLSearchParams(String(init?.body ?? "")));
+      return reply();
+    }) as unknown as typeof fetch;
+    return { forms, fetchImpl };
+  }
+
+  const resolve = (seed: Seed, fetchImpl: typeof fetch) =>
+    resolveConnectionValues({
+      db: app,
+      session: sessionFor(seed.tenantId, seed.userId, seed.relationId),
+      selector: { adapterKey: seed.adapterKey },
+      keyring: KEYRING,
+      fetchImpl,
+      artifacts: ARTIFACTS,
+    });
+
+  async function storedValues(seed: Seed): Promise<Record<string, unknown>> {
+    const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
+    const result = await withDbSession(app, session, (trx) =>
+      sql<{ values: Record<string, unknown> }>`
+        select configuration_values as values from integration.connections
+         where id = ${seed.personalId}::uuid
+      `.execute(trx),
+    );
+    return result.rows[0]!.values;
+  }
+
+  test(
+    "refreshes without a secret, repeats the resource and records a stated scope",
+    async () => {
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), {
+        auth: PUBLIC_AUTH,
+        support: PUBLIC_SUPPORT,
+        personal: { ...BOUND, grantedScopes: ["mail.read", "mail.write"] },
+      });
+      const endpoint = recordingEndpoint(() =>
+        Response.json({ access_token: "access-2", refresh_token: "refresh-2", expires_in: 3600, scope: "mail.read" }),
+      );
+      const result = await resolve(seed, endpoint.fetchImpl);
+      if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+      expect(result.connection.values.accessToken).toBe("access-2");
+      const form = endpoint.forms[0]!;
+      expect(form.get("client_id")).toBe("public-client");
+      expect(form.has("client_secret")).toBe(false);
+      expect(form.get("resource")).toBe(RESOURCE);
+      const stored = await storedValues(seed);
+      expect(stored.grantedScopes).toEqual(["mail.read"]);
+      expect(stored.oauthBinding).toEqual(BOUND.oauthBinding);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "refuses a still-live token minted for another resource, spending nothing",
+    async () => {
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() + 3_600_000), {
+        auth: PUBLIC_AUTH,
+        support: PUBLIC_SUPPORT,
+        personal: { oauthBinding: { resource: "https://auth.provider.example/rest", issuer: null } },
+      });
+      const endpoint = recordingEndpoint(() => Response.json({ access_token: "must-not-be-issued" }));
+      const result = await resolve(seed, endpoint.fetchImpl);
+      expect(result).toMatchObject({ ok: false, code: "REAUTHORIZATION_REQUIRED" });
+      expect(endpoint.forms).toHaveLength(0);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "keeps the stored tokens when a refresh answers for another audience",
+    async () => {
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), {
+        auth: PUBLIC_AUTH,
+        support: PUBLIC_SUPPORT,
+        personal: BOUND,
+      });
+      const endpoint = recordingEndpoint(() =>
+        Response.json({ access_token: "wrong-audience", expires_in: 3600, aud: "https://auth.provider.example/rest" }),
+      );
+      const result = await resolve(seed, endpoint.fetchImpl);
+      expect(result).toMatchObject({ ok: false, code: "REAUTHORIZATION_REQUIRED" });
+      const stored = await storedValues(seed);
+      expect(decryptSecret(KEYRING, TOKEN_SCOPE, "accessToken", stored.accessToken as never)).toBe("access-1");
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "goes to consent without calling a server whose metadata has no refresh grant",
+    async () => {
+      const issuer = "https://auth.provider.example";
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), {
+        auth: {
+          ...PUBLIC_AUTH,
+          serverMetadata: {
+            issuer,
+            authorization_endpoint: `${issuer}/authorize`,
+            token_endpoint: TOKEN_URL,
+            grant_types_supported: ["authorization_code"],
+            code_challenge_methods_supported: ["S256"],
+            token_endpoint_auth_methods_supported: ["none"],
+          },
+        },
+        support: PUBLIC_SUPPORT,
+        personal: { oauthBinding: { resource: RESOURCE, issuer } },
+      });
+      const endpoint = recordingEndpoint(() => Response.json({ access_token: "must-not-be-issued" }));
+      const result = await resolve(seed, endpoint.fetchImpl);
+      expect(result).toMatchObject({ ok: false, code: "REAUTHORIZATION_REQUIRED" });
+      expect(endpoint.forms).toHaveLength(0);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "still asks a confidential Adapter for its secret",
+    async () => {
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), { support: PUBLIC_SUPPORT });
+      const endpoint = recordingEndpoint(() => Response.json({ access_token: "must-not-be-issued" }));
+      const result = await resolve(seed, endpoint.fetchImpl);
+      expect(result).toMatchObject({ ok: false, code: "TOKEN_REFRESH_FAILED" });
+      expect(endpoint.forms).toHaveLength(0);
+    },
+    TEST_TIMEOUT,
+  );
+});
 
 describe("resolveConnectionValues hands a module a live OAuth token", () => {
   test(

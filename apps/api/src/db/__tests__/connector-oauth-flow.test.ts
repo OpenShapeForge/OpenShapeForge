@@ -47,6 +47,7 @@ import {
 import { readSecrets } from "../../connectors/store.js";
 import type { ConnectorContract } from "../../connectors/catalog.js";
 import { refreshConnectionRowLocked } from "../../mcp/connection-token-refresh.js";
+import { oauthClientProfile } from "../../mcp/entity-oauth-profile.js";
 import { selectOAuthConnectionRow } from "../../mcp/generated-mcp-server.js";
 
 const ADMIN_URL =
@@ -986,6 +987,7 @@ describe("authored connection token lifecycle", () => {
             refreshLeewaySeconds: 60,
             audit: { sourceTable: "test.providers", connectionId: selectedId, scope, correlationId: `request-${scope}` },
             tokenUrl: "https://auth.provider.example/token", clientId: "client", clientSecret: "secret",
+            profile: oauthClientProfile({}),
             egress: ["auth.provider.example"], keyring: KEYRING, secretScope,
             fetchImpl: (async () => {
               exchanges += 1;
@@ -1044,6 +1046,7 @@ describe("authored connection token lifecycle", () => {
             expectedOwnerUserId: scope === "user" ? session.userId : null,
             audit: { sourceTable: "test.providers", connectionId: selectedId, scope, correlationId: `reauth-${scope}` },
             tokenUrl: "https://auth.provider.example/token", clientId: "client", clientSecret: "secret",
+            profile: oauthClientProfile({}),
             egress: ["auth.provider.example"], keyring: KEYRING, secretScope,
             fetchImpl: (async () => new Response("provider body", { status: 400 })) as unknown as typeof fetch,
           })).rejects.toMatchObject({ code: "REAUTHORIZATION_REQUIRED" });

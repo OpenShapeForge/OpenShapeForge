@@ -13,6 +13,18 @@ export type OAuthTokenSet = {
   accessToken: string;
   refreshToken?: string;
   expiresAt: number;
+  /** The provider's stated scope, when its response carried one. */
+  grantedScopes?: string[];
+};
+
+/** A parsed token endpoint response; `resource` and `aud` are provider extras. */
+export type OAuthTokenResponse = {
+  access_token?: unknown;
+  refresh_token?: unknown;
+  expires_in?: unknown;
+  scope?: unknown;
+  resource?: unknown;
+  aud?: unknown;
 };
 
 export type OAuthBoundFetch = (
@@ -64,7 +76,13 @@ export async function ensureOAuthTokenSet<TStored>(input: {
   refreshLeewaySeconds?: number;
   tokenUrl: string;
   clientId: string;
-  clientSecret: string;
+  /** Absent for a public client, which identifies itself by client_id alone. */
+  clientSecret?: string | undefined;
+  /** RFC 8707 resource indicator; repeated so a refreshed token keeps its audience. */
+  resource?: string | undefined;
+  /** The server's metadata rules out this grant: go to consent, spend nothing. */
+  refreshUnsupported?: boolean | undefined;
+  verifyTokenResponse?: ((payload: OAuthTokenResponse) => void) | undefined;
   boundFetch: OAuthBoundFetch;
   now?: number;
   signal?: AbortSignal;
@@ -107,10 +125,17 @@ export async function ensureOAuthTokenSet<TStored>(input: {
           "Stored OAuth tokens have no refresh token; authorization is required again.",
         );
       }
+      if (input.refreshUnsupported) {
+        throw reauthorization(
+          "The authorization server offers no refresh grant; authorization is required again.",
+        );
+      }
       const refreshed = await refreshOAuthTokenSet({
         tokenUrl: input.tokenUrl,
         clientId: input.clientId,
         clientSecret: input.clientSecret,
+        resource: input.resource,
+        verifyTokenResponse: input.verifyTokenResponse,
         refreshToken: tokens.refreshToken,
         boundFetch: input.boundFetch,
         now,
@@ -188,16 +213,19 @@ export function oauthExpiresIn(value: unknown): number | undefined {
     ? seconds : undefined;
 }
 
+/** OAuth's space-delimited `scope`; undefined when the provider stated none. */
+export function oauthScopeList(value: unknown): string[] | undefined {
+  if (typeof value !== "string") return undefined;
+  const scopes = value.split(" ").filter(Boolean);
+  return scopes.length > 0 ? scopes : undefined;
+}
+
 /** Bound provider-controlled bytes before parsing token responses for any grant. */
-export async function readOAuthTokenResponse(response: Response): Promise<{
-  access_token?: unknown;
-  refresh_token?: unknown;
-  expires_in?: unknown;
-}> {
+export async function readOAuthTokenResponse(response: Response): Promise<OAuthTokenResponse> {
   try {
     const value: unknown = JSON.parse(await readBoundedResponse(response, 1024 * 1024));
     if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
-    return value as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown };
+    return value as OAuthTokenResponse;
   } catch {
     throw new OAuthTokenLifecycleError(
       "OAUTH_FAILED",
@@ -210,7 +238,9 @@ export async function readOAuthTokenResponse(response: Response): Promise<{
 export async function refreshOAuthTokenSet(input: {
   tokenUrl: string;
   clientId: string;
-  clientSecret: string;
+  clientSecret?: string | undefined;
+  resource?: string | undefined;
+  verifyTokenResponse?: ((payload: OAuthTokenResponse) => void) | undefined;
   refreshToken: string;
   boundFetch: OAuthBoundFetch;
   now?: number;
@@ -227,7 +257,8 @@ export async function refreshOAuthTokenSet(input: {
       grant_type: "refresh_token",
       refresh_token: input.refreshToken,
       client_id: input.clientId,
-      client_secret: input.clientSecret,
+      ...(input.clientSecret === undefined ? {} : { client_secret: input.clientSecret }),
+      ...(input.resource === undefined ? {} : { resource: input.resource }),
     }).toString(),
     ...(input.signal ? { signal: input.signal } : {}),
   });
@@ -252,7 +283,9 @@ export async function refreshOAuthTokenSet(input: {
       "The provider token endpoint returned no access token.",
     );
   }
+  input.verifyTokenResponse?.(payload);
   const expiresIn = oauthExpiresIn(payload.expires_in) ?? 3600;
+  const grantedScopes = oauthScopeList(payload.scope);
   return {
     accessToken: payload.access_token,
     refreshToken:
@@ -261,5 +294,6 @@ export async function refreshOAuthTokenSet(input: {
         ? payload.refresh_token
         : input.refreshToken,
     expiresAt: Math.floor((input.now ?? Date.now()) / 1000) + expiresIn,
+    ...(grantedScopes ? { grantedScopes } : {}),
   };
 }

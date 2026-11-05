@@ -94,8 +94,8 @@ describe("runtime module platform session authority", () => {
       id: "external.refresh", failureIsolation: "external-catalog",
       refresh: async (session, signal) => {
         expect(signal.aborted).toBe(false);
-        runtime.assertActiveOperationSession(session);
-        retained = session;
+        runtime.assertActiveOperationSession(session as TrustedSessionContext);
+        retained = session as TrustedSessionContext;
         return true;
       },
       list: async () => [], get: async () => undefined,

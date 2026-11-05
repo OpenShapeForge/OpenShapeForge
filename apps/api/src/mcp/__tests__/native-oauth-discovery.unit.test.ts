@@ -87,7 +87,7 @@ async function failureOf(run: () => Promise<unknown>): Promise<{ code?: string; 
     return {};
   } catch (error) {
     const failure = error as { code?: string; status?: number };
-    return { code: failure.code, status: failure.status };
+    return { ...(failure.code === undefined ? {} : { code: failure.code }), ...(failure.status === undefined ? {} : { status: failure.status }) };
   }
 }
 

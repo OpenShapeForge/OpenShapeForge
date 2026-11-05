@@ -268,18 +268,22 @@ describe("a successful registration", () => {
 describe("a server that answers with a secret", () => {
   const SECRET = "do-not-keep-this";
 
-  it("refuses a registration that issued a client secret", async () => {
-    expect(await failureOf(() => register(registering({
+  it("discards an unused secret when the registered method is none", async () => {
+    const registered = await register(registering({
       ...REGISTERED,
       client_secret: SECRET,
       client_secret_expires_at: 0,
-    })))).toEqual({ code: "OAUTH_CLIENT_AUTH_UNSUPPORTED", status: 502 });
+    })) as { clientId: string; registrationMetadata: Record<string, unknown> };
+    expect(registered.clientId).toBe(REGISTERED.client_id);
+    expect(JSON.stringify(registered)).not.toContain(SECRET);
+    expect(registered.registrationMetadata).not.toHaveProperty("client_secret");
   });
 
-  it("never repeats the secret in the refusal", async () => {
+  it("never repeats the secret when the registered method is not public", async () => {
     const message = await messageOf(() => register(registering({
       ...REGISTERED,
       client_secret: SECRET,
+      token_endpoint_auth_method: "client_secret_post",
     })));
     expect(message).not.toContain(SECRET);
   });
@@ -292,6 +296,11 @@ describe("a server that answers with a secret", () => {
       client_secret_expires_at: 0,
     })) as { registrationMetadata: Record<string, unknown> };
     expect(registered.registrationMetadata).toEqual(REGISTERED);
+    expect(JSON.stringify(registered)).not.toContain(SECRET);
+  });
+
+  it("removes credential fields nested inside provider extensions", async () => {
+    const registered = await register(registering({ ...REGISTERED, extension: { nested: [{ client_secret: SECRET }] } }));
     expect(JSON.stringify(registered)).not.toContain(SECRET);
   });
 });

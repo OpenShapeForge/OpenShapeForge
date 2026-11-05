@@ -126,9 +126,10 @@ confidential client: its organization Connection holds `clientId` and
 (`apps/api/src/mcp/entity-oauth-profile.ts`) describe a public client or an
 audience-restricted resource, such as a remote MCP server:
 
-These are core runtime fields, not yet exposed by the Integrations Adapter's
-authoring schema or ordinary configuration UI. A host must not present them as
-supported authoring until that schema and its discovery flow are extended.
+Integrations exposes `clientAuthentication` and `resource` as typed Adapter
+fields. The metadata fields and expected audiences below are core runtime
+contracts only; they are not yet exposed by that authoring schema or a
+discovery flow.
 
 | Key | Meaning |
 | --- | --- |

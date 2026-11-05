@@ -137,9 +137,9 @@ beforeAll(async () => {
         using (app.bypass_rls() or tenant_id = app.current_tenant());
       create policy connections_owner_scope on integration.connections
         using (app.bypass_rls() or (tenant_id = app.current_tenant()
-          and (owner_user_id is null or owner_user_id = app.current_user_id())))
+          and (owner_user_id is null or owner_user_id = app.current_relation_id())))
         with check (app.bypass_rls() or (tenant_id = app.current_tenant()
-          and (owner_user_id is null or owner_user_id = app.current_user_id())));
+          and (owner_user_id is null or owner_user_id = app.current_relation_id())));
       grant usage on schema integration to ${sql.id(APP_ROLE)};
       grant select on integration.adapters to ${sql.id(APP_ROLE)};
       grant select, update on integration.connections to ${sql.id(APP_ROLE)}
@@ -156,10 +156,12 @@ afterAll(async () => {
   await control?.close();
 });
 
-function sessionFor(tenantId: string, userId: string): TrustedSessionContext {
+/** A person's login and the Relation it acts as are different ids, as in production. */
+function sessionFor(tenantId: string, userId: string, relationId?: string): TrustedSessionContext {
   return {
     tenantId,
     userId,
+    ...(relationId ? { relationId } : {}),
     roles: [],
     groups: [],
     scope: "self",
@@ -173,12 +175,14 @@ type Seed = {
   adapterKey: string;
   personalId: string;
   userId: string;
+  relationId: string;
 };
 
 /** An OAuth Adapter, the organization's client credentials, and one person's expired sign-in. */
 async function seedOAuthMailbox(admin: Kysely<DB>, expiresAt: Date): Promise<Seed> {
   const tenantId = randomUUID();
   const userId = randomUUID();
+  const relationId = randomUUID();
   const adapterId = randomUUID();
   const adapterKey = `mailbox-oauth-${adapterId.slice(0, 8)}`;
   const personalId = randomUUID();
@@ -213,10 +217,34 @@ async function seedOAuthMailbox(admin: Kysely<DB>, expiresAt: Date): Promise<See
     await sql`
       insert into integration.connections (id, tenant_id, key, name, adapter_id, configuration_values, owner_user_id)
       values (${randomUUID()}::uuid, ${tenantId}::uuid, 'oauth-client', 'OAuth client', ${adapterId}::uuid, ${JSON.stringify(support)}::text::jsonb, null),
-             (${personalId}::uuid, ${tenantId}::uuid, 'mailbox-anna', 'Mailbox van Anna', ${adapterId}::uuid, ${JSON.stringify(personal)}::text::jsonb, ${userId}::uuid)
+             (${personalId}::uuid, ${tenantId}::uuid, 'mailbox-anna', 'Mailbox van Anna', ${adapterId}::uuid, ${JSON.stringify(personal)}::text::jsonb, ${relationId}::uuid)
     `.execute(conn);
   });
-  return { tenantId, adapterId, adapterKey, personalId, userId };
+  return { tenantId, adapterId, adapterKey, personalId, userId, relationId };
+}
+
+/** An Adapter of one scope with an organization row and one person's own row. */
+async function seedScopedAdapter(admin: Kysely<DB>, connectionScope: "user" | "tenant" | "both") {
+  const tenantId = randomUUID();
+  const userId = randomUUID();
+  const relationId = randomUUID();
+  const adapterId = randomUUID();
+  const adapterKey = `scoped-${adapterId.slice(0, 8)}`;
+  const organizationId = randomUUID();
+  const personalId = randomUUID();
+  await admin.connection().execute(async (conn) => {
+    await sql`
+      insert into integration.adapters (id, tenant_id, key, name, description, transport, discovery, auth, configuration_fields, egress_hosts)
+      values (${adapterId}::uuid, ${tenantId}::uuid, ${adapterKey}, 'Scoped', 'test', 'socket', 'none',
+              ${JSON.stringify({ scheme: "none", connectionScope })}::text::jsonb, '[]'::jsonb, '[]'::jsonb)
+    `.execute(conn);
+    await sql`
+      insert into integration.connections (id, tenant_id, key, name, adapter_id, configuration_values, owner_user_id)
+      values (${organizationId}::uuid, ${tenantId}::uuid, 'organization', 'Organization', ${adapterId}::uuid, '{"account":"organization"}'::jsonb, null),
+             (${personalId}::uuid, ${tenantId}::uuid, 'personal', 'Personal', ${adapterId}::uuid, '{"account":"personal"}'::jsonb, ${relationId}::uuid)
+    `.execute(conn);
+  });
+  return { tenantId, userId, relationId, adapterKey, organizationId, personalId };
 }
 
 function tokenEndpoint(reply: () => Response): { fetchImpl: typeof fetch; exchanges: () => number } {
@@ -235,7 +263,7 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
     "renews an expired token before handing it over, once, and persists the rotation",
     async () => {
         const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-        const session = sessionFor(seed.tenantId, seed.userId);
+        const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
         const endpoint = tokenEndpoint(() =>
           Response.json({ access_token: "access-2", refresh_token: "refresh-2", expires_in: 3600 }),
         );
@@ -294,7 +322,7 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
     "says REAUTHORIZATION_REQUIRED when the provider refuses the renewal, and hands nothing over",
     async () => {
         const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-        const session = sessionFor(seed.tenantId, seed.userId);
+        const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
         const endpoint = tokenEndpoint(() => new Response("invalid_grant", { status: 400 }));
         const refused = await resolveConnectionValues({
           db: app,
@@ -330,7 +358,7 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
         });
         const fresh = await resolveConnectionValues({
           db: app,
-          session: sessionFor(live.tenantId, live.userId),
+          session: sessionFor(live.tenantId, live.userId, live.relationId),
           selector: { adapterKey: live.adapterKey },
           keyring: KEYRING,
           fetchImpl: endpoint.fetchImpl,
@@ -344,6 +372,7 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
         // even the field named accessToken has nothing to renew.
         const tenantId = randomUUID();
         const userId = randomUUID();
+        const relationId = randomUUID();
         const adapterId = randomUUID();
         const adapterKey = `mailbox-password-${adapterId.slice(0, 8)}`;
         await admin.connection().execute(async (conn) => {
@@ -358,12 +387,12 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
             insert into integration.connections (id, tenant_id, key, name, adapter_id, configuration_values, owner_user_id)
             values (${randomUUID()}::uuid, ${tenantId}::uuid, 'mailbox-bram', 'Mailbox van Bram', ${adapterId}::uuid,
                     ${JSON.stringify({ address: "bram@example.test", [field]: encryptSecret(KEYRING, ELICIT_SCOPE, field, "app-pw") })}::text::jsonb,
-                    ${userId}::uuid)
+                    ${relationId}::uuid)
           `.execute(conn);
         });
         const password = await resolveConnectionValues({
           db: app,
-          session: sessionFor(tenantId, userId),
+          session: sessionFor(tenantId, userId, relationId),
           selector: { adapterKey },
           keyring: KEYRING,
           fetchImpl: endpoint.fetchImpl,
@@ -396,8 +425,8 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
         {
           sourceReference: mintInvocationSourceReference({
             tenantId,
-            actorId: null,
-            scope: "tenant",
+            actorId: userId,
+            scope: "personal",
             connectionTable: CONNECTION_TABLE,
             connectionId,
           }),
@@ -423,7 +452,7 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
       // with the provider. The refusal has to land first: a Service bound to
       // one account must not renew, let alone use, another account's sign-in.
       const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-      const session = sessionFor(seed.tenantId, seed.userId);
+      const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
       const endpoint = tokenEndpoint(() => {
         throw new Error("no token endpoint may be called");
       });
@@ -457,7 +486,7 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
       // invocation bound to the Connection its caller read must not open a
       // replacement here, one call before any reference exists.
       const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-      const session = sessionFor(seed.tenantId, seed.userId);
+      const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
       const endpoint = tokenEndpoint(() => {
         throw new Error("no token endpoint may be called");
       });
@@ -489,7 +518,7 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
       // id, and what comes back is the core-minted reference every later page
       // presents.
       const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-      const session = sessionFor(seed.tenantId, seed.userId);
+      const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
       const endpoint = tokenEndpoint(() =>
         Response.json({ access_token: "access-3", refresh_token: "refresh-3", expires_in: 3600 }),
       );
@@ -511,8 +540,8 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
         outcome: "one-connection",
         sourceReference: mintInvocationSourceReference({
           tenantId: seed.tenantId,
-          actorId: null,
-          scope: "tenant",
+          actorId: seed.userId,
+          scope: "personal",
           connectionTable: CONNECTION_TABLE,
           connectionId: seed.personalId,
         }),
@@ -525,7 +554,7 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
     "hands over the Connection the invocation is bound to, and records it",
     async () => {
       const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-      const session = sessionFor(seed.tenantId, seed.userId);
+      const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
       const endpoint = tokenEndpoint(() =>
         Response.json({ access_token: "access-2", refresh_token: "refresh-2", expires_in: 3600 }),
       );
@@ -549,8 +578,8 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
         outcome: "one-connection",
         sourceReference: mintInvocationSourceReference({
           tenantId: seed.tenantId,
-          actorId: null,
-          scope: "tenant",
+          actorId: seed.userId,
+          scope: "personal",
           connectionTable: CONNECTION_TABLE,
           connectionId: seed.personalId,
         }),
@@ -577,7 +606,7 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
         for (const owned of [seed, second]) {
           const resolved = await resolveConnectionValues({
             db: app,
-            session: sessionFor(owned.tenantId, owned.userId),
+            session: sessionFor(owned.tenantId, owned.userId, owned.relationId),
             selector: { connectionId: owned.personalId },
             keyring: KEYRING,
             fetchImpl: endpoint.fetchImpl,
@@ -595,9 +624,84 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
   );
 });
 
+/**
+ * A personal Connection is owned by the Relation a login acts as, which is
+ * what the OAuth callback writes and row-level security compares. Every session
+ * here has a userId that differs from its relationId, so a comparison against
+ * the login cannot pass by accident.
+ */
+describe("resolveConnectionValues compares ownership with the acting Relation", () => {
+  const resolve = (
+    session: TrustedSessionContext,
+    selector: { adapterKey: string } | { connectionId: string },
+  ) => resolveConnectionValues({ db: app, session, selector, keyring: KEYRING, artifacts: ARTIFACTS });
+
+  test("hands a person their own Connection, by Adapter and by id", async () => {
+    const seed = await seedScopedAdapter(admin, "user");
+    const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
+    expect(seed.userId).not.toBe(seed.relationId);
+    for (const selector of [{ adapterKey: seed.adapterKey }, { connectionId: seed.personalId }]) {
+      const resolved = await resolve(session, selector);
+      if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+      expect(resolved.connection.connectionId).toBe(seed.personalId);
+      expect(resolved.connection.connectionScope).toBe("user");
+      expect(resolved.connection.ownerUserId).toBe(seed.relationId);
+    }
+  }, TEST_TIMEOUT);
+
+  test("refuses another person, an unlinked login and a login named like the owner", async () => {
+    const seed = await seedScopedAdapter(admin, "user");
+    const sessions = [
+      sessionFor(seed.tenantId, randomUUID(), randomUUID()),
+      sessionFor(seed.tenantId, seed.userId),
+      // The owner's id as a login id is not the owner's Relation.
+      sessionFor(seed.tenantId, seed.relationId, randomUUID()),
+    ];
+    for (const session of sessions) {
+      for (const selector of [{ adapterKey: seed.adapterKey }, { connectionId: seed.personalId }]) {
+        expect(await resolve(session, selector)).toMatchObject({ ok: false, code: "NOT_FOUND" });
+      }
+    }
+  }, TEST_TIMEOUT);
+
+  test("refuses the same login and Relation in another tenant", async () => {
+    const seed = await seedScopedAdapter(admin, "user");
+    const elsewhere = sessionFor(randomUUID(), seed.userId, seed.relationId);
+    for (const selector of [{ adapterKey: seed.adapterKey }, { connectionId: seed.personalId }]) {
+      expect(await resolve(elsewhere, selector)).toMatchObject({ ok: false, code: "NOT_FOUND" });
+    }
+  }, TEST_TIMEOUT);
+
+  test("keeps an organization Connection open to members, linked or not", async () => {
+    const seed = await seedScopedAdapter(admin, "tenant");
+    for (const session of [
+      sessionFor(seed.tenantId, randomUUID(), randomUUID()),
+      sessionFor(seed.tenantId, randomUUID()),
+    ]) {
+      const resolved = await resolve(session, { connectionId: seed.organizationId });
+      if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+      expect(resolved.connection.connectionScope).toBe("tenant");
+      expect(resolved.connection.ownerUserId).toBeNull();
+    }
+    // Its owner may reach a personal row on a tenant Adapter; nobody else can.
+    const owner = await resolve(sessionFor(seed.tenantId, seed.userId, seed.relationId), { connectionId: seed.personalId });
+    expect(owner).toMatchObject({ ok: true, connection: { connectionScope: "tenant" } });
+    expect(await resolve(sessionFor(seed.tenantId, randomUUID(), randomUUID()), { connectionId: seed.personalId }))
+      .toMatchObject({ ok: false, code: "NOT_FOUND" });
+  }, TEST_TIMEOUT);
+
+  test("reads a `both` Adapter as the row it selected", async () => {
+    const seed = await seedScopedAdapter(admin, "both");
+    const owner = await resolve(sessionFor(seed.tenantId, seed.userId, seed.relationId), { adapterKey: seed.adapterKey });
+    expect(owner).toMatchObject({ ok: true, connection: { connectionId: seed.personalId, connectionScope: "user" } });
+    const colleague = await resolve(sessionFor(seed.tenantId, randomUUID(), randomUUID()), { adapterKey: seed.adapterKey });
+    expect(colleague).toMatchObject({ ok: true, connection: { connectionId: seed.organizationId, connectionScope: "tenant" } });
+  }, TEST_TIMEOUT);
+});
+
 test("transaction-scoped Connection resolution locks against rotation and avoids token refresh", async () => {
   const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-  const session = sessionFor(seed.tenantId, seed.userId);
+  const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
   const endpoint = tokenEndpoint(() => { throw new Error("unexpected refresh"); });
   await withDbSession(app, session, async (trx) => {
     const result = await resolveConnectionValues({ db: app, session,

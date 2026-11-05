@@ -47,6 +47,7 @@ import type { DB } from "../generated/db/types.js";
 import manifest from "../generated/db/manifest.json" with { type: "json" };
 import rawCatalog from "../generated/mcp/tools.json" with { type: "json" };
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import { ownedByActingRelation } from "../db/acting-relation.js";
 import { withDbSession } from "../db/session.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import {
@@ -300,7 +301,7 @@ export async function resolveConnectionValues(
     // narrowed the visible set to this employee's own (plus any unowned one,
     // which gate 2 below rejects for a `user` Adapter).
     return (
-      result.rows.find((candidate) => candidate.owner === input.session.userId) ??
+      result.rows.find((candidate) => ownedByActingRelation(candidate.owner, input.session)) ??
       result.rows[0]
     );
   };
@@ -315,10 +316,13 @@ export async function resolveConnectionValues(
     );
   }
 
+  // A personal row is owned by the acting Relation, never by the login: the
+  // OAuth callback writes that id and row-level security compares against it.
+  const ownedByCaller = ownedByActingRelation(row.owner, input.session);
   const declaredScope = connectionScopeOf(row.adapter_auth);
   const scope =
     declaredScope === "both"
-      ? row.owner === input.session.userId
+      ? ownedByCaller
         ? "user"
         : "tenant"
       : declaredScope;
@@ -329,7 +333,7 @@ export async function resolveConnectionValues(
         "This Connection belongs to one employee, and this session acts as no employee.",
       );
     }
-    if (row.owner !== input.session.userId) {
+    if (!ownedByCaller) {
       // Reached only if RLS were ever widened; the message stays the same as
       // "no such connection" so it cannot be used to probe for other people's.
       return refuse(
@@ -337,7 +341,7 @@ export async function resolveConnectionValues(
         "No Connection to that Adapter is available to you.",
       );
     }
-  } else if (row.owner !== null && row.owner !== input.session.userId) {
+  } else if (row.owner !== null && !ownedByCaller) {
     return refuse("NOT_FOUND", "No Connection to that Adapter is available to you.");
   }
 

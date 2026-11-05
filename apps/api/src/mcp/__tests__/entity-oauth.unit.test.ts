@@ -207,6 +207,14 @@ describe("a public client with a resource indicator", () => {
     expect(values.oauthBinding).toEqual({ resource: RESOURCE, issuer: null });
   });
 
+  it("never forwards an authorization code through a token-endpoint redirect", async () => {
+    const { pending } = await pendingFor();
+    let calls = 0;
+    const redirect = (async () => { calls++; return new Response(null, { status: 307, headers: { location: "https://auth.example.com/other" } }); }) as unknown as typeof fetch;
+    await expect(exchangeCodeForTokens(pending, "code", redirect, KEYRING)).rejects.toMatchObject({ code: "EGRESS_DENIED" });
+    expect(calls).toBe(1);
+  });
+
   it("does not let a re-consent inherit the previous grant's refresh token or expiry", async () => {
     const { pending } = await pendingFor();
     const { impl } = endpoint({ access_token: "at-2", scope: "tickets.read" });

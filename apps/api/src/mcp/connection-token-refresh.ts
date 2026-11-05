@@ -216,6 +216,8 @@ export async function refreshConnectionRowLocked(input: {
           input.egress,
           input.fetchImpl,
           egressInvocation.dispatch,
+          input.profile.strictGrants ? "https-only" : "http-or-https",
+          input.profile.strictGrants ? "deny" : "follow",
         ),
       store: {
         withLockedRow: (work) =>

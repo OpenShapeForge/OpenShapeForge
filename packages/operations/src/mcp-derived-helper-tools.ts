@@ -12,7 +12,7 @@ export function connectHelperTool(name: string, description: string): McpToolSha
         tool: {
           type: "string",
           description:
-            "Name of the tool to connect.",
+            "Name of the tool to connect, or mcp:<provider key> to connect an MCP server before its tools are discovered.",
         },
         connectionScope: {
           type: "string",

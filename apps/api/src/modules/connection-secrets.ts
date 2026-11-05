@@ -176,6 +176,7 @@ export type ResolveConnectionInput = {
   keyring?: SecretKeyring | undefined;
   /** Test seam for the token endpoint an expired OAuth sign-in is renewed at. */
   fetchImpl?: typeof fetch | undefined;
+  egressOwner?: import("./contract.js").RuntimeModule["egress"] | undefined;
   /** Generated host artifacts; omitted in production, injectable for tests. */
   artifacts?: {
     catalog: CatalogShape;
@@ -226,6 +227,8 @@ export async function resolveConnectionValues(
     transport: columnFor(providerTable, "transport"),
     egress: columnFor(providerTable, "egressHosts"),
     definitions: columnFor(providerTable, "configurationFields"),
+    discovery: columnFor(providerTable, "discovery"),
+    updatedAt: columnFor(providerTable, "updatedAt"),
   };
   const {
     key: providerKeyColumn,
@@ -258,6 +261,8 @@ export async function resolveConnectionValues(
     adapter_transport: string | null;
     adapter_egress: unknown;
     adapter_definitions: unknown;
+    adapter_discovery: string | null;
+    adapter_updated_at: Date | string | null;
   };
 
   const selector = input.selector;
@@ -279,7 +284,9 @@ export async function resolveConnectionValues(
       a.${sql.ref(providerAuthColumn)} as adapter_auth,
       a.${sql.ref(providerTransportColumn)} as adapter_transport,
       a.${sql.ref(providerEgressColumn)} as adapter_egress,
-      a.${sql.ref(providerDefinitionsColumn)} as adapter_definitions
+      a.${sql.ref(providerDefinitionsColumn)} as adapter_definitions,
+      ${providerColumns.discovery ? sql`a.${sql.ref(providerColumns.discovery)}` : sql`null`} as adapter_discovery,
+      ${providerColumns.updatedAt ? sql`a.${sql.ref(providerColumns.updatedAt)}` : sql`null`} as adapter_updated_at
     `;
     if ("connectionId" in selector) {
       const result = await sql<ConnectionRow>`
@@ -385,6 +392,8 @@ export async function resolveConnectionValues(
       id: row.id,
       owner: row.owner,
       adapterId: row.adapter_id,
+      adapterDiscovery: row.adapter_discovery,
+      adapterUpdatedAt: row.adapter_updated_at,
       auth: (row.adapter_auth ?? null) as JsonRecord | null,
       egress,
       definitions: row.adapter_definitions,
@@ -398,6 +407,7 @@ export async function resolveConnectionValues(
     elicitScope,
     tokenScope,
     fetchImpl: input.fetchImpl,
+    egressOwner: input.egressOwner,
   });
   if (!live.ok) return refuse(live.code, live.message);
 

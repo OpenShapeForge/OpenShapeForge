@@ -35,6 +35,7 @@ import {
   withConnectionControls,
 } from "../../mcp/connection-expectation.js";
 import { mintInvocationSourceReference } from "../../modules/source-reference.js";
+import { savePublicMcpOAuthClient } from "../../mcp/native-oauth-client-store.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -69,6 +70,8 @@ const ARTIFACTS = {
           { name: "transport", sourceField: "transport" },
           { name: "egress_hosts", sourceField: "egressHosts" },
           { name: "configuration_fields", sourceField: "configurationFields" },
+          { name: "discovery", sourceField: "discovery" },
+          { name: "updated_at", sourceField: "updatedAt" },
         ],
       },
       {
@@ -123,7 +126,7 @@ beforeAll(async () => {
         id uuid primary key, tenant_id uuid not null, key text not null,
         name text not null, description text not null, transport text not null,
         discovery text not null, auth jsonb not null,
-        configuration_fields jsonb not null, egress_hosts jsonb not null
+        configuration_fields jsonb not null, egress_hosts jsonb not null, updated_at timestamptz not null default now()
       );
       create table integration.connections (
         id uuid primary key, tenant_id uuid not null, key text not null,
@@ -275,6 +278,41 @@ describe("a public client's token stays bound to its resource", () => {
   const PUBLIC_SUPPORT = { clientId: "public-client" };
   const BOUND = { oauthBinding: { resource: RESOURCE, issuer: null } };
 
+  test("renews an automatically registered MCP client without an organization credentials row", async () => {
+    const previousOrigin = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+    process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://app.example";
+    try {
+      const issuer = "https://auth.provider.example";
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), {
+        auth: PUBLIC_AUTH, personal: { oauthBinding: { resource: RESOURCE, issuer } },
+      });
+      const changed = await admin.connection().execute(conn => sql<{ updated_at: Date }>`
+        update integration.adapters set discovery = 'mcp' where id = ${seed.adapterId}::uuid returning updated_at
+      `.execute(conn));
+      const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
+      await admin.connection().execute(conn => sql`delete from integration.connections where adapter_id = ${seed.adapterId}::uuid and owner_user_id is null`.execute(conn));
+      const redirectUri = "https://app.example/api/entity-oauth/callback";
+      await savePublicMcpOAuthClient(app, { session, providerTable: ELICIT_SCOPE, providerId: seed.adapterId,
+        providerUpdatedAt: changed.rows[0]!.updated_at, resource: RESOURCE, redirectUri }, {
+        resource: RESOURCE, issuer, clientId: "auto-client", redirectUri, metadata: {
+          serverMetadata: { issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: TOKEN_URL,
+            token_endpoint_auth_methods_supported: ["none"], grant_types_supported: ["authorization_code", "refresh_token"], code_challenge_methods_supported: ["S256"] },
+          protectedResourceMetadata: { resource: RESOURCE, authorization_servers: [issuer] },
+        },
+      });
+      const endpoint = recordingEndpoint(() => Response.json({ access_token: "access-auto", expires_in: 3600 }));
+      const result = await resolve(seed, endpoint.fetchImpl);
+      if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+      expect(result.connection.values.accessToken).toBe("access-auto");
+      expect(endpoint.forms[0]?.get("client_id")).toBe("auto-client");
+      expect(endpoint.forms[0]?.has("client_secret")).toBe(false);
+      expect(endpoint.forms[0]?.get("resource")).toBe(RESOURCE);
+    } finally {
+      if (previousOrigin === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+      else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previousOrigin;
+    }
+  }, TEST_TIMEOUT);
+
   function recordingEndpoint(reply: () => Response) {
     const forms: URLSearchParams[] = [];
     const fetchImpl = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -329,6 +367,17 @@ describe("a public client's token stays bound to its resource", () => {
     },
     TEST_TIMEOUT,
   );
+
+  test("does not forward a refresh token to a redirected endpoint", async () => {
+    const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), {
+      auth: PUBLIC_AUTH, support: PUBLIC_SUPPORT, personal: BOUND,
+    });
+    const endpoint = recordingEndpoint(() => new Response(null, { status: 307, headers: { location: "https://auth.provider.example/other" } }));
+    expect(await resolve(seed, endpoint.fetchImpl)).toMatchObject({ ok: false, code: "TOKEN_REFRESH_FAILED" });
+    expect(endpoint.forms).toHaveLength(1);
+    const values = await storedValues(seed);
+    expect(decryptSecret(KEYRING, TOKEN_SCOPE, "refreshToken", values.refreshToken as never)).toBe("refresh-1");
+  }, TEST_TIMEOUT);
 
   test(
     "refuses a still-live token minted for another resource, spending nothing",

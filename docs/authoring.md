@@ -437,8 +437,11 @@ Notes on what the compiler does with this:
   `deriveOnCreate: { from: name, transform: slug, onConflict: suffix }`. The
   field is then absent from create and update inputs in Web, REST, GraphQL and
   MCP. The API stores the slug once, keeps it stable when the source is later
-  edited, and allocates `name-2`, `name-3`, and so on under the database unique
-  index. Tenant-scoped entities must declare that index as
+  edited, and allocates `name-2`, `name-3`, and `name-4` under the database unique
+  index. Further conflicts use a random numeric suffix with a bounded number of
+  retries, so suffixes are not necessarily consecutive. A create can fail if
+  those attempts collide, particularly when the field has a short maximum length.
+  Tenant-scoped entities must declare that index as
   `fields: [tenantId, <derivedField>]`; global entities use only the derived
   field. The identifier stays unique across every row in that scope, including
   inactive rows. An authored partial unique index remains in the output; the

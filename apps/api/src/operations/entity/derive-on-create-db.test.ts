@@ -156,5 +156,43 @@ describe("database-backed create-time identifiers", () => {
     const renamed = await updateGeneratedEntityForTable(runtime.db, session, table, String(created[0]!.id), { name: "Renamed offer" });
     expect(renamed?.name).toBe("Renamed offer");
     expect(renamed?.key).toBe(created[0]!.key);
+
+    // Repeated creates in one transaction exercise the source-page failure
+    // mode without depending on the random values selected after conflicts.
+    const before = derivedInserts.length;
+    const repeated = await withDbSession(runtime.db, session, async (trx, dbSession) => {
+      const rows = [];
+      for (let index = 0; index < 80; index++) {
+        rows.push(await createGeneratedEntityInTransaction(trx, dbSession, table, { name: "Repeated bulk name", active: true }));
+      }
+      return rows;
+    });
+    expect(new Set(repeated.map((row) => row.key)).size).toBe(80);
+    expect(derivedInserts.length - before).toBeLessThanOrEqual(80 * 12);
+
+    // Fill every candidate of a deliberately tiny identifier namespace.
+    // Exhausting the retry budget must abort earlier work in the transaction.
+    const shortTable: GeneratedCrudTable = {
+      ...table,
+      columns: table.columns.map((column) => column.deriveOnCreate
+        ? { ...column, deriveOnCreate: { ...column.deriveOnCreate, maxLength: 3 } }
+        : column),
+    };
+    await withDbSession(runtime.db, session, async (trx) => {
+      for (const key of ["zzz", ...Array.from({ length: 10 }, (_, n) => `z-${n}`)]) {
+        await sql`insert into erp.derived_identifier_fixtures (tenant_id, key, name, active)
+          values (${tenantId}, ${key}, 'Occupied', true)`.execute(trx);
+      }
+    });
+    const beforeFailure = derivedInserts.length;
+    await expect(withDbSession(runtime.db, session, async (trx, dbSession) => {
+      await createGeneratedEntityInTransaction(trx, dbSession, table, { name: "Rollback marker", active: true });
+      await createGeneratedEntityInTransaction(trx, dbSession, shortTable, { name: "zzz", active: true });
+    })).rejects.toThrow(/could not allocate a unique derived identifier/);
+    expect(derivedInserts.length - beforeFailure).toBe(13);
+    const marker = await withDbSession(runtime.db, session, (trx) => sql<{ count: string }>`
+      select count(*)::text as count from erp.derived_identifier_fixtures where name = 'Rollback marker'
+    `.execute(trx));
+    expect(marker.rows[0]?.count).toBe("0");
   }, 30_000);
 });

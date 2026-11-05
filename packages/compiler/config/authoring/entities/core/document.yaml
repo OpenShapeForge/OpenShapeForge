@@ -377,14 +377,17 @@ operations:
   create:
     name: { en: Create document, nl: Document aanmaken }
     description:
-      en: Create a document with its first version. You can attach a file.
-      nl: Maak een document met de eerste versie. U kunt een bestand bijvoegen.
+      en: Create a document with its first version.
+      nl: Maak een document met de eerste versie.
 
     implementation: { type: plugin, plugin: documents, handler: createDocument, action: create }
     target: { scope: collection }
     input:
       schema:
         type: object
+        not:
+          properties: { artifact: {}, content: {} }
+          required: [artifact, content]
         required:
           - document
           - version
@@ -399,6 +402,28 @@ operations:
               title:
                 en: Idempotency Key
                 nl: Aanvraagreferentie
+          content:
+            type: object
+            additionalProperties: false
+            required: [variant, blocks]
+            x-osf-i18n:
+              title: { en: Content, nl: Inhoud }
+            properties:
+              variant:
+                x-osf-entityInput:
+                  entity: DocumentVariant
+                  fields: [channel, locale]
+                x-osf-i18n:
+                  title: { en: Content variant, nl: Inhoudsvariant }
+              blocks:
+                type: array
+                x-osf-collection: { entity: DocumentVariant, field: blocks }
+                items:
+                  x-osf-entityInput:
+                    entity: Block
+                    fields: [definitionKey, definitionVersion, values]
+                x-osf-i18n:
+                  title: { en: Content blocks, nl: Inhoudsblokken }
           artifact:
             type: object
             x-osf-control: artifact-upload
@@ -618,6 +643,16 @@ interfaces:
   web:
     operations:
       materialize: { resultRenderer: document.content }
+      create:
+        form:
+          showOnlyGroupedFields: true
+          defaults:
+            document: { status: draft }
+            version: { versionLabel: "1", status: draft }
+            content: { variant: { channel: document, locale: { from: uiLocale } }, blocks: [] }
+          groups:
+            - title: { en: Document, nl: Document }
+              fields: [document.title, document.documentType]
     views:
       quotePreview:
         kind: record

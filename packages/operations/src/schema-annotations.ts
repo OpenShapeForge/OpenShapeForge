@@ -14,6 +14,15 @@ export const operationInputFieldsKeyword = {
   metaSchema: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)?$" },
 };
 
+/** Identifies the canonical owned collection whose items an input edits.
+ * Presentation metadata only; it never grants access or authorizes writes. */
+export const operationCollectionKeyword = {
+  keyword: "x-osf-collection", schemaType: "object" as const, valid: true,
+  metaSchema: { type: "object", additionalProperties: false, required: ["entity", "field"],
+    properties: { entity: { type: "string", pattern: "^[A-Za-z][A-Za-z0-9_]*$" },
+      field: { type: "string", pattern: "^[A-Za-z_][A-Za-z0-9_]*$" } } },
+};
+
 const equalityConstraint = {
   type: "object", required: ["eq"], additionalProperties: false,
   properties: { eq: { type: ["string", "number", "boolean"] } },

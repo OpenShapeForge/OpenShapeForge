@@ -37,6 +37,24 @@ test("references cannot override rules or select missing or server-owned fields"
   expect(() => resolveEntityInputSources({ ...reference("Example", ["title"]), additionalProperties: true }, [contract], {})).toThrow("override");
 });
 
+test("collection input admits only a matching owned collection and canonical item source", () => {
+  const owner = { ...contract, entity: { ...contract.entity, name: "Owner" }, model: { ...contract.model,
+    relationships: [{ key: "items", kind: "hasMany", ownership: "owned", target: "Example" }],
+  } } as unknown as CompiledEntityContract;
+  const collection = { type: "array", "x-osf-collection": { entity: "Owner", field: "items" },
+    items: { "x-osf-entityInput": { entity: "Example", fields: ["title"] } } };
+  const compiled = resolveEntityInputSources(collection, [owner, contract], {});
+  expect(compiled).toMatchObject({
+    "x-osf-collection": { entity: "Owner", field: "items" }, items: { properties: { title: { minLength: 1 } } },
+  });
+  expect(resolveEntityInputSources(compiled, [owner, contract], {})).toEqual(compiled);
+  expect(() => resolveEntityInputSources({ ...collection, type: "object" }, [owner, contract], {})).toThrow("requires an array");
+  expect(() => resolveEntityInputSources({ ...collection, "x-osf-collection": { entity: "Owner", field: "missing" } }, [owner, contract], {})).toThrow("owned collection");
+  const nonOwned = { ...owner, model: { ...owner.model, relationships: [{ ...owner.model.relationships[0]!, ownership: "reference" as const }] } };
+  expect(() => resolveEntityInputSources(collection, [nonOwned, contract], {})).toThrow("owned collection");
+  expect(() => resolveEntityInputSources({ ...collection, items: { "x-osf-entityInput": { entity: "Other", fields: ["title"] } } }, [owner, contract], {})).toThrow("matching canonical items");
+});
+
 test("input and output sources lower identically in both canonical operation projections", () => {
   const operation = () => ({ input: { kind: "json-schema", schema: structuredClone(input) }, output: { kind: "json-schema", schema: structuredClone(input) } });
   const entity = { ...contract, entityOperations: { create: operation() },
@@ -69,4 +87,32 @@ test("managed choices fail closed for missing or incompatible canonical sources"
   const incompatible = source("Example", "title");
   incompatible.model.fields[0]!.baseType = "boolean";
   expect(() => materializeEntityInputSources([incompatible], {})).toThrow("Invalid entity option source");
+});
+
+test("version-sourced fields resolve only a stored field-definition collection on the versioned head", () => {
+  const head = { ...contract, entity: { ...contract.entity, name: "Head" }, versioning: { versionEntity: "HeadVersion" },
+    storage: { columns: [{ field: "schema", column: "schema_definitions", type: "jsonb" }] },
+    model: { ...contract.model, fields: [{ key: "schema", osfType: "fieldDefinition", cardinality: "collection" }] }, entityOperations: {} } as unknown as CompiledEntityContract;
+  const value = { ...contract, entity: { ...contract.entity, name: "Value", valueDefinition: true }, entityOperations: {}, model: { ...contract.model, fields: [
+    { key: "version", cardinality: "single", relationship: { target: "HeadVersion" } },
+    { key: "values", baseType: "object", cardinality: "single", valueFieldsFrom: { reference: "version", field: "schema" } },
+  ] } } as unknown as CompiledEntityContract;
+  const version = { ...contract, entity: { ...contract.entity, name: "HeadVersion" }, storage: { columns: [{ field: "snapshot", column: "snapshot", type: "jsonb" }] }, entityOperations: {} } as unknown as CompiledEntityContract;
+  materializeEntityInputSources([head, version, value], {});
+  expect(value.model.fields[1]!.valueFieldsFrom).toEqual({ reference: "version", field: "schema", snapshotColumn: "schema_definitions", headEntity: "Head" });
+  const bad = structuredClone(value);
+  bad.model.fields[1]!.valueFieldsFrom!.field = "missing";
+  expect(() => materializeEntityInputSources([head, version, bad], {})).toThrow("stored FieldDefinition collection");
+  const ordinary = structuredClone(value);
+  ordinary.entity.valueDefinition = false;
+  expect(() => materializeEntityInputSources([head, version, ordinary], {})).toThrow("only on entity-value definitions");
+  const invalidVersion = { ...version, storage: { ...version.storage, columns: [] } };
+  expect(() => materializeEntityInputSources([head, invalidVersion, value], {})).toThrow("stored FieldDefinition collection");
+});
+
+test("entity CRUD uses record view groups instead of silently ignoring an operation form", () => {
+  const entity = { ...contract, entityOperations: { create: {
+    id: "Example.create", implementation: { type: "entity" }, interfaces: { web: { form: { groups: [{ title: { en: "Main", nl: "Basis" }, fields: ["title"] }] } } },
+  } } } as unknown as CompiledEntityContract;
+  expect(() => materializeEntityInputSources([entity], {})).toThrow("use record create or update groups");
 });

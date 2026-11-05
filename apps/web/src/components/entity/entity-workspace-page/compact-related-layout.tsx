@@ -147,7 +147,6 @@ export function renderCompactRelatedLayout({
             entity={entity}
             lang={lang}
             config={config.related}
-            persistTaskOutput={entry.entityName === "Task"}
           />
         )
       : (

@@ -25,7 +25,7 @@ export function buildFieldSchemaGroups(
   const showLayoutControl = isProfileControlEnabled(profile, "layout");
   const showPersistenceControl = isProfileControlEnabled(profile, "persistence");
   const showAiHintControl = isProfileControlEnabled(profile, "aiHint");
-  const showFullContractControls = profile.id === "fullFieldDefinition" || profile.id === "formDefinitionField";
+  const showFullContractControls = profile.id === "fullFieldDefinition";
   const fieldGroup = {
     id: "field-identity",
     title: { nl: "Basis", en: "Basics" },

@@ -164,19 +164,6 @@ export function listAuthoringEntitySlugs(authoringDir: string): string[] {
   return listEntityFiles(authoringDir).map((file) => file.slug);
 }
 
-function flattenFields(fields: Field[] | undefined, result = new Map<string, Field>()) {
-  for (const field of fields ?? []) {
-    if (!result.has(field.key)) {
-      result.set(field.key, field);
-    }
-    flattenFields(field.children, result);
-    if (field.item) {
-      flattenFields([field.item], result);
-    }
-  }
-  return result;
-}
-
 function defaultSql(field: Field | undefined, column: ColumnDefinition): string | undefined {
   if (column.primaryKey && column.type === "uuid") {
     return "gen_random_uuid()";

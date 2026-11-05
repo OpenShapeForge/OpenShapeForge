@@ -45,6 +45,8 @@ export function serializeEntityRow(
     table.columns.filter((column) => !hidden.has(column.name)).map((column) => [fieldNameForColumn(column), normalized[column.name]]),
   );
   for (const field of table.source?.computedFields ?? []) result[field.field] = row[field.field];
+  // Server-derived frozen definitions are already authorized and use logical field keys.
+  if (Object.hasOwn(row, "frozenFieldDefinitions")) result.frozenFieldDefinitions = row.frozenFieldDefinitions;
   // Already projected and redacted per key (extensions/read.ts).
   if (extensibleEntityOf(table) && Object.hasOwn(row, "extensions")) {
     result.extensions = row.extensions;

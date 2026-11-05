@@ -2,6 +2,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "bun:test";
 import { collectAllArtifacts } from "./index.js";
 import { loadActivePlatformCompile, resolveActiveAuthoringDir } from "./active-manifest.js";
@@ -29,6 +30,10 @@ function assertCanonicalDocumentInput(schema: JsonObject): void {
   const properties = object(schema.properties);
   const document = object(properties.document);
   const documentProperties = object(document.properties);
+  const content = object(properties.content);
+  const contentProperties = object(content.properties);
+  expect(contentProperties.blocks).toMatchObject({ type: "array", "x-osf-collection": { entity: "DocumentVariant", field: "blocks" },
+    items: { properties: { values: { "x-osf-type": "entityValue" } } } });
   const version = object(properties.version);
   const versionProperties = object(version.properties);
   expect(schema.required).not.toContain("artifact");
@@ -93,7 +98,18 @@ test("canonical entity input sources reach every generated operation interface",
     // A host can generate its frontend directly from the public compile API,
     // before (or without) running the all-artifact generator.
     const active = await loadActivePlatformCompile(root);
+    const blockInput = resolveEntityInputSources({ type: "array", "x-osf-collection": { entity: "DocumentVariant", field: "blocks" }, items: {
+      "x-osf-entityInput": { entity: "Block", fields: ["definitionKey", "definitionVersion", "values"] },
+    } }, active.entities.map(entity => entity.contract), {});
+    expect(blockInput).toMatchObject({ type: "array", items: { type: "object", properties: {
+      definitionKey: { type: "string" }, values: { type: "object", "x-osf-type": "entityValue" },
+    } } });
+    expect(blockInput["x-osf-collection"]).toEqual({ entity: "DocumentVariant", field: "blocks" });
     const directWeb = buildWebManifest(active.entities, {}, corpusWebOperations(resolveActiveAuthoringDir(root)));
+    expect(directWeb.entityValueDefinitions?.TemplateBlock?.fields.find(field => field.key === "parameters")?.valueFieldsFrom)
+      .toEqual({ reference: "version", field: "parameters" });
+    expect(directWeb.entityValueDefinitions?.TemplateBlock?.fields.find(field => field.key === "version")?.optionSource)
+      .toMatchObject({ type: "entity", source: "Template", valueField: "publishedVersionId" });
     const directCreate = object(JSON.parse(JSON.stringify(directWeb.entities.Document!.operations.create)));
     expect(object(directCreate.input).kind).toBe("json-schema");
     assertCanonicalDocumentInput(object(object(directCreate.input).schema));
@@ -182,3 +198,18 @@ test("canonical entity input sources reach every generated operation interface",
     await rm(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+test("authored document form reaches the web artifact with resolved input paths", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const artifacts = await collectAllArtifacts(root);
+  const entry = artifacts.all.find(item => item.path === "apps/web/src/generated/web-manifest.json");
+  expect(entry).toBeDefined();
+  const web = JSON.parse(entry!.contents as string);
+  const create = web.entities.Document.operations.create;
+  expect(create.form.groups.map((group: { fields: string[] }) => group.fields)).toContainEqual(["document.title", "document.documentType"]);
+  expect(create.form.showOnlyGroupedFields).toBe(true);
+  expect(create.form.defaults.content).toEqual({ variant: { channel: "document", locale: { from: "uiLocale" } }, blocks: [] });
+  expect(create.form.defaults.version).toEqual({ versionLabel: "1", status: "draft" });
+  expect(create.input.schema.properties.document.properties.title).toBeDefined();
+  expect(JSON.stringify(create.input.schema)).not.toContain("x-osf-entityInput");
+}, 30_000);

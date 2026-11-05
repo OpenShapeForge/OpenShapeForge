@@ -35,15 +35,12 @@ import {
   editLeaseToolDefinitions,
   personalizationHelperTool,
   searchableOperationToolDefinitions,
-  type GenericToolBranch,
   type McpToolShape,
 } from "@openshapeforge/operations";
 import { withBlueprintCreate } from "./blueprint-create-schema.js";
 import { pluralize } from "./authoring/compiler/helpers.js";
 import type {
-  CompiledColumn,
   CompiledEntityContract,
-  CompiledEntityOperation,
   CompiledField,
   CompiledRelationship,
 } from "./authoring/types.js";
@@ -60,17 +57,13 @@ import {
   entityValuesSchema,
   withEntityBindingControls,
   withEntityOperationControls,
-  writableEntityFields,
 } from "./entity-operation-json-schema.js";
 import type { PluginExecutionCompatibility } from "./plugins.js";
 import { resolveDerivedExecution } from "./derived-execution.js";
 import {
   compiledFieldSchema,
-  compiledFieldSchemaWithoutDefinitions,
-  compiledObjectSchema,
   describeCompiledField,
   localizedText,
-  splitBundledDefinitions,
 } from "./field-json-schema.js";
 
 type JsonObject = Record<string, unknown>;
@@ -269,9 +262,6 @@ function entityToolOutputSchema(
     },
   };
 }
-
-/** Operations whose tools accept no entity fields, only identifiers/paging. */
-const READ_OPERATIONS = new Set(["list", "get"]);
 
 /** Fields carrying a restricting classification, for the runtime to withhold. */
 function classifiedFieldKeys(fields: CompiledField[]): string[] {
@@ -1229,25 +1219,6 @@ function resolveSourceTable(
     );
   }
   return source.table;
-}
-
-/** Resolve an entity name to its physical table, failing closed at build. */
-function resolveEntityTable(
-  inputs: McpCatalogInput[],
-  entityName: string,
-  owningEntity: string,
-  option: string,
-): string {
-  const found = inputs.find(
-    (input) => input.contract.entity.name === entityName,
-  );
-  if (!found) {
-    throw new Error(
-      `mcp ${option} on entity "${owningEntity}" names entity "${entityName}", ` +
-        `which is not part of this catalog.`,
-    );
-  }
-  return found.table;
 }
 
 export function buildMcpCatalog(

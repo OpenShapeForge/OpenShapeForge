@@ -6,6 +6,7 @@ import type { EntityValueCandidate, EntityValueRegistry } from "./entity-value-t
 import type { CompiledField } from "./types/compiled.js";
 import type { FieldDefinition } from "./types/field-definition.js";
 import { assertEntityValueFieldPolicies } from "./entity-fields.js";
+import { resolveValueFieldsFrom } from "./value-fields-from.js";
 
 const snake = (value: string) => value.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
 const ident = (value: string) => `"${value.replaceAll('"', '""')}"`;
@@ -131,6 +132,7 @@ export function compileEntityValueStorage(
     for (const name of definitionNames) {
       const definition = byEntity.get(name)!;
       const fields = definition.effectiveFields;
+      resolveValueFieldsFrom(definition, candidates);
       if (new Set(fields.map((field) => field.key)).size !== fields.length) throw new Error(`${name}: duplicate effective value fields across core and profiles.`);
       if (fields.some((field) => field.entityValue || field.allowedDefinitions)) throw new Error(`${name}: nested entityValue definitions are not supported.`);
       const references = fields.filter((field) => field.relationship?.target);

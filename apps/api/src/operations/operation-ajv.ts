@@ -4,6 +4,7 @@ import addFormats from "ajv-formats";
 import {
   valueInvariantKeywords,
   operationChoiceKeyword,
+  operationCollectionKeyword,
   operationExactNumericKeyword, operationFieldMetadataKeywords,
   operationI18nKeyword,
   operationInputFieldsKeyword,
@@ -36,6 +37,7 @@ export function createOperationAjv(coerceTypes = false): OperationAjv {
   instance.addKeyword({ keyword: "x-osf-default-template", schemaType: "string", valid: true });
   // The authoring editor's choice marker (which catalog a string is chosen from); presentation metadata as well.
   instance.addKeyword(operationChoiceKeyword);
+  instance.addKeyword(operationCollectionKeyword);
   instance.addKeyword(operationReferenceKeyword);
   instance.addKeyword(operationI18nKeyword);
   instance.addKeyword(operationInputFieldsKeyword);

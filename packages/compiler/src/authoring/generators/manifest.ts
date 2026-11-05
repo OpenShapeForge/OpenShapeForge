@@ -83,11 +83,6 @@ function capitalizeFirst(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function buildManifestVarName(entityLower: string): string {
-  const normalized = entityLower.replace(/[^a-zA-Z0-9_$]/g, "_");
-  return `entity_${normalized}`;
-}
-
 export function generateDynamicRoutes(
   entries: EntityManifestEntryData[],
   runtimeMetadata: RuntimeMetadataData,

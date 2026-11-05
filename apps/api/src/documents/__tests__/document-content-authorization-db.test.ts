@@ -34,6 +34,74 @@ describe("document content authorization against PostgreSQL", () => {
   beforeAll(openScratch, 120_000);
   afterAll(closeScratch);
 
+  test("creating a document and its owned content rolls back together when a block is invalid", async () => {
+    const setup = platformFor(caseUser);
+    const title = `atomic-content-${crypto.randomUUID()}`;
+    const input = { document: { title, documentType: "outgoing_mail", status: "draft" },
+      version: { versionLabel: "1", status: "draft", isMajorVersion: false },
+      content: { variant: { channel: "document", locale: "nl" }, blocks: [
+        { definitionKey: "TextBlock", values: { markdown: "First" } },
+        { definitionKey: "NotAllowed", values: {} },
+      ] } };
+    await failsWith(setup.handlers.createDocument!(input, setup.context), ["BAD_USER_INPUT", "VALIDATION"]);
+    const remaining = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${title}`.execute(privileged());
+    expect(remaining.rows[0]!.count).toBe(0);
+    input.content.blocks[1] = { definitionKey: "TextBlock", values: { markdown: "Second" } };
+    const created = (await setup.handlers.createDocument!(input, setup.context)).value as { id: string };
+    const child = await variant(created.id, "document", "nl");
+    expect((await variantBlocks(child.id)).map(block => block.markdown)).toEqual(["First", "Second"]);
+  });
+
+  test("included version parameters are checked against its frozen field definitions on write", async () => {
+    const setup = platformFor(editor);
+    const template = await seedTemplate();
+    const versionId = await publishTemplate(setup.context, template.template);
+    const title = `template-values-${crypto.randomUUID()}`;
+    const input = { document: { title, documentType: "outgoing_mail", status: "draft" },
+      version: { versionLabel: "1", status: "draft", isMajorVersion: false },
+      content: { variant: { channel: "document", locale: "nl" }, blocks: [
+        { definitionKey: "TemplateBlock", values: { version: versionId, parameters: { name: 42 } } },
+      ] } };
+    await fails(setup.handlers.createDocument!(input, setup.context), "VALIDATION_FAILED");
+    const remaining = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${title}`.execute(privileged());
+    expect(remaining.rows[0]!.count).toBe(0);
+    input.content.blocks[0]!.values.parameters.name = "Ada" as any;
+    const created = (await setup.handlers.createDocument!(input, setup.context)).value as { id: string };
+    expect((await variantBlocks((await variant(created.id, "document", "nl")).id)).length).toBe(1);
+    await sql`update erp.templates set parameters = ${jsonbLiteral([{ key: "name", osfType: "number", required: true, label: { en: "Name", nl: "Naam" } }])}
+      where id = ${template.template}::uuid`.execute(privileged());
+    const newerVersion = await publishTemplate(setup.context, template.template);
+    expect(newerVersion).not.toBe(versionId);
+    const stillPinned = { ...input, document: { ...input.document, title: `template-old-${crypto.randomUUID()}` } };
+    expect((await setup.handlers.createDocument!(stillPinned, setup.context)).value).toHaveProperty("id");
+    const newerInput = { ...input, document: { ...input.document, title: `template-new-${crypto.randomUUID()}` }, content: { ...input.content,
+      blocks: [{ definitionKey: "TemplateBlock", values: { version: newerVersion, parameters: { name: "Ada" } } }] } };
+    await fails(setup.handlers.createDocument!(newerInput, setup.context), "VALIDATION_FAILED");
+    const deniedTitle = `template-denied-${crypto.randomUUID()}`;
+    const deniedSetup = platformFor(caseUser);
+    await fails(deniedSetup.handlers.createDocument!({ ...input, document: { ...input.document, title: deniedTitle } }, deniedSetup.context), "FORBIDDEN");
+    const denied = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${deniedTitle}`.execute(privileged());
+    expect(denied.rows[0]!.count).toBe(0);
+    const otherTenant = crypto.randomUUID();
+    const foreign = await seedTemplate(otherTenant);
+    const foreignVersion = await publishTemplate(platformFor({ ...editor, tenantId: otherTenant }).context, foreign.template);
+    const foreignTitle = `template-foreign-${crypto.randomUUID()}`;
+    const foreignInput = { ...input, document: { ...input.document, title: foreignTitle }, content: { ...input.content,
+      blocks: [{ definitionKey: "TemplateBlock", values: { version: foreignVersion, parameters: { name: "Ada" } } }] } };
+    await failsWith(setup.handlers.createDocument!(foreignInput, setup.context), ["NOT_FOUND", "FORBIDDEN"]);
+    const foreignDocument = await sql<{ count: number }>`select count(*)::int as count from erp.documents where title = ${foreignTitle}`.execute(privileged());
+    expect(foreignDocument.rows[0]!.count).toBe(0);
+    const emptyTemplate = await seedTemplate();
+    await sql`update erp.templates set parameters = null where id = ${emptyTemplate.template}::uuid`.execute(privileged());
+    const emptyVersion = await publishTemplate(setup.context, emptyTemplate.template);
+    const emptyInput = { ...input, document: { ...input.document, title: `template-empty-${crypto.randomUUID()}` }, content: { ...input.content,
+      blocks: [{ definitionKey: "TemplateBlock", values: { version: emptyVersion, parameters: {} } }] } };
+    expect((await setup.handlers.createDocument!(emptyInput, setup.context)).value).toHaveProperty("id");
+    const unexpectedInput = { ...emptyInput, document: { ...emptyInput.document, title: `template-empty-invalid-${crypto.randomUUID()}` }, content: { ...emptyInput.content,
+      blocks: [{ definitionKey: "TemplateBlock", values: { version: emptyVersion, parameters: { name: "Ada" } } }] } };
+    await fails(setup.handlers.createDocument!(unexpectedInput, setup.context), "VALIDATION_FAILED");
+  });
+
   test("a document editor edits document blocks only through the variant, never template blocks", async () => {
     const setup = platformFor(editor);
     const ids = await seedTemplate();

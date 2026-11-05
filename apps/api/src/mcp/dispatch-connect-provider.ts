@@ -10,13 +10,15 @@ import { selectOAuthConnectionRow } from "./session-connections.js";
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import { resolveTemplate } from "./declarative-execution.js";
 import { mintAuthorization, scopesCovered } from "./entity-oauth.js";
-import { accessTokenNeedsRefresh } from "./connection-token-refresh.js";
+import { accessTokenNeedsRefresh, refreshConnectionRowLocked, refreshLeewaySeconds } from "./connection-token-refresh.js";
+import { connectionTokenSecretScope } from "../connectors/secrets.js";
 import { HttpError } from "../rest/http-error.js";
+import { connectRefreshOutcome } from "./connect-refresh-outcome.js";
 import { missingRequiredConnectionValues } from "./connection-guidance.js";
 import { isOrganizationAdministrator } from "./onboarding.js";
 import { connectionScopeOf } from "./catalog-rows.js";
 import { entityForTable } from "./catalog.js";
-import { ENTITY_OAUTH_CALLBACK_PATH, callbackOrigin } from "./handoff-config.js";
+import { ENTITY_OAUTH_CALLBACK_PATH, callbackOrigin, elicitedKeyring } from "./handoff-config.js";
 import {
   looksLikeStoredSecret,
   normalizeConnectionValueRows,
@@ -155,14 +157,13 @@ export async function connectProviderStep(
     (!accessTokenNeedsRefresh(existingValues) ||
       looksLikeStoredSecret(existingValues.refreshToken)),
   );
-  if (
-    hasExistingTokens &&
-    scopesCovered(scopes, existingValues?.grantedScopes)
-  ) {
+  const scopesStillCovered = scopesCovered(scopes, existingValues?.grantedScopes);
+  const needsRefresh = !!existingValues && accessTokenNeedsRefresh(existingValues, refreshLeewaySeconds(auth));
+  if (hasExistingTokens && scopesStillCovered && !needsRefresh) {
     connectedProviders.push(String(providerRow.name ?? providerRowId));
     return undefined;
   }
-  const reconsent = hasExistingTokens;
+  const reconsent = Boolean(existingForScope && existingValues?.accessToken);
   const tenantConnection = selectOAuthConnectionRow(connectionRows, "tenant", session.userId);
   const secretScope =
     entityForTable(execution.connectionTable)?.elicitOnCreate
@@ -228,6 +229,36 @@ export async function connectProviderStep(
     tenantUrlValues.secretKeys,
   );
 
+  // A stored refresh token is not proof that the provider still accepts it.
+  // Reuse the normal locked lifecycle and preserve transient failures; only a
+  // definitive reauthorization outcome starts a new consent handoff.
+  if (hasExistingTokens && scopesStillCovered && needsRefresh && existingForScope) {
+    const keyring = elicitedKeyring();
+    const table = tables.get(execution.connectionTable);
+    if (!keyring || !table) throw new HttpError(500, "PROVIDER_MISCONFIGURED", "Token refresh is not configured.");
+    const outcome = await connectRefreshOutcome(() => refreshConnectionRowLocked({
+        db, session, table, rowId: String(existingForScope.id),
+        valuesField: execution.connectionValuesField,
+        providerField: execution.connectionProviderRef,
+        expectedProviderId: providerRowId,
+        expectedOwnerUserId: scope_ === "user" ? actingRelationId(session) : null,
+        refreshLeewaySeconds: refreshLeewaySeconds(auth),
+        audit: { sourceTable: execution.providerTable, connectionId: String(existingForScope.id), scope: scope_, correlationId: String(scope.requestId) },
+        tokenUrl: resolvedTokenUrl, ...credentials,
+        egress: Array.isArray(providerRow.egressHosts) ? providerRow.egressHosts as string[] : [],
+        keyring, secretScope: connectionTokenSecretScope(execution.connectionTable),
+        moduleEgress: { owner: scope.egressOwner, purpose: "oauth", scope: {
+          tenantId: session.tenantId, actorId: session.userId, provider: providerRowId,
+          operation: "refresh_access_token", kind: "mutation",
+        } },
+        ...(scope.signal ? { signal: scope.signal } : {}),
+      }));
+    if (outcome === "connected") {
+      connectedProviders.push(String(providerRow.name ?? providerRowId));
+      return undefined;
+    }
+  }
+
   const handoff = await mintAuthorization({
     db,
     session,
@@ -266,17 +297,13 @@ export async function connectProviderStep(
     expiresInSeconds: handoff.expiresInSeconds,
     instructions:
       (reconsent
-        ? "The required permissions changed since this connection was approved; a " +
-          "fresh approval replaces the stored sign-in in place. "
+        ? "A fresh approval replaces the stored sign-in in place; the connection is not deleted. "
         : "") +
       (signInProviders.length > 1
         ? "This definition spans multiple providers; each is connected in turn. "
         : "") +
       "Ask the person to open authorizationUrl in their browser and approve access. " +
-      "Then wait by checking, not by asking: call this tool again every ten seconds " +
-      "or so (sleep between checks if you can) — it continues with the next provider " +
-      "or answers connected once every sign-in has landed. Only if nothing has " +
-      "landed after about three minutes, ask the person to tell you when they are " +
-      "done.",
+      "Once approval is complete, call this tool again to continue with any other " +
+      "provider or confirm the sign-in. Do not repeatedly start new handoffs while waiting.",
   });
 }

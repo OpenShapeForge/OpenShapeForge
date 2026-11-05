@@ -227,6 +227,9 @@ export async function resolveTenantConnection(
           toolName: name,
           connectTool: entry?.connect?.name ?? null,
           scope: "tenant",
+        ...(input.internalDerivedDefinition && entry?.compatibility?.connectOperation && typeof input.internalDerivedDefinition.row.id === "string"
+          ? { canonicalConnect: { operationId: entry.compatibility.connectOperation, serviceId: input.internalDerivedDefinition.row.id } }
+          : {}),
         });
       }
     }

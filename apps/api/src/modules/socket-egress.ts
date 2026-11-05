@@ -31,6 +31,7 @@
  */
 import { connect as netConnect, type Socket } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
+import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { hostAllowed } from "./egress.js";
 import type { ModuleSocketGrant, ModuleSocketRequest } from "./contract.js";
 
@@ -43,6 +44,17 @@ type GrantState = {
   adapterKey: string;
   adapterName: string;
   tenantId: string | null;
+  /**
+   * What ties a grant to the resolution that minted it. Only the HTTP path
+   * reads this; the socket path stays bound by its caller's live session.
+   */
+  binding?: {
+    session: TrustedSessionContext;
+    connectionId: string;
+    connectionTable: string;
+    ownerUserId: string | null;
+    expiresAtMs: number;
+  };
 };
 
 const grants = new WeakMap<ModuleSocketGrant, GrantState>();
@@ -55,6 +67,11 @@ export function mintSocketGrant(state: GrantState): ModuleSocketGrant {
     allowlist: Object.freeze([...state.allowlist]),
   });
   return grant;
+}
+
+/** Core-only. The policy behind a grant, for the host's own HTTP path. */
+export function socketGrantState(grant: ModuleSocketGrant): Readonly<GrantState> | undefined {
+  return grants.get(grant);
 }
 
 export class SocketEgressDenied extends Error {

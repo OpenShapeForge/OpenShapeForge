@@ -53,6 +53,7 @@ import type {
 } from "./contract.js";
 import { parseModuleToolExecutionOptions } from "./invocation-sources.js";
 import { resolveConnectionValues } from "./connection-secrets.js";
+import { requestConnectionHttp } from "./connection-http-egress.js";
 import { connectSocket } from "./socket-egress.js";
 import { classifyDatabaseError } from "../db/database-refusals.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "./field-schemas.js";
@@ -446,6 +447,7 @@ export class ModulePlatformRuntime {
    */
   #declarativeServiceCapabilities: RuntimeDeclarativeServiceCapabilities | undefined;
   #hostOperationExecutor: ModuleHostOperationExecutor | undefined;
+  #egressOwner: RuntimeModule["egress"] | undefined;
 
   readonly #capabilityOperations: ReadonlySet<string> | undefined;
 
@@ -787,6 +789,14 @@ export class ModulePlatformRuntime {
             ...(typeof request.timeoutMs === "number"
               ? { timeoutMs: request.timeoutMs }
               : {}),
+          });
+        },
+        request: async (session, grant, request) => {
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error("Module egress requires a live verified session.");
+          }
+          return requestConnectionHttp(session, grant, request, {
+            owner: this.#egressOwner,
           });
         },
       },
@@ -1410,6 +1420,10 @@ export class ModulePlatformRuntime {
       if (operationError) return { error: operationError };
       throw error;
     }
+  }
+
+  registerEgressOwner(owner: RuntimeModule["egress"] | undefined): void {
+    this.#egressOwner = owner;
   }
 
   registerHostOperationExecutor(executor: ModuleHostOperationExecutor): void {

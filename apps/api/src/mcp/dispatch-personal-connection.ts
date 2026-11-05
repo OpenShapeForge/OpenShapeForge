@@ -239,6 +239,9 @@ export async function resolvePersonalConnection(
         toolName: name,
         connectTool: entry?.connect?.name ?? null,
         scope: "user",
+        ...(input.internalDerivedDefinition && entry?.compatibility?.connectOperation && typeof input.internalDerivedDefinition.row.id === "string"
+          ? { canonicalConnect: { operationId: entry.compatibility.connectOperation, serviceId: input.internalDerivedDefinition.row.id } }
+          : {}),
       });
     }
   }

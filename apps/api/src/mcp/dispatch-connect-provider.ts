@@ -151,14 +151,14 @@ export async function connectProviderStep(
   // scope evolved after consent, silently reusing the old token
   // guarantees a provider 403 — the fix is a fresh approval, minted
   // below, whose callback replaces the stored tokens in place.
+  const needsRefresh = !!existingValues && accessTokenNeedsRefresh(existingValues, refreshLeewaySeconds(auth));
   const hasExistingTokens = Boolean(
     existingForScope &&
     existingValues?.accessToken &&
-    (!accessTokenNeedsRefresh(existingValues) ||
+    (!needsRefresh ||
       looksLikeStoredSecret(existingValues.refreshToken)),
   );
   const scopesStillCovered = scopesCovered(scopes, existingValues?.grantedScopes);
-  const needsRefresh = !!existingValues && accessTokenNeedsRefresh(existingValues, refreshLeewaySeconds(auth));
   if (hasExistingTokens && scopesStillCovered && !needsRefresh) {
     connectedProviders.push(String(providerRow.name ?? providerRowId));
     return undefined;

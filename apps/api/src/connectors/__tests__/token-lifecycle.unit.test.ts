@@ -6,6 +6,7 @@ import {
   oauthExpiresIn,
   parseOAuthTokenSet,
   refreshOAuthTokenSet,
+  readOAuthTokenResponse,
 } from "../token-lifecycle.js";
 
 describe("OAuth token lifecycle", () => {
@@ -75,5 +76,25 @@ describe("OAuth token lifecycle", () => {
     for (const raw of ["not-json", "{}", '{"accessToken":"access"}']) {
       expect(() => parseOAuthTokenSet(raw)).toThrow(OAuthTokenLifecycleError);
     }
+  });
+});
+
+
+describe("token response byte limit", () => {
+  it("accepts a valid response exactly at the limit", async () => {
+    const prefix = '{"access_token":"';
+    const suffix = '"}';
+    const json = prefix + 'x'.repeat(1024 * 1024 - prefix.length - suffix.length) + suffix;
+    expect((await readOAuthTokenResponse(new Response(json))).access_token).toHaveLength(1024 * 1024 - prefix.length - suffix.length);
+  });
+
+  it("rejects and cancels a chunked response over the limit", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array(256 * 1024)); },
+      cancel() { cancelled = true; },
+    });
+    await expect(readOAuthTokenResponse(new Response(stream))).rejects.toMatchObject({ code: "OAUTH_FAILED" });
+    expect(cancelled).toBe(true);
   });
 });

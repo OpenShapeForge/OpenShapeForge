@@ -12,6 +12,7 @@ import type { FetchLike } from "@openshapeforge/plugin-runtime/connector";
 import { describe, expect, it } from "bun:test";
 import {
   ConnectorOAuthError,
+  exchangeAuthorizationCode,
   resolveEndpoint,
   toExecutionError,
   withOAuthAuthorization,
@@ -111,5 +112,34 @@ describe("error mapping", () => {
 
   it("leaves an unrelated error for someone else to handle", () => {
     expect(toExecutionError(CONTRACT, new Error("something else"))).toBeUndefined();
+  });
+});
+
+describe("authorization code token responses", () => {
+  const exchange = (boundFetch: FetchLike) => exchangeAuthorizationCode({
+    contract: CONTRACT,
+    tokenUrl: "https://provider.example/token",
+    code: "code",
+    codeVerifier: "verifier",
+    redirectUri: "https://app.example/callback",
+    clientId: "client",
+    clientSecret: "secret",
+    boundFetch,
+    now: 0,
+  });
+
+  it("accepts a normal token response", async () => {
+    expect(await exchange(async () => Response.json({ access_token: "access", refresh_token: "refresh" })))
+      .toEqual({ accessToken: "access", refreshToken: "refresh", expiresAt: 3600 });
+  });
+
+  it("rejects and cancels an oversized streamed response", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) { controller.enqueue(new Uint8Array(256 * 1024)); },
+      cancel() { cancelled = true; },
+    });
+    await expect(exchange(async () => new Response(body))).rejects.toMatchObject({ code: "CONNECTOR_OAUTH_FAILED" });
+    expect(cancelled).toBe(true);
   });
 });

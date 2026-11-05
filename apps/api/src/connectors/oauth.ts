@@ -46,6 +46,7 @@ import {
   OAuthTokenLifecycleError,
   oauthTokenNeedsRefresh,
   parseOAuthTokenSet,
+  readOAuthTokenResponse,
   refreshOAuthTokenSet,
   type OAuthTokenSet,
 } from "./token-lifecycle.js";
@@ -190,11 +191,13 @@ export async function exchangeAuthorizationCode(input: {
     );
   }
 
-  const payload = (await response.json()) as {
-    access_token?: unknown;
-    refresh_token?: unknown;
-    expires_in?: unknown;
-  };
+  let payload: Awaited<ReturnType<typeof readOAuthTokenResponse>>;
+  try {
+    payload = await readOAuthTokenResponse(response);
+  } catch (error) {
+    if (!(error instanceof OAuthTokenLifecycleError)) throw error;
+    throw new ConnectorOAuthError("CONNECTOR_OAUTH_FAILED", error.message);
+  }
   if (typeof payload.access_token !== "string") {
     throw new ConnectorOAuthError(
       "CONNECTOR_OAUTH_FAILED",
@@ -304,10 +307,13 @@ async function requestClientCredentialsToken(
     );
   }
 
-  const payload = (await response.json()) as {
-    access_token?: unknown;
-    expires_in?: unknown;
-  };
+  let payload: Awaited<ReturnType<typeof readOAuthTokenResponse>>;
+  try {
+    payload = await readOAuthTokenResponse(response);
+  } catch (error) {
+    if (!(error instanceof OAuthTokenLifecycleError)) throw error;
+    throw new ConnectorOAuthError("CONNECTOR_OAUTH_FAILED", error.message);
+  }
   if (typeof payload.access_token !== "string") {
     throw new ConnectorOAuthError(
       "CONNECTOR_OAUTH_FAILED",

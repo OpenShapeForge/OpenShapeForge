@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   assertNoDerivedOnCreateValues,
   derivedSlugCandidate,
+  maxDerivedIdentifierAttempts,
 } from "./derive-on-create.js";
 import { isWritableColumn, normalizeWritableValues } from "./write-policy.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
@@ -47,6 +48,11 @@ describe("create-time derived identifiers", () => {
     expect(derivedSlugCandidate("  Café & Crème  ", 1, 100)).toBe("cafe-creme");
     expect(derivedSlugCandidate("A very long template", 2, 12)).toBe("a-very-lon-2");
     expect(derivedSlugCandidate("東京", 1, 100)).toBe("item");
+    expect(derivedSlugCandidate("Repeated", 4, 100)).toBe("repeated-4");
+    expect(derivedSlugCandidate("Repeated", 5, 100)).toMatch(/^repeated-\d{12}$/);
+    expect(derivedSlugCandidate("Repeated", 5, 3)).toMatch(/^r-\d$/);
+    expect(maxDerivedIdentifierAttempts()).toBe(12);
+    expect(() => derivedSlugCandidate("Repeated", 13, 100)).toThrow(/could not allocate/);
   });
 
   test("keeps the derived column server-owned on create and update", () => {

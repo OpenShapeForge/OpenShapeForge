@@ -249,9 +249,17 @@ export function reauthorizationProblem(
     toolName: string;
     connectTool: string | null;
     scope: "user" | "tenant";
+    canonicalConnect?: { operationId: string; serviceId: string } | undefined;
   },
 ): unknown {
   if (error instanceof HttpError && error.code === "REAUTHORIZATION_REQUIRED") {
+    if (context.canonicalConnect) {
+      const { operationId, serviceId } = context.canonicalConnect;
+      return new HttpError(403, "REAUTHORIZATION_REQUIRED",
+        `${context.adapter} sign-in expired and could not be refreshed. ` +
+        `Use the available Operation executor with operationId ${JSON.stringify(operationId)} and input { id: ${JSON.stringify(serviceId)} }; open the returned authorization URL.`,
+      );
+    }
     return connectionProblemError({
       kind: "reauthorization",
       ...context,

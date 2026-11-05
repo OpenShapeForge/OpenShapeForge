@@ -17,7 +17,7 @@ domains:
   - hr
 fields:
   - key: employeeNumber
-    permissions: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] }
+    authorization: { roles: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] } }
     osfType: string
     required: true
     label:
@@ -33,7 +33,7 @@ fields:
       column: employee_number
       storageClass: core
   - key: status
-    permissions: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] }
+    authorization: { roles: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] } }
     required: true
     label:
       en: Status
@@ -49,7 +49,7 @@ fields:
       referentieGroep: EMPLOYMENTSTATUS
     osfType: referenceDataCode
   - key: hireDate
-    permissions: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] }
+    authorization: { roles: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] } }
     osfType: date
     required: false
     label:
@@ -62,7 +62,7 @@ fields:
       column: hire_date
       storageClass: core
   - key: terminationDate
-    permissions: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] }
+    authorization: { roles: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] } }
     osfType: date
     required: false
     label:
@@ -75,7 +75,7 @@ fields:
       column: termination_date
       storageClass: core
   - key: name
-    permissions: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] }
+    authorization: { roles: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] } }
     osfType: string
     required: false
     label:
@@ -90,7 +90,7 @@ fields:
       column: name
       storageClass: core
   - key: description
-    permissions: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] }
+    authorization: { roles: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] } }
     required: false
     label:
       en: Description
@@ -105,7 +105,7 @@ fields:
       storageClass: core
     osfType: multilineText
   - key: externalCode
-    permissions: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] }
+    authorization: { roles: { read: [Organization.All.Read, Organization.All.ReadWrite], write: [Organization.All.ReadWrite] } }
     osfType: string
     required: false
     label:
@@ -120,7 +120,7 @@ fields:
       column: external_code
       storageClass: core
   - key: relationId
-    permissions: { read: [Organization.All.Read, Organization.All.ReadWrite, Organization.EmployeeDirectory.Read], write: [Organization.All.ReadWrite] }
+    authorization: { roles: { read: [Organization.All.Read, Organization.All.ReadWrite, Organization.EmployeeDirectory.Read], write: [Organization.All.ReadWrite] } }
     label:
       en: Relation
       nl: Relatie

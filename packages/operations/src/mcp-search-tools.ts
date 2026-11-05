@@ -24,9 +24,7 @@ export function searchableOperationToolDefinitions(
         "nextCursor; it never returns a schema. Choose an id from them and call this tool again with " +
         "only operationId: that returns the Operation's full current contract (the exact input and " +
         "output schema, errors and controls the executor validates), or nothing when this session " +
-        "cannot use it. Search for one capability at a time and reuse a known contract instead of " +
-        "repeating broad or synonymous searches. An available Operation or stored connection does " +
-        "not prove a provider read will succeed.",
+        "cannot use it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -87,10 +85,7 @@ export function searchableOperationToolDefinitions(
       description:
         "Execute one canonical Operation, with input matching the contract the search tool returns for " +
         "its operationId. For a keyed Operation, reuse the same idempotencyKey only when retrying the " +
-        "exact same input. Use the selected Operation's actual input schema; arguments from a " +
-        "different tool projection are not interchangeable. If a provider read fails, preserve the " +
-        "error, respect retryability and do not loop on unchanged failures or delete a connection " +
-        "as a recovery shortcut.",
+        "exact same input.",
       inputSchema: {
         type: "object",
         properties: {

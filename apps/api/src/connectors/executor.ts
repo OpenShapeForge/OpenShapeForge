@@ -56,6 +56,57 @@ import {
 
 export { hostAllowed } from "../modules/egress.js";
 
+// Limit decoded response bytes, including chunked and compressed responses, before
+// any connector can buffer or parse them. This is independent of output limits.
+export const CONNECTOR_RESPONSE_MAX_BYTES = 20 * 1024 * 1024;
+
+function boundConnectorResponse(response: Response, connector: string): Response {
+  const oversized = () => platformExecutionError(
+    "CONNECTOR_UPSTREAM_ERROR", connector,
+    `Connector "${connector}" provider response exceeds the supported size.`,
+  );
+  if (Number(response.headers.get("content-length")) > CONNECTOR_RESPONSE_MAX_BYTES) {
+    void response.body?.cancel().catch(() => {});
+    throw oversized();
+  }
+  if (!response.body) return response;
+
+  const reader = response.body.getReader();
+  let bytes = 0;
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          controller.close();
+          reader.releaseLock();
+          return;
+        }
+        bytes += chunk.value.byteLength;
+        if (bytes > CONNECTOR_RESPONSE_MAX_BYTES) {
+          controller.error(oversized());
+          void reader.cancel().catch(() => {});
+          return;
+        }
+        controller.enqueue(chunk.value);
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel(reason) { return reader.cancel(reason); },
+  });
+  const bounded = new Response(body, {
+    status: response.status, statusText: response.statusText, headers: response.headers,
+  });
+  // Response's constructor does not carry fetch metadata across.
+  Object.defineProperties(bounded, {
+    url: { value: response.url },
+    redirected: { value: response.redirected },
+    type: { value: response.type },
+  });
+  return bounded;
+}
+
 export type ConnectorExecutionErrorCode =
   | "CONNECTOR_PROVENANCE_REFUSED"
   | "CONNECTOR_EGRESS_DENIED"
@@ -277,9 +328,10 @@ export function createBoundFetch(
           ),
       });
       observe?.(response);
-      if (response.status < 300 || response.status >= 400) return response;
+      if (response.status < 300 || response.status >= 400) return boundConnectorResponse(response, contract.slug);
       const location = response.headers.get("location");
-      if (!location) return response;
+      if (!location) return boundConnectorResponse(response, contract.slug);
+      void response.body?.cancel().catch(() => {});
       if (hop === 5) {
         throw platformExecutionError(
           "CONNECTOR_EGRESS_DENIED",

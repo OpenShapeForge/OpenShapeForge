@@ -335,7 +335,7 @@ export function registerConnectorOAuthRoutes(
         return reply.redirect(landingUrl(options, slug, "failed"), 302);
       }
 
-      const controller = new AbortController();
+      const signal = AbortSignal.timeout(20_000);
       const tokens = await exchangeAuthorizationCode({
         contract,
         tokenUrl: resolveEndpoint(contract.auth.tokenUrl, installation.config),
@@ -348,7 +348,7 @@ export function registerConnectorOAuthRoutes(
         clientSecret,
         boundFetch: createBoundFetch(
           contract,
-          controller.signal,
+          signal,
           fetch,
           undefined,
           {

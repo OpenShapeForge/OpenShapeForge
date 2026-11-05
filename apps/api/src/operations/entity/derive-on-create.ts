@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql, type QueryExecutorProvider } from "kysely";
+import { randomInt } from "node:crypto";
 import { generatedCrudError } from "./catalog.js";
 import { fieldNameForColumn } from "./columns.js";
 import type { GeneratedCrudColumn, GeneratedCrudTable } from "./types.js";
 
-const MAX_SUFFIX_ATTEMPTS = 10_000;
+// Keep common identifiers readable, but do not rescan an occupied namespace
+// on every create. The database remains the authority for uniqueness.
+const SEQUENTIAL_ATTEMPTS = 4;
+const MAX_SUFFIX_ATTEMPTS = 12;
 
 export function derivedOnCreateColumn(table: GeneratedCrudTable): GeneratedCrudColumn | undefined {
   const columns = table.columns.filter((column) => column.deriveOnCreate);
@@ -62,7 +66,12 @@ export function derivedSlugCandidate(
       "INTERNAL_SERVER_ERROR",
     );
   }
-  const suffix = attempt === 1 ? "" : `-${attempt}`;
+  // Short authored fields have a smaller namespace; use all available digits.
+  // Even if space remains, repeated collisions stop at the fixed retry limit.
+  const digits = Math.min(12, maxLength === undefined ? 12 : maxLength - 2);
+  const suffix = attempt === 1 ? "" : attempt <= SEQUENTIAL_ATTEMPTS
+    ? `-${attempt}`
+    : `-${randomInt(0, 10 ** digits).toString().padStart(digits, "0")}`;
   if (maxLength !== undefined && maxLength <= suffix.length) {
     throw generatedCrudError(
       "The authored maximum length is too small for a suffixed derived identifier.",

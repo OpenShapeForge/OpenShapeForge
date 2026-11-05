@@ -334,6 +334,30 @@ describe("the client-credentials flow", () => {
   const APP_CONFIG = { clientId: "client-abc", host: "contoso.example" };
 
   test(
+    "rejects oversized streamed client-credentials responses without storing tokens",
+    async () => {
+      await withMigratedDb(async (db) => {
+        const tenantId = randomUUID();
+        const session = { tenantId, userId: randomUUID(), roles: [] };
+        const installationId = await seedInstallation(db, tenantId);
+        let cancelled = false;
+        const boundFetch: FetchLike = async () => new Response(new ReadableStream<Uint8Array>({
+          pull(controller) { controller.enqueue(new Uint8Array(256 * 1024)); },
+          cancel() { cancelled = true; },
+        }));
+        await expect(ensureAccessToken({
+          db, session, keyring: KEYRING, contract: APP_CONTRACT, installationId,
+          instanceKey: "default", config: APP_CONFIG,
+          secrets: { clientSecret: "secret-abc" }, boundFetch,
+        })).rejects.toMatchObject({ code: "CONNECTOR_OAUTH_FAILED" });
+        expect(cancelled).toBe(true);
+        expect((await readSecrets(db, session, KEYRING, installationId))[PLATFORM_OAUTH_FIELD]).toBeUndefined();
+      });
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
     "mints a token on first use rather than demanding authorization",
     async () => {
       await withMigratedDb(async (db) => {

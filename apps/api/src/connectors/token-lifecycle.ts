@@ -188,6 +188,24 @@ export function oauthExpiresIn(value: unknown): number | undefined {
     ? seconds : undefined;
 }
 
+/** Bound provider-controlled bytes before parsing token responses for any grant. */
+export async function readOAuthTokenResponse(response: Response): Promise<{
+  access_token?: unknown;
+  refresh_token?: unknown;
+  expires_in?: unknown;
+}> {
+  try {
+    const value: unknown = JSON.parse(await readBoundedResponse(response, 1024 * 1024));
+    if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error();
+    return value as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown };
+  } catch {
+    throw new OAuthTokenLifecycleError(
+      "OAUTH_FAILED",
+      "The provider token endpoint returned an invalid response.",
+    );
+  }
+}
+
 /** Refresh one token set without reading a provider error body. */
 export async function refreshOAuthTokenSet(input: {
   tokenUrl: string;
@@ -224,19 +242,7 @@ export async function refreshOAuthTokenSet(input: {
         : "The provider token endpoint could not refresh the connection.",
     );
   }
-  let payload: {
-    access_token?: unknown;
-    refresh_token?: unknown;
-    expires_in?: unknown;
-  };
-  try {
-    payload = (JSON.parse(await readBoundedResponse(response, 1024 * 1024))) as typeof payload;
-  } catch {
-    throw new OAuthTokenLifecycleError(
-      "OAUTH_FAILED",
-      "The provider token endpoint returned an invalid response.",
-    );
-  }
+  const payload = await readOAuthTokenResponse(response);
   if (
     typeof payload.access_token !== "string" ||
     payload.access_token.length === 0

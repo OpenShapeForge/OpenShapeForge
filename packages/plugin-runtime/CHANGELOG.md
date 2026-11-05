@@ -8,6 +8,16 @@
   collection's child that is not extensible itself, by child entity, for
   `rollup.of` to follow: `RuntimeExtensionRegistryManifest.childRelations` and
   `RuntimeExtensionRegistry.childRelations(entity)`. Metadata only.
+- **`RuntimeOperationDefinition.nativeMcpTool`**, for a provider Operation that
+  is one tool of an external MCP server. It carries the exact tool name, the
+  owning Connection and the upstream title, output schema, annotations and
+  metadata; a successful Operation answers an MCP `CallToolResult` as `data`.
+  Core binds execution to that Connection and refuses a definition that claims
+  more than `RUNTIME_NATIVE_MCP_EFFECTS` or any idempotency. `list` and `get`
+  must not reach the upstream server. Exports `RuntimeNativeMcpTool`,
+  `RuntimeNativeMcpToolResult`, `RUNTIME_NATIVE_MCP_EFFECTS`,
+  `RUNTIME_NATIVE_MCP_OUTPUT`, `nativeMcpToolProblem` and
+  `parseNativeMcpToolResult`.
 - **Extension registry types.** `RuntimeExtensibleEntity`,
   `RuntimeExtensionRegistryManifest`, `RuntimeExtensionRegistry` and
   `RuntimeExtensionIndexColumn` describe the manifest's `extensionRegistry`

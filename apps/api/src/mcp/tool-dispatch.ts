@@ -119,7 +119,12 @@ export async function directToolCall(
   };
   for (const section of SECTIONS) {
     const outcome = await section(scoped);
-    if (outcome !== undefined) return retainConfigurationAppResult(outcome, call.session, call.db);
+    if (outcome === undefined) continue;
+    // An upstream server's `_meta` is its own: it neither sets this session's
+    // pending configuration nor receives it.
+    return call.current?.runtimeOperation?.nativeMcpTool
+      ? outcome
+      : retainConfigurationAppResult(outcome, call.session, call.db);
   }
   // The entity section answers every name it is reached with.
   throw new Error(`Tool "${call.name}" was not dispatched.`);

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, it } from "bun:test";
-import { createOAuthMetadataFetch } from "../native-oauth-transport.js";
+import { createOAuthMetadataFetch, createOAuthRegistrationFetch } from "../native-oauth-transport.js";
 
 describe("OAuth metadata egress", () => {
   it("uses a pinned public address, the Adapter allowlist, no credentials and no redirects", async () => {
@@ -25,5 +25,14 @@ describe("OAuth metadata egress", () => {
     await expect(createOAuthMetadataFetch(options)({ url: "https://auth.example.com/.well-known", maxResponseBytes: 10 })).rejects.toMatchObject({ code: "EGRESS_DENIED" });
     await expect(createOAuthMetadataFetch({ ...options, owner: undefined })({ url: "https://auth.example.com/.well-known", maxResponseBytes: 10 })).rejects.toMatchObject({ code: "EGRESS_OWNER_REQUIRED" });
     await expect(createOAuthMetadataFetch({ ...options, resolve: async () => ["93.184.216.34"] })({ url: "https://auth.example.com/.well-known", maxResponseBytes: 3 })).rejects.toMatchObject({ code: "PROVIDER_RESPONSE_TOO_LARGE" });
+  });
+  it("sends registration once over the same bounded pinned route", async () => {
+    const requests: any[] = [];
+    const register = createOAuthRegistrationFetch({ owner: { pinsResolvedAddresses: true, fetch: async (request: any) => { requests.push(request); return Response.json({ client_id: "public-client" }); } } as any,
+      allowlist: ["auth.example.com"], tenantId: "tenant", actorId: "person", provider: "provider", resolve: async () => ["93.184.216.34"] });
+    expect(await register({ url: "https://auth.example.com/register", body: '{"token_endpoint_auth_method":"none"}', maxResponseBytes: 1024 })).toMatchObject({ status: 200 });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].init.method).toBe("POST");
+    expect(requests[0].resolvedAddresses).toEqual(["93.184.216.34"]);
   });
 });

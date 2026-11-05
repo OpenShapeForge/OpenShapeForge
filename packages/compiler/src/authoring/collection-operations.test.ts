@@ -247,6 +247,30 @@ test("fails closed on unsupported ownership, sorting, actions and child guard co
   expect(() => compile(fixture((owner) => { delete owner.operations!.update!.concurrency; }))).toThrow("updatedAt");
 });
 
+test("a remove may ask an acknowledgement, which every projection then carries", () => {
+  const removable = (mode: "none" | "acknowledgement") => fixture((owner) => {
+    owner.operations!.removeChild = { ...native("remove"), confirmation: { mode } };
+  });
+  const remove = compile(removable("acknowledgement")).find((operation) => operation.id === "Owner.removeChild")!;
+  expect(remove.confirmation).toEqual({ mode: "acknowledgement" });
+  // Optional in the schema: leaving it out is the runtime's CONFIRMATION_REQUIRED, not a 400.
+  expect(remove.inputSchema.properties).toHaveProperty("confirmed");
+  expect(remove.inputSchema.required).toEqual(["id", "expectedVersion", "childId"]);
+  expect(remove.inputSchema.additionalProperties).toBe(false);
+  expect(compile(removable("none")).find((operation) => operation.id === "Owner.removeChild")!.inputSchema.properties).not.toHaveProperty("confirmed");
+});
+
+test("insert, move and update stay unconfirmed, and remove never takes a challenge", () => {
+  const challenge = { mode: "challenge", challenge: { kind: "type-current-field", field: "body", issuedBy: "server",
+    bindTo: ["subject", "tenant", "operation", "target.id", "target.version"], expiresAfter: "PT5M", singleUse: true } } as const;
+  for (const [key, confirmation] of [["insertChild", { mode: "acknowledgement" }], ["moveChild", { mode: "acknowledgement" }]] as const)
+    expect(() => fixture((owner) => { owner.operations![key]!.confirmation = confirmation; })).toThrow("remove may ask an acknowledgement");
+  expect(() => fixture((owner) => {
+    owner.operations!.updateChild = { ...native("insert"), implementation: { type: "collection", action: "update", field: "children" }, confirmation: { mode: "acknowledgement" } } as never;
+  })).toThrow("remove may ask an acknowledgement");
+  expect(() => fixture((owner) => { owner.operations!.removeChild = { ...native("remove"), confirmation: challenge } as never; })).toThrow("remove may ask an acknowledgement");
+});
+
 test("authoring schema accepts identityless baseEntity false and object semantic catalog metadata", () => {
   const document = entity("Example", [{ key: "label", osfType: "string" }]);
   expect(() => authoringValidator().validate(document, "/authoring/entities/core/example.yaml")).not.toThrow();

@@ -983,7 +983,10 @@ its parent. The step of a rollup's `of` follows the same rules: an authored
 relation's foreign key refuses the delete while a child points at the target, a
 tenant reference does what its `onDelete` says, and a child it clears recomputes
 its parent. An owned child that its collection Operation removes is deleted under
-the same rules.
+the same rules. A `remove` may declare `confirmation: { mode: acknowledgement }`:
+the caller then repeats the request with `confirmed: true`, as for a delete.
+`insert`, `move` and `update` declare `none`, and no collection Operation takes a
+challenge.
 
 A handwritten manifest can give a foreign key `ON DELETE SET NULL` or `CASCADE`.
 The database then changes or deletes the referring records itself, and none of

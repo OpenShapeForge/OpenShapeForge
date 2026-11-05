@@ -23,7 +23,9 @@ export function nativeCollectionBinding(operation: OperationContract): Readonly<
       operation.concurrency?.version?.mode !== "required" || operation.concurrency.version.field !== "updatedAt" ||
       (operation.concurrency.editLease && (operation.concurrency.editLease.mode !== "required" ||
         typeof operation.concurrency.editLease.expiresAfterInactivity !== "string")) ||
-      operation.confirmation?.mode !== "none" || operation.idempotency.mode !== "none") {
+      // The canonical runtime demands the acknowledgement before it takes a lease or a lock.
+      !(operation.confirmation?.mode === "none" || (operation.confirmation?.mode === "acknowledgement" && binding.action === "remove")) ||
+      operation.idempotency.mode !== "none") {
     throw new Error(`Canonical collection Operation ${operation.key} has an unsupported or incomplete binding.`);
   }
   return Object.freeze({ entityName: binding.entityName, field: binding.field, action: binding.action });

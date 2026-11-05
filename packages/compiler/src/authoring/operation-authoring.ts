@@ -9,6 +9,7 @@ import type { CoreEntity, EntityOperationDefinition } from "./types.js";
 import { fieldCardinality } from "./compiler/helpers.js";
 import { operationAction } from "./entity-model.js";
 import { assertOperationControls } from "./operation-controls.js";
+import { collectionConfirmationSupported } from "./collection-operations.js";
 
 export type OperationAuthoringContext = {
   entity: CoreEntity;
@@ -53,10 +54,10 @@ export function assertOperationAuthoring(
     if (["input", "output", "target", "auth", "tenancy", "errors", "interaction", "prerequisites"].some((key) => Reflect.get(operation, key) !== undefined)) {
       throw new Error(`${origin} ${operationKey}: collection schemas, target, auth and tenancy are compiler-derived; custom controls are unsupported.`);
     }
-    if (operation.effects.data !== "write" || operation.effects.external !== "none" || operation.confirmation.mode !== "none" ||
+    if (operation.effects.data !== "write" || operation.effects.external !== "none" || !collectionConfirmationSupported(implementation.action, operation.confirmation) ||
       operation.reliability.idempotency.mode !== "none" || Object.keys(operation.reliability.idempotency).some((key) => key !== "mode") ||
       (operation.concurrency && (operation.concurrency.editLease || operation.concurrency.version?.mode !== "required" || operation.concurrency.version.field !== "updatedAt"))) {
-      throw new Error(`${origin} ${operationKey}: collection Operations require write/no external, idempotency none, confirmation none and required updatedAt without leases.`);
+      throw new Error(`${origin} ${operationKey}: collection Operations require write/no external, idempotency none, confirmation none (remove may ask an acknowledgement) and required updatedAt without leases.`);
     }
     return;
   }

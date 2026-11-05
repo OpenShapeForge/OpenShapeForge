@@ -21,7 +21,9 @@
  *   - The definition names the Connection the tool belongs to. Core binds the
  *     execution to it, so `resolveConnectionValues` inside `execute` refuses
  *     any other row, and that call is where the caller's ownership is decided.
- *     A provider has no other way to credentials.
+ *     This binding covers core's credential resolver; providers must also use
+ *     core's grant-bound egress and must not maintain a separate credential or
+ *     transport path that bypasses it.
  *   - `effects` and `reliability` say what core can actually know about an
  *     unverified upstream tool: it may write, and retrying it is not safe.
  *     Upstream annotations are the server's own hints; they are projected

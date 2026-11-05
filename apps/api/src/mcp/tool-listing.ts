@@ -12,7 +12,7 @@ import {
 import { GENERIC_DESCRIBE_TOOL_NAME } from "@openshapeforge/operations";
 import type { Tool } from "@modelcontextprotocol/server";
 import { deriveToolName, derivedHelperAvailable } from "./derived-tools.js";
-import { coreOwnsStaticToolName } from "./session-projection.js";
+import { coreOwnsStaticToolName, coreStaticToolNames } from "./session-projection.js";
 import { ARTIFACT_UPLOAD_APP_URI } from "./artifact-upload.js";
 import { productName } from "../config/product-name.js";
 import { EDIT_LEASE_TOOL_NAMES, editLeaseToolsForOperationIds } from "./edit-lease-tools.js";
@@ -37,6 +37,29 @@ import { publicOriginIsHttps, supportsMcpApp } from "./handoff-config.js";
 import { primeSessionExtensions } from "./extension-schemas.js";
 import type { ServerScope } from "./server-scope.js";
 import type { ListedTool } from "./session-surface.js";
+
+/**
+ * Discovered names never take a core or authored name, listed to this session
+ * or not, and two that collide name neither: which account a name reaches is
+ * not something list order may decide. Everything else keeps the boot-state
+ * error `assertUniqueToolNames` raises, because only this data is discovered.
+ */
+function withoutCollidingNativeTools(
+  tools: ListedTool[],
+  projection: ServerScope["operationToolProjection"],
+): ListedTool[] {
+  if (!tools.some((entry) => entry.runtimeOperation?.nativeMcpTool)) return tools;
+  const coreNames = new Set(coreStaticToolNames(projection));
+  const claims = new Map<string, number>();
+  for (const { tool } of tools) claims.set(tool.name, (claims.get(tool.name) ?? 0) + 1);
+  return tools.filter(({ runtimeOperation, tool }) => {
+    if (!runtimeOperation?.nativeMcpTool) return true;
+    if (claims.get(tool.name) === 1 && !coreNames.has(tool.name)) return true;
+    console.warn(`[operation-provider] Native tool name ${JSON.stringify(tool.name)} collides and is not offered.`);
+    return false;
+  });
+}
+
 /**
  * The tool list of one session and the registration of `tools/list`: the
  * core tools in their fixed order, the row-derived and connector tools, the
@@ -218,7 +241,7 @@ export function createToolListing(scope: ServerScope) {
       projectionContext(),
     );
     await assertModuleToolNamesAvailable(projectedModuleTools);
-    const sourced: ListedTool[] = [
+    const sourced = withoutCollidingNativeTools([
       ...coreTools.map((tool) => ({ tool, source: sourceOf(tool.name) })),
       ...runtimeOperationTools.map(({ definition, tool }) => ({
         tool,
@@ -226,7 +249,7 @@ export function createToolListing(scope: ServerScope) {
         runtimeOperation: definition,
       })),
       ...projectedModuleTools,
-    ];
+    ], operationToolProjection);
     assertUniqueToolNames(sourced);
     const decorated = decorateMcpTools(
       sourced,
@@ -245,7 +268,11 @@ export function createToolListing(scope: ServerScope) {
     const covered = searchableCoveredToolNames(scope, definitions);
     const ids = new Set(definitions.map((definition) => definition.id));
     for (const entry of available) {
-      if (entry.runtimeOperation && ids.has(entry.runtimeOperation.id)) covered.add(entry.tool.name);
+      // A native tool is offered as itself; only the fixed catalog of governed
+      // Operations collapses into the search pair.
+      if (entry.runtimeOperation && !entry.runtimeOperation.nativeMcpTool && ids.has(entry.runtimeOperation.id)) {
+        covered.add(entry.tool.name);
+      }
     }
     // Exact schemas ride on the search tool's operationId lookup,
     // including dedicated entities, so osf_describe adds nothing here.

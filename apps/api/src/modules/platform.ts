@@ -30,6 +30,7 @@ import type {
   RuntimeOperationRequest,
   RuntimeHostOperationRequest,
 } from "@openshapeforge/plugin-runtime";
+import { nativeMcpToolProblem } from "@openshapeforge/plugin-runtime";
 import {
   executeEntityOperation,
   entityOperationAdmitsPrincipal,
@@ -52,6 +53,7 @@ import type {
 } from "./contract.js";
 import { parseModuleToolExecutionOptions } from "./invocation-sources.js";
 import { resolveConnectionValues } from "./connection-secrets.js";
+import { requestConnectionHttp } from "./connection-http-egress.js";
 import { connectSocket } from "./socket-egress.js";
 import { classifyDatabaseError } from "../db/database-refusals.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "./field-schemas.js";
@@ -82,8 +84,26 @@ import {
 import { CapabilityGrantNotFoundError } from "../operations/grants-operations.js";
 import { actingRelationId } from "../db/acting-relation.js";
 import { generatedCrudTools, matchNativeCrudTool } from "../mcp/native-crud-tool.js";
-import { parseDeclarativeConnectionCapabilities } from "../mcp/connection-expectation.js";
+import {
+  type ConnectionControls,
+  EXPECTED_CONNECTION_UNAVAILABLE_CODE,
+  inheritConnectionControls,
+  isExpectedConnectionUnavailable,
+  parseConnectionExpectation,
+  parseDeclarativeConnectionCapabilities,
+  withConnectionControls,
+} from "../mcp/connection-expectation.js";
 import { withAdmittedRecordAction } from "../operations/entity/record-action-admission.js";
+
+/** How long a provider may take to read stored definitions; it never calls upstream. */
+const PROVIDER_READ_TIMEOUT_MS = 5_000;
+
+/** Discovered definitions are data: a bad one is left out, and says why in the log. */
+function nativeMcpToolUsable(definition: RuntimeOperationDefinition): boolean {
+  const problem = nativeMcpToolProblem(definition);
+  if (problem) console.warn(`[operation-provider] Native tool ${JSON.stringify(definition.id)} refused: ${problem}.`);
+  return problem === undefined;
+}
 
 function contractPreconditionFailure(
   definition: RuntimeOperationDefinition,
@@ -427,6 +447,7 @@ export class ModulePlatformRuntime {
    */
   #declarativeServiceCapabilities: RuntimeDeclarativeServiceCapabilities | undefined;
   #hostOperationExecutor: ModuleHostOperationExecutor | undefined;
+  #egressOwner: RuntimeModule["egress"] | undefined;
 
   readonly #capabilityOperations: ReadonlySet<string> | undefined;
 
@@ -749,6 +770,7 @@ export class ModulePlatformRuntime {
             db: this.#db,
             session,
             selector: parseConnectionSelector(selector),
+            egressOwner: this.#egressOwner,
           });
         },
       },
@@ -768,6 +790,14 @@ export class ModulePlatformRuntime {
             ...(typeof request.timeoutMs === "number"
               ? { timeoutMs: request.timeoutMs }
               : {}),
+          });
+        },
+        request: async (session, grant, request) => {
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error("Module egress requires a live verified session.");
+          }
+          return requestConnectionHttp(session, grant, request, {
+            owner: this.#egressOwner,
           });
         },
       },
@@ -906,8 +936,8 @@ export class ModulePlatformRuntime {
       );
     }
     const definitions = (await Promise.all(
-      [...this.#operationProviders.values()].map((provider) =>
-        provider.list(session)
+      [...this.#operationProviders.values()].map(async (provider) =>
+        await this.#readProvider(provider, "list", () => provider.list(session)) ?? []
       ),
     )).flat();
     const reservedIds = new Set([
@@ -915,7 +945,9 @@ export class ModulePlatformRuntime {
       ...this.#staticOperations.keys(),
     ]);
     const byId = new Map<string, RuntimeOperationDefinition>();
-    for (const definition of definitions) {
+    // Authored definitions first: a duplicate among them stays the boot-state
+    // error it always was, and discovered data can only lose to them.
+    for (const definition of definitions.filter((candidate) => !candidate.nativeMcpTool)) {
       if (
         !definition.id ||
         reservedIds.has(definition.id) ||
@@ -927,9 +959,111 @@ export class ModulePlatformRuntime {
       }
       byId.set(definition.id, definition);
     }
+    for (const definition of definitions.filter((candidate) => candidate.nativeMcpTool)) {
+      const unusable = !definition.id || reservedIds.has(definition.id) || byId.has(definition.id);
+      if (unusable || !nativeMcpToolUsable(definition)) {
+        if (unusable) console.warn(`[operation-provider] A native tool id is empty or duplicated: ${JSON.stringify(definition.id)}`);
+        continue;
+      }
+      byId.set(definition.id, definition);
+    }
     return [...byId.values()].sort((left, right) =>
       left.id.localeCompare(right.id)
     );
+  }
+
+  /** Refresh only explicitly isolated providers; a slow external server cannot block the session. */
+  async refreshExternalCatalogs(session: TrustedSessionContext): Promise<boolean> {
+    const providers = [...this.#operationProviders.values()].filter(
+      provider => provider.failureIsolation === "external-catalog" && provider.refresh,
+    );
+    if (!providers.length) return false;
+    return this.withActiveOperationSession(session, async live => {
+      const results = await Promise.all(providers.map(async provider => {
+        const controller = new AbortController();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          return await Promise.race([
+            provider.refresh!(live, controller.signal),
+            new Promise<boolean>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(false); }, 15_000); }),
+          ]);
+        } catch {
+          return false;
+        } finally { clearTimeout(timer); }
+      }));
+      const changed = results.some(Boolean);
+      if (changed) this.#notify(live.tenantId, "tools");
+      return changed;
+    });
+  }
+
+  /**
+   * Isolate a declared external catalog when it fails or stalls. Existing
+   * providers propagate their errors unchanged. The isolated catalog is
+   * retried on the next read and must expose its own connection health.
+   */
+  async #readProvider<T>(
+    provider: RuntimeOperationProvider,
+    read: "list" | "get",
+    work: () => Promise<T>,
+  ): Promise<T | undefined> {
+    // Existing providers retain their fail-closed error semantics. Only an
+    // explicitly isolated external catalog can disappear independently.
+    if (provider.failureIsolation !== "external-catalog") return work();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        work(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`no answer within ${PROVIDER_READ_TIMEOUT_MS}ms`)),
+            PROVIDER_READ_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } catch (error) {
+      console.warn(
+        `[operation-provider] ${provider.id} ${read} failed:`,
+        error instanceof Error ? error.message : String(error),
+      );
+      return undefined;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** One provider's definition of an Operation, under the same isolation as its listing. */
+  async #providerDefinition(
+    provider: RuntimeOperationProvider,
+    session: TrustedSessionContext,
+    operationId: string,
+  ): Promise<RuntimeOperationDefinition | undefined> {
+    const definition = await this.#readProvider(provider, "get", () => provider.get(session, operationId));
+    return definition && (!definition.nativeMcpTool || nativeMcpToolUsable(definition)) ? definition : undefined;
+  }
+
+  /** A native tool runs inside its Connection's bound invocation, or not at all. */
+  async #executeBoundToConnection(
+    session: TrustedSessionContext,
+    connectionId: string,
+    execute: () => Promise<RuntimeOperationExecutionResult>,
+  ): Promise<RuntimeOperationExecutionResult> {
+    let controls: ConnectionControls;
+    try {
+      controls = inheritConnectionControls(
+        parseConnectionExpectation({ connectionId, appliesTo: "every-provider-call" }, session),
+      );
+    } catch (error) {
+      if (!isExpectedConnectionUnavailable(error)) throw error;
+      return {
+        error: {
+          code: EXPECTED_CONNECTION_UNAVAILABLE_CODE,
+          message: (error as Error).message,
+          retryable: false,
+        },
+      };
+    }
+    return withConnectionControls(controls, execute);
   }
 
   /** Activate only providers from modules that loaded and initialised cleanly. */
@@ -1022,7 +1156,7 @@ export class ModulePlatformRuntime {
     const matches = (
       await Promise.all(
         [...this.#operationProviders.values()].map((provider) =>
-          provider.get(session, operationId),
+          this.#providerDefinition(provider, session, operationId),
         ),
       )
     ).filter((definition): definition is RuntimeOperationDefinition =>
@@ -1137,7 +1271,7 @@ export class ModulePlatformRuntime {
       definition: RuntimeOperationDefinition;
     }> = [];
     for (const provider of this.#operationProviders.values()) {
-      const definition = await provider.get(session, request.operation.id);
+      const definition = await this.#providerDefinition(provider, session, request.operation.id);
       if (definition) matches.push({ provider, definition });
     }
     if (matches.length === 0) {
@@ -1275,7 +1409,9 @@ export class ModulePlatformRuntime {
         if (operationError) return { error: operationError };
         throw error;
       }
-      return execute();
+      // A native tool is never keyed (nativeMcpToolProblem), so this is its only route.
+      const native = match.definition.nativeMcpTool;
+      return native ? this.#executeBoundToConnection(session, native.connectionId, execute) : execute();
     }
     // Keyed: decide early for a friendly refusal before the receipt work,
     // and again below once the claim is committed.
@@ -1310,6 +1446,10 @@ export class ModulePlatformRuntime {
       if (operationError) return { error: operationError };
       throw error;
     }
+  }
+
+  registerEgressOwner(owner: RuntimeModule["egress"] | undefined): void {
+    this.#egressOwner = owner;
   }
 
   registerHostOperationExecutor(executor: ModuleHostOperationExecutor): void {

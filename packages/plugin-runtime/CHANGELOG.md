@@ -4,6 +4,21 @@
 
 ### Added
 
+- **`platform.egress.request`**, one finite HTTPS POST on the `egressGrant` of a
+  resolved Connection, in the session that resolved it. The host enforces the
+  Adapter's allow-list, public addresses and a bounded JSON or SSE body. It
+  sends once, never follows a redirect and does not stream notifications.
+  Exports `RuntimeConnectionHttpRequest` and `RuntimeConnectionHttpResponse`.
+- **`RuntimeOperationDefinition.nativeMcpTool`**, for a provider Operation that
+  is one tool of an external MCP server. It carries the exact tool name, the
+  owning Connection and the upstream title, output schema, annotations and
+  metadata; a successful Operation answers an MCP `CallToolResult` as `data`.
+  Core binds execution to that Connection and refuses a definition that claims
+  more than `RUNTIME_NATIVE_MCP_EFFECTS` or any idempotency. `list` and `get`
+  must not reach the upstream server. Exports `RuntimeNativeMcpTool`,
+  `RuntimeNativeMcpToolResult`, `RUNTIME_NATIVE_MCP_EFFECTS`,
+  `RUNTIME_NATIVE_MCP_OUTPUT`, `nativeMcpToolProblem` and
+  `parseNativeMcpToolResult`.
 - **Extension registry types.** `RuntimeExtensibleEntity`,
   `RuntimeExtensionRegistryManifest`, `RuntimeExtensionRegistry` and
   `RuntimeExtensionIndexColumn` describe the manifest's `extensionRegistry`

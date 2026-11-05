@@ -482,6 +482,7 @@ export function createApiApp(options: {
     const egressDiagnostic = missingEgressOwnerDiagnostic(process.env.NODE_ENV, egressOwner);
     if (egressDiagnostic) app.log.warn({ code: egressDiagnostic.code }, egressDiagnostic.message);
     if (modulePlatform) {
+      modulePlatform.registerEgressOwner(egressOwner);
       modulePlatform.registerDeclarativeServiceExecutor(
         createRuntimeDeclarativeServiceExecutor({
           db: databaseRuntime!.db,

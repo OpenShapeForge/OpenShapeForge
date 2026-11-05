@@ -893,6 +893,30 @@ tables:
       - name: connector_oauth_states_expires_idx
         columns: [expires_at]
 
+  # Public MCP OAuth client registrations and verified server metadata. Tokens
+  # and client secrets remain in the existing encrypted Connection store.
+  - schema: platform
+    name: mcp_oauth_clients
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: provider_table, type: text, required: true }
+      - { name: provider_id, type: uuid, required: true }
+      - { name: provider_updated_at, type: timestamptz, required: true }
+      - { name: resource, type: text, required: true }
+      - { name: issuer, type: text, required: true }
+      - { name: metadata, type: jsonb, required: true }
+      - { name: client_id, type: text, required: true }
+      - { name: redirect_uri, type: text, required: true }
+      - { name: updated_at, type: timestamptz, required: true, default: now() }
+    indexes:
+      - name: mcp_oauth_clients_binding_uidx
+        columns: [tenant_id, provider_table, provider_id, resource, redirect_uri]
+        unique: true
+
   # Short-lived, encrypted continuation state for MCP OAuth and secure-form
   # handoffs. The public token is hashed; the payload is encrypted at rest.
   - schema: platform

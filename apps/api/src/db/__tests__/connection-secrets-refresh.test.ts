@@ -28,12 +28,14 @@ import { withDbSession } from "../session.js";
 import { decryptSecret, encryptSecret, keyringFromEnv } from "../../connectors/secrets.js";
 import { connectionTokenSecretScope } from "../../connectors/secrets.js";
 import { resolveConnectionValues } from "../../modules/connection-secrets.js";
+import { requestConnectionHttp } from "../../modules/connection-http-egress.js";
 import {
   inheritConnectionControls,
   parseConnectionExpectation,
   withConnectionControls,
 } from "../../mcp/connection-expectation.js";
 import { mintInvocationSourceReference } from "../../modules/source-reference.js";
+import { savePublicMcpOAuthClient } from "../../mcp/native-oauth-client-store.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -68,6 +70,8 @@ const ARTIFACTS = {
           { name: "transport", sourceField: "transport" },
           { name: "egress_hosts", sourceField: "egressHosts" },
           { name: "configuration_fields", sourceField: "configurationFields" },
+          { name: "discovery", sourceField: "discovery" },
+          { name: "updated_at", sourceField: "updatedAt" },
         ],
       },
       {
@@ -122,7 +126,7 @@ beforeAll(async () => {
         id uuid primary key, tenant_id uuid not null, key text not null,
         name text not null, description text not null, transport text not null,
         discovery text not null, auth jsonb not null,
-        configuration_fields jsonb not null, egress_hosts jsonb not null
+        configuration_fields jsonb not null, egress_hosts jsonb not null, updated_at timestamptz not null default now()
       );
       create table integration.connections (
         id uuid primary key, tenant_id uuid not null, key text not null,
@@ -137,9 +141,9 @@ beforeAll(async () => {
         using (app.bypass_rls() or tenant_id = app.current_tenant());
       create policy connections_owner_scope on integration.connections
         using (app.bypass_rls() or (tenant_id = app.current_tenant()
-          and (owner_user_id is null or owner_user_id = app.current_user_id())))
+          and (owner_user_id is null or owner_user_id = app.current_relation_id())))
         with check (app.bypass_rls() or (tenant_id = app.current_tenant()
-          and (owner_user_id is null or owner_user_id = app.current_user_id())));
+          and (owner_user_id is null or owner_user_id = app.current_relation_id())));
       grant usage on schema integration to ${sql.id(APP_ROLE)};
       grant select on integration.adapters to ${sql.id(APP_ROLE)};
       grant select, update on integration.connections to ${sql.id(APP_ROLE)}
@@ -156,10 +160,12 @@ afterAll(async () => {
   await control?.close();
 });
 
-function sessionFor(tenantId: string, userId: string): TrustedSessionContext {
+/** A person's login and the Relation it acts as are different ids, as in production. */
+function sessionFor(tenantId: string, userId: string, relationId?: string): TrustedSessionContext {
   return {
     tenantId,
     userId,
+    ...(relationId ? { relationId } : {}),
     roles: [],
     groups: [],
     scope: "self",
@@ -173,12 +179,22 @@ type Seed = {
   adapterKey: string;
   personalId: string;
   userId: string;
+  relationId: string;
 };
 
 /** An OAuth Adapter, the organization's client credentials, and one person's expired sign-in. */
-async function seedOAuthMailbox(admin: Kysely<DB>, expiresAt: Date): Promise<Seed> {
+async function seedOAuthMailbox(
+  admin: Kysely<DB>,
+  expiresAt: Date,
+  overrides: {
+    auth?: Record<string, unknown>;
+    support?: Record<string, unknown>;
+    personal?: Record<string, unknown>;
+  } = {},
+): Promise<Seed> {
   const tenantId = randomUUID();
   const userId = randomUUID();
+  const relationId = randomUUID();
   const adapterId = randomUUID();
   const adapterKey = `mailbox-oauth-${adapterId.slice(0, 8)}`;
   const personalId = randomUUID();
@@ -187,13 +203,14 @@ async function seedOAuthMailbox(admin: Kysely<DB>, expiresAt: Date): Promise<See
     profile: "oauth2AuthorizationCode",
     connectionScope: "user",
     tokenUrl: TOKEN_URL,
+    ...overrides.auth,
   };
   const fields = [
     { key: "clientId", classification: { sensitivity: "internal" } },
     { key: "clientSecret", classification: { sensitivity: "confidential" } },
     { key: "address", classification: { sensitivity: "internal" } },
   ];
-  const support = {
+  const support = overrides.support ?? {
     clientId: "client",
     clientSecret: encryptSecret(KEYRING, ELICIT_SCOPE, "clientSecret", "secret"),
   };
@@ -202,6 +219,7 @@ async function seedOAuthMailbox(admin: Kysely<DB>, expiresAt: Date): Promise<See
     accessToken: encryptSecret(KEYRING, TOKEN_SCOPE, "accessToken", "access-1"),
     refreshToken: encryptSecret(KEYRING, TOKEN_SCOPE, "refreshToken", "refresh-1"),
     accessTokenExpiresAt: expiresAt.toISOString(),
+    ...overrides.personal,
   };
   await admin.connection().execute(async (conn) => {
     await sql`
@@ -213,10 +231,34 @@ async function seedOAuthMailbox(admin: Kysely<DB>, expiresAt: Date): Promise<See
     await sql`
       insert into integration.connections (id, tenant_id, key, name, adapter_id, configuration_values, owner_user_id)
       values (${randomUUID()}::uuid, ${tenantId}::uuid, 'oauth-client', 'OAuth client', ${adapterId}::uuid, ${JSON.stringify(support)}::text::jsonb, null),
-             (${personalId}::uuid, ${tenantId}::uuid, 'mailbox-anna', 'Mailbox van Anna', ${adapterId}::uuid, ${JSON.stringify(personal)}::text::jsonb, ${userId}::uuid)
+             (${personalId}::uuid, ${tenantId}::uuid, 'mailbox-anna', 'Mailbox van Anna', ${adapterId}::uuid, ${JSON.stringify(personal)}::text::jsonb, ${relationId}::uuid)
     `.execute(conn);
   });
-  return { tenantId, adapterId, adapterKey, personalId, userId };
+  return { tenantId, adapterId, adapterKey, personalId, userId, relationId };
+}
+
+/** An Adapter of one scope with an organization row and one person's own row. */
+async function seedScopedAdapter(admin: Kysely<DB>, connectionScope: "user" | "tenant" | "both") {
+  const tenantId = randomUUID();
+  const userId = randomUUID();
+  const relationId = randomUUID();
+  const adapterId = randomUUID();
+  const adapterKey = `scoped-${adapterId.slice(0, 8)}`;
+  const organizationId = randomUUID();
+  const personalId = randomUUID();
+  await admin.connection().execute(async (conn) => {
+    await sql`
+      insert into integration.adapters (id, tenant_id, key, name, description, transport, discovery, auth, configuration_fields, egress_hosts)
+      values (${adapterId}::uuid, ${tenantId}::uuid, ${adapterKey}, 'Scoped', 'test', 'socket', 'none',
+              ${JSON.stringify({ scheme: "none", connectionScope })}::text::jsonb, '[]'::jsonb, '[]'::jsonb)
+    `.execute(conn);
+    await sql`
+      insert into integration.connections (id, tenant_id, key, name, adapter_id, configuration_values, owner_user_id)
+      values (${organizationId}::uuid, ${tenantId}::uuid, 'organization', 'Organization', ${adapterId}::uuid, '{"account":"organization"}'::jsonb, null),
+             (${personalId}::uuid, ${tenantId}::uuid, 'personal', 'Personal', ${adapterId}::uuid, '{"account":"personal"}'::jsonb, ${relationId}::uuid)
+    `.execute(conn);
+  });
+  return { tenantId, userId, relationId, adapterKey, organizationId, personalId };
 }
 
 function tokenEndpoint(reply: () => Response): { fetchImpl: typeof fetch; exchanges: () => number } {
@@ -230,12 +272,194 @@ function tokenEndpoint(reply: () => Response): { fetchImpl: typeof fetch; exchan
   };
 }
 
+describe("a public client's token stays bound to its resource", () => {
+  const RESOURCE = "https://auth.provider.example/mcp";
+  const PUBLIC_AUTH = { clientAuthentication: "none", resource: RESOURCE };
+  const PUBLIC_SUPPORT = { clientId: "public-client" };
+  const BOUND = { oauthBinding: { resource: RESOURCE, issuer: null } };
+
+  test("renews an automatically registered MCP client without an organization credentials row", async () => {
+    const previousOrigin = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+    process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = "https://app.example";
+    try {
+      const issuer = "https://auth.provider.example";
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), {
+        auth: PUBLIC_AUTH, personal: { oauthBinding: { resource: RESOURCE, issuer } },
+      });
+      const changed = await admin.connection().execute(conn => sql<{ updated_at: string }>`
+        update integration.adapters set discovery = 'mcp', updated_at = '2026-01-01T00:00:00.123456Z'::timestamptz where id = ${seed.adapterId}::uuid returning updated_at::text
+      `.execute(conn));
+      const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
+      await admin.connection().execute(conn => sql`delete from integration.connections where adapter_id = ${seed.adapterId}::uuid and owner_user_id is null`.execute(conn));
+      const redirectUri = "https://app.example/api/entity-oauth/callback";
+      await savePublicMcpOAuthClient(app, { session, providerTable: ELICIT_SCOPE, providerId: seed.adapterId,
+        providerUpdatedAt: changed.rows[0]!.updated_at, resource: RESOURCE, redirectUri }, {
+        resource: RESOURCE, issuer, clientId: "auto-client", redirectUri, metadata: {
+          serverMetadata: { issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: TOKEN_URL,
+            token_endpoint_auth_methods_supported: ["none"], grant_types_supported: ["authorization_code", "refresh_token"], code_challenge_methods_supported: ["S256"] },
+          protectedResourceMetadata: { resource: RESOURCE, authorization_servers: [issuer] },
+        },
+      });
+      const endpoint = recordingEndpoint(() => Response.json({ access_token: "access-auto", expires_in: 3600 }));
+      const result = await resolve(seed, endpoint.fetchImpl);
+      if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+      expect(result.connection.values.accessToken).toBe("access-auto");
+      expect(endpoint.forms[0]?.get("client_id")).toBe("auto-client");
+      expect(endpoint.forms[0]?.has("client_secret")).toBe(false);
+      expect(endpoint.forms[0]?.get("resource")).toBe(RESOURCE);
+    } finally {
+      if (previousOrigin === undefined) delete process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
+      else process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = previousOrigin;
+    }
+  }, TEST_TIMEOUT);
+
+  function recordingEndpoint(reply: () => Response) {
+    const forms: URLSearchParams[] = [];
+    const fetchImpl = (async (_input: string | URL | Request, init?: RequestInit) => {
+      forms.push(new URLSearchParams(String(init?.body ?? "")));
+      return reply();
+    }) as unknown as typeof fetch;
+    return { forms, fetchImpl };
+  }
+
+  const resolve = (seed: Seed, fetchImpl: typeof fetch) =>
+    resolveConnectionValues({
+      db: app,
+      session: sessionFor(seed.tenantId, seed.userId, seed.relationId),
+      selector: { adapterKey: seed.adapterKey },
+      keyring: KEYRING,
+      fetchImpl,
+      artifacts: ARTIFACTS,
+    });
+
+  async function storedValues(seed: Seed): Promise<Record<string, unknown>> {
+    const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
+    const result = await withDbSession(app, session, (trx) =>
+      sql<{ values: Record<string, unknown> }>`
+        select configuration_values as values from integration.connections
+         where id = ${seed.personalId}::uuid
+      `.execute(trx),
+    );
+    return result.rows[0]!.values;
+  }
+
+  test(
+    "refreshes without a secret, repeats the resource and records a stated scope",
+    async () => {
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), {
+        auth: PUBLIC_AUTH,
+        support: PUBLIC_SUPPORT,
+        personal: { ...BOUND, grantedScopes: ["mail.read", "mail.write"] },
+      });
+      const endpoint = recordingEndpoint(() =>
+        Response.json({ access_token: "access-2", refresh_token: "refresh-2", expires_in: 3600, scope: "mail.read" }),
+      );
+      const result = await resolve(seed, endpoint.fetchImpl);
+      if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+      expect(result.connection.values.accessToken).toBe("access-2");
+      const form = endpoint.forms[0]!;
+      expect(form.get("client_id")).toBe("public-client");
+      expect(form.has("client_secret")).toBe(false);
+      expect(form.get("resource")).toBe(RESOURCE);
+      const stored = await storedValues(seed);
+      expect(stored.grantedScopes).toEqual(["mail.read"]);
+      expect(stored.oauthBinding).toEqual(BOUND.oauthBinding);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test("does not forward a refresh token to a redirected endpoint", async () => {
+    const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), {
+      auth: PUBLIC_AUTH, support: PUBLIC_SUPPORT, personal: BOUND,
+    });
+    const endpoint = recordingEndpoint(() => new Response(null, { status: 307, headers: { location: "https://auth.provider.example/other" } }));
+    expect(await resolve(seed, endpoint.fetchImpl)).toMatchObject({ ok: false, code: "TOKEN_REFRESH_FAILED" });
+    expect(endpoint.forms).toHaveLength(1);
+    const values = await storedValues(seed);
+    expect(decryptSecret(KEYRING, TOKEN_SCOPE, "refreshToken", values.refreshToken as never)).toBe("refresh-1");
+  }, TEST_TIMEOUT);
+
+  test(
+    "refuses a still-live token minted for another resource, spending nothing",
+    async () => {
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() + 3_600_000), {
+        auth: PUBLIC_AUTH,
+        support: PUBLIC_SUPPORT,
+        personal: { oauthBinding: { resource: "https://auth.provider.example/rest", issuer: null } },
+      });
+      const endpoint = recordingEndpoint(() => Response.json({ access_token: "must-not-be-issued" }));
+      const result = await resolve(seed, endpoint.fetchImpl);
+      expect(result).toMatchObject({ ok: false, code: "REAUTHORIZATION_REQUIRED" });
+      expect(endpoint.forms).toHaveLength(0);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "keeps the stored tokens when a refresh answers for another audience",
+    async () => {
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), {
+        auth: PUBLIC_AUTH,
+        support: PUBLIC_SUPPORT,
+        personal: BOUND,
+      });
+      const endpoint = recordingEndpoint(() =>
+        Response.json({ access_token: "wrong-audience", expires_in: 3600, aud: "https://auth.provider.example/rest" }),
+      );
+      const result = await resolve(seed, endpoint.fetchImpl);
+      expect(result).toMatchObject({ ok: false, code: "REAUTHORIZATION_REQUIRED" });
+      const stored = await storedValues(seed);
+      expect(decryptSecret(KEYRING, TOKEN_SCOPE, "accessToken", stored.accessToken as never)).toBe("access-1");
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "goes to consent without calling a server whose metadata has no refresh grant",
+    async () => {
+      const issuer = "https://auth.provider.example";
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), {
+        auth: {
+          ...PUBLIC_AUTH,
+          serverMetadata: {
+            issuer,
+            authorization_endpoint: `${issuer}/authorize`,
+            token_endpoint: TOKEN_URL,
+            grant_types_supported: ["authorization_code"],
+            code_challenge_methods_supported: ["S256"],
+            token_endpoint_auth_methods_supported: ["none"],
+          },
+        },
+        support: PUBLIC_SUPPORT,
+        personal: { oauthBinding: { resource: RESOURCE, issuer } },
+      });
+      const endpoint = recordingEndpoint(() => Response.json({ access_token: "must-not-be-issued" }));
+      const result = await resolve(seed, endpoint.fetchImpl);
+      expect(result).toMatchObject({ ok: false, code: "REAUTHORIZATION_REQUIRED" });
+      expect(endpoint.forms).toHaveLength(0);
+    },
+    TEST_TIMEOUT,
+  );
+
+  test(
+    "still asks a confidential Adapter for its secret",
+    async () => {
+      const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), { support: PUBLIC_SUPPORT });
+      const endpoint = recordingEndpoint(() => Response.json({ access_token: "must-not-be-issued" }));
+      const result = await resolve(seed, endpoint.fetchImpl);
+      expect(result).toMatchObject({ ok: false, code: "TOKEN_REFRESH_FAILED" });
+      expect(endpoint.forms).toHaveLength(0);
+    },
+    TEST_TIMEOUT,
+  );
+});
+
 describe("resolveConnectionValues hands a module a live OAuth token", () => {
   test(
     "renews an expired token before handing it over, once, and persists the rotation",
     async () => {
         const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-        const session = sessionFor(seed.tenantId, seed.userId);
+        const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
         const endpoint = tokenEndpoint(() =>
           Response.json({ access_token: "access-2", refresh_token: "refresh-2", expires_in: 3600 }),
         );
@@ -294,7 +518,7 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
     "says REAUTHORIZATION_REQUIRED when the provider refuses the renewal, and hands nothing over",
     async () => {
         const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-        const session = sessionFor(seed.tenantId, seed.userId);
+        const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
         const endpoint = tokenEndpoint(() => new Response("invalid_grant", { status: 400 }));
         const refused = await resolveConnectionValues({
           db: app,
@@ -330,7 +554,7 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
         });
         const fresh = await resolveConnectionValues({
           db: app,
-          session: sessionFor(live.tenantId, live.userId),
+          session: sessionFor(live.tenantId, live.userId, live.relationId),
           selector: { adapterKey: live.adapterKey },
           keyring: KEYRING,
           fetchImpl: endpoint.fetchImpl,
@@ -344,6 +568,7 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
         // even the field named accessToken has nothing to renew.
         const tenantId = randomUUID();
         const userId = randomUUID();
+        const relationId = randomUUID();
         const adapterId = randomUUID();
         const adapterKey = `mailbox-password-${adapterId.slice(0, 8)}`;
         await admin.connection().execute(async (conn) => {
@@ -358,12 +583,12 @@ describe("resolveConnectionValues hands a module a live OAuth token", () => {
             insert into integration.connections (id, tenant_id, key, name, adapter_id, configuration_values, owner_user_id)
             values (${randomUUID()}::uuid, ${tenantId}::uuid, 'mailbox-bram', 'Mailbox van Bram', ${adapterId}::uuid,
                     ${JSON.stringify({ address: "bram@example.test", [field]: encryptSecret(KEYRING, ELICIT_SCOPE, field, "app-pw") })}::text::jsonb,
-                    ${userId}::uuid)
+                    ${relationId}::uuid)
           `.execute(conn);
         });
         const password = await resolveConnectionValues({
           db: app,
-          session: sessionFor(tenantId, userId),
+          session: sessionFor(tenantId, userId, relationId),
           selector: { adapterKey },
           keyring: KEYRING,
           fetchImpl: endpoint.fetchImpl,
@@ -396,8 +621,8 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
         {
           sourceReference: mintInvocationSourceReference({
             tenantId,
-            actorId: null,
-            scope: "tenant",
+            actorId: userId,
+            scope: "personal",
             connectionTable: CONNECTION_TABLE,
             connectionId,
           }),
@@ -423,7 +648,7 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
       // with the provider. The refusal has to land first: a Service bound to
       // one account must not renew, let alone use, another account's sign-in.
       const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-      const session = sessionFor(seed.tenantId, seed.userId);
+      const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
       const endpoint = tokenEndpoint(() => {
         throw new Error("no token endpoint may be called");
       });
@@ -457,7 +682,7 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
       // invocation bound to the Connection its caller read must not open a
       // replacement here, one call before any reference exists.
       const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-      const session = sessionFor(seed.tenantId, seed.userId);
+      const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
       const endpoint = tokenEndpoint(() => {
         throw new Error("no token endpoint may be called");
       });
@@ -489,7 +714,7 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
       // id, and what comes back is the core-minted reference every later page
       // presents.
       const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-      const session = sessionFor(seed.tenantId, seed.userId);
+      const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
       const endpoint = tokenEndpoint(() =>
         Response.json({ access_token: "access-3", refresh_token: "refresh-3", expires_in: 3600 }),
       );
@@ -511,8 +736,8 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
         outcome: "one-connection",
         sourceReference: mintInvocationSourceReference({
           tenantId: seed.tenantId,
-          actorId: null,
-          scope: "tenant",
+          actorId: seed.userId,
+          scope: "personal",
           connectionTable: CONNECTION_TABLE,
           connectionId: seed.personalId,
         }),
@@ -525,7 +750,7 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
     "hands over the Connection the invocation is bound to, and records it",
     async () => {
       const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-      const session = sessionFor(seed.tenantId, seed.userId);
+      const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
       const endpoint = tokenEndpoint(() =>
         Response.json({ access_token: "access-2", refresh_token: "refresh-2", expires_in: 3600 }),
       );
@@ -549,8 +774,8 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
         outcome: "one-connection",
         sourceReference: mintInvocationSourceReference({
           tenantId: seed.tenantId,
-          actorId: null,
-          scope: "tenant",
+          actorId: seed.userId,
+          scope: "personal",
           connectionTable: CONNECTION_TABLE,
           connectionId: seed.personalId,
         }),
@@ -577,7 +802,7 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
         for (const owned of [seed, second]) {
           const resolved = await resolveConnectionValues({
             db: app,
-            session: sessionFor(owned.tenantId, owned.userId),
+            session: sessionFor(owned.tenantId, owned.userId, owned.relationId),
             selector: { connectionId: owned.personalId },
             keyring: KEYRING,
             fetchImpl: endpoint.fetchImpl,
@@ -595,9 +820,106 @@ describe("resolveConnectionValues inside a bound declarative invocation", () => 
   );
 });
 
+/**
+ * A personal Connection is owned by the Relation a login acts as, which is
+ * what the OAuth callback writes and row-level security compares. Every session
+ * here has a userId that differs from its relationId, so a comparison against
+ * the login cannot pass by accident.
+ */
+describe("resolveConnectionValues compares ownership with the acting Relation", () => {
+  const resolve = (
+    session: TrustedSessionContext,
+    selector: { adapterKey: string } | { connectionId: string },
+  ) => resolveConnectionValues({ db: app, session, selector, keyring: KEYRING, artifacts: ARTIFACTS });
+
+  test("hands a person their own Connection, by Adapter and by id", async () => {
+    const seed = await seedScopedAdapter(admin, "user");
+    const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
+    expect(seed.userId).not.toBe(seed.relationId);
+    for (const selector of [{ adapterKey: seed.adapterKey }, { connectionId: seed.personalId }]) {
+      const resolved = await resolve(session, selector);
+      if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+      expect(resolved.connection.connectionId).toBe(seed.personalId);
+      expect(resolved.connection.connectionScope).toBe("user");
+      expect(resolved.connection.ownerUserId).toBe(seed.relationId);
+    }
+  }, TEST_TIMEOUT);
+
+  test("refuses another person, an unlinked login and a login named like the owner", async () => {
+    const seed = await seedScopedAdapter(admin, "user");
+    const sessions = [
+      sessionFor(seed.tenantId, randomUUID(), randomUUID()),
+      sessionFor(seed.tenantId, seed.userId),
+      // The owner's id as a login id is not the owner's Relation.
+      sessionFor(seed.tenantId, seed.relationId, randomUUID()),
+    ];
+    for (const session of sessions) {
+      for (const selector of [{ adapterKey: seed.adapterKey }, { connectionId: seed.personalId }]) {
+        expect(await resolve(session, selector)).toMatchObject({ ok: false, code: "NOT_FOUND" });
+      }
+    }
+  }, TEST_TIMEOUT);
+
+  test("refuses the same login and Relation in another tenant", async () => {
+    const seed = await seedScopedAdapter(admin, "user");
+    const elsewhere = sessionFor(randomUUID(), seed.userId, seed.relationId);
+    for (const selector of [{ adapterKey: seed.adapterKey }, { connectionId: seed.personalId }]) {
+      expect(await resolve(elsewhere, selector)).toMatchObject({ ok: false, code: "NOT_FOUND" });
+    }
+  }, TEST_TIMEOUT);
+
+  test("keeps an organization Connection open to members, linked or not", async () => {
+    const seed = await seedScopedAdapter(admin, "tenant");
+    for (const session of [
+      sessionFor(seed.tenantId, randomUUID(), randomUUID()),
+      sessionFor(seed.tenantId, randomUUID()),
+    ]) {
+      const resolved = await resolve(session, { connectionId: seed.organizationId });
+      if (!resolved.ok) throw new Error(`${resolved.code}: ${resolved.message}`);
+      expect(resolved.connection.connectionScope).toBe("tenant");
+      expect(resolved.connection.ownerUserId).toBeNull();
+    }
+    // Its owner may reach a personal row on a tenant Adapter; nobody else can.
+    const owner = await resolve(sessionFor(seed.tenantId, seed.userId, seed.relationId), { connectionId: seed.personalId });
+    expect(owner).toMatchObject({ ok: true, connection: { connectionScope: "tenant" } });
+    expect(await resolve(sessionFor(seed.tenantId, randomUUID(), randomUUID()), { connectionId: seed.personalId }))
+      .toMatchObject({ ok: false, code: "NOT_FOUND" });
+  }, TEST_TIMEOUT);
+
+  test("reads a `both` Adapter as the row it selected", async () => {
+    const seed = await seedScopedAdapter(admin, "both");
+    const owner = await resolve(sessionFor(seed.tenantId, seed.userId, seed.relationId), { adapterKey: seed.adapterKey });
+    expect(owner).toMatchObject({ ok: true, connection: { connectionId: seed.personalId, connectionScope: "user" } });
+    const colleague = await resolve(sessionFor(seed.tenantId, randomUUID(), randomUUID()), { adapterKey: seed.adapterKey });
+    expect(colleague).toMatchObject({ ok: true, connection: { connectionId: seed.organizationId, connectionScope: "tenant" } });
+  }, TEST_TIMEOUT);
+});
+
+test("a real personal Connection mints a single-use HTTP grant and revocation stops the next resolution", async () => {
+  const seed = await seedOAuthMailbox(admin, new Date(Date.now() + 3_600_000));
+  const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
+  const resolve = () => resolveConnectionValues({
+    db: app, session, selector: { connectionId: seed.personalId }, keyring: KEYRING, artifacts: ARTIFACTS,
+  });
+  const result = await resolve();
+  if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+  let calls = 0;
+  const dependencies = {
+    owner: { pinsResolvedAddresses: true as const, fetch: async () => { calls++; return Response.json({ ok: true }); } },
+    resolve: async () => ["1.1.1.1"],
+  };
+  const request = { url: "https://auth.provider.example/mcp", json: { jsonrpc: "2.0" } };
+  expect((await requestConnectionHttp(session, result.connection.egressGrant, request, dependencies)).status).toBe(200);
+  await expect(requestConnectionHttp(session, result.connection.egressGrant, request, dependencies))
+    .rejects.toMatchObject({ code: "EGRESS_DENIED" });
+  await sql`delete from integration.connections where id = ${seed.personalId}::uuid`.execute(admin);
+  expect(await resolve()).toMatchObject({ ok: false, code: "NOT_FOUND" });
+  expect(calls).toBe(1);
+}, TEST_TIMEOUT);
+
 test("transaction-scoped Connection resolution locks against rotation and avoids token refresh", async () => {
   const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));
-  const session = sessionFor(seed.tenantId, seed.userId);
+  const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
   const endpoint = tokenEndpoint(() => { throw new Error("unexpected refresh"); });
   await withDbSession(app, session, async (trx) => {
     const result = await resolveConnectionValues({ db: app, session,

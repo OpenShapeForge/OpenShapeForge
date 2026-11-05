@@ -22,6 +22,7 @@ import { connectionProblemError, type ConnectionProblem } from "./connection-gui
 import { isOrganizationAdministrator } from "./onboarding.js";
 import { catalog, entityForTable, type GeneratedTable } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
+import type { OAuthClientAuthentication } from "./entity-oauth-profile.js";
 import {
   ENTITY_CONFIGURATION_PATH,
   ENTITY_OAUTH_CALLBACK_PATH,
@@ -275,13 +276,15 @@ export function reauthorizationProblem(
 
 /**
  * The tenant-level connection's OAuth client credentials, decrypted. The
- * secret goes only into token-endpoint calls, never anywhere else.
+ * secret goes only into token-endpoint calls, never anywhere else. A public
+ * client has none: a secret stored on its row is left alone, never sent.
  */
 export function readClientCredentials(
   tenantConnection: Record<string, unknown> | undefined,
   valuesField: string,
   secretScope: string,
-): { clientId: string; clientSecret: string } {
+  clientAuthentication: OAuthClientAuthentication = "client_secret_post",
+): { clientId: string; clientSecret?: string } {
   const values = (tenantConnection?.[valuesField] ?? {}) as Record<
     string,
     unknown
@@ -295,24 +298,34 @@ export function readClientCredentials(
   // this reader treated the encrypted form as missing.
   const clientIdReadable =
     typeof rawClientId === "string" || looksLikeStoredSecret(rawClientId);
-  if (!clientIdReadable || !looksLikeStoredSecret(rawSecret) || !keyring) {
+  const publicClient = clientAuthentication === "none";
+  const needsKeyring = !publicClient || typeof rawClientId !== "string";
+  if (
+    !clientIdReadable ||
+    (!publicClient && !looksLikeStoredSecret(rawSecret)) ||
+    (needsKeyring && !keyring)
+  ) {
     throw new HttpError(
       400,
       "CONNECTION_MISSING",
-      "An administrator must first create the provider connection holding the OAuth " +
-        "client credentials (clientId and a confidential clientSecret).",
+      publicClient
+        ? "An administrator must first create the provider connection holding the OAuth clientId."
+        : "An administrator must first create the provider connection holding the OAuth " +
+            "client credentials (clientId and a confidential clientSecret).",
     );
   }
+  const clientId =
+    typeof rawClientId === "string"
+      ? rawClientId
+      : decryptSecret(keyring!, secretScope, "clientId", rawClientId as StoredSecret);
+  if (publicClient) return { clientId };
   return {
-    clientId:
-      typeof rawClientId === "string"
-        ? rawClientId
-        : decryptSecret(keyring, secretScope, "clientId", rawClientId),
+    clientId,
     clientSecret: decryptSecret(
-      keyring,
+      keyring!,
       secretScope,
       "clientSecret",
-      rawSecret,
+      rawSecret as StoredSecret,
     ),
   };
 }

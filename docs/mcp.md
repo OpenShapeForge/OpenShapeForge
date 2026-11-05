@@ -118,6 +118,49 @@ this UX order:
 Secret and confidential values post directly to the runtime and are encrypted
 at rest with `OPENSHAPEFORGE_ELICITED_SECRET_KEYS`.
 
+### OAuth clients and protected resources
+
+An `oauth2AuthorizationCode` Adapter that declares nothing further is a
+confidential client: its organization Connection holds `clientId` and
+`clientSecret`, sent with `client_secret_post`. These optional `auth` keys
+(`apps/api/src/mcp/entity-oauth-profile.ts`) describe a public client or an
+audience-restricted resource, such as a remote MCP server:
+
+Integrations exposes `clientAuthentication` and `resource` as typed Adapter
+fields. The metadata fields and expected audiences below are core runtime
+contracts only; they are not yet exposed by that authoring schema or a
+discovery flow.
+
+| Key | Meaning |
+| --- | --- |
+| `clientAuthentication` | `client_secret_post` (default) or `none`. `none` is a public client: the Connection needs only `clientId`, and no secret reaches the token endpoint. Other methods are refused, including ones the server advertises. |
+| `resource` | The RFC 8707 resource indicator, sent on the authorization request, the code exchange and every refresh. Its host must be in the Adapter's egress hosts. |
+| `expectedAudiences` | `aud` values that also identify `resource`, for a server whose audience differs from the resource URI. |
+| `serverMetadata` | An RFC 8414 document, as verified by the Adapter's author. It must name the declared endpoints and offer the client authentication, the `authorization_code` grant, the `code` response type and PKCE `S256`. Its `issuer` is compared with the callback's RFC 9207 `iss`, which is required when the document sets `authorization_response_iss_parameter_supported`. A server without the `refresh_token` grant goes back to consent instead of refreshing. |
+| `protectedResourceMetadata` | An RFC 9728 document. It must name `resource` and list the `serverMetadata` issuer. |
+
+The metadata is configuration: core does not fetch it, and nothing in a request
+or callback can name a URL it will use. Declaring `clientAuthentication: none`,
+`resource` or `serverMetadata` also opts into stricter handling:
+
+- An explicit partial `scope` stores nothing on a step-up. When scope is
+  omitted, RFC 6749 §5.1 means it is identical to the requested scope; core
+  records that effective scope with `rfc6749-implicit` provenance.
+- A token response whose `resource` or `aud`, or whose JWT `aud` claim, names
+  another audience is refused. An opaque token without those fields is accepted;
+  the resource server remains the final judge.
+- Connection values record the `oauthBinding` (resource and issuer). A row minted
+  for anything else needs a fresh consent, even while its token is live. Tokens
+  stay on the Connection of their own Adapter, so a REST grant and an MCP grant
+  of one provider are separate rows.
+
+The scope provenance distinguishes a provider-stated grant from the implicit
+grant specified by RFC 6749 when the scope field is omitted.
+
+Discovery from a live server, dynamic client registration and Client ID
+Metadata Documents are not implemented. They need a governed write of the
+verified metadata or registered client onto the Adapter and its Connection.
+
 ### Discovery
 
 The MCP specification makes authorization OPTIONAL and conformance a SHOULD for
@@ -310,6 +353,38 @@ or `limit`. Covered
 CRUD, authored operation and provider tools no longer consume individual slots
 in `tools/list`; tools without a canonical replacement remain advertised.
 The dedicated projection continues to offer its authored tool names.
+
+A runtime provider may mark an Operation as one tool of an external MCP server
+(`RuntimeOperationDefinition.nativeMcpTool`, contract in
+`packages/plugin-runtime/src/native-mcp-tool.ts`). Such a tool stays listed in
+both projections, per session, under the exact name the provider gives it, with
+its input schema, title, description, output schema, annotations and metadata
+unchanged. An upstream UI reference (`_meta.ui`) is the one thing removed:
+upstream resources are not served here, so it could only resolve to one of this
+server's own apps. The output schema gains the usual failure branch. A call
+answers the upstream `CallToolResult` itself, including `isError` and `_meta`;
+through `osf_execute_operation` the same result is the envelope's `data`. New
+tools need no approval: the next `tools/list` has them.
+
+This changes the projection, not the authority. A call resolves the tool again
+under the live session and runs through canonical execution: provider `get`,
+execution policies, module interceptors. Upstream decides what the person may do
+there; OSF enforces the verified tenant and person and the Connection. Every
+native tool names its Connection, and core binds the execution to it when the
+provider obtains credentials through `resolveConnectionValues`; row-level
+security and the Adapter's connection scope decide ownership. This contract
+does not itself verify the provider's discovery filtering or prevent a provider
+from using some other transport. Upstream annotations are hints that
+are passed on and decide nothing. Core accepts only the effects it can know, a
+possible external write with no idempotency, so no native tool is retried on an
+assumption. A provider's `list` and `get` answer from stored discovery and never
+call upstream. A provider explicitly marked `failureIsolation: "external-catalog"`
+that fails, or does not answer within five seconds, loses its own Operations for
+that read and nothing else; an invalid definition or
+a colliding name loses only that tool, and two tools claiming a name lose it both.
+
+Core ships the contract only. Discovery, the snapshot store and the upstream MCP
+client belong to a plugin, and no such integration ships here.
 
 Entity execution uses the existing MCP adapter, preserving private configuration,
 confirmation, edit leases and definition-change notifications. A private

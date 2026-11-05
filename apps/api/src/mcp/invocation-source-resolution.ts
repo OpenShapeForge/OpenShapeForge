@@ -14,6 +14,7 @@ import {
 import { bindingSelected } from "./declarative-execution.js";
 import { loadOrderedBindings } from "./execution-bindings.js";
 import { connectionScopesCovered } from "./entity-oauth.js";
+import { oauthClientProfile, tokenBindingCurrent } from "./entity-oauth-profile.js";
 import { accessTokenNeedsRefresh, refreshLeewaySeconds } from "./connection-token-refresh.js";
 import { connectionProblemMessage } from "./connection-guidance.js";
 import { isOrganizationAdministrator } from "./onboarding.js";
@@ -267,6 +268,13 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
               providerAuth?.profile === "oauth2AuthorizationCode" &&
               !connectionValues?.accessToken
             ) {
+              continue;
+            }
+            if (
+              providerAuth?.profile === "oauth2AuthorizationCode" &&
+              !tokenBindingCurrent(oauthClientProfile(providerAuth), connectionValues)
+            ) {
+              needsReauthorization = true;
               continue;
             }
             if (

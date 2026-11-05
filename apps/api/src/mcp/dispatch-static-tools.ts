@@ -30,6 +30,8 @@ import {
   failed,
   ok,
   operationToolResult,
+  nativeOperationEnvelopeResult,
+  nativeOperationToolResult,
   runtimeOperationToolResult,
 } from "./tool-results.js";
 import type { CallToolResult } from "@modelcontextprotocol/server";
@@ -241,7 +243,9 @@ export async function staticToolCall(
         },
         signal ? { signal } : {},
       );
-      return runtimeOperationToolResult(result);
+      return definition.nativeMcpTool
+        ? nativeOperationEnvelopeResult(result)
+        : runtimeOperationToolResult(result);
     } catch (error) {
       return failed(error);
     }
@@ -267,7 +271,9 @@ export async function staticToolCall(
       },
       signal ? { signal } : {},
     );
-    return runtimeOperationToolResult(result);
+    return definition.nativeMcpTool
+      ? nativeOperationToolResult(result)
+      : runtimeOperationToolResult(result);
   }
   // A derived-tool helper's public name may also be a plugin Operation's
   // MCP name: that Operation is implemented by the helper through the

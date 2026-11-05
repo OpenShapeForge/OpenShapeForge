@@ -8,6 +8,19 @@ Deployments that intentionally make no outbound calls may run without an owner.
 Configure exactly one owner and its host allowlists before enabling outbound
 integrations. This requirement does not relax any TLS, DNS or host checks.
 
+`platform.egress.request(session, grant, request)` sends one HTTPS POST for a
+Connection resolved through `platform.secrets`. The destination must pass that
+Connection's Adapter allow-list, and the `egressGrant` works once, only in the
+session that resolved it, for at most five minutes. Core refuses a host with any non-public
+address and passes the checked addresses to the owner as `resolvedAddresses`.
+Every environment requires an owner that declares
+`pinsResolvedAddresses: true`, a promise to dial only those addresses while
+keeping the hostname for TLS; otherwise the call fails with 503
+`EGRESS_OWNER_REQUIRED`. The request is never
+retried and a redirect is a refusal. The body is buffered up to a budget: an SSE
+response is returned once the upstream closes it, and one still open at the
+deadline fails, so this does not carry streaming notifications.
+
 Canonical read handlers can call `platform.readProgress?.report(session, {data, message})`
 to publish provisional evidence while the original request is still running.
 The ordinary final result remains mandatory and unchanged. Core accepts only

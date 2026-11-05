@@ -31,6 +31,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import { createHandoff, readHandoff } from "./handoff-store.js";
 import { keyringFromEnv } from "../connectors/secrets.js";
+import { grantedScopesOf, type OAuthClientProfile } from "./entity-oauth-profile.js";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -59,7 +60,10 @@ export type PendingAuthorization = {
   connectionValuesField: string;
   tokenUrl: string;
   clientId: string;
-  clientSecret: string;
+  /** Absent for a public client: only client_id reaches the token endpoint. */
+  clientSecret?: string;
+  /** Absent on a handoff minted before profiles: the legacy confidential flow. */
+  profile?: OAuthClientProfile;
   egress: string[];
   scopes: string[];
   redirectUri: string;
@@ -157,6 +161,8 @@ export async function mintAuthorization(
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
+  if (input.profile?.resource)
+    url.searchParams.set("resource", input.profile.resource);
 
   return {
     authorizationUrl: url.toString(),
@@ -185,8 +191,7 @@ export function scopesCovered(
 /** Service-account JWTs are minted with the adapter's configured scopes;
  * authorization-code connections instead prove scopes from their consent. */
 export function connectionScopesCovered(required: readonly string[], auth: Record<string, unknown> | null | undefined, values: unknown): boolean {
-  const connection = values && typeof values === "object" && !Array.isArray(values) ? values as Record<string, unknown> : undefined;
-  return scopesCovered(required, auth?.profile === "googleServiceAccount" ? auth.scopes : connection?.grantedScopes);
+  return scopesCovered(required, auth?.profile === "googleServiceAccount" ? auth.scopes : grantedScopesOf(auth, values));
 }
 
 /** Single use: reading a state consumes it, valid or not. */

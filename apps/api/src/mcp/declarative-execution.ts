@@ -116,6 +116,7 @@ export async function fetchWithAllowedRedirects(
   fetchImpl: typeof fetch = fetch,
   egress?: ModuleEgressDispatch,
   protocolPolicy: "http-or-https" | "https-only" = "http-or-https",
+  redirectPolicy: "follow" | "deny" = "follow",
 ): Promise<Response> {
   let url = new URL(input);
   let requestInit = { ...init };
@@ -142,6 +143,10 @@ export async function fetchWithAllowedRedirects(
     });
     requestInit.signal?.throwIfAborted();
     if (response.status < 300 || response.status >= 400) return response;
+    if (redirectPolicy === "deny") {
+      void response.body?.cancel().catch(() => {});
+      throw new HttpError(403, "EGRESS_DENIED", "The OAuth endpoint returned a redirect, which is not followed.");
+    }
     const location = response.headers.get("location");
     if (!location) return response;
     if (hop === MAX_REDIRECTS) {

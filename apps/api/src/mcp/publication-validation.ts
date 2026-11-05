@@ -69,7 +69,9 @@ export function requiredAuthValueKeys(auth: unknown): string[] {
   // here would demand a value no person could have — found live as
   // "Missing required values: access_token" on a correct setup.
   if (config.profile === "oauth2AuthorizationCode") {
-    return ["clientId", "clientSecret"];
+    return config.clientAuthentication === "none"
+      ? ["clientId"]
+      : ["clientId", "clientSecret"];
   }
   const keys = new Set<string>();
   switch (config.scheme) {

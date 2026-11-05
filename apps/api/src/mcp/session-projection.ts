@@ -257,6 +257,13 @@ export function coreOwnsStaticToolName(
   name: string,
   projection: OperationToolProjection = generatedOperationToolProjection,
 ): boolean {
+  return coreStaticToolNames(projection).includes(name);
+}
+
+/** Every name core keeps for itself, listed to this session or not. */
+export function coreStaticToolNames(
+  projection: OperationToolProjection = generatedOperationToolProjection,
+): string[] {
   return [
     ...catalog.tools.map((tool) => tool.name),
     ...catalog.operationTools.map((tool) => tool.name),
@@ -276,5 +283,5 @@ export function coreOwnsStaticToolName(
     ...(projection.mode === "searchable"
       ? [projection.search, projection.execute, `${projection.execute}_secure`]
       : []),
-  ].includes(name);
+  ];
 }

@@ -319,10 +319,6 @@ laptop.
 The passkey browser flow (`keycloak-passkey-browser-flow.ts`) offers direct
 passkey sign-in and also supports identifying the person by e-mail:
 
-The generated profile was exercised on Keycloak 26.7.3 with a virtual
-resident passkey and a local mail sink: passkey sign-in, e-mail-link sign-in,
-and rejection of an incorrect e-mail code all completed as expected.
-
 ```
 passkey-browser
   auth-cookie                         ALTERNATIVE
@@ -330,8 +326,12 @@ passkey-browser
   passkey-browser-organization        ALTERNATIVE
     conditional-user-configured + organization     (identity-first, by domain)
   passkey-browser-forms               ALTERNATIVE
-    auth-username-form + conditional email sign-in
+    auth-username-form + conditional-credential + required email sign-in
 ```
+
+The generated profile was exercised on Keycloak 26.7.3 with a virtual
+resident passkey and a local mail sink: passkey sign-in, e-mail-link sign-in,
+and rejection of an incorrect e-mail code all completed as expected.
 
 An address on a domain of an Organization whose linked provider has
 `kc.org.broker.redirect.mode.email-matches` set is redirected to that provider;

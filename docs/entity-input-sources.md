@@ -67,6 +67,10 @@ fields:
 The source must be a stored field-definition collection on the versioned
 entity. Values are validated against the selected version, with normal record
 authorization; republishing the source does not change an existing block.
+For an authorized version read, the definitions are returned as
+`frozenFieldDefinitions.<field>` alongside the version record. A host uses
+that field to present inputs for the referenced version; it is omitted when the
+source record or its definitions are not readable.
 
 This describes the authored-content and file-binding path, not parity for
 managed document types or destructive document governance.

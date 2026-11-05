@@ -194,6 +194,15 @@ describe("passkey profile — a person always chooses passkey or e-mail", () => 
     ]);
     expect(p.authenticatorConfig).toContainEqual({ alias: "passkey-not-yet-used", config: { credentials: "webauthn-passwordless", included: "false" } });
   });
+
+  it("exports every authenticator configuration referenced by the browser flows", () => {
+    const aliases = new Set(p.authenticatorConfig.map((config) => config.alias));
+    for (const flow of p.authenticationFlows) {
+      for (const execution of flow.authenticationExecutions) {
+        if (execution.authenticatorConfig) expect(aliases.has(execution.authenticatorConfig)).toBe(true);
+      }
+    }
+  });
 });
 
 describe("passkey profile — the WebAuthn policy is a decision, not a default", () => {

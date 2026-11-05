@@ -184,6 +184,12 @@ export function buildServer(
 
   const dispatchTool = createDispatchTool(scope, surface);
 
+  const refreshExternalCatalogs = () => {
+    if (modulePlatform) {
+      void modulePlatform.refreshExternalCatalogs(scope.moduleSession).catch(() => {});
+    }
+  };
+
   server.setRequestHandler('tools/call', async (request, ctx) => {
     // osf_describe and every CRUD call read this tenant's field definitions.
     await primeSessionExtensions(scope.db, scope.session);
@@ -205,12 +211,17 @@ export function buildServer(
           }});
         }, dispatch, ctx.mcpReq.signal)
       : await dispatch();
+    refreshExternalCatalogs();
     return outcome.result;
   });
 
   registerSessionExecutors(scope, dispatchTool);
 
   registerSessionWithPlatform(scope, surface, dispatchTool);
+
+  // Refresh in a separate active capability, never during tools/list. The
+  // existing snapshot stays usable if discovery fails or times out.
+  refreshExternalCatalogs();
 
   return server;
 }

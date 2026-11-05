@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: BUSL-1.1
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import type { FormDefault } from "@openshapeforge/interface-web";
+
+function isFormDefault(value: unknown): value is FormDefault {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isFormDefault);
+  if (typeof value !== "object") return false;
+  return Object.getPrototypeOf(value) === Object.prototype && Object.values(value).every(isFormDefault);
+}
 
 /** Presentation paths never remove inputs from the canonical Operation. */
-export function operationForm(form: { showOnlyGroupedFields?: boolean; defaults?: Record<string, unknown>; groups: Array<{ title: { en?: string; nl?: string }; fields: string[]; collapsed?: boolean }> } | undefined, schema: Readonly<Record<string, unknown>>, origin: string, controlFields: readonly (string | undefined)[] = []) {
-  if (!form) return undefined;
+export function operationForm(form: { showOnlyGroupedFields?: boolean; defaults?: Record<string, unknown>; groups: Array<{ title: { en?: string; nl?: string }; fields: string[]; collapsed?: boolean }> }, schema: Readonly<Record<string, unknown>>, origin: string, controlFields: readonly (string | undefined)[] = []) {
+  if (form.defaults && !Object.values(form.defaults).every(isFormDefault)) throw new Error(`${origin}: invalid form defaults.`);
   if (form.defaults && !form.showOnlyGroupedFields) throw new Error(`${origin}: form defaults require showOnlyGroupedFields.`);
   if (form.groups.some(group => !group.title.en && !group.title.nl)) throw new Error(`${origin}: form group requires an English or Dutch title.`);
   const used: string[] = [];
@@ -81,6 +90,10 @@ export function operationForm(form: { showOnlyGroupedFields?: boolean; defaults?
     };
     checkRequired(schema, form.defaults, "");
   }
-  return { ...(form.showOnlyGroupedFields ? { showOnlyGroupedFields: true } : {}), ...(form.defaults ? { defaults: form.defaults } : {}), groups };
+  const defaults: Record<string, FormDefault> | undefined = form.defaults && Object.fromEntries(Object.entries(form.defaults).map(([key, value]) => {
+    if (!isFormDefault(value)) throw new Error(`${origin}: invalid form defaults.`);
+    return [key, value];
+  }));
+  return { ...(form.showOnlyGroupedFields ? { showOnlyGroupedFields: true } : {}), ...(defaults ? { defaults } : {}), groups };
 }
 

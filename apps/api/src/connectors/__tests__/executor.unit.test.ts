@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { ConnectorContractBoundary } from "../contract-boundary.js";
 import {
   ConnectorExecutionError,
+  CONNECTOR_RESPONSE_MAX_BYTES,
   assertExecutable,
   createBoundFetch,
   hostAllowed,
@@ -243,6 +244,46 @@ describe("egress allowlist", () => {
     );
     await bound("https://api.example.com/objects");
     expect(reached).toBe("https://api.example.com/objects");
+  });
+
+  it("rejects an oversized declared response and cancels its body", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+    const bound = createBoundFetch(contract(), new AbortController().signal, async () =>
+      new Response(body, { headers: { "content-length": String(CONNECTOR_RESPONSE_MAX_BYTES + 1) } }),
+    );
+    await expect(bound("https://api.example.com/objects")).rejects.toThrow(/exceeds the supported size/);
+    expect(cancelled).toBe(true);
+  });
+
+  it("rejects and cancels oversized streamed responses even with a misleading length", async () => {
+    let cancelled = false;
+    let sent = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sent++;
+        controller.enqueue(new Uint8Array(1024 * 1024));
+      },
+      cancel() { cancelled = true; },
+    });
+    const bound = createBoundFetch(contract(), new AbortController().signal, async () =>
+      new Response(body, { headers: { "content-length": "1" } }),
+    );
+    const response = await bound("https://api.example.com/objects");
+    await expect(response.arrayBuffer()).rejects.toThrow(/exceeds the supported size/);
+    expect(cancelled).toBe(true);
+    expect(sent).toBeLessThanOrEqual(23);
+  });
+
+  it("accepts a response at the byte limit and preserves response metadata", async () => {
+    const body = new Uint8Array(CONNECTOR_RESPONSE_MAX_BYTES).fill(97);
+    const original = new Response(body, { status: 201, headers: { "content-type": "text/plain" } });
+    const bound = createBoundFetch(contract(), new AbortController().signal, async () => original);
+    const response = await bound("https://api.example.com/objects");
+    expect(response.status).toBe(201);
+    expect(response.headers.get("content-type")).toBe("text/plain");
+    expect(response.url).toBe(original.url);
+    expect((await response.arrayBuffer()).byteLength).toBe(CONNECTOR_RESPONSE_MAX_BYTES);
   });
 
   it("revalidates redirects and refuses an allowed-to-disallowed hop", async () => {

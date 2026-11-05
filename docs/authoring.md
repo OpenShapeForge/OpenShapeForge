@@ -1799,3 +1799,24 @@ fields, typed values and presentation configuration are not supported by event
 contracts yet. Event
 contract authoring does not enable connector event capabilities, establish
 runtime validation, subscriptions, storage, provider mappings or delivery.
+
+### Grouping a web Operation form
+
+A plugin-backed entity Operation may arrange its existing input fields under
+`interfaces.web.operations.<operation>.form.groups`. Each group has a localized
+`title` (English or Dutch), ordered dot-separated input `fields`, and optional `collapsed: true`.
+For example, `fields: [record.title, record.description]` groups two fields
+of the required `record` input. This is a web presentation: the Operation's
+input, authorization, validation, other interfaces and submission are unchanged.
+Fields not listed remain available by default. Set `showOnlyGroupedFields: true`
+to present only the grouped fields, and use `defaults` for values the operation
+still requires (for example, `{ version: { status: draft, label: "1" } }`).
+A value `{ from: uiLocale }` resolves to the active web interface language.
+Defaults are ordinary submitted inputs; they do not change the canonical contract
+or other interfaces. The compiler rejects invalid defaults and required hidden
+fields without a default; the runtime supplies operation control fields. The
+compiler also refuses unknown or overlapping paths, traversal into an optional
+object or choice, and a collapsed required field without a default. Compact forms
+cannot collapse groups or hide fields when the applicable schema uses conditional
+or composed requirements the compiler cannot verify. Generated entity CRUD uses
+the record view's create or update groups instead.

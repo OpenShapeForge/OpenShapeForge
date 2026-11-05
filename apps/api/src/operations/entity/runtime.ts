@@ -1,4 +1,5 @@
 import { assertCurrentAccountAuthority } from "../../accounts/account-current-authority.js";
+import { withFrozenFieldDefinitions } from "./frozen-field-definitions.js";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { classifyDatabaseError } from "../../db/database-refusals.js";
@@ -1234,10 +1235,11 @@ async function executeEntityOperationWithContext(
         };
       }
       case "get": {
-        const data = await getGeneratedEntity(db, session, {
+        const row = await getGeneratedEntity(db, session, {
           table: table.name,
           id: requireId(request.input),
         });
+        const data = row ? await withFrozenFieldDefinitions(db, session, table, row) : row;
         const unavailableByTarget = data
           ? await businessAndLeaseUnavailability(
               db,

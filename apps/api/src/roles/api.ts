@@ -241,7 +241,7 @@ export function createApiApp(options: {
     // mcp/handoff-store.ts) are `<tenant>.<handoff>.<secret>` — 117
     // characters — and the router's default of 100 answered them with 414
     // before the route ever ran (found live). Generous but bounded.
-    maxParamLength: 512,
+    routerOptions: { maxParamLength: 512 },
     // Short addresses: `https://app.example.test/acme/...`.
     //
     // One organization, one prefix, every surface underneath it —

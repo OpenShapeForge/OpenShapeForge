@@ -4,17 +4,17 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 522 packages.
+Regenerate with `bun run notices`. 527 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 399 |
+| MIT | 403 |
 | Apache-2.0 | 60 |
 | ISC | 31 |
 | BSD-3-Clause | 16 |
-| BlueOak-1.0.0 | 5 |
+| BlueOak-1.0.0 | 6 |
 | MPL-2.0 | 4 |
 | LGPL-3.0-or-later | 2 |
 | 0BSD | 1 |
@@ -66,12 +66,16 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — https://github.com/graphql-hive/envelop.git
 - Author: Dotan Simha <dotansimha@gmail.com>
 
-### @envelop/core@5.6.0
-- License: **MIT** — https://github.com/graphql-hive/graphql-yoga.git
+### @envelop/core@5.6.1
+- License: **MIT** — https://github.com/graphql-hive/graphql-yoga/tree/main/packages/envelop/core#readme
 - Author: Dotan Simha <dotansimha@gmail.com>
 
 ### @envelop/instrumentation@1.0.0
 - License: **MIT** — https://github.com/n1ru4l/envelop.git
+- Author: Valentin Cocaud <v.cocaud@gmail.com>
+
+### @envelop/instrumentation@1.0.1
+- License: **MIT** — https://github.com/graphql-hive/graphql-yoga/tree/main/packages/envelop/instrumentation#readme
 - Author: Valentin Cocaud <v.cocaud@gmail.com>
 
 ### @envelop/on-resolve@7.2.0
@@ -84,6 +88,10 @@ Regenerate with `bun run notices`. 522 packages.
 
 ### @envelop/types@5.2.1
 - License: **MIT** — https://github.com/n1ru4l/envelop.git
+- Author: Dotan Simha <dotansimha@gmail.com>
+
+### @envelop/types@5.2.2
+- License: **MIT** — https://github.com/graphql-hive/graphql-yoga/tree/main/packages/envelop/types#readme
 - Author: Dotan Simha <dotansimha@gmail.com>
 
 ### @escape.tech/graphql-armor-cost-limit@2.4.3
@@ -114,7 +122,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — https://github.com/fastify/ajv-compiler#readme
 - Author: Manuel Spigolon <behemoth89@gmail.com> (https://github.com/Eomm)
 
-### @fastify/busboy@3.2.0
+### @fastify/busboy@3.2.4
 - License: **MIT** — https://github.com/fastify/busboy#readme
 - Author: Brian White <mscdex@mscdex.net>
 
@@ -158,31 +166,27 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — https://floating-ui.com
 - Author: atomiks
 
-### @graphql-tools/executor@2.0.0
-- License: **MIT** — https://github.com/ardatan/graphql-tools.git
+### @graphql-tools/executor@2.1.0
+- License: **MIT** — git+https://github.com/ardatan/graphql-tools.git
 - Author: Saihajpreet Singh <saihajpreet.singh@gmail.com>
 
-### @graphql-tools/merge@9.2.2
-- License: **MIT** — ardatan/graphql-tools
+### @graphql-tools/merge@9.2.8
+- License: **MIT** — git+https://github.com/ardatan/graphql-tools.git
 - Author: Dotan Simha <dotansimha@gmail.com>
 
-### @graphql-tools/schema@10.0.38
-- License: **MIT** — ardatan/graphql-tools
+### @graphql-tools/schema@10.1.5
+- License: **MIT** — git+https://github.com/ardatan/graphql-tools.git
 
-### @graphql-tools/utils@11.2.2
-- License: **MIT** — ardatan/graphql-tools
-- Author: Dotan Simha <dotansimha@gmail.com>
-
-### @graphql-tools/utils@12.0.0
-- License: **MIT** — ardatan/graphql-tools
+### @graphql-tools/utils@12.1.0
+- License: **MIT** — git+https://github.com/ardatan/graphql-tools.git
 - Author: Dotan Simha <dotansimha@gmail.com>
 
 ### @graphql-typed-document-node/core@3.2.0
 - License: **MIT** — git@github.com:dotansimha/graphql-typed-document-node.git
 - Author: Dotan Simha <dotansimha@gmail.com>
 
-### @graphql-yoga/logger@2.0.1
-- License: **MIT** — https://github.com/dotansimha/graphql-yoga.git
+### @graphql-yoga/logger@2.0.2
+- License: **MIT** — https://github.com/graphql-hive/graphql-yoga/tree/main/packages/logger#readme
 
 ### @graphql-yoga/plugin-persisted-operations@3.22.0
 - License: **MIT** — https://github.com/graphql-hive/graphql-yoga.git
@@ -192,15 +196,15 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — https://github.com/graphql-hive/graphql-yoga.git
 - Author: Arda TANRIKULU <ardatanrikulu@gmail.com>
 
-### @graphql-yoga/subscription@5.0.5
-- License: **MIT** — https://github.com/graphql-hive/graphql-yoga.git
+### @graphql-yoga/subscription@5.1.1
+- License: **MIT** — https://github.com/graphql-hive/graphql-yoga/tree/main/packages/subscription#readme
 - Author: Laurin Quast <laurinquast@googlemail.com>
 
-### @graphql-yoga/typed-event-target@3.0.2
-- License: **MIT** — https://github.com/dotansimha/graphql-yoga.git
+### @graphql-yoga/typed-event-target@3.0.3
+- License: **MIT** — https://github.com/graphql-hive/graphql-yoga/tree/main/packages/event-target/typed-event-target#readme
 - Author: Laurin Quast <laurinquast@googlemail.com>
 
-### @grpc/grpc-js@1.14.4
+### @grpc/grpc-js@1.14.7
 - License: **Apache-2.0** — https://grpc.io/
 - Author: Google Inc.
 
@@ -208,32 +212,35 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **Apache-2.0** — https://grpc.io/
 - Author: Google Inc.
 
-### @hono/node-server@1.19.17
+### @hono/node-server@2.1.6
 - License: **MIT** — https://github.com/honojs/node-server
 - Author: Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)
 
 ### @img/colour@1.1.0
 - License: **MIT** — git+https://github.com/lovell/colour.git
 
-### @img/sharp-libvips-linux-x64@1.3.2
+### @img/sharp-libvips-linux-x64@1.3.4
 - License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
-### @img/sharp-libvips-linuxmusl-x64@1.3.2
+### @img/sharp-libvips-linuxmusl-x64@1.3.4
 - License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
-### @img/sharp-linux-x64@0.35.3
+### @img/sharp-linux-x64@0.35.5
 - License: **Apache-2.0** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
-### @img/sharp-linuxmusl-x64@0.35.3
+### @img/sharp-linuxmusl-x64@0.35.5
 - License: **Apache-2.0** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
 ### @ioredis/commands@1.10.0
 - License: **MIT** — https://github.com/ioredis/commands
 - Author: Zihua Li <i@zihua.li> (http://zihua.li)
+
+### @isaacs/nonrecursive-glob-match@1.0.3
+- License: **BlueOak-1.0.0**
 
 ### @jridgewell/gen-mapping@0.3.13
 - License: **MIT** — https://github.com/jridgewell/sourcemaps/tree/main/packages/gen-mapping
@@ -263,11 +270,11 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — lukeed/ms
 - Author: Luke Edwards
 
-### @modelcontextprotocol/client@2.3.0
+### @modelcontextprotocol/client@2.4.0
 - License: **Apache-2.0** — https://modelcontextprotocol.io
 - Author: Anthropic, PBC (https://anthropic.com)
 
-### @modelcontextprotocol/core@2.3.0
+### @modelcontextprotocol/core@2.4.0
 - License: **Apache-2.0** — https://modelcontextprotocol.io
 - Author: Anthropic, PBC (https://anthropic.com)
 
@@ -275,26 +282,26 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — https://github.com/modelcontextprotocol/ext-apps
 - Author: Olivier Chafik
 
-### @modelcontextprotocol/node@2.1.1
+### @modelcontextprotocol/node@2.1.2
 - License: **Apache-2.0** — https://modelcontextprotocol.io
 - Author: Anthropic, PBC (https://anthropic.com)
 
-### @modelcontextprotocol/sdk@1.30.0
+### @modelcontextprotocol/sdk@1.32.2
 - License: **MIT** — https://modelcontextprotocol.io
 - Author: Anthropic, PBC (https://anthropic.com)
 
-### @modelcontextprotocol/server@2.3.0
+### @modelcontextprotocol/server@2.4.0
 - License: **Apache-2.0** — https://modelcontextprotocol.io
 - Author: Anthropic, PBC (https://anthropic.com)
 
-### @next/env@16.2.11
+### @next/env@16.4.5
 - License: **MIT** — https://github.com/vercel/next.js
 - Author: Next.js Team <support@vercel.com>
 
-### @next/swc-linux-x64-gnu@16.2.11
+### @next/swc-linux-x64-gnu@16.4.5
 - License: **MIT** — https://github.com/vercel/next.js
 
-### @next/swc-linux-x64-musl@16.2.11
+### @next/swc-linux-x64-musl@16.4.5
 - License: **MIT** — https://github.com/vercel/next.js
 
 ### @nodable/entities@3.1.0
@@ -604,7 +611,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — https://standardschema.dev
 - Author: Colin McDonnell
 
-### @swc/helpers@0.5.15
+### @swc/helpers@0.5.23
 - License: **Apache-2.0** — https://swc.rs
 - Author: 강동윤 <kdy1997.dev@gmail.com>
 
@@ -692,10 +699,14 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **ISC** — https://github.com/ungap/structured-clone#readme
 - Author: Andrea Giammarchi
 
-### @vercel/og@0.11.1
+### @vercel/og@1.0.1
 - License: **MPL-2.0**
 
 ### @whatwg-node/disposablestack@0.0.6
+- License: **MIT** — ardatan/whatwg-node
+- Author: Arda TANRIKULU <ardatanrikulu@gmail.com>
+
+### @whatwg-node/disposablestack@0.1.0
 - License: **MIT** — ardatan/whatwg-node
 - Author: Arda TANRIKULU <ardatanrikulu@gmail.com>
 
@@ -712,6 +723,10 @@ Regenerate with `bun run notices`. 522 packages.
 - Author: Arda TANRIKULU <ardatanrikulu@gmail.com>
 
 ### @whatwg-node/promise-helpers@1.3.2
+- License: **MIT** — ardatan/whatwg-node
+- Author: Arda TANRIKULU <ardatanrikulu@gmail.com>
+
+### @whatwg-node/promise-helpers@2.0.1
 - License: **MIT** — ardatan/whatwg-node
 - Author: Arda TANRIKULU <ardatanrikulu@gmail.com>
 
@@ -781,14 +796,17 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — git://github.com/vadimg/js_bintrees.git
 - Author: Vadim Graboys <dimva13@gmail.com>
 
-### body-parser@2.3.0
+### body-parser@2.4.0
 - License: **MIT** — expressjs/body-parser
 
-### brace-expansion@5.0.9
+### brace-expansion@5.0.12
 - License: **MIT** — git+https://github.com/juliangruber/brace-expansion.git
 
 ### bun-types@1.3.14
 - License: **MIT** — https://bun.com
+
+### busboy-benchmarks@1.0.0
+- License: **MIT**
 
 ### bytes@3.1.2
 - License: **MIT** — visionmedia/bytes.js
@@ -1066,7 +1084,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — git+https://github.com/anonrig/fast-querystring.git
 - Author: Yagiz Nizipli <yagiz@nizipli.com>
 
-### fast-uri@4.1.3
+### fast-uri@4.2.3
 - License: **BSD-3-Clause** — https://github.com/fastify/fast-uri
 - Author: Vincent Le Goff <vince.legoff@gmail.com> (https://github.com/zekth)
 
@@ -1078,7 +1096,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — git+https://github.com/NaturalIntelligence/fast-xml-parser.git
 - Author: Amit Gupta (https://solothought.com)
 
-### fastify@5.12.2
+### fastify@5.12.8
 - License: **MIT** — https://fastify.dev/
 - Author: Matteo Collina <hello@matteocollina.com>
 
@@ -1094,7 +1112,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — pillarjs/finalhandler
 - Author: Douglas Christopher Wilson <doug@somethingdoug.com>
 
-### find-my-way@9.7.0
+### find-my-way@9.10.0
 - License: **MIT** — https://github.com/delvedor/find-my-way#readme
 - Author: Tomas Della Vedova - @delvedor (http://delved.org)
 
@@ -1129,7 +1147,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — https://github.com/ljharb/get-proto#readme
 - Author: Jordan Harband <ljharb@gmail.com>
 
-### glob@13.0.6
+### glob@14.0.3
 - License: **BlueOak-1.0.0** — git@github.com:isaacs/node-glob.git
 - Author: Isaac Z. Schlueter <i@izs.me> (https://blog.izs.me/)
 
@@ -1143,8 +1161,8 @@ Regenerate with `bun run notices`. 522 packages.
 ### graphql@16.14.2
 - License: **MIT** — https://github.com/graphql/graphql-js
 
-### graphql-yoga@5.22.0
-- License: **MIT** — https://github.com/graphql-hive/graphql-yoga.git
+### graphql-yoga@5.24.6
+- License: **MIT** — https://github.com/graphql-hive/graphql-yoga/tree/main/packages/graphql-yoga#readme
 - Author: Saihajpreet Singh <saihajpreet.singh@gmail.com> (https://saihaj.dev/)
 
 ### has-symbols@1.1.0
@@ -1163,7 +1181,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — syntax-tree/hast-util-whitespace
 - Author: Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)
 
-### hono@4.13.5
+### hono@4.13.16
 - License: **MIT** — https://hono.dev
 - Author: Yusuke Wada <yusuke@kamawada.com> (https://github.com/yusukebe)
 
@@ -1193,7 +1211,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — git://github.com/luin/ioredis.git
 - Author: Zihua Li <i@zihua.li> (http://zihua.li)
 
-### ip-address@10.7.3
+### ip-address@10.7.6
 - License: **MIT** — https://github.com/beaugunderson/ip-address.git
 - Author: Beau Gunderson <beau@beaugunderson.com> (https://beaugunderson.com/)
 
@@ -1445,7 +1463,7 @@ Regenerate with `bun run notices`. 522 packages.
 ### mime-types@3.0.2
 - License: **MIT** — jshttp/mime-types
 
-### minimatch@10.2.5
+### minimatch@11.0.4
 - License: **BlueOak-1.0.0** — git@github.com:isaacs/minimatch
 - Author: Isaac Z. Schlueter <i@izs.me> (http://blog.izs.me)
 
@@ -1467,7 +1485,7 @@ Regenerate with `bun run notices`. 522 packages.
 ### negotiator@1.1.0
 - License: **MIT** — jshttp/negotiator
 
-### next@16.2.11
+### next@16.4.5
 - License: **MIT** — https://nextjs.org
 
 ### next-auth@5.0.0-beta.32
@@ -1512,7 +1530,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — sindresorhus/path-key
 - Author: Sindre Sorhus
 
-### path-scurry@2.0.2
+### path-scurry@3.0.0
 - License: **BlueOak-1.0.0** — git+https://github.com/isaacs/path-scurry
 - Author: Isaac Z. Schlueter <i@izs.me> (https://blog.izs.me)
 
@@ -1602,7 +1620,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — jshttp/proxy-addr
 - Author: Douglas Christopher Wilson <doug@somethingdoug.com>
 
-### qs@6.16.0
+### qs@6.17.1
 - License: **BSD-3-Clause** — https://github.com/ljharb/qs
 
 ### quick-format-unescaped@4.0.4
@@ -1623,7 +1641,7 @@ Regenerate with `bun run notices`. 522 packages.
 ### react-dom@19.2.7
 - License: **MIT** — https://react.dev/
 
-### react-is@19.3.0-canary-3f0b9e61-20260317
+### react-is@19.3.0-canary-278794d7-20261002
 - License: **MIT** — https://react.dev/
 
 ### react-markdown@10.1.0
@@ -1743,7 +1761,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **ISC** — https://github.com/wesleytodd/setprototypeof
 - Author: Wes Todd
 
-### sharp@0.35.3
+### sharp@0.35.5
 - License: **Apache-2.0** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
@@ -1779,7 +1797,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **MIT** — https://sonner.emilkowal.ski/
 - Author: Emil Kowalski <e@emilkowal.ski>
 
-### source-map-js@1.2.1
+### source-map-js@1.2.2
 - License: **BSD-3-Clause** — https://github.com/7rulnik/source-map-js
 - Author: Valentin 7rulnik Semirulnik <v7rulnik@gmail.com>
 
@@ -1972,7 +1990,7 @@ Regenerate with `bun run notices`. 522 packages.
 - License: **ISC** — https://github.com/yargs/yargs-parser.git
 - Author: Ben Coe <ben@npmjs.com>
 
-### zod@4.4.3
+### zod@4.6.7
 - License: **MIT** — https://zod.dev
 - Author: Colin McDonnell <zod@colinhacks.com>
 
@@ -2110,7 +2128,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>@envelop/core@5.6.0, @envelop/on-resolve@7.2.0, @envelop/prometheus@14.2.0, @graphql-yoga/logger@2.0.1, @graphql-yoga/plugin-persisted-operations@3.22.0, @graphql-yoga/plugin-prometheus@6.17.0, @graphql-yoga/subscription@5.0.5, @graphql-yoga/typed-event-target@3.0.2, graphql-yoga@5.22.0</summary>
+<details><summary>@envelop/core@5.6.1, @envelop/instrumentation@1.0.1, @envelop/on-resolve@7.2.0, @envelop/prometheus@14.2.0, @envelop/types@5.2.2, @graphql-yoga/logger@2.0.2, @graphql-yoga/plugin-persisted-operations@3.22.0, @graphql-yoga/plugin-prometheus@6.17.0, @graphql-yoga/subscription@5.1.1, @graphql-yoga/typed-event-target@3.0.3, graphql-yoga@5.24.6</summary>
 
 ```
 MIT License
@@ -2168,15 +2186,13 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>@fastify/busboy@3.2.0</summary>
+<details><summary>@fastify/busboy@3.2.4</summary>
 
 ```
 MIT License
 
 Copyright Brian White. All rights reserved.
-Copyright (c) 2021-present The Fastify team
-
-The Fastify team members are listed at https://github.com/fastify/fastify#team.
+Copyright (c) 2021-present The Fastify team <https://github.com/fastify/fastify#team>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -2407,7 +2423,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ```
 </details>
 
-<details><summary>@grpc/grpc-js@1.14.4, @grpc/proto-loader@0.8.1, detect-libc@2.1.2</summary>
+<details><summary>@grpc/grpc-js@1.14.7, @grpc/proto-loader@0.8.1, detect-libc@2.1.2</summary>
 
 ```
 Apache License
@@ -2614,7 +2630,7 @@ Apache License
 ```
 </details>
 
-<details><summary>@hono/node-server@1.19.17</summary>
+<details><summary>@hono/node-server@2.1.6</summary>
 
 ```
 MIT License
@@ -2729,7 +2745,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ```
 </details>
 
-<details><summary>@img/sharp-linux-x64@0.35.3, @img/sharp-linuxmusl-x64@0.35.3, sharp@0.35.3</summary>
+<details><summary>@img/sharp-linux-x64@0.35.5, @img/sharp-linuxmusl-x64@0.35.5, sharp@0.35.5</summary>
 
 ```
 Apache License
@@ -2954,6 +2970,67 @@ SOFTWARE.
 ```
 </details>
 
+<details><summary>@isaacs/nonrecursive-glob-match@1.0.3, lru-cache@11.5.2, minipass@7.1.3, path-scurry@3.0.0</summary>
+
+```
+# Blue Oak Model License
+
+Version 1.0.0
+
+## Purpose
+
+This license gives everyone as much permission to work with
+this software as possible, while protecting contributors
+from liability.
+
+## Acceptance
+
+In order to receive this license, you must agree to its
+rules.  The rules of this license are both obligations
+under that agreement and conditions to your license.
+You must not do anything with this software that triggers
+a rule that you cannot or will not follow.
+
+## Copyright
+
+Each contributor licenses you to do everything with this
+software that would otherwise infringe that contributor's
+copyright in it.
+
+## Notices
+
+You must ensure that everyone who gets a copy of
+any part of this software from you, with or without
+changes, also gets the text of this license or a link to
+<https://blueoakcouncil.org/license/1.0.0>.
+
+## Excuse
+
+If anyone notifies you in writing that you have not
+complied with [Notices](#notices), you can keep your
+license by taking all practical steps to comply within 30
+days after the notice.  If you do not do so, your license
+ends immediately.
+
+## Patent
+
+Each contributor licenses you to do everything with this
+software that would otherwise infringe any patent claims
+they can license or become able to license.
+
+## Reliability
+
+No contributor can revoke this license.
+
+## No Liability
+
+***As far as the law allows, this software comes as is,
+without any warranty or condition, and no contributor
+will be liable to anyone for any damages related to this
+software or this license, under any kind of legal claim.***
+```
+</details>
+
 <details><summary>@jridgewell/gen-mapping@0.3.13, @jridgewell/remapping@2.3.5, @jridgewell/sourcemap-codec@1.5.5, @jridgewell/trace-mapping@0.3.31</summary>
 
 ```
@@ -3046,7 +3123,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ```
 </details>
 
-<details><summary>@modelcontextprotocol/client@2.3.0, @modelcontextprotocol/core@2.3.0, @modelcontextprotocol/ext-apps@2.0.3, @modelcontextprotocol/node@2.1.1, @modelcontextprotocol/server@2.3.0</summary>
+<details><summary>@modelcontextprotocol/client@2.4.0, @modelcontextprotocol/core@2.4.0, @modelcontextprotocol/ext-apps@2.0.3, @modelcontextprotocol/node@2.1.2, @modelcontextprotocol/server@2.4.0</summary>
 
 ```
 The MCP project is undergoing a licensing transition from the MIT License to the Apache License, Version 2.0 ("Apache-2.0"). All new code and specification contributions to the project are licensed under Apache-2.0. Documentation contributions (excluding specifications) are licensed under CC-BY-4.0.
@@ -3268,7 +3345,7 @@ the full license text.
 ```
 </details>
 
-<details><summary>@modelcontextprotocol/sdk@1.30.0</summary>
+<details><summary>@modelcontextprotocol/sdk@1.32.2</summary>
 
 ```
 MIT License
@@ -4070,7 +4147,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>@swc/helpers@0.5.15</summary>
+<details><summary>@swc/helpers@0.5.23</summary>
 
 ```
 Apache License
@@ -4379,7 +4456,7 @@ PERFORMANCE OF THIS SOFTWARE.
 ```
 </details>
 
-<details><summary>@vercel/og@0.11.1</summary>
+<details><summary>@vercel/og@1.0.1</summary>
 
 ```
 Mozilla Public License Version 2.0
@@ -5059,7 +5136,7 @@ THE SOFTWARE.
 ```
 </details>
 
-<details><summary>body-parser@2.3.0, type-is@2.1.0</summary>
+<details><summary>body-parser@2.4.0, type-is@2.1.0</summary>
 
 ```
 (The MIT License)
@@ -5088,7 +5165,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 </details>
 
-<details><summary>brace-expansion@5.0.9</summary>
+<details><summary>brace-expansion@5.0.12</summary>
 
 ```
 MIT License
@@ -7302,7 +7379,7 @@ DEALINGS IN THE SOFTWARE.
 ```
 </details>
 
-<details><summary>fast-uri@4.1.3</summary>
+<details><summary>fast-uri@4.2.3</summary>
 
 ```
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
@@ -7365,7 +7442,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>fastify@5.12.2</summary>
+<details><summary>fastify@5.12.8</summary>
 
 ```
 MIT License
@@ -7468,7 +7545,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 </details>
 
-<details><summary>find-my-way@9.7.0</summary>
+<details><summary>find-my-way@9.10.0</summary>
 
 ```
 MIT License
@@ -7667,7 +7744,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>glob@13.0.6</summary>
+<details><summary>glob@14.0.3</summary>
 
 ```
 All packages under `src/` are licensed according to the terms in
@@ -7865,7 +7942,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>hono@4.13.5</summary>
+<details><summary>hono@4.13.16</summary>
 
 ```
 MIT License
@@ -8036,7 +8113,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>ip-address@10.7.3</summary>
+<details><summary>ip-address@10.7.6</summary>
 
 ```
 Copyright (C) 2011 by Beau Gunderson
@@ -8891,67 +8968,6 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 </details>
 
-<details><summary>lru-cache@11.5.2, minipass@7.1.3, path-scurry@2.0.2</summary>
-
-```
-# Blue Oak Model License
-
-Version 1.0.0
-
-## Purpose
-
-This license gives everyone as much permission to work with
-this software as possible, while protecting contributors
-from liability.
-
-## Acceptance
-
-In order to receive this license, you must agree to its
-rules.  The rules of this license are both obligations
-under that agreement and conditions to your license.
-You must not do anything with this software that triggers
-a rule that you cannot or will not follow.
-
-## Copyright
-
-Each contributor licenses you to do everything with this
-software that would otherwise infringe that contributor's
-copyright in it.
-
-## Notices
-
-You must ensure that everyone who gets a copy of
-any part of this software from you, with or without
-changes, also gets the text of this license or a link to
-<https://blueoakcouncil.org/license/1.0.0>.
-
-## Excuse
-
-If anyone notifies you in writing that you have not
-complied with [Notices](#notices), you can keep your
-license by taking all practical steps to comply within 30
-days after the notice.  If you do not do so, your license
-ends immediately.
-
-## Patent
-
-Each contributor licenses you to do everything with this
-software that would otherwise infringe any patent claims
-they can license or become able to license.
-
-## Reliability
-
-No contributor can revoke this license.
-
-## No Liability
-
-***As far as the law allows, this software comes as is,
-without any warranty or condition, and no contributor
-will be liable to anyone for any damages related to this
-software or this license, under any kind of legal claim.***
-```
-</details>
-
 <details><summary>lucide-react@1.28.0</summary>
 
 ```
@@ -9089,7 +9105,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 </details>
 
-<details><summary>minimatch@10.2.5</summary>
+<details><summary>minimatch@11.0.4</summary>
 
 ```
 # Blue Oak Model License
@@ -9260,7 +9276,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 </details>
 
-<details><summary>next@16.2.11</summary>
+<details><summary>next@16.4.5</summary>
 
 ```
 The MIT License (MIT)
@@ -10009,7 +10025,7 @@ support library is itself covered by the above license.
 ```
 </details>
 
-<details><summary>qs@6.16.0</summary>
+<details><summary>qs@6.17.1</summary>
 
 ```
 BSD 3-Clause License
@@ -10128,7 +10144,7 @@ THE SOFTWARE.
 ```
 </details>
 
-<details><summary>react@19.2.7, react-dom@19.2.7, react-is@19.3.0-canary-3f0b9e61-20260317, scheduler@0.27.0, use-sync-external-store@1.6.0</summary>
+<details><summary>react@19.2.7, react-dom@19.2.7, react-is@19.3.0-canary-278794d7-20261002, scheduler@0.27.0, use-sync-external-store@1.6.0</summary>
 
 ```
 MIT License
@@ -10840,7 +10856,7 @@ SOFTWARE.
 ```
 </details>
 
-<details><summary>source-map-js@1.2.1</summary>
+<details><summary>source-map-js@1.2.2</summary>
 
 ```
 Copyright (c) 2009-2011, Mozilla Foundation and contributors
@@ -11546,7 +11562,7 @@ ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 ```
 </details>
 
-<details><summary>zod@4.4.3</summary>
+<details><summary>zod@4.6.7</summary>
 
 ```
 MIT License

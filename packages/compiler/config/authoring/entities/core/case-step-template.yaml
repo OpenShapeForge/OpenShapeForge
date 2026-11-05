@@ -357,12 +357,6 @@ fields:
               label:
                 en: Assignment metadata
                 nl: Toewijzingsmetadata
-            - key: formDefinition
-              osfType: object
-              required: false
-              label:
-                en: Form definition
-                nl: Formulierdefinitie
   - key: templateId
     label:
       en: Case template
@@ -558,8 +552,5 @@ interfaces:
         render:
           component: Input
       actions.action.taskTemplate.assignmentMetadata:
-        render:
-          component: JsonFieldEditor
-      actions.action.taskTemplate.formDefinition:
         render:
           component: JsonFieldEditor

@@ -5,15 +5,14 @@ import { join } from "node:path";
 import Ajv from "ajv/dist/2020.js";
 import { operationFieldMetadataKeywords, operationTypeKeyword } from "@openshapeforge/operations";
 import addFormats from "ajv-formats";
-import { compileAuthoringBackendManifest } from "./backend-manifest.js";
 import { buildWebManifest } from "./web-manifest.js";
 import { authoringValidator } from "./schema-validation.js";
 import { loadEntity } from "./loader.js";
 import { compile as compileEntity } from "./compiler/index.js";
 import { collectAuthoredEntityPluginOperations, collectPluginOperations, assertOperationRuntimeModules, buildStaticOperationCatalog } from "../generate-operations.js";
-import type { CoreEntity, Field } from "./types.js";
+import type { CoreEntity } from "./types.js";
 import type { FieldDefinitionInverseCollection } from "./types/field-definition.js";
-import type { CompiledEntityInfo, PluginOperationContract } from "../plugins.js";
+import type { PluginOperationContract } from "../plugins.js";
 import { buildMcpCatalog } from "../generate-mcp.js";
 import { entityOperationJsonSchemas } from "../entity-operation-json-schema.js";
 

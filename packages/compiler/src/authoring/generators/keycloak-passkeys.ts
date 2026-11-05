@@ -69,9 +69,8 @@
  *
  * ── Google Workspace, and any other Organization-linked provider ──────────
  * Federation IS an accepted alternative to presenting a passkey, and an
- * address on an Organization domain is routed to that Organization's provider
- * before the passkey prompt. Both decisions, and what they cost, are argued in
- * keycloak-passkey-browser-flow.ts, which holds the browser flow.
+ * an address on an Organization domain can route to its provider; the login
+ * screen also offers a passkey directly. See keycloak-passkey-browser-flow.ts.
  */
 
 import { PASSKEY_REQUIRED_ACTIONS } from "./keycloak-passkey-required-actions.js";
@@ -100,6 +99,7 @@ export const INVITATION_EMAIL_VERIFIED_ACTION = "osf-invitation-email-verified";
 
 export interface KeycloakAuthenticationExecutionExport {
   authenticator?: string;
+  authenticatorConfig?: string;
   flowAlias?: string;
   requirement: "REQUIRED" | "ALTERNATIVE" | "CONDITIONAL" | "DISABLED";
   priority: number;
@@ -122,7 +122,10 @@ export interface PasskeyProfile {
   directGrantFlow: string;
   registrationFlow: string;
   authenticationFlows: KeycloakAuthenticationFlowExport[];
+  authenticatorConfig: { alias: string; config: Record<string, string> }[];
   requiredActions: KeycloakRequiredActionExport[];
+  webAuthnPolicyPasswordlessPasskeysEnabled: boolean;
+  webAuthnPolicyPasswordlessMediation: string;
   webAuthnPolicyPasswordlessRpEntityName: string;
   webAuthnPolicyPasswordlessRpId: string;
   webAuthnPolicyPasswordlessSignatureAlgorithms: string[];
@@ -290,12 +293,15 @@ export function buildPasskeyProfile(options: {
         ],
       },
     ],
+    authenticatorConfig: [{ alias: "passkey-not-yet-used", config: { credentials: "webauthn-passwordless", included: "false" } }],
     requiredActions: PASSKEY_REQUIRED_ACTIONS,
     // The name a browser shows in the system passkey prompt ("Sign in to
     // ..."). Left at Keycloak's shipped "keycloak" it would read as somebody
     // else's product.
     webAuthnPolicyPasswordlessRpEntityName: realmDisplayName?.trim() || realmName,
     webAuthnPolicyPasswordlessRpId: resolvePasskeyRpId(rpId, dev, realmName),
+    webAuthnPolicyPasswordlessPasskeysEnabled: true,
+    webAuthnPolicyPasswordlessMediation: "none",
     // ES256 covers Apple, Android and every FIDO2 key; RS256 covers Windows
     // Hello's TPM-backed credentials. RS1 (SHA-1) is deliberately absent.
     webAuthnPolicyPasswordlessSignatureAlgorithms: ["ES256", "RS256"],

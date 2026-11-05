@@ -35,16 +35,16 @@
     "fast-xml-parser": "5.11.2",
     "fastify": "^5.8.2",
     "graphql": "^16.13.2",
-    "graphql-yoga": "^5.22.0",
+    "graphql-yoga": "^5.24.6",
     "kysely": "^0.29.4",
     "kysely-postgres-js": "3.0.0",
     "postgres": "^3.4.0",
     "swagger-ui-dist": "^5.32.11",
     "yaml": "^2.8.3",
-    "@modelcontextprotocol/core": "2.3.0",
-    "@modelcontextprotocol/server": "2.3.0",
-    "@modelcontextprotocol/node": "2.1.1",
-    "@modelcontextprotocol/client": "2.3.0"
+    "@modelcontextprotocol/core": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@modelcontextprotocol/node": "2.1.2",
+    "@modelcontextprotocol/client": "2.4.0"
   },
   "devDependencies": {
     "@openshapeforge/connector-afas-profit": "workspace:*",
@@ -55,6 +55,6 @@
     "@types/bun": "^1.3.5",
     "jose": "^6.2.1",
     "typescript": "^5.9.0",
-    "@modelcontextprotocol/sdk": "1.30.0"
+    "@modelcontextprotocol/sdk": "1.32.2"
   }
 }

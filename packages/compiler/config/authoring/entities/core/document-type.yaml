@@ -174,7 +174,7 @@ interfaces:
         subtitle: "{{code}}"
         layout:
           context:
-            fields: [ defaultConfidentiality, requiresRegistration, allowsExternalPublication, lifecycleStatus, publishedVersion ]
+            fields: [ lifecycleStatus, publishedVersion, defaultConfidentiality ]
             relationships: []
           tabs:
             - id: overview
@@ -192,4 +192,13 @@ interfaces:
             title: { en: Create document type, nl: Documenttype aanmaken }
             groups:
               - title: { en: Document type, nl: Documenttype }
-                fields: [ code, name, description, defaultConfidentiality, requiresRegistration, allowsExternalPublication ]
+                fields: [ name, description ]
+              - title: { en: Registration and access, nl: Registratie en toegang }
+                fields: [ defaultConfidentiality, requiresRegistration, allowsExternalPublication ]
+          update:
+            title: { en: Edit document type, nl: Documenttype bewerken }
+            groups:
+              - title: { en: Document type, nl: Documenttype }
+                fields: [ name, description ]
+              - title: { en: Registration and access, nl: Registratie en toegang }
+                fields: [ defaultConfidentiality, requiresRegistration, allowsExternalPublication ]

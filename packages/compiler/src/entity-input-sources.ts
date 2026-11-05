@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { operationForm } from "./authoring/operation-form-presentation.js";
 import type { CompiledEntityContract, CompiledField } from "./authoring/types.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
 import { compiledObjectSchema, splitBundledDefinitions } from "./field-json-schema.js";
 import { entityRelationshipKeys, withEntityRelationshipKeys, writableEntityFields } from "./entity-operation-json-schema.js";
+import { resolveValueFieldsFrom } from "./authoring/value-fields-from.js";
 
 type ObjectSchema = Record<string, unknown>;
 const KEY = "x-osf-entityInput";
@@ -19,6 +21,33 @@ export function resolveEntityInputSources(
     if (Array.isArray(value)) return value.map(visit);
     if (!value || typeof value !== "object") return value;
     const object = value as ObjectSchema;
+    if ("x-osf-collection" in object) {
+      const source = object["x-osf-collection"] as { entity?: unknown; field?: unknown } | null;
+      const items = object.items as ObjectSchema | undefined;
+      const itemSource = items?.[KEY] as { entity?: unknown } | undefined;
+      if (object.type !== "array" || !source || typeof source !== "object" || Array.isArray(source) ||
+        Object.keys(source).some(key => !["entity", "field"].includes(key)) || typeof source.entity !== "string" ||
+        typeof source.field !== "string" || !items || typeof items !== "object" || Array.isArray(items)) {
+        throw new Error("Collection input requires an array, an owner and field, and canonical entity input items.");
+      }
+      const owners = contracts.filter(contract => contract.entity.name === source.entity);
+      const relations = owners.length === 1 ? owners[0]!.model.relationships.filter(relation =>
+        (relation.fieldKey ?? relation.key) === source.field && relation.kind === "hasMany" && relation.ownership === "owned") : [];
+      if (relations.length !== 1 || (itemSource && relations[0]!.target !== itemSource.entity)) {
+        throw new Error(`Collection input must name an owned collection with matching canonical items: ${source.entity}.${source.field}.`);
+      }
+      if (!itemSource) {
+        const properties = items.properties;
+        if (items.type !== "object" || !properties || typeof properties !== "object" || Array.isArray(properties)) {
+          throw new Error("Collection input requires canonical entity input items.");
+        }
+        const canonical = visit({ [KEY]: { entity: relations[0]!.target, fields: Object.keys(properties) },
+          ...(items.title !== undefined ? { title: items.title } : {}),
+          ...(items.description !== undefined ? { description: items.description } : {}),
+          ...(items["x-osf-i18n"] !== undefined ? { "x-osf-i18n": items["x-osf-i18n"] } : {}) });
+        if (JSON.stringify(canonical) !== JSON.stringify(items)) throw new Error("Collection input items must match the canonical entity input.");
+      }
+    }
     if (!(KEY in object)) return Object.fromEntries(Object.entries(object).map(([key, child]) => [key, visit(child)]));
     if (Object.keys(object).some(key => ![KEY, "title", "description", "x-osf-i18n"].includes(key))) {
       throw new Error("Entity input sources cannot override canonical field validation.");
@@ -70,6 +99,8 @@ export function materializeEntityInputSources(
   referentiedata: CoreReferentiedataSnapshot,
 ): void {
   const byName = new Map(contracts.map(contract => [contract.entity.name, contract]));
+  const candidates = contracts.map(contract => ({ contract, effectiveFields: contract.model.fields }));
+  for (const candidate of candidates) resolveValueFieldsFrom(candidate, candidates);
   function validateEntityOptions(fields: readonly CompiledField[]): void {
     for (const field of fields) {
       if (field.options?.type === "entity") {
@@ -89,11 +120,18 @@ export function materializeEntityInputSources(
   for (const contract of contracts) validateEntityOptions(contract.model.fields);
   for (const contract of contracts) {
     for (const operation of Object.values(contract.entityOperations)) {
-      if (operation?.input.kind === "json-schema") operation.input.schema = resolveEntityInputSources(operation.input.schema, contracts, referentiedata);
+      if (operation?.implementation?.type === "entity" && operation.interfaces?.web && operation.interfaces.web.form) throw new Error(`${operation.id}: use record create or update groups for entity CRUD.`);
+      if (operation?.input.kind === "json-schema") {
+        operation.input.schema = resolveEntityInputSources(operation.input.schema, contracts, referentiedata);
+        if (operation.interfaces?.web && operation.interfaces.web.form) operationForm(operation.interfaces.web.form, operation.input.schema, operation.id, operation.reliability.idempotency.mode === "keyed" ? [operation.reliability.idempotency.inputField] : []);
+      }
       if (operation?.output.kind === "json-schema") operation.output.schema = resolveEntityInputSources(operation.output.schema, contracts, referentiedata);
     }
     for (const operation of contract.pluginOperations ?? []) {
-      if (operation.definition.input) operation.definition.input.schema = resolveEntityInputSources(operation.definition.input.schema, contracts, referentiedata);
+      if (operation.definition.input) {
+        operation.definition.input.schema = resolveEntityInputSources(operation.definition.input.schema, contracts, referentiedata);
+        if (operation.interfaces?.web && operation.interfaces.web.form) operationForm(operation.interfaces.web.form, operation.definition.input.schema, operation.id, operation.definition.reliability.idempotency.mode === "keyed" ? [operation.definition.reliability.idempotency.inputField] : []);
+      }
       if (operation.definition.output) operation.definition.output.schema = resolveEntityInputSources(operation.definition.output.schema, contracts, referentiedata);
     }
   }

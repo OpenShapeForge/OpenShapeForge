@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import Ajv2020 from "ajv/dist/2020.js";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import type { FormDefault } from "@openshapeforge/interface-web";
 
@@ -64,7 +64,7 @@ export function operationForm(form: { showOnlyGroupedFields?: boolean; defaults?
       return Object.fromEntries(Object.entries(object).map(([key, entry]) => [key, sample(entry, locale)]));
     };
     for (const key of Object.keys(form.defaults)) if (!(key in (schema.properties as Record<string, unknown> ?? {}))) throw new Error(`${origin}: invalid form defaults.`);
-    const ajv = new Ajv2020.default({ strict: false });
+    const ajv = new Ajv2020({ strict: false });
     addFormats.default(ajv);
     for (const locale of ["en", "nl"]) if (!ajv.validate(relax(schema) as object, sample(form.defaults, locale))) throw new Error(`${origin}: invalid form defaults: ${ajv.errorsText(ajv.errors)}.`);
   }

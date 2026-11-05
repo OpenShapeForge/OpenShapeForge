@@ -19,9 +19,9 @@
  *   response_types               code
  *   redirect_uris                exactly the one URI the caller named
  *
- * There is no client secret anywhere in this module — none is sent, and a
- * server that answers with one has not registered what was asked for, so its
- * answer is refused rather than stored. A credential the specification does
+ * No client secret is sent. Some servers nevertheless return one for a
+ * client whose registered authentication method is `none`; it is discarded
+ * and never used. A credential the specification does
  * allow alongside a successful registration (the RFC 7592 management token and
  * URI) is dropped from the retained metadata: this module's result is meant to
  * be persisted, and nothing persisted here may be a secret. No message, and
@@ -69,9 +69,8 @@ const JSON_MEDIA_TYPE = /^application\/(?:[a-z0-9.!#$&^_-]+\+)?json$/;
 const CONTROL_OR_SEPARATOR = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 
 /**
- * Keys that carry, or describe, a client credential. A `client_secret` means
- * the server did not register a public client and its answer is refused. The
- * rest are dropped from the retained metadata so that persisting the result
+ * Keys that carry, or describe, a client credential. These are dropped from
+ * the retained metadata so that persisting the result
  * cannot persist a secret.
  */
 const CREDENTIAL_KEYS = [
@@ -364,13 +363,6 @@ function registeredClientId(document: JsonRecord): string {
  * adds another has registered a client that may send a code somewhere else.
  */
 function assertRegisteredClientMatches(document: JsonRecord, redirectUri: string): void {
-  if (document.client_secret !== undefined && document.client_secret !== null) {
-    throw new HttpError(
-      502,
-      "OAUTH_CLIENT_AUTH_UNSUPPORTED",
-      "The client registration response issued a client secret, so no public client was registered.",
-    );
-  }
   if (document.token_endpoint_auth_method !== "none") {
     throw new HttpError(
       502,
@@ -408,9 +400,14 @@ function issuedAt(value: unknown): number | undefined {
 
 /** The server's answer with every credential-bearing key removed. */
 function withoutCredentials(document: JsonRecord): JsonRecord {
-  const retained = { ...document };
-  for (const key of CREDENTIAL_KEYS) delete retained[key];
-  return retained;
+  const barred = new Set<string>(CREDENTIAL_KEYS);
+  const sanitize = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(sanitize);
+    const record = asRecord(value);
+    if (!record) return value;
+    return Object.fromEntries(Object.entries(record).filter(([key]) => !barred.has(key.toLowerCase())).map(([key, child]) => [key, sanitize(child)]));
+  };
+  return sanitize(document) as JsonRecord;
 }
 
 /**

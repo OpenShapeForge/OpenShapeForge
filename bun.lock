@@ -205,7 +205,7 @@
     },
     "packages/documents": {
       "name": "@openshapeforge/documents",
-      "version": "0.2.22",
+      "version": "0.2.23",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "@openshapeforge/versioning": "workspace:*",
@@ -230,7 +230,7 @@
     },
     "packages/interface-web": {
       "name": "@openshapeforge/interface-web",
-      "version": "0.2.21",
+      "version": "0.2.22",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
       },
@@ -277,7 +277,7 @@
     },
     "packages/plugin-runtime": {
       "name": "@openshapeforge/plugin-runtime",
-      "version": "0.1.30",
+      "version": "0.1.31",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "fastify": "^5.8.2",
@@ -313,7 +313,7 @@
     },
     "packages/versioning": {
       "name": "@openshapeforge/versioning",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
       },

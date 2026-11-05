@@ -969,7 +969,7 @@ describe("host execution policies against PostgreSQL", () => {
       insert into erp.template_versions
         (id, tenant_id, template_id, version_number, status, snapshot, content_hash, published_by, published_at)
       values
-        (${templateVersion}::uuid, ${tenantA}::uuid, ${template}::uuid, 1, 'published', '{}'::jsonb,
+        (${templateVersion}::uuid, ${tenantA}::uuid, ${template}::uuid, 1, 'published', '{"schemaVersion":1,"entity":"Template","head":{"row":{"parameters":[]}}}'::jsonb,
          ${"a".repeat(64)}, ${randomUUID()}::uuid, now())
     `.execute(privileged!.db);
     await sql`

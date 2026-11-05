@@ -85,6 +85,10 @@ export function platformFor(who: Session) {
   const operation = (id: string, entityName: string, intent: string, data: "read" | "write", input: Record<string, unknown>) =>
     ({ id, entityName, intent, effects: { data, external: "none" }, reliability: { idempotency: { mode: "natural" } }, input: { kind: "json-schema", schema: input }, output: { kind: "json-schema", schema: { type: "object" } } });
   const operations = [
+    operation("Document.get", "Document", "get", "read", { type: "object" }),
+    operation("DocumentVariant.get", "DocumentVariant", "get", "read", { type: "object" }),
+    operation("Document.insertVariant", "Document", "invoke", "write", { type: "object" }),
+    operation("DocumentVariant.insertBlock", "DocumentVariant", "invoke", "write", { type: "object" }),
     operation("TextBlock.materialize", "TextBlock", "invoke", "read", { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: "TextBlock" }, values: { type: "object" } } }),
     operation("DocumentVersion.create", "DocumentVersion", "create", "write", { type: "object" }),
     operation("DocumentVersion.get", "DocumentVersion", "get", "read", { type: "object" }),
@@ -122,6 +126,19 @@ export function platformFor(who: Session) {
       async get(_session: unknown, id: string) { return operations.find((entry) => entry.id === id); },
       async execute(_session: unknown, request: { operation: { id: string }; input: Record<string, unknown> }) {
         try {
+          if (request.operation.id === "Document.get" || request.operation.id === "DocumentVariant.get") {
+            const table = request.operation.id === "Document.get" ? "documents" : "document_variants";
+            const row = (await sql<Record<string, unknown>>`select id, to_jsonb(updated_at) #>> '{}' as "updatedAt" from ${sql.id("erp", table)} where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
+            return { data: row ?? null };
+          }
+          if (request.operation.id === "Document.insertVariant" || request.operation.id === "DocumentVariant.insertBlock") {
+            const owner = request.operation.id === "Document.insertVariant" ? "Document" : "DocumentVariant";
+            const field = owner === "Document" ? "variants" : "blocks";
+            const result = await collections.inTransaction(active!, dbInput(who), { entityName: owner, field, action: "insert" }, request.input as any);
+            const table = owner === "Document" ? "documents" : "document_variants";
+            const row = (await sql<{ updatedAt: string }>`select to_jsonb(updated_at) #>> '{}' as "updatedAt" from ${sql.id("erp", table)} where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
+            return { data: { ...result, parent: { updatedAt: row!.updatedAt } } };
+          }
           if (request.operation.id === "TextBlock.materialize") return { data: (await handlers.materializeFields!(request.input, context)).value };
           if (request.operation.id === "DocumentVersion.create") return { data: (await handlers.createDocumentVersion!(request.input, context)).value };
           if (request.operation.id === "DocumentVersion.get") {
@@ -151,13 +168,13 @@ export const collections = createCollectionMutationExecutor({
 export const tableName = (entity: string) => getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === entity)!.name;
 
 export const parameters = [{ key: "name", osfType: "string", required: true, label: { en: "Name", nl: "Naam" } }];
-export async function seedTemplate() {
+export async function seedTemplate(templateTenant = tenant) {
   const ids = { template: randomUUID(), variant: randomUUID(), first: randomUUID(), second: randomUUID() };
-  await sql`insert into erp.templates (id, tenant_id, key, name, parameters) values (${ids.template}::uuid, ${tenant}::uuid, ${`welcome-${ids.template.slice(0, 8)}`}, 'Welcome', ${jsonbLiteral(parameters)})`.execute(privileged());
-  await sql`insert into erp.template_variants (id, tenant_id, template_id, channel, locale) values (${ids.variant}::uuid, ${tenant}::uuid, ${ids.template}::uuid, 'document', 'nl')`.execute(privileged());
+  await sql`insert into erp.templates (id, tenant_id, key, name, parameters) values (${ids.template}::uuid, ${templateTenant}::uuid, ${`welcome-${ids.template.slice(0, 8)}`}, 'Welcome', ${jsonbLiteral(parameters)})`.execute(privileged());
+  await sql`insert into erp.template_variants (id, tenant_id, template_id, channel, locale) values (${ids.variant}::uuid, ${templateTenant}::uuid, ${ids.template}::uuid, 'document', 'nl')`.execute(privileged());
   await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, "values") values
-    (${ids.first}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, 0, 'TextBlock', ${jsonbLiteral({ markdown: "Hello {{local.name}}" })}),
-    (${ids.second}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, 1, 'TextBlock', ${jsonbLiteral({ markdown: "Second" })})`.execute(privileged());
+    (${ids.first}::uuid, ${templateTenant}::uuid, ${ids.variant}::uuid, 0, 'TextBlock', ${jsonbLiteral({ markdown: "Hello {{local.name}}" })}),
+    (${ids.second}::uuid, ${templateTenant}::uuid, ${ids.variant}::uuid, 1, 'TextBlock', ${jsonbLiteral({ markdown: "Second" })})`.execute(privileged());
   return ids;
 }
 export async function publishTemplate(context: ModuleOperationContext, templateId: string) {

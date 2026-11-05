@@ -24,20 +24,7 @@ import fieldDefinitionAuthoringSchema from "../config/schemas/field-definition.s
 import workflowInspectorSchema from "../config/schemas/workflow-inspector.schema.json" with {
   type: "json",
 };
-import {
-  bundleDefinitions,
-  describeField,
-  fieldSchema,
-  objectSchema,
-  operationFieldObjectSchema,
-  operationFieldSchema,
-  resolveFields,
-  type DescribeFieldOptions,
-  type OperationFieldDefinition,
-  type OperationFieldSchemaOptions,
-  type OperationFieldSchemaRegistry,
-  type ResolvedOperationField,
-} from "@openshapeforge/operations";
+import { bundleDefinitions, describeField, fieldSchema, objectSchema, resolveFields, type DescribeFieldOptions, type OperationFieldDefinition, type OperationFieldSchemaOptions, type OperationFieldSchemaRegistry, type ResolvedOperationField } from "@openshapeforge/operations";
 
 export {
   localizedText,

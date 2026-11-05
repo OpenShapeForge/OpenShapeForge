@@ -85,33 +85,6 @@ profiles:
       layout: false
       persistence: false
 
-  formDefinitionField:
-    label:
-      nl: Formulierveld
-      en: Form definition field
-    description:
-      nl: Velddefinitie voor formulierbouwers met layout- en renderinstellingen.
-      en: Field definition for form builders with layout and render settings.
-    keyBehavior: hiddenGeneratedStable
-    excludedFieldTypes: []
-    typePickerUsage: internalSchema
-    controls:
-      label: true
-      description: true
-      type: combined
-      cardinality: false
-      sortable: false
-      shape: true
-      options: true
-      render: false
-      moneyDisplay: true
-      aiHint: true
-      defaultValue: true
-      value: false
-      validation: true
-      layout: true
-      persistence: false
-
   templateParameter:
     label:
       nl: Templateparameter

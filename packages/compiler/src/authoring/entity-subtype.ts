@@ -12,16 +12,7 @@
  * compiler and every generator treat it as one more entity; only the backend
  * manifest binds it to the base table instead of emitting a second one.
  */
-import type {
-  AuthorizationConfig,
-  CoreEntity,
-  EntityInterfacesDefinition,
-  EntitySubtypeDocument,
-  EntitySubtypeFieldOverride,
-  EntitySubtypeScopeValue,
-  Field,
-  OsfTypeDefinition,
-} from "./types.js";
+import type { AuthorizationConfig, CoreEntity, EntityInterfacesDefinition, EntitySubtypeDocument, EntitySubtypeScopeValue, Field, OsfTypeDefinition } from "./types.js";
 import { assertEntitySecurityOnlyNarrows, strategicMerge } from "./layers.js";
 import { fieldCardinality } from "./compiler/helpers.js";
 

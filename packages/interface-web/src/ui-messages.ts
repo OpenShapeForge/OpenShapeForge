@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { normalizeUiLocale, type UiLocale } from "./localization.js";
+import { normalizeUiLocale } from "./localization.js";
 
 export const uiMessages = {
   "Unavailable": {

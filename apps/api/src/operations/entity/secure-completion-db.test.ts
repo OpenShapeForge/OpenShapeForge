@@ -32,7 +32,7 @@ beforeAll(async () => {
   await privileged.db.connection().execute(connection => runMigrationChain(connection));
   url.username='openshapeforge_app'; url.password='openshapeforge_app';
   runtime=createDatabaseRuntime({databaseUrl:url.href});
-  const secure = {type:"secureInput" as const, sourceField:"parentTaskId", sourceEntity:"Task", definitionsField:"formDefinition", into:"metadata"};
+  const secure = {type:"secureInput" as const, sourceField:"parentTaskId", sourceEntity:"Task", definitionsField:"metadata", into:"metadata"};
   operation.interaction = {...oldInteraction, secureInput:secure};
   table.source!.mcp = {...oldMcp, elicitOnCreate:{...secure, sourceTable:table.name}} as NonNullable<typeof oldMcp>;
 }, 180_000);

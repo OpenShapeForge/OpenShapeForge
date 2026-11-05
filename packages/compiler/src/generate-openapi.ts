@@ -24,13 +24,7 @@ import type {
 } from "./authoring/types.js";
 import type { RestApiDocumentation } from "./authoring/layers.js";
 import type { CoreReferentiedataSnapshot } from "./core-referentiedata-artifacts.js";
-import {
-  compiledFieldSchema,
-  describeCompiledField,
-  localizedText,
-  rebaseJsonSchemaReferences,
-  splitBundledDefinitions,
-} from "./field-json-schema.js";
+import { describeCompiledField, localizedText, rebaseJsonSchemaReferences } from "./field-json-schema.js";
 import type {
   PlatformSchemaManifest,
   ScalarType,
@@ -144,8 +138,6 @@ function fieldNameForColumn(
   );
 }
 
-const schemaForScalar = (type: ScalarType): JsonObject => scalarJsonSchema(type) as JsonObject;
-
 // Mirrors the storage-writable predicate of generated CRUD. Request schema
 // construction additionally removes the secure elicitation target, matching
 // isCallerWritableColumn in the API runtime.
@@ -196,8 +188,6 @@ function isRestrictedColumn(
 function isRestrictedField(field: CompiledField | undefined): boolean {
   return isRestrictedSensitivity(field?.classification?.sensitivity) || field?.authorization !== undefined;
 }
-
-
 
 function entityLabel(
   contract: CompiledEntityContract | undefined,
@@ -414,7 +404,6 @@ function entityResponse(name: string, description: string): JsonObject {
     },
   };
 }
-
 
 export function renderOpenApiSpec(
   manifest: PlatformSchemaManifest,

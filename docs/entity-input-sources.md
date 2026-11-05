@@ -35,7 +35,38 @@ Resolution happens in `loadActivePlatformCompile` before contracts are cached,
 so a host that calls `buildWebManifest` directly receives the same schema without
 first running the all-artifact generator.
 
-Document creation currently uses this to create a logical Document and first
-DocumentVersion atomically. File upload/binding, managed document types and
-destructive document governance are separate unfinished migration steps; this
-does not claim their functional parity.
+An operation may also accept an owned collection as a draft. The annotation
+identifies an existing relationship; item constraints still come from the
+canonical target entity. It does not grant access or execute the mutation:
+
+```yaml
+blocks:
+  type: array
+  x-osf-collection: { entity: DocumentVariant, field: blocks }
+  items:
+    x-osf-entityInput:
+      entity: Block
+      fields: [definitionKey, values]
+```
+
+The compiler rejects non-owned relationships and mismatched target entities.
+The operation handler must execute the canonical collection mutations in its
+transaction. Document creation uses this for a first variant and its blocks;
+an uploaded artifact and authored content are mutually exclusive inputs.
+
+An entity-value field can derive its typed fields from a sibling reference to
+an immutable published version:
+
+```yaml
+fields:
+  - key: parameters
+    osfType: object
+    valueFieldsFrom: { reference: version, field: parameters }
+```
+
+The source must be a stored field-definition collection on the versioned
+entity. Values are validated against the selected version, with normal record
+authorization; republishing the source does not change an existing block.
+
+This describes the authored-content and file-binding path, not parity for
+managed document types or destructive document governance.

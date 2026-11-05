@@ -12,24 +12,20 @@
   "packageManager": "bun@1.4.4",
   "//overrides": [
     "These entries lift transitive pins that carry fixed CVEs.",
-    "postcss: next pins 8.4.31 exactly, so it cannot float; 8.5.x is a minor",
-    "and @tailwindcss/postcss already requires ^8.5.16, so this de-duplicates",
-    "the tree rather than adding to it.",
-    "sharp: an optional dependency next uses for image optimisation. Nothing",
-    "here imports next/image, so it is unused \u2014 the bump is free.",
+    "postcss and sharp keep the Next.js dependency tree on fixed releases.",
     "brace-expansion, fast-uri, hono and nanoid are constrained to fixed",
     "releases; repository tests cover their compiler and HTTP paths.",
-    "fastify stays on the validated 5.10 line so workspace adapter types agree.",
-    "Drop an entry once next ships a release that pins the fixed version."
+    "fastify is pinned across workspaces so adapter types agree.",
+    "Reassess overrides as upstream dependency constraints change."
   ],
   "overrides": {
-    "brace-expansion": "^5.0.9",
-    "fastify": "5.12.2",
-    "fast-uri": "^4.1.2",
-    "hono": "^4.12.34",
+    "brace-expansion": "^5.0.12",
+    "fastify": "5.12.8",
+    "fast-uri": "^4.2.3",
+    "hono": "^4.13.11",
     "nanoid": "^3.3.18",
     "postcss": "^8.5.18",
-    "sharp": "^0.35.0"
+    "sharp": "^0.35.5"
   },
   "engines": {
     "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.12.1 <27",

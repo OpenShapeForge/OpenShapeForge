@@ -304,6 +304,11 @@ export const createDocument: ModuleOperationHandler = async (input, context) => 
   const document = inputObject(input, "document");
   const version = inputObject(input, "version");
   const { logicalVersion, binding } = artifactInput(input, version);
+  const content = input.content === undefined ? undefined : inputObject(input, "content");
+  if (content && binding) throw operationFailure({ code: "VALIDATION", message: "A document cannot contain both an uploaded file and authored content.", retryable: false });
+  if (content && (!content.variant || typeof content.variant !== "object" || Array.isArray(content.variant) || !Array.isArray(content.blocks))) {
+    throw operationFailure({ code: "VALIDATION", message: "Content requires a variant and an ordered block list.", retryable: false });
+  }
 
   const value = await translateDatabaseError(platform, () =>
     platform.db.withSession(session, async (transaction) => {
@@ -325,6 +330,31 @@ export const createDocument: ModuleOperationHandler = async (input, context) => 
       }
       if (binding) {
         await finalizeArtifactBinding(transaction, platform, session, created, binding);
+      }
+      if (content) {
+        const definitions = await platform.operations.list(session);
+        const invoke = async (id: string, values: Record<string, unknown>) => {
+          const operation = definitions.find(item => item.id === id && item.intent === "invoke" && item.effects.data === "write" && item.effects.external === "none");
+          if (!operation) throw operationFailure({ code: "OPERATION_UNAVAILABLE", message: "The canonical content collection Operation is unavailable.", retryable: false });
+          const result = await platform.operations.execute(session, { operation, input: values });
+          if ("error" in result) throw operationFailure(result.error);
+          if (!result.data || typeof result.data !== "object" || Array.isArray(result.data)) throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The collection Operation returned no record.", retryable: false });
+          return result.data as Record<string, unknown>;
+        };
+        const head = await readCanonicalDocument(platform, session, created.documentId);
+        if (typeof head?.updatedAt !== "string") throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The document version token is unavailable.", retryable: false });
+        const variant = await invoke("Document.insertVariant", { id: created.documentId, expectedVersion: head.updatedAt, values: content.variant });
+        if (typeof variant.childId !== "string" || !UUID.test(variant.childId)) throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The content variant identity is unavailable.", retryable: false });
+        const get = definitions.find(item => item.entityName === "DocumentVariant" && item.intent === "get" && item.effects.data === "read" && item.effects.external === "none");
+        if (!get) throw operationFailure({ code: "OPERATION_UNAVAILABLE", message: "The canonical content variant read is unavailable.", retryable: false });
+        const read = await platform.operations.execute(session, { operation: get, input: { id: variant.childId } });
+        if ("error" in read) throw operationFailure(read.error);
+        let token = (read.data as Record<string, unknown> | undefined)?.updatedAt;
+        for (const block of content.blocks as unknown[]) {
+          if (!block || typeof block !== "object" || Array.isArray(block) || typeof token !== "string") throw operationFailure({ code: "VALIDATION", message: "The content block or variant version is invalid.", retryable: false });
+          const inserted = await invoke("DocumentVariant.insertBlock", { id: variant.childId, expectedVersion: token, values: block });
+          token = (inserted.parent as Record<string, unknown> | undefined)?.updatedAt;
+        }
       }
       return authoredRow(await readCanonicalDocument(platform, session, created.documentId), { id: created.documentId });
     }),

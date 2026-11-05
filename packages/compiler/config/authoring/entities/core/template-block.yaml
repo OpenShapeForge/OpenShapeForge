@@ -19,6 +19,7 @@ fields:
   - key: version
     osfType: TemplateVersion
     required: true
+    options: { type: entity, source: Template, valueField: publishedVersionId }
     label: { en: Template version, nl: Templateversie }
     description:
       en: The published template version this block includes. The inclusion resolves from that version's frozen
@@ -27,6 +28,7 @@ fields:
         van die versie, dus opnieuw publiceren van de opgenomen template verandert hem niet.
   - key: parameters
     osfType: object
+    valueFieldsFrom: { reference: version, field: parameters }
     defaultValue: {}
     label: { en: Local values, nl: Lokale waarden }
     description:

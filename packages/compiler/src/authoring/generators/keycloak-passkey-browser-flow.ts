@@ -1,79 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * The browser flow of the passkey profile: who is let in, and by what.
+ * Shared passwordless browser flow. Keycloak's username and Organization
+ * forms perform native loginless WebAuthn when passkeys are enabled. After
+ * identification, the email execution is conditional on no passwordless
+ * credential having been verified in this authentication session. A mere
+ * identified username never satisfies the condition.
  *
- * Split out of keycloak-passkeys.ts for size; the rule it serves (no password
- * execution anywhere) is argued in that file's header.
- *
- *   passkey-browser                                  (top level)
- *     auth-cookie                          ALTERNATIVE  existing SSO session
- *     identity-provider-redirector         ALTERNATIVE  kc_idp_hint
- *     passkey-browser-organization         ALTERNATIVE
- *       passkey-browser-organization-conditional  CONDITIONAL
- *         conditional-user-configured      REQUIRED
- *         organization                     ALTERNATIVE  identity-first, by e-mail domain
- *     passkey-browser-forms                ALTERNATIVE
- *       auth-username-form                 REQUIRED
- *       passkey-browser-sign-in            REQUIRED
- *         webauthn-authenticator-passwordless ALTERNATIVE  a passkey this person has
- *         osf-email-sign-in                ALTERNATIVE  a code + same-browser link by e-mail
- *
- * ── Passkey OR e-mail, and the person chooses ───────────────────────────────
- * Not everybody has a device that can make a passkey, and a passkey-only door
- * stranded invited people who registered but never enrolled one. So the
- * credential step offers two ways in, as Keycloak alternatives: somebody with
- * a passkey is asked for it first and sees "try another way" for e-mail;
- * somebody without one goes straight to the e-mail step (the passkey
- * authenticator is not configured for them, so Keycloak skips it). The e-mail
- * step (packages/keycloak-spi EmailSignIn) mails a 6-digit code and a link that
- * only continues the login in the browser that asked for it. That makes the
- * inbox a root of trust — which it already was: invitations and the
- * admin-issued enrolment link arrive the same way. Still no password anywhere.
- * The platform-operator re-authentication flow stays passkey-only.
- *
- * ── The Organization identity-first step ────────────────────────────────────
- * Keycloak's stock browser flow carries the same step (its "Organization"
- * sub-flow). It asks for the e-mail address first. When the domain belongs to
- * an Organization whose linked identity provider has
- * `kc.org.broker.redirect.mode.email-matches` set, the person is redirected to
- * that provider — e.g. a acme.example address goes to the Acme Google
- * Workspace. Otherwise the step records who the person is and gives way;
- * `auth-username-form` below then sees that user and skips its own page, so
- * the next thing on screen is the passkey prompt, as without this step.
- *
- * Measured on Keycloak 26.5.3 and 26.7.3, and Keycloak's rule, not ours:
- *   - Keycloak does NOT redirect a person who already holds a first-factor
- *     credential (a passkey here); they get the passkey prompt, so they can
- *     choose. On an Organization domain the provider is therefore the way in
- *     for everybody without a passkey — a new or unknown address included —
- *     and `kc_idp_hint` remains the way in for everybody else.
- *   - An address Keycloak does not know and no Organization claims gets the
- *     identity-first page back without an error, where the flow without this
- *     step said "Invalid username or email". Nobody is admitted either way.
- *
- * `conditional-user-configured` keeps the step inert in a realm whose
- * Organizations feature is off: the organization authenticator reports
- * itself not configured there, so the sub-flow is skipped and the forms
- * sub-flow renders the username page as before (also measured).
- *
- * ── Federation is an alternative to a passkey, on purpose ───────────────────
- * Both routes to an identity provider sit at ALTERNATIVE next to the passkey
- * sub-flow, so a broker login admits the person on its own. For a provider
- * linked to one tenant's Keycloak Organization (see
- * apps/api/src/control/keycloak-organization-admin.ts), that tenant IS the identity
- * authority for their domain, and their own Workspace MFA policy is what
- * guards the account. Demanding a second, product-specific passkey on top
- * makes the SSO they bought pointless.
- *
- * Stated plainly: the passkey-only guarantee is then only as strong as that
- * tenant's policy. A Workspace that still allows bare passwords re-opens a
- * password path — at Google, not here. Two things keep it from being a hole by
- * accident: `hideOnLogin: true` on the provider (no button on the login page;
- * only an address on a linked Organization domain is routed to it), and the
- * `webauthn-register-passwordless` required action being a DEFAULT action, so
- * a person who arrives over Workspace is still walked through enrolling a
- * passkey and ends up with one — after which, per the rule above, Keycloak
- * shows them the passkey prompt rather than the redirect.
+ * Organization identity-first routing and the explicit identity-provider
+ * redirect remain alternatives; the tenant identity provider owns its policy.
  */
 
 import type { KeycloakAuthenticationFlowExport } from "./keycloak-passkeys.js";
@@ -91,9 +25,6 @@ export const PASSKEY_SIGN_IN_FLOW = "passkey-browser-sign-in";
 
 /** OSF provider id of the e-mail code + same-browser link authenticator. */
 export const EMAIL_SIGN_IN_AUTHENTICATOR = "osf-email-sign-in";
-
-/** Keycloak's provider id for the passwordless (passkey) authenticator. */
-const WEBAUTHN_PASSWORDLESS_AUTHENTICATOR = "webauthn-authenticator-passwordless";
 
 export function passkeyBrowserFlows(): KeycloakAuthenticationFlowExport[] {
   return [
@@ -183,7 +114,7 @@ export function passkeyBrowserFlows(): KeycloakAuthenticationFlowExport[] {
     },
     {
       alias: PASSKEY_FORMS_FLOW,
-      description: "Identify the person, then let them sign in with a passkey or by e-mail. Deliberately contains no password authenticator.",
+      description: "Offer native passkey sign-in or identify the person for e-mail sign-in.",
       providerId: "basic-flow",
       topLevel: false,
       builtIn: false,
@@ -200,12 +131,11 @@ export function passkeyBrowserFlows(): KeycloakAuthenticationFlowExport[] {
           authenticatorFlow: false,
           userSetupAllowed: false,
         },
-        // REQUIRED around the two alternatives: one of them must succeed.
-        // A lone ALTERNATIVE at this level is how a flow accidentally becomes
-        // optional.
+        // Skip the email challenge only after Keycloak has verified a passkey.
+        // With an email address alone, email authentication is still REQUIRED.
         {
           flowAlias: PASSKEY_SIGN_IN_FLOW,
-          requirement: "REQUIRED",
+          requirement: "CONDITIONAL",
           priority: 20,
           authenticatorFlow: true,
           userSetupAllowed: false,
@@ -214,23 +144,22 @@ export function passkeyBrowserFlows(): KeycloakAuthenticationFlowExport[] {
     },
     {
       alias: PASSKEY_SIGN_IN_FLOW,
-      description: "A passkey, or a one-time code and same-browser link by e-mail. The person chooses.",
+      description: "Require email sign-in unless a passwordless credential was already verified.",
       providerId: "basic-flow",
       topLevel: false,
       builtIn: false,
       authenticationExecutions: [
-        // First: Keycloak offers a credential the person HAS before anything
-        // else, and lists the rest under "try another way".
         {
-          authenticator: WEBAUTHN_PASSWORDLESS_AUTHENTICATOR,
-          requirement: "ALTERNATIVE",
+          authenticator: "conditional-credential",
+          authenticatorConfig: "passkey-not-yet-used",
+          requirement: "REQUIRED",
           priority: 10,
           authenticatorFlow: false,
           userSetupAllowed: false,
         },
         {
           authenticator: EMAIL_SIGN_IN_AUTHENTICATOR,
-          requirement: "ALTERNATIVE",
+          requirement: "REQUIRED",
           priority: 20,
           authenticatorFlow: false,
           userSetupAllowed: false,

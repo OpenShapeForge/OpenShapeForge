@@ -6,7 +6,6 @@ import {
   ConditionDisplay,
   EntityReferenceDisplay,
   FieldDefinitionView,
-  FormDefinitionDisplay,
   MarkdownDisplay,
   TextDisplay,
 } from "@/features/renderer/display";
@@ -100,10 +99,6 @@ export function renderDisplayField(
 
   if (displayComponent === "BsnDisplay" && typeof value === "string") {
     return <BsnDisplay value={value} />;
-  }
-
-  if (displayComponent === "FormDefinitionDisplay") {
-    return <FormDefinitionDisplay value={value} lang={lang} />;
   }
 
   if (displayComponent === "EntityReferenceDisplay") {

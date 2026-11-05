@@ -41,7 +41,6 @@ function resolveFieldAuthoringProfileId(value: unknown): FieldAuthoringProfileId
     || value === "caseVariable"
     || value === "runtimeNotificationParameter"
     || value === "templateParameter"
-    || value === "formDefinitionField"
     ? value
     : "fullFieldDefinition";
 }

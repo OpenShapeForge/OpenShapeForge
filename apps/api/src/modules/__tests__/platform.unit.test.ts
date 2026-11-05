@@ -11,7 +11,7 @@ import {
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
-import type { McpInvocationContext, RuntimeModule } from "../contract.js";
+import type { McpInvocationContext, ModuleSocketGrant, RuntimeModule } from "../contract.js";
 import { authorizeMcpRequest } from "../mcp-hooks.js";
 import { getEntityOperationContracts } from "../../operations/entity/index.js";
 import { generatedCrudTools } from "../../mcp/native-crud-tool.js";
@@ -168,6 +168,23 @@ describe("runtime module platform session authority", () => {
         error: { code: "OPERATION_CONTRACT_CHANGED", retryable: false },
       });
     });
+  });
+
+  it("refuses connection HTTP on a session that is no longer live", async () => {
+    const runtime = new ModulePlatformRuntime(testDatabase());
+    const request = { url: "https://mcp.example.com/rpc", json: {} };
+    const noGrant = {} as ModuleSocketGrant;
+    let retained: TrustedSessionContext | undefined;
+    await runtime.withActiveOperationSession(operationClaims(), async (session) => {
+      retained = session;
+      // Live, so the refusal is the grant's and no request leaves the process.
+      await expect(runtime.services.egress.request(session, noGrant, request))
+        .rejects.toMatchObject({ code: "EGRESS_DENIED" });
+    });
+    await expect(runtime.services.egress.request(retained!, noGrant, request))
+      .rejects.toThrow("live verified session");
+    await expect(runtime.services.egress.request(operationClaims(), noGrant, request))
+      .rejects.toThrow("live verified session");
   });
 
   it("answers a generated entity tool name with its canonical contract under the same checks", async () => {

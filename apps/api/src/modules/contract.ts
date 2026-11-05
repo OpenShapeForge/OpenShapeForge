@@ -48,6 +48,8 @@ import type {
   RuntimeConnectionValues,
   RuntimeConnectionResolution,
   RuntimeConnectionGrant,
+  RuntimeConnectionHttpRequest,
+  RuntimeConnectionHttpResponse,
   RuntimeDeclarativeServiceCapabilities,
   RuntimeOperationExecutionOptions,
   RuntimeOperationExecutionResult,
@@ -227,6 +229,12 @@ export type ModuleEgressRequest = {
    * OAuth, discovery, probes and other source-less traffic omit it.
    */
   source?: ModuleEgressInvocationSource;
+  /**
+   * Present only on a Connection request: the public addresses core resolved
+   * `url` to. An owner that declares `pinsResolvedAddresses` dials only these
+   * and keeps `url`'s hostname for SNI, certificate validation and `Host`.
+   */
+  resolvedAddresses?: readonly string[];
   signal?: AbortSignal;
   /**
    * Create a core-owned failure with one of the closed egress outcomes. The
@@ -265,6 +273,9 @@ export type ModuleSocketRequest = {
   /** Deadline for establishing the connection. */
   timeoutMs?: number;
 };
+
+export type ModuleConnectionHttpRequest = RuntimeConnectionHttpRequest;
+export type ModuleConnectionHttpResponse = RuntimeConnectionHttpResponse;
 
 /** One Connection's values, opened for the module core decided may see them. */
 export type ModuleConnectionValues = RuntimeConnectionValues;
@@ -363,6 +374,12 @@ export type ModulePlatformServices = {
       grant: ModuleSocketGrant,
       request: ModuleSocketRequest,
     ): Promise<Duplex>;
+    /** One finite POST to a host the grant's Adapter admits; see `modules/connection-http-egress.ts`. */
+    request(
+      session: TrustedSessionContext,
+      grant: ModuleSocketGrant,
+      request: ModuleConnectionHttpRequest,
+    ): Promise<ModuleConnectionHttpResponse>;
   };
   mcp: {
     notifyToolsChanged(scope: { tenantId: string | null }): void;
@@ -573,7 +590,11 @@ export type RuntimeModule = RuntimeModuleContract<
   /** Dynamic MCP projection and invocation hooks, evaluated per request. */
   mcp?: RuntimeMcpContribution;
   /** At most one loaded module may own final outbound request execution. */
-  egress?: { fetch(request: ModuleEgressRequest): Promise<Response> };
+  egress?: {
+    fetch(request: ModuleEgressRequest): Promise<Response>;
+    /** Declares that `resolvedAddresses` is honored; Connection requests require it. */
+    pinsResolvedAddresses?: true;
+  };
   /**
    * A platform-level (cross-tenant) catalog this module administers, used
    * ONLY by the control plane's platform administrator MCP

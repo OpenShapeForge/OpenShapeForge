@@ -28,6 +28,7 @@ import { withDbSession } from "../session.js";
 import { decryptSecret, encryptSecret, keyringFromEnv } from "../../connectors/secrets.js";
 import { connectionTokenSecretScope } from "../../connectors/secrets.js";
 import { resolveConnectionValues } from "../../modules/connection-secrets.js";
+import { requestConnectionHttp } from "../../modules/connection-http-egress.js";
 import {
   inheritConnectionControls,
   parseConnectionExpectation,
@@ -698,6 +699,28 @@ describe("resolveConnectionValues compares ownership with the acting Relation", 
     expect(colleague).toMatchObject({ ok: true, connection: { connectionId: seed.organizationId, connectionScope: "tenant" } });
   }, TEST_TIMEOUT);
 });
+
+test("a real personal Connection mints a single-use HTTP grant and revocation stops the next resolution", async () => {
+  const seed = await seedOAuthMailbox(admin, new Date(Date.now() + 3_600_000));
+  const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
+  const resolve = () => resolveConnectionValues({
+    db: app, session, selector: { connectionId: seed.personalId }, keyring: KEYRING, artifacts: ARTIFACTS,
+  });
+  const result = await resolve();
+  if (!result.ok) throw new Error(`${result.code}: ${result.message}`);
+  let calls = 0;
+  const dependencies = {
+    owner: { pinsResolvedAddresses: true as const, fetch: async () => { calls++; return Response.json({ ok: true }); } },
+    resolve: async () => ["1.1.1.1"],
+  };
+  const request = { url: "https://auth.provider.example/mcp", json: { jsonrpc: "2.0" } };
+  expect((await requestConnectionHttp(session, result.connection.egressGrant, request, dependencies)).status).toBe(200);
+  await expect(requestConnectionHttp(session, result.connection.egressGrant, request, dependencies))
+    .rejects.toMatchObject({ code: "EGRESS_DENIED" });
+  await sql`delete from integration.connections where id = ${seed.personalId}::uuid`.execute(admin);
+  expect(await resolve()).toMatchObject({ ok: false, code: "NOT_FOUND" });
+  expect(calls).toBe(1);
+}, TEST_TIMEOUT);
 
 test("transaction-scoped Connection resolution locks against rotation and avoids token refresh", async () => {
   const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000));

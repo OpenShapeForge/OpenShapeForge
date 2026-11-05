@@ -243,6 +243,8 @@ export async function fetchValidatedOutbound(input: {
   allowlist: readonly string[];
   fallback: (target: string | URL | Request, init: RequestInit) => Promise<Response>;
   dispatch?: ModuleEgressDispatch | undefined;
+  /** Core-verified public addresses the owner must dial; see `ModuleEgressRequest`. */
+  resolvedAddresses?: readonly string[] | undefined;
   denied(url: URL, reason: "protocol" | "host"): Error;
 }): Promise<Response> {
   const url = new URL(
@@ -327,6 +329,9 @@ export async function fetchValidatedOutbound(input: {
       purpose: dispatch.purpose,
       scope,
       ...(source ? { source } : {}),
+      ...(input.resolvedAddresses
+        ? { resolvedAddresses: Object.freeze([...input.resolvedAddresses]) }
+        : {}),
       ...(ownerSignal ? { signal: ownerSignal } : {}),
       createFailure,
     }), { ...(provider ? { provider } : {}) });

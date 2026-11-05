@@ -71,6 +71,8 @@ import { mintSocketGrant } from "./socket-egress.js";
 import { liveConnectionValues, secretKeysOf } from "./connection-oauth-liveness.js";
 
 const KEYRING_ENV = "OPENSHAPEFORGE_ELICITED_SECRET_KEYS";
+/** Keeps a long MCP session from outliving a changed Adapter on an old grant. */
+const EGRESS_GRANT_TTL_MS = 5 * 60_000;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -443,6 +445,13 @@ export async function resolveConnectionValues(
       adapterKey: row.adapter_key,
       adapterName: row.adapter_key,
       tenantId: input.session.tenantId,
+      binding: {
+        session: input.session,
+        connectionId: row.id,
+        connectionTable: execution.connectionTable,
+        ownerUserId: row.owner,
+        expiresAtMs: Date.now() + EGRESS_GRANT_TTL_MS,
+      },
     }),
   };
   return { ok: true, connection };

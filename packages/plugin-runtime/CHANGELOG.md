@@ -8,6 +8,11 @@
   collection's child that is not extensible itself, by child entity, for
   `rollup.of` to follow: `RuntimeExtensionRegistryManifest.childRelations` and
   `RuntimeExtensionRegistry.childRelations(entity)`. Metadata only.
+- **`platform.egress.request`**, one finite HTTPS POST on the `egressGrant` of a
+  resolved Connection, in the session that resolved it. The host enforces the
+  Adapter's allow-list, public addresses and a bounded JSON or SSE body. It
+  sends once, never follows a redirect and does not stream notifications.
+  Exports `RuntimeConnectionHttpRequest` and `RuntimeConnectionHttpResponse`.
 - **`RuntimeOperationDefinition.nativeMcpTool`**, for a provider Operation that
   is one tool of an external MCP server. It carries the exact tool name, the
   owning Connection and the upstream title, output schema, annotations and

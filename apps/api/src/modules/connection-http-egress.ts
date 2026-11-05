@@ -291,6 +291,23 @@ export async function requestConnectionHttp(
   const { url: target, headers: rawHeaders, json, exposeHeaders, signal } = request;
   const url = parseTarget(target);
   if (!hostAllowed(url.hostname, state.allowlist)) throw grantRefusal(state.adapterKey);
+  if (binding.resource) {
+    let resource: URL;
+    try { resource = new URL(binding.resource); }
+    catch { throw denied("The Connection's protected resource is invalid."); }
+    const base = resource.pathname.endsWith("/") ? resource.pathname : `${resource.pathname}/`;
+    const remaining = [...url.searchParams.entries()];
+    const queryMatches = [...resource.searchParams.entries()].every(([key, value]) => {
+      const index = remaining.findIndex(([candidate, actual]) => candidate === key && actual === value);
+      if (index < 0) return false;
+      remaining.splice(index, 1);
+      return true;
+    });
+    if (resource.protocol !== "https:" || resource.username || resource.password || resource.hash ||
+        resource.origin !== url.origin || !queryMatches || (url.pathname !== resource.pathname && !url.pathname.startsWith(base))) {
+      throw denied("The outbound URL is outside the Connection's protected resource.");
+    }
+  }
   const headers = requestHeaders(rawHeaders);
   const body = serializedBody(json);
   const timeoutMs = boundedOption(request.timeoutMs, DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);

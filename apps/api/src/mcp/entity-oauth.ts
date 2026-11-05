@@ -31,6 +31,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import { createHandoff, readHandoff } from "./handoff-store.js";
 import { keyringFromEnv } from "../connectors/secrets.js";
+import type { OAuthClientProfile } from "./entity-oauth-profile.js";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -59,7 +60,10 @@ export type PendingAuthorization = {
   connectionValuesField: string;
   tokenUrl: string;
   clientId: string;
-  clientSecret: string;
+  /** Absent for a public client: only client_id reaches the token endpoint. */
+  clientSecret?: string;
+  /** Absent on a handoff minted before profiles: the legacy confidential flow. */
+  profile?: OAuthClientProfile;
   egress: string[];
   scopes: string[];
   redirectUri: string;
@@ -157,6 +161,8 @@ export async function mintAuthorization(
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
+  if (input.profile?.resource)
+    url.searchParams.set("resource", input.profile.resource);
 
   return {
     authorizationUrl: url.toString(),

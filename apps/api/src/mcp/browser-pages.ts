@@ -187,6 +187,8 @@ export type EntityOAuthOutcome =
   | "provider_refused"
   /** The provider returned without an authorization code. */
   | "no_code"
+  /** The response came from the wrong server, or its grant was not the one asked for. */
+  | "grant_refused"
   /** Token exchange or the database write failed. */
   | "store_failed";
 
@@ -247,6 +249,15 @@ export function renderEntityOAuthCallbackPage(
         heading: "The sign-in did not complete",
         lead: `${provider} returned without an authorization code, so nothing was stored.`,
         next: `${retry} If it happens again, ask your administrator.`,
+      });
+    case "grant_refused":
+      return renderBrowserPage({
+        ...base,
+        tone: "error",
+        title: "Sign-in not completed",
+        heading: "The sign-in could not be accepted",
+        lead: `The response did not match the access requested from ${provider}, so nothing was stored.`,
+        next: `${retry} Approve all requested access. If it happens again, ask your administrator.`,
       });
     case "store_failed":
       return renderBrowserPage({

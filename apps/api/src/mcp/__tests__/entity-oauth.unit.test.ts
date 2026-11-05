@@ -13,6 +13,7 @@ import {
   redeemState,
   scopesCovered,
 } from "../entity-oauth.js";
+import { grantedScopesOf, oauthClientProfile } from "../entity-oauth-profile.js";
 import { exchangeCodeForTokens, refreshTokens } from "../entity-oauth-tokens.js";
 import {
   connectionTokenSecretScope,
@@ -156,6 +157,153 @@ describe("exchangeCodeForTokens", () => {
     await expect(
       exchangeCodeForTokens(pending2, "c", fetch, undefined),
     ).rejects.toThrow(/ELICITED_SECRET_KEYS/);
+  });
+});
+
+describe("a public client with a resource indicator", () => {
+  const RESOURCE = "https://mcp.example.com/v2/mcp";
+  const { clientSecret: _confidential, ...PUBLIC_BASE } = BASE;
+  const profile = oauthClientProfile({ clientAuthentication: "none", resource: RESOURCE });
+
+  async function pendingFor(input: Partial<typeof PUBLIC_BASE> = {}) {
+    const handoff = await mintAuthorization({
+      ...PUBLIC_BASE,
+      ...input,
+      profile,
+      egress: ["auth.example.com", "mcp.example.com"],
+      authorizationUrl: "https://auth.example.com/authorize",
+    });
+    return { handoff, pending: (await redeemState(handoff.state))! };
+  }
+
+  function endpoint(body: Record<string, unknown>) {
+    const forms: URLSearchParams[] = [];
+    const impl = (async (_input: string | URL | Request, init?: RequestInit) => {
+      forms.push(new URLSearchParams(String(init?.body ?? "")));
+      return Response.json(body);
+    }) as typeof fetch;
+    return { forms, impl };
+  }
+
+  it("names the resource at consent and sends no client secret to the token endpoint", async () => {
+    const { handoff, pending } = await pendingFor();
+    const url = new URL(handoff.authorizationUrl);
+    expect(url.searchParams.get("resource")).toBe(RESOURCE);
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+
+    const { forms, impl } = endpoint({
+      access_token: "at-1",
+      refresh_token: "rt-1",
+      expires_in: 3600,
+      scope: "tickets.read other",
+    });
+    const { values } = await exchangeCodeForTokens(pending, "code-1", impl, KEYRING);
+    const form = forms[0]!;
+    expect(form.get("client_id")).toBe("cid");
+    expect(form.has("client_secret")).toBe(false);
+    expect(form.get("resource")).toBe(RESOURCE);
+    expect(form.get("code_verifier")).toBe(pending.codeVerifier);
+    expect(values.grantedScopes).toEqual(["tickets.read", "other"]);
+    expect(values.oauthBinding).toEqual({ resource: RESOURCE, issuer: null });
+  });
+
+  it("does not let a re-consent inherit the previous grant's refresh token or expiry", async () => {
+    const { pending } = await pendingFor();
+    const { impl } = endpoint({ access_token: "at-2", scope: "tickets.read" });
+    const { values } = await exchangeCodeForTokens(pending, "code", impl, KEYRING);
+    expect(values.refreshToken).toBeNull();
+    expect(values.accessTokenExpiresAt).toBeNull();
+  });
+
+  it("records RFC 6749 implicit grant provenance when scope is omitted", async () => {
+    const { pending } = await pendingFor();
+    const { impl } = endpoint({ access_token: "at-1" });
+    const { values } = await exchangeCodeForTokens(pending, "code", impl, KEYRING);
+    expect(values.grantedScopes).toEqual(["tickets.read"]);
+    expect(values.scopeProvenance).toBe("rfc6749-implicit");
+  });
+
+  it("stores nothing when a step-up is only partly granted", async () => {
+    const { pending } = await pendingFor({ scopes: ["tickets.read", "tickets.write"] });
+    const { impl } = endpoint({ access_token: "at-1", scope: "tickets.read" });
+    const failure = await exchangeCodeForTokens(pending, "code", impl, KEYRING).catch((error: unknown) => error);
+    expect((failure as { code?: string }).code).toBe("OAUTH_GRANT_INCOMPLETE");
+  });
+
+  it("stores nothing for a token issued to another audience", async () => {
+    const { pending } = await pendingFor();
+    const { impl } = endpoint({
+      access_token: "at-1",
+      scope: "tickets.read",
+      aud: "https://rest.example.com/",
+    });
+    const failure = await exchangeCodeForTokens(pending, "code", impl, KEYRING).catch((error: unknown) => error);
+    expect((failure as { code?: string }).code).toBe("OAUTH_AUDIENCE_MISMATCH");
+  });
+
+  it("refreshes without a secret, repeats the resource and takes a stated scope", async () => {
+    const { forms, impl } = endpoint({ access_token: "at-2", expires_in: 600, scope: "tickets.read" });
+    const { values } = await refreshTokens({
+      tokenUrl: BASE.tokenUrl,
+      clientId: BASE.clientId,
+      resource: RESOURCE,
+      refreshToken: "refresh-1",
+      egress: BASE.egress,
+      connectionTable: BASE.connectionTable,
+      keyring: KEYRING,
+      fetchImpl: impl,
+    });
+    const form = forms[0]!;
+    expect(form.get("grant_type")).toBe("refresh_token");
+    expect(form.has("client_secret")).toBe(false);
+    expect(form.get("resource")).toBe(RESOURCE);
+    expect(values.grantedScopes).toEqual(["tickets.read"]);
+  });
+});
+
+describe("a confidential client on the legacy flow", () => {
+  async function exchange(body: Record<string, unknown>) {
+    const handoff = await mintAuthorization({
+      ...BASE,
+      authorizationUrl: "https://auth.example.com/authorize",
+    });
+    expect(new URL(handoff.authorizationUrl).searchParams.has("resource")).toBe(false);
+    const pending = (await redeemState(handoff.state))!;
+    let form = new URLSearchParams();
+    const { values } = await exchangeCodeForTokens(pending, "code", (async (
+      _input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      form = new URLSearchParams(String(init?.body ?? ""));
+      return Response.json(body);
+    }) as typeof fetch, KEYRING);
+    return { form, values };
+  }
+
+  it("still posts its secret, and no resource", async () => {
+    const { form } = await exchange({ access_token: "at-1", scope: "tickets.read" });
+    expect(form.get("client_secret")).toBe("csecret");
+    expect(form.has("resource")).toBe(false);
+  });
+
+  it("keeps a re-consent's stored refresh token and expiry, as Google's flow needs", async () => {
+    const { values } = await exchange({ access_token: "at-1", scope: "tickets.read" });
+    expect(Object.hasOwn(values, "refreshToken")).toBe(false);
+    expect(Object.hasOwn(values, "accessTokenExpiresAt")).toBe(false);
+  });
+
+  it("records omitted scope with RFC 6749 provenance", async () => {
+    const { values } = await exchange({ access_token: "at-1" });
+    expect(values.grantedScopes).toEqual(["tickets.read"]);
+    expect(values.scopeProvenance).toBe("rfc6749-implicit");
+    expect(scopesCovered(["tickets.read"], values.grantedScopes)).toBe(true);
+    expect(scopesCovered(["tickets.read"], grantedScopesOf({}, values))).toBe(true);
+  });
+
+  it("accepts a partial grant, for connect to re-consent", async () => {
+    const { values } = await exchange({ access_token: "at-1", scope: "other" });
+    expect(values.grantedScopes).toEqual(["other"]);
+    expect(values.scopeProvenance).toBe("provider");
   });
 });
 

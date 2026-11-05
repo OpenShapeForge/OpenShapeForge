@@ -14,7 +14,9 @@ import {
 } from "../operations/entity/index.js";
 import { handoffFailureCode } from "./configuration-submission.js";
 import { renderEntityOAuthCallbackPage } from "./browser-pages.js";
+import { HttpError } from "../rest/http-error.js";
 import { redeemState } from "./entity-oauth.js";
+import { callbackIssuerMismatch } from "./entity-oauth-profile.js";
 import { exchangeCodeForTokens } from "./entity-oauth-tokens.js";
 import { tablesByName } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
@@ -47,6 +49,17 @@ export async function registerEntityOAuthCallbackRoute(
         .status(400)
         .type("text/html")
         .send(html({ outcome: "invalid_state" }));
+    }
+    // Ahead of the error branch: RFC 9207 binds error responses too, and a
+    // mix-up attacker's response must reach no further handling.
+    if (callbackIssuerMismatch(pending.profile, query.iss)) {
+      request.log.warn({ failure: "OAUTH_ISSUER_MISMATCH" }, "Personal connection callback refused.");
+      return reply
+        .status(400)
+        .type("text/html")
+        .send(
+          html({ outcome: "grant_refused", providerName: pending.providerName }),
+        );
     }
     if (typeof query.error === "string" && query.error) {
       return reply
@@ -151,6 +164,17 @@ export async function registerEntityOAuthCallbackRoute(
         { err: error, failure: handoffFailureCode(error) },
         "Personal connection callback failed.",
       );
+      if (
+        error instanceof HttpError &&
+        (error.code === "OAUTH_GRANT_INCOMPLETE" || error.code === "OAUTH_AUDIENCE_MISMATCH")
+      ) {
+        return reply
+          .status(403)
+          .type("text/html")
+          .send(
+            html({ outcome: "grant_refused", providerName: pending.providerName }),
+          );
+      }
       return reply
         .status(500)
         .type("text/html")

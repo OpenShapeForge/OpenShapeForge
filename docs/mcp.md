@@ -118,6 +118,48 @@ this UX order:
 Secret and confidential values post directly to the runtime and are encrypted
 at rest with `OPENSHAPEFORGE_ELICITED_SECRET_KEYS`.
 
+### OAuth clients and protected resources
+
+An `oauth2AuthorizationCode` Adapter that declares nothing further is a
+confidential client: its organization Connection holds `clientId` and
+`clientSecret`, sent with `client_secret_post`. These optional `auth` keys
+(`apps/api/src/mcp/entity-oauth-profile.ts`) describe a public client or an
+audience-restricted resource, such as a remote MCP server:
+
+These are core runtime fields, not yet exposed by the Integrations Adapter's
+authoring schema or ordinary configuration UI. A host must not present them as
+supported authoring until that schema and its discovery flow are extended.
+
+| Key | Meaning |
+| --- | --- |
+| `clientAuthentication` | `client_secret_post` (default) or `none`. `none` is a public client: the Connection needs only `clientId`, and no secret reaches the token endpoint. Other methods are refused, including ones the server advertises. |
+| `resource` | The RFC 8707 resource indicator, sent on the authorization request, the code exchange and every refresh. Its host must be in the Adapter's egress hosts. |
+| `expectedAudiences` | `aud` values that also identify `resource`, for a server whose audience differs from the resource URI. |
+| `serverMetadata` | An RFC 8414 document, as verified by the Adapter's author. It must name the declared endpoints and offer the client authentication, the `authorization_code` grant, the `code` response type and PKCE `S256`. Its `issuer` is compared with the callback's RFC 9207 `iss`, which is required when the document sets `authorization_response_iss_parameter_supported`. A server without the `refresh_token` grant goes back to consent instead of refreshing. |
+| `protectedResourceMetadata` | An RFC 9728 document. It must name `resource` and list the `serverMetadata` issuer. |
+
+The metadata is configuration: core does not fetch it, and nothing in a request
+or callback can name a URL it will use. Declaring `clientAuthentication: none`,
+`resource` or `serverMetadata` also opts into stricter handling:
+
+- An explicit partial `scope` stores nothing on a step-up. When scope is
+  omitted, RFC 6749 §5.1 means it is identical to the requested scope; core
+  records that effective scope with `rfc6749-implicit` provenance.
+- A token response whose `resource` or `aud`, or whose JWT `aud` claim, names
+  another audience is refused. An opaque token without those fields is accepted;
+  the resource server remains the final judge.
+- Connection values record the `oauthBinding` (resource and issuer). A row minted
+  for anything else needs a fresh consent, even while its token is live. Tokens
+  stay on the Connection of their own Adapter, so a REST grant and an MCP grant
+  of one provider are separate rows.
+
+The scope provenance distinguishes a provider-stated grant from the implicit
+grant specified by RFC 6749 when the scope field is omitted.
+
+Discovery from a live server, dynamic client registration and Client ID
+Metadata Documents are not implemented. They need a governed write of the
+verified metadata or registered client onto the Adapter and its Connection.
+
 ### Discovery
 
 The MCP specification makes authorization OPTIONAL and conformance a SHOULD for

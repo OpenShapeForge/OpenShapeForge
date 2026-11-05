@@ -7,6 +7,7 @@ import { serializeRow } from "./catalog-rows.js";
 import { accessTokenNeedsRefresh, fieldNameForColumn, refreshConnectionRowLocked, refreshLeewaySeconds } from "./connection-token-refresh.js";
 import { resolveTemplate } from "./declarative-execution.js";
 import type { ElicitOnCreateEntry } from "./elicitation.js";
+import { oauthClientProfile, tokenBindingCurrent } from "./entity-oauth-profile.js";
 import { elicitedKeyring } from "./handoff-config.js";
 import { readClientCredentials, selectOAuthConnectionRow, urlSafeConnectionValues } from "./session-connections.js";
 import type { DirectCallScope } from "./tool-dispatch.js";
@@ -43,14 +44,16 @@ export async function prepareConnectionTest(
   const urlValues = urlSafeConnectionValues(tenant, elicit.into, sourceRow[elicit.definitionsField], elicit.sourceTable);
   const fallback = personal ? { fallbackPlainValues: urlValues.plain } : {};
   const values = (row[elicit.into] ?? {}) as Row;
-  if (auth?.profile !== "oauth2AuthorizationCode" || !values.accessToken ||
-      !accessTokenNeedsRefresh(values, refreshLeewaySeconds(auth))) return { row, ...fallback };
+  if (auth?.profile !== "oauth2AuthorizationCode" || !values.accessToken) return { row, ...fallback };
+  const profile = oauthClientProfile(auth);
+  if (!accessTokenNeedsRefresh(values, refreshLeewaySeconds(auth)) &&
+      tokenBindingCurrent(profile, values)) return { row, ...fallback };
 
   const keyring = elicitedKeyring();
   if (!keyring || typeof auth.tokenUrl !== "string") {
     throw new HttpError(400, "PROVIDER_MISCONFIGURED", "Token refresh is not configured.");
   }
-  const credentials = readClientCredentials(tenant, elicit.into, elicit.sourceTable);
+  const credentials = readClientCredentials(tenant, elicit.into, elicit.sourceTable, profile.clientAuthentication);
   const refreshed = await refreshConnectionRowLocked({
     db: ctx.db, session: ctx.session, table, rowId: String(row.id),
     valuesField: elicit.into, providerField: elicit.sourceField,
@@ -61,6 +64,7 @@ export async function prepareConnectionTest(
       scope: personal ? "user" : "tenant", correlationId: String(ctx.requestId) },
     tokenUrl: resolveTemplate(auth.tokenUrl, urlValues.plain, "auth.tokenUrl", urlValues.secretKeys),
     ...credentials,
+    profile,
     egress: Array.isArray(sourceRow.egressHosts) ? sourceRow.egressHosts as string[] : [],
     keyring, secretScope: connectionTokenSecretScope(tableName),
     moduleEgress: { owner: ctx.egressOwner, purpose: "oauth", scope: {

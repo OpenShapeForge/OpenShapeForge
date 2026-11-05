@@ -141,8 +141,11 @@ export async function registerEntityOAuthCallbackRoute(
           values,
         );
       } else {
+        const keyColumn = table.columns.find((column) => column.sourceField === "key" || column.name === "key");
         await createGeneratedEntityForTable(db, writeSession, table, {
-          key: `personal-${(ownerRelationId ?? pending.userId).replace(/[^a-z0-9-]/g, "").slice(0, 20)}`,
+          ...(keyColumn?.deriveOnCreate ? {} : {
+            key: `personal-${(ownerRelationId ?? pending.userId).replace(/[^a-z0-9-]/g, "").slice(0, 20)}`,
+          }),
           name: `Personal ${pending.providerName} connection`,
           [pending.connectionProviderRef]: pending.providerRowId,
           ...(ownerRelationId ? { ownerUserId: ownerRelationId } : {}),

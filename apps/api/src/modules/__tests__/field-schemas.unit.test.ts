@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
-import { __runtimeJsonSchemaCompilerStateForTests, createRuntimeFieldSchemaCompiler, runtimeJsonSchemas, storedFieldBaseType } from "../field-schemas.js";
+import { __runtimeJsonSchemaCompilerStateForTests, createRuntimeFieldSchemaCompiler, generatedRuntimeFieldSchemas, runtimeJsonSchemas, storedFieldBaseType } from "../field-schemas.js";
 import generatedCatalog from "../../generated/operations/catalog.json" with { type: "json" };
+
+test("static workflow start choices reject values outside the configured team", () => {
+  const team = "00000000-0000-4000-8000-000000000001";
+  const fields = [{ key: "teamId", osfType: "string", required: true,
+    options: { type: "static", items: [{ value: team, label: { en: "Sales", nl: "Sales" } }] } }];
+  expect(generatedRuntimeFieldSchemas.validateObject(fields, { teamId: team })).toEqual({ valid: true });
+  expect(generatedRuntimeFieldSchemas.validateObject(fields, { teamId: "00000000-0000-4000-8000-000000000002" }))
+    .toMatchObject({ valid: false, error: { code: "VALIDATION_FAILED" } });
+});
 
 test("JSON engines isolate schema ids, nested refs and failed compilations", () => {
   const producer = { $id: "urn:test:tenant-a", type: "object", properties: { value: { $ref: "#/$defs/value" } },

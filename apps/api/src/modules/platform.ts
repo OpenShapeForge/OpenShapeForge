@@ -971,6 +971,31 @@ export class ModulePlatformRuntime {
     );
   }
 
+  /** Refresh only explicitly isolated providers; a slow external server cannot block the session. */
+  async refreshExternalCatalogs(session: TrustedSessionContext): Promise<boolean> {
+    const providers = [...this.#operationProviders.values()].filter(
+      provider => provider.failureIsolation === "external-catalog" && provider.refresh,
+    );
+    if (!providers.length) return false;
+    return this.withActiveOperationSession(session, async live => {
+      const results = await Promise.all(providers.map(async provider => {
+        const controller = new AbortController();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          return await Promise.race([
+            provider.refresh!(live, controller.signal),
+            new Promise<boolean>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(false); }, 15_000); }),
+          ]);
+        } catch {
+          return false;
+        } finally { clearTimeout(timer); }
+      }));
+      const changed = results.some(Boolean);
+      if (changed) this.#notify(live.tenantId, "tools");
+      return changed;
+    });
+  }
+
   /**
    * Isolate a declared external catalog when it fails or stalls. Existing
    * providers propagate their errors unchanged. The isolated catalog is

@@ -548,6 +548,8 @@ export type RuntimeOperationProvider = {
   id: string;
   /** An external catalog may fail independently of the application's own Operations. */
   failureIsolation?: "external-catalog";
+  /** Refresh an external snapshot under a live session, independently of list/get. */
+  refresh?(session: PluginSessionContext, signal: AbortSignal): Promise<boolean>;
   list(session: PluginSessionContext): Promise<readonly RuntimeOperationDefinition[]>;
   get(
     session: PluginSessionContext,

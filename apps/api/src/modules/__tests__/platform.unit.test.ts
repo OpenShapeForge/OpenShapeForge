@@ -87,6 +87,24 @@ const binding = (
 });
 
 describe("runtime module platform session authority", () => {
+  it("refreshes an isolated catalog only with an active temporary session", async () => {
+    const runtime = new ModulePlatformRuntime(testDatabase());
+    let retained: TrustedSessionContext | undefined;
+    runtime.registerOperationProviders([{ name: "external", operationProviders: [{
+      id: "external.refresh", failureIsolation: "external-catalog",
+      refresh: async (session, signal) => {
+        expect(signal.aborted).toBe(false);
+        runtime.assertActiveOperationSession(session);
+        retained = session;
+        return true;
+      },
+      list: async () => [], get: async () => undefined,
+      execute: async () => ({ error: { code: "NOT_FOUND", message: "Unavailable", retryable: false } }),
+    }] }]);
+    expect(await runtime.refreshExternalCatalogs(operationClaims())).toBe(true);
+    expect(retained).toBeDefined();
+    expect(() => runtime.assertActiveOperationSession(retained!)).toThrow();
+  });
   it("keeps RelationGroup memberships request-fresh without exposing mutable authority", () => {
     const source = claims();
     source.relationGroupIds = ["11111111-1111-4111-8111-111111111111"];

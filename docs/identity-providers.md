@@ -255,17 +255,21 @@ one thing that gets somebody in without presenting a passkey.
 mode. There is deliberately no switch:
 
 - **`browserFlow: passkey-browser`** — cookie, then identity-provider
-  redirector, then a sub-flow of *username form → WebAuthn Passwordless*. The
-  stock `auth-username-password-form` execution does not appear anywhere in it,
-  so there is no password box to type into.
+  redirector, then a username form supporting passkey authentication. Without a
+  passkey verified in the current authentication session, the conditional
+  flow requires email verification. The stock `auth-username-password-form`
+  execution does not appear, so there is no password box to type into. The
+  isolated Keycloak journey also checks that an enrolled passkey alone does not
+  admit a user who submits an email and an incorrect code.
 - **`directGrantFlow: passkey-direct-grant-denied`** — a single
   `deny-access-authenticator`. `grant_type=password` is closed at the realm
   rather than left to depend on no user happening to still have a password
   credential. `client_credentials` is a different flow and is untouched, so
   service accounts and confidential clients keep working exactly as before.
 - **`webAuthnPolicyPasswordless*`** — resident key required, user verification
-  required, ES256/RS256, attestation `none`, a 120 s ceremony timeout, no
-  AAGUID allow-list, and authenticator attachment left *unspecified*.
+  required, passkeys enabled with mediation `none`, ES256/RS256, attestation
+  `none`, a 120 s ceremony timeout, no AAGUID allow-list, and authenticator
+  attachment left *unspecified*.
 - **required actions** — the complete registry, with
   `webauthn-register-passwordless` on as a **default action** and
   `UPDATE_PASSWORD`, `webauthn-register` (the second-factor variant),

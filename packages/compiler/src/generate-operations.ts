@@ -3,7 +3,7 @@ import { applicationSearchDefinition, applicationSearchSources, catalogApplicati
 // SPDX-License-Identifier: BUSL-1.1
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { operationFieldMetadataKeywords, valueInvariantKeywords, operationChoiceKeyword, operationExactNumericKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword, operationVariablesKeyword } from "@openshapeforge/operations";
+import { operationFieldMetadataKeywords, valueInvariantKeywords, operationChoiceKeyword, operationCollectionKeyword, operationExactNumericKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword, operationVariablesKeyword } from "@openshapeforge/operations";
 import type {
   CompilerPlugin,
   CompiledPluginOperation,
@@ -522,6 +522,7 @@ function operationSchemaValidator() {
   ajv.addKeyword(operationReferenceKeyword);
   ajv.addKeyword(operationI18nKeyword);
   ajv.addKeyword(operationInputFieldsKeyword);
+  ajv.addKeyword(operationCollectionKeyword);
   ajv.addKeyword(operationChoiceKeyword);
   ajv.addKeyword(operationTypeKeyword);
   ajv.addKeyword(operationVariablesKeyword);

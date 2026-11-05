@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { materializeEntityInputSources } from "../entity-input-sources.js";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -405,6 +406,10 @@ export async function generateAuthoringUiArtifacts(
       ),
     });
   }
+
+  // UI artifacts compile their own entity corpus; resolve the same canonical
+  // inputs and validate presentation paths before emitting any web manifest.
+  materializeEntityInputSources(compiled.map(item => item.contract), referentiedata);
 
   const viewDefinitions = await loadViewDefinitions(authoringDir);
   const authorizationConfig = await loadAuthorizationConfig(authoringDir);

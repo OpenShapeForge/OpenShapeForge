@@ -6,6 +6,7 @@ import addFormats from "ajv-formats";
 import {
   valueInvariantKeywords,
   operationChoiceKeyword,
+  operationCollectionKeyword,
   operationExactNumericKeyword, operationFieldMetadataKeywords,
   operationFieldObjectSchema,
   operationI18nKeyword,
@@ -37,6 +38,7 @@ function createJsonSchemaCompiler() {
   ajv.addKeyword({ keyword: "x-osf-control", schemaType: "string", valid: true });
   ajv.addKeyword({ keyword: "x-osf-default-template", schemaType: "string", valid: true });
   ajv.addKeyword(operationChoiceKeyword);
+  ajv.addKeyword(operationCollectionKeyword);
   ajv.addKeyword(operationTypeKeyword);
   ajv.addKeyword(operationVariablesKeyword);
   for (const keyword of operationFieldMetadataKeywords) ajv.addKeyword(keyword);

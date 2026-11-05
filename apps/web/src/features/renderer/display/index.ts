@@ -4,7 +4,6 @@ export { ChipResolvedTextDisplay } from "@/features/renderer/display/chip-resolv
 export { ConditionDisplay } from "@/features/renderer/display/condition-display";
 export { EntityReferenceDisplay } from "@/features/renderer/display/entity-reference-display";
 export { FieldDefinitionView } from "@/features/renderer/display/field-definition-view";
-export { FormDefinitionDisplay } from "@/features/renderer/display/form-definition-display";
 export { DisplayLabel } from "@/features/renderer/display/label";
 export { MarkdownDisplay } from "@/features/renderer/display/markdown-display";
 export { RelationshipCards } from "@/features/renderer/display/relationship-cards";

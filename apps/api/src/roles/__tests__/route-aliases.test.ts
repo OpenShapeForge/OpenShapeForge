@@ -36,4 +36,14 @@ describe("canonical operational routes", () => {
     expect((await app.inject({ method: "GET", url: "/healthz" })).statusCode).toBe(404);
     expect((await app.inject({ method: "GET", url: "/api/graphql/health" })).statusCode).toBe(404);
   });
+
+  test("accepts handoff-sized route parameters while keeping the 512 character limit", async () => {
+    delete process.env.OPENSHAPEFORGE_ROUTE_ALIASES;
+    app = createApiApp({ cors: false });
+    app.get("/router-limit-test/:value", async () => ({ ok: true }));
+
+    expect((await app.inject({ method: "GET", url: `/router-limit-test/${"a".repeat(117)}` })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `/router-limit-test/${"a".repeat(512)}` })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: `/router-limit-test/${"a".repeat(513)}` })).statusCode).toBe(414);
+  });
 });

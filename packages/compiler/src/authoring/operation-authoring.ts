@@ -76,9 +76,7 @@ export function assertOperationAuthoring(
     if (operation.implementation.type === "plugin") throw new Error(`${origin}: plugin read intents require source.kind operations.`);
   }
   const operationKind = action ?? "plugin";
-  const version = operation.concurrency?.version;
-  const editLease = operation.concurrency?.editLease;
-  const secureInput = operation.interaction;
+
   const mutableExistingTarget = action === "update" || action === "delete" ||
     (operation.implementation.type === "plugin" &&
       operation.target?.scope === "record" &&

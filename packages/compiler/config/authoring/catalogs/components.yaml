@@ -323,12 +323,6 @@ components:
     props:
       - value
 
-  FormDefinitionDisplay:
-    kind: field
-    description: Read-only preview renderer for structured form definitions.
-    props:
-      - value
-
   WoonsituatiePanel:
     kind: custom
     description: Custom panel showing living situation details for a person.

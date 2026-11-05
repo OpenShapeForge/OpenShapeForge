@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 export { FIELD_ITEM_ID, type FieldValuePolicy } from "./field-value-policy.js";
-export { operationChoiceKeyword, operationExactNumericKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword, operationVariablesKeyword } from "./schema-annotations.js";
+export { operationChoiceKeyword, operationCollectionKeyword, operationExactNumericKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword, operationVariablesKeyword } from "./schema-annotations.js";
 export type { ExactDecimal, ExactNumericBounds, ExactNumericViolation } from "./exact-numeric.js";
 export {
   compareExactNumeric, exactNumericRule,

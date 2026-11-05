@@ -125,7 +125,7 @@ const timedOut = () =>
   new HttpError(504, "PROVIDER_TIMEOUT", "The provider did not answer in time.");
 const cancelled = () => new DOMException("Outbound request cancelled.", "AbortError");
 
-async function resolveAddresses(hostname: string): Promise<readonly string[]> {
+export async function resolveAddresses(hostname: string): Promise<readonly string[]> {
   const answers = await lookup(hostname, { all: true, verbatim: true });
   return answers.map((answer) => answer.address);
 }
@@ -182,7 +182,7 @@ function serializedBody(json: unknown): string {
 }
 
 /** Stop waiting at cancellation even if the awaited side ignores the signal. */
-function untilAborted<T>(
+export function untilAborted<T>(
   work: Promise<T>,
   signal: AbortSignal,
   discard?: (late: T) => void,
@@ -206,7 +206,7 @@ function untilAborted<T>(
 }
 
 /** Every answer must be public: a client may dial any of them. */
-async function publicAddresses(
+export async function publicAddresses(
   url: URL,
   resolve: NonNullable<ConnectionHttpDependencies["resolve"]>,
   signal: AbortSignal,

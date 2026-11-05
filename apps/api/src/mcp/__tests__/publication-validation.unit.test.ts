@@ -584,6 +584,14 @@ describe("requiredAuthValueKeys", () => {
       "clientId",
       "clientSecret",
     ]);
+    expect(requiredAuthValueKeys({ scheme: "googleServiceAccount" }).sort()).toEqual([
+      "clientEmail",
+      "privateKey",
+    ]);
+    expect(requiredAuthValueKeys({ scheme: "googleServiceAccount", clientEmailFrom: "account", privateKeyFrom: "key" }).sort()).toEqual([
+      "account",
+      "key",
+    ]);
     expect(
       requiredAuthValueKeys({
         scheme: "session",

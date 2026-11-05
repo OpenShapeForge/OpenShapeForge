@@ -31,7 +31,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import { createHandoff, readHandoff } from "./handoff-store.js";
 import { keyringFromEnv } from "../connectors/secrets.js";
-import type { OAuthClientProfile } from "./entity-oauth-profile.js";
+import { grantedScopesOf, type OAuthClientProfile } from "./entity-oauth-profile.js";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -186,6 +186,12 @@ export function scopesCovered(
     granted.filter((scope): scope is string => typeof scope === "string"),
   );
   return required.every((scope) => have.has(scope));
+}
+
+/** Service-account JWTs are minted with the adapter's configured scopes;
+ * authorization-code connections instead prove scopes from their consent. */
+export function connectionScopesCovered(required: readonly string[], auth: Record<string, unknown> | null | undefined, values: unknown): boolean {
+  return scopesCovered(required, auth?.profile === "googleServiceAccount" ? auth.scopes : grantedScopesOf(auth, values));
 }
 
 /** Single use: reading a state consumes it, valid or not. */

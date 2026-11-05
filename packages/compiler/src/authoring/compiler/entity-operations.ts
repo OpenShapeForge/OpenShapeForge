@@ -12,7 +12,7 @@ import {
   deriveEntityOperationErrors,
   withDeclaredEntityOperationErrors,
 } from "./entity-operation-errors.js";
-import { operationByAction } from "../entity-model.js";
+import { operationByAction, withheldActions } from "../entity-model.js";
 
 const OPERATION_ORDER: readonly EntityOperationIntent[] = [
   "list",
@@ -110,6 +110,7 @@ function compileOperation(
     entityId: source.entity.id,
     entityName: source.entity.name,
     intent,
+    ...(source.coreEntity && withheldActions(source.coreEntity).has(intent) ? { withheld: true as const } : {}),
     name: definition?.name ?? `${source.entity.name} ${intent}`,
     description: definition?.description ?? `${intent} ${source.entity.name}`,
     implementation: pluginImplementation

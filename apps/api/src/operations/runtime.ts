@@ -33,12 +33,14 @@ import type {
   ModuleOperationAvailabilityHandler,
   ModuleOperationResult,
   ModuleOperationSuccessResult,
+  ModulePlatformServices,
   ModuleRuntimeContext,
   RuntimeModule,
 } from "../modules/contract.js";
 import type {
   RuntimeOperationDefinition,
   RuntimeOperationExecutionResult,
+  RuntimeOperationRequest,
 } from "@openshapeforge/plugin-runtime";
 import {
   isOperationAccepted,
@@ -69,7 +71,7 @@ import { withConsumedCollectionLeaseInTransaction } from "./entity/collection-le
 import { getGeneratedCrudTables, recordActionTable } from "./entity/catalog.js";
 import { resolvePrincipalClass } from "../db/session.js";
 import { applyOwnedEntityFields, assertOwnedTarget, captureOwnedTarget } from "./entity/owned-fields.js";
-import { getEntityOperationOffers } from "./entity/runtime.js";
+import { getEntityOperationOffers, isWithheldOperation } from "./entity/runtime.js";
 import { entityBusinessUnavailability } from "./entity/availability.js";
 import type { EntityOperationContract, GeneratedCrudTable } from "./entity/types.js";
 import {
@@ -2115,6 +2117,24 @@ export function registerOperationRestRoutes(
  * Stable adapter for entity and record-derived Operations. Definitions stay
  * dynamic and session-filtered; adding a stored Operation never adds a route.
  */
+/**
+ * What a caller may address by id. An Operation its entity withholds from every
+ * interface is written through by another Operation, under that one's lease and
+ * version; a caller naming it directly would have neither. Other Operations
+ * still reach it through the platform port.
+ */
+const addressable = <T extends { id: string }>(definitions: readonly T[]): T[] =>
+  definitions.filter((definition) => !isWithheldOperation(definition.id));
+
+function executeForCaller(
+  platform: ModulePlatformServices,
+  session: TrustedSessionContext,
+  request: RuntimeOperationRequest,
+): Promise<RuntimeOperationExecutionResult> {
+  if (!isWithheldOperation(request.operation.id)) return platform.operations.execute(session, request);
+  return Promise.resolve({ error: { code: "OPERATION_NOT_FOUND", message: "The requested Operation is not available.", retryable: false } });
+}
+
 export function registerRuntimeOperationRestRoutes(
   app: FastifyInstance,
   runtime: ModuleRuntimeContext,
@@ -2206,7 +2226,7 @@ export function registerRuntimeOperationRestRoutes(
       try {
         return await withSession(
           request,
-          (session) => runtime.platform!.operations.list(session),
+          async (session) => addressable(await runtime.platform!.operations.list(session)),
         );
       } catch (error) {
         return failed(reply, error);
@@ -2223,7 +2243,7 @@ export function registerRuntimeOperationRestRoutes(
           async (session, definition) => definition ?? runtime.platform!.operations.get(session, id),
           id,
         );
-        if (!definition) {
+        if (!definition || isWithheldOperation(id)) {
           throw new HttpError(404, "NOT_FOUND", "Operation is not available.");
         }
         return definition;
@@ -2264,7 +2284,7 @@ export function registerRuntimeOperationRestRoutes(
         }
         const result = await withSession(
           request,
-          (session) => runtime.platform!.operations.execute(session, {
+          (session) => executeForCaller(runtime.platform!, session, {
             operation: { id, intent: body.intent as string },
             ...(operationInput ? { input: operationInput } : {}),
             ...(idempotencyKey ? { idempotencyKey } : {}),
@@ -2345,7 +2365,7 @@ export function operationGraphqlContribution(
       context: GraphqlContext,
     ) => withRuntimeSession(
       context,
-      (session) => runtime.platform!.operations.list(session),
+      async (session) => addressable(await runtime.platform!.operations.list(session)),
     );
     resolvers.Query.operationDefinition = (
       _parent: unknown,
@@ -2353,7 +2373,7 @@ export function operationGraphqlContribution(
       context: GraphqlContext,
     ) => withRuntimeSession(
       context,
-      (session) => runtime.platform!.operations.get(session, args.id),
+      async (session) => isWithheldOperation(args.id) ? undefined : runtime.platform!.operations.get(session, args.id),
     );
     resolvers.Mutation.executeOperation = (
       _parent: unknown,
@@ -2366,7 +2386,7 @@ export function operationGraphqlContribution(
       context: GraphqlContext,
     ) => withRuntimeSession(context, (session) => {
       const input = args.input === undefined ? undefined : asInput(args.input);
-      return runtime.platform!.operations.execute(session, {
+      return executeForCaller(runtime.platform!, session, {
         operation: { id: args.id, intent: args.intent },
         ...(input ? { input } : {}),
         ...(args.idempotencyKey

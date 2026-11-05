@@ -274,6 +274,8 @@ export type EntityOperationContract = EntityOperationRef & {
   key: string;
   entityId: string;
   entityName: string;
+  /** Every declared interface switches it off: only another Operation reaches it. */
+  withheld?: true;
   name: string | Readonly<Record<string, string>>;
   description: string | Readonly<Record<string, string>>;
   implementation?: { type: "entity" } | { type: "plugin"; plugin: string; handler: string };

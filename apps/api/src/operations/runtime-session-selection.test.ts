@@ -15,6 +15,7 @@ import { createControlRuntime } from "../control/runtime.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
 import type { RuntimeModule } from "../modules/contract.js";
 import { operationGraphqlContribution, registerRuntimeOperationRestRoutes, runtimeStaticOperationRegistrations, type OperationContract } from "./runtime.js";
+import { getEntityOperationContracts } from "./entity/runtime.js";
 
 const issuer = "https://identity.example.test/realms/dual-context";
 const tenantA = "11111111-1111-4111-8111-111111111111";
@@ -159,6 +160,22 @@ test("a tenant business failure is returned once without retrying another contex
   platform.registerOperationProviders([{ name: "example", operationProviders: [{ id: "example.refusal", list: async () => [providerDefinition], get: async () => providerDefinition, execute: async context => { writes.push(context.session as TrustedSessionContext); return { error: { code: "CONFLICT", message: "Definition changed.", retryable: false } }; } }] }]);
   const response = await execute(providerDefinition.id); expect(response.json()).toMatchObject({ error: { code: "CONFLICT" } }); expect(writes).toHaveLength(1); expect(controls).toHaveLength(0);
 });
+test("an Operation withheld from every interface is no address for a caller", async () => {
+  const withheld = "DocumentVariant.update";
+  expect(getEntityOperationContracts().find((operation) => operation.id === withheld)?.withheld).toBe(true);
+  const notFound = { error: { code: "OPERATION_NOT_FOUND" } };
+  const input = { id: "44444444-4444-4444-8444-444444444444", expectedVersion: "2026-01-01T00:00:00.000Z", values: {} };
+  const rest = await app.inject({ method: "POST", url: `/api/operations/${withheld}/execute`, headers: bearer(), payload: { intent: "update", input } });
+  expect(rest.json()).toMatchObject(notFound);
+  expect((await app.inject({ method: "GET", url: `/api/operations/${withheld}`, headers: bearer() })).statusCode).toBe(404);
+  const context = await createGraphqlContext(new Headers(bearer()), { db });
+  const { resolvers } = operationGraphqlContribution([], { db, platform: platform.services })!.graphql!({ db, platform: platform.services });
+  const executeOperation = resolvers!.Mutation!.executeOperation as (parent: unknown, args: { id: string; intent: string; input: Record<string, unknown> }, context: unknown) => Promise<unknown>;
+  const definition = resolvers!.Query!.operationDefinition as (parent: unknown, args: { id: string }, context: unknown) => Promise<unknown>;
+  expect(await executeOperation(null, { id: withheld, intent: "update", input }, context)).toMatchObject(notFound);
+  expect(await definition(null, { id: withheld }, context)).toBeUndefined();
+});
+
 test("GraphQL already preserves the same verified dual-role tenant context", async () => {
   const context = await createGraphqlContext(new Headers(bearer()), { db });
   const contribution = operationGraphqlContribution([], { db, platform: platform.services })!.graphql!({ db, platform: platform.services });

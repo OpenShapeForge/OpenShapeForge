@@ -109,6 +109,20 @@ export function projectedActions(
   return result;
 }
 
+/**
+ * The actions every interface the entity declares switches off. Such an
+ * Operation exists for another Operation to write through, under that one's
+ * guards: no caller addresses it, neither on a transport nor by its id.
+ */
+export function withheldActions(entity: CoreEntity): ReadonlySet<CrudOperationKey> {
+  // A web block without views only labels fields; it is no surface (webOperationActions).
+  const declared = (["rest", "graphql", "mcp", "web"] as const)
+    .filter((name) => name === "web" ? entity.interfaces?.web?.views : entity.interfaces?.[name])
+    .map((name) => projectedActions(entity, name));
+  return new Set((["list", "get", "create", "update", "delete"] as const)
+    .filter((action) => declared.length > 0 && declared.every((actions) => actions[action] === false)));
+}
+
 export function completeProjectedActions(
   entity: CoreEntity,
   interfaceName: "rest" | "mcp" | "web" | "graphql",

@@ -12,7 +12,7 @@ import { compile as compileEntity } from "./compiler/index.js";
 import { collectAuthoredEntityPluginOperations, collectPluginOperations, assertOperationRuntimeModules, buildStaticOperationCatalog } from "../generate-operations.js";
 import type { CoreEntity } from "./types.js";
 import type { FieldDefinitionInverseCollection } from "./types/field-definition.js";
-import type { PluginOperationContract } from "../plugins.js";
+import type { CompiledEntityInfo, PluginOperationContract } from "../plugins.js";
 import { buildMcpCatalog } from "../generate-mcp.js";
 import { entityOperationJsonSchemas } from "../entity-operation-json-schema.js";
 
@@ -268,6 +268,22 @@ test("insert, move and update stay unconfirmed, and remove never takes a challen
     owner.operations!.updateChild = { ...native("insert"), implementation: { type: "collection", action: "update", field: "children" }, confirmation: { mode: "acknowledgement" } } as never;
   })).toThrow("remove may ask an acknowledgement");
   expect(() => fixture((owner) => { owner.operations!.removeChild = { ...native("remove"), confirmation: challenge } as never; })).toThrow("remove may ask an acknowledgement");
+});
+
+test("an Operation every declared interface switches off is withheld, and the collection still writes through it", () => {
+  const off = (child: CoreEntity, ...names: ("rest" | "graphql" | "mcp" | "web")[]) => {
+    for (const name of names) Object.assign(child.interfaces![name]!, { operations: { update: false } });
+  };
+  const update = (entries: CompiledEntityInfo[]) => entries.find(({ contract }) => contract.entity.name === "Child")!.contract.entityOperations.update!;
+  expect(update(fixture((_owner, child) => off(child, "rest", "graphql", "mcp", "web"))).withheld).toBe(true);
+  // One interface left is a caller left.
+  expect(update(fixture((_owner, child) => off(child, "rest", "graphql", "mcp"))).withheld).toBeUndefined();
+  // An interface the entity does not declare is not a way in.
+  expect(update(fixture((_owner, child) => { off(child, "rest", "graphql", "web"); delete child.interfaces!.mcp; })).withheld).toBe(true);
+  // A web block without views is no surface either.
+  expect(update(fixture((_owner, child) => { off(child, "rest", "graphql", "mcp"); delete child.interfaces!.web!.views; })).withheld).toBe(true);
+  expect(update(fixture()).withheld).toBeUndefined();
+  expect(compile(fixture((_owner, child) => off(child, "rest", "graphql", "mcp", "web"))).map((operation) => operation.id)).toContain("Owner.insertChild");
 });
 
 test("authoring schema accepts identityless baseEntity false and object semantic catalog metadata", () => {

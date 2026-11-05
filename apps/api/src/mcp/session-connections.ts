@@ -255,9 +255,13 @@ export function reauthorizationProblem(
   if (error instanceof HttpError && error.code === "REAUTHORIZATION_REQUIRED") {
     if (context.canonicalConnect) {
       const { operationId, serviceId } = context.canonicalConnect;
+      const subject = context.scope === "tenant"
+        ? `The organization's ${context.adapter} sign-in`
+        : `Your ${context.adapter} sign-in`;
+      const actor = context.scope === "tenant" ? "An organization administrator must use" : "Use";
       return new HttpError(403, "REAUTHORIZATION_REQUIRED",
-        `${context.adapter} sign-in expired and could not be refreshed. ` +
-        `Use the available Operation executor with operationId ${JSON.stringify(operationId)} and input { id: ${JSON.stringify(serviceId)} }; open the returned authorization URL.`,
+        `${subject} expired and could not be refreshed. ${actor} the available Operation executor ` +
+        `with operationId ${JSON.stringify(operationId)} and input { id: ${JSON.stringify(serviceId)} }; open the returned authorization URL.`,
       );
     }
     return connectionProblemError({

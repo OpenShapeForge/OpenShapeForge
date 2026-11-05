@@ -3,11 +3,15 @@
  * The `osf-extensions` Operations and the `extensions` record contract, on
  * the extensible fixture (__fixtures__/rowaccess/entities/extensible-part*.yaml).
  */
-import { describe, expect, it } from "bun:test";
+import { afterAll, describe, expect, it } from "bun:test";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import YAML from "yaml";
 import { compileAuthoringBackendManifest } from "./authoring/backend-manifest.js";
+import { resolveAuthoringLayers } from "./authoring/layers.js";
 import type { CompiledEntityContract } from "./authoring/types/compiled.js";
 import { EXTENSIONS_PLUGIN, collectExtensionOperations } from "./extension-operations.js";
 import { entityOperationJsonSchemas, entityRecordOutputSchema } from "./entity-operation-json-schema.js";
@@ -25,6 +29,8 @@ const entities = contracts.map((contract) => ({ contract, slug: contract.storage
 const contract = (name: string) => contracts.find((candidate) => candidate.entity.name === name)!;
 const operations = collectExtensionOperations(entities, manifest.extensionRegistry);
 const operation = (key: string) => operations.find((candidate) => candidate.key === key)!;
+const temporary: string[] = [];
+afterAll(() => { for (const dir of temporary) rmSync(dir, { recursive: true, force: true }); });
 
 describe("osf-extensions Operations", () => {
   it("defines every field-definition action on the extensible entity and a referenced-by read on each target", () => {
@@ -131,6 +137,46 @@ describe("osf-extensions Operations", () => {
     })).toBe(true);
     const references = ajv.compile(operation("RestEnabled.referencedBy").outputSchema);
     expect(references({ items: [{ entity: "ExtensiblePart", fieldId: "00000000-0000-4000-8000-000000000000", fieldKey: "supplier", label: { en: "Supplier" }, count: 4 }] })).toBe(true);
+  });
+});
+
+describe("a target a host hides on every interface", () => {
+  const hide = (slug: string) => {
+    const host = mkdtempSync(join(tmpdir(), "osf-extensions-host-"));
+    const repoRoot = mkdtempSync(join(tmpdir(), "osf-extensions-repo-"));
+    temporary.push(host, repoRoot);
+    mkdirSync(join(host, "entities"));
+    writeFileSync(join(host, "entities", `${slug}.yaml`), YAML.stringify({
+      kind: "entityPatch", interfaces: { rest: null, graphql: null, mcp: null, web: null },
+    }));
+    const hidden: CompiledEntityContract[] = [];
+    const compiled = compileAuthoringBackendManifest(resolveAuthoringLayers(repoRoot, { layers: [fixtureDir, host] }), {
+      mode: "promote", entityAllowlist: slugs, generatedCrudAllowlist: slugs,
+      onCandidate: ({ contract: candidate }) => { hidden.push(candidate); },
+    });
+    const compiledEntities = hidden.map((candidate) => ({ contract: candidate, slug: candidate.storage.table }));
+    const compiledOperations = collectExtensionOperations(compiledEntities, compiled.extensionRegistry);
+    return { compiled, entities: compiledEntities, operations: compiledOperations };
+  };
+
+  it("has no referenced-by Operation, so no REST path, GraphQL field or OpenAPI path", () => {
+    const { compiled, entities: hiddenEntities, operations: hiddenOperations } = hide("rest-enabled");
+    expect(hiddenOperations.map((candidate) => candidate.key)).toEqual(
+      operations.map((candidate) => candidate.key).filter((key) => key !== "RestEnabled.referencedBy"),
+    );
+    expect(hiddenOperations.some((candidate) => candidate.target?.entityName === "RestEnabled")).toBe(false);
+    expect(hiddenOperations.some((candidate) => candidate.transports.rest.path.startsWith("/api/rest/v1/rest-enableds"))).toBe(false);
+    expect(hiddenOperations.flatMap((candidate) => candidate.transports.graphql.enabled ? [candidate.transports.graphql.field] : [])).not.toContain("restEnabledReferencedBy");
+    const spec = JSON.parse(renderOpenApiSpec(compiled, "fixture", { entities: hiddenEntities, operations: hiddenOperations })) as any;
+    expect(Object.keys(spec.paths).filter((path) => path.startsWith("/api/rest/v1/rest-enableds"))).toEqual([]);
+    expect(spec.paths["/api/rest/v1/extensible-parts/{id}/referenced-by"].post).toBeDefined();
+  });
+
+  it("keeps the field definitions of a hidden extensible entity and takes only its referenced-by read", () => {
+    const { operations: hiddenOperations } = hide("extensible-part");
+    expect(hiddenOperations.map((candidate) => candidate.key)).toContain("ExtensiblePart.fieldDefinitions.list");
+    expect(hiddenOperations.map((candidate) => candidate.key)).not.toContain("ExtensiblePart.referencedBy");
+    expect(hiddenOperations.map((candidate) => candidate.key)).toContain("RestEnabled.referencedBy");
   });
 });
 

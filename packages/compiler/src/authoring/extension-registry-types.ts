@@ -25,7 +25,9 @@ export type ExtensionRegistry = {
    * authored relation of an extensible one and every entity a child's single
    * relation leads to — from its compiled authorization contract. The runtime proves from this that a lookup or rollup shows no
    * reader of the source anything the target would hide from them; an entity
-   * missing here is never a lookup or rollup target.
+   * missing here is never a lookup or rollup target. An entity no interface
+   * reads is not a target or relation at all, so it is missing here unless it
+   * is extensible itself.
    */
   readAccess: Record<string, ExtensionReadAccess>;
 };

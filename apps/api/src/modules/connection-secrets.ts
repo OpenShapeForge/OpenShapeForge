@@ -286,7 +286,7 @@ export async function resolveConnectionValues(
       a.${sql.ref(providerEgressColumn)} as adapter_egress,
       a.${sql.ref(providerDefinitionsColumn)} as adapter_definitions,
       ${providerColumns.discovery ? sql`a.${sql.ref(providerColumns.discovery)}` : sql`null`} as adapter_discovery,
-      ${providerColumns.updatedAt ? sql`a.${sql.ref(providerColumns.updatedAt)}` : sql`null`} as adapter_updated_at
+      ${providerColumns.updatedAt ? sql`a.${sql.ref(providerColumns.updatedAt)}::text` : sql`null`} as adapter_updated_at
     `;
     if ("connectionId" in selector) {
       const result = await sql<ConnectionRow>`

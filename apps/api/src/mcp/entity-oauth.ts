@@ -182,6 +182,13 @@ export function scopesCovered(
   return required.every((scope) => have.has(scope));
 }
 
+/** Service-account JWTs are minted with the adapter's configured scopes;
+ * authorization-code connections instead prove scopes from their consent. */
+export function connectionScopesCovered(required: readonly string[], auth: Record<string, unknown> | null | undefined, values: unknown): boolean {
+  const connection = values && typeof values === "object" && !Array.isArray(values) ? values as Record<string, unknown> : undefined;
+  return scopesCovered(required, auth?.profile === "googleServiceAccount" ? auth.scopes : connection?.grantedScopes);
+}
+
 /** Single use: reading a state consumes it, valid or not. */
 export async function redeemState(
   state: unknown,

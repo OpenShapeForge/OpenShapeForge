@@ -12,7 +12,17 @@ import {
   mintAuthorization,
   redeemState,
   scopesCovered,
+  connectionScopesCovered,
 } from "../entity-oauth.js";
+
+it("checks service-account scopes against the signed token configuration, not user consent", () => {
+  const account = { profile: "googleServiceAccount", scopes: ["calendar.freebusy"] };
+  expect(connectionScopesCovered(["calendar.freebusy"], account, {})).toBe(true);
+  expect(connectionScopesCovered(["calendar.events"], account, { grantedScopes: ["calendar.events"] })).toBe(false);
+  expect(connectionScopesCovered(["calendar.freebusy"], { profile: "googleServiceAccount" }, { grantedScopes: ["calendar.freebusy"] })).toBe(false);
+  expect(connectionScopesCovered(["calendar.freebusy"], { profile: "oauth2AuthorizationCode", scopes: ["calendar.freebusy"] }, {})).toBe(false);
+  expect(connectionScopesCovered(["calendar.freebusy"], { profile: "oauth2AuthorizationCode" }, { grantedScopes: ["calendar.freebusy"] })).toBe(true);
+});
 import { exchangeCodeForTokens, refreshTokens } from "../entity-oauth-tokens.js";
 import {
   connectionTokenSecretScope,

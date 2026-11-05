@@ -13,7 +13,7 @@ import {
 } from "./derived-tools.js";
 import { bindingSelected } from "./declarative-execution.js";
 import { loadOrderedBindings } from "./execution-bindings.js";
-import { scopesCovered } from "./entity-oauth.js";
+import { connectionScopesCovered } from "./entity-oauth.js";
 import { accessTokenNeedsRefresh, refreshLeewaySeconds } from "./connection-token-refresh.js";
 import { connectionProblemMessage } from "./connection-guidance.js";
 import { isOrganizationAdministrator } from "./onboarding.js";
@@ -258,7 +258,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
               execution.connectionValuesField
             ] ?? {}) as Record<string, unknown>;
             if (
-              !scopesCovered(requiredScopes, connectionValues?.grantedScopes)
+              !connectionScopesCovered(requiredScopes, providerAuth, connectionValues)
             ) {
               missingRequiredScopes = true;
               continue;

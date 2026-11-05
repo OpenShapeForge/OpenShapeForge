@@ -108,6 +108,18 @@ describe("JWT bearer token acquisition", () => {
       expect((error as JwtBearerError).code).toBe("JWT_BEARER_CONFIGURATION");
     });
 
+    it("accepts the single-line escaped PEM representation from Google JSON", async () => {
+      const assertion = await buildServiceAccountAssertion({
+        clientEmail: TEST_EMAIL, privateKey: testPrivateKey.replace(/\n/g, "\\n"), scopes: TEST_SCOPES, now: NOW,
+      });
+      const jwk = await exportJWK(testPublicKey);
+      jwk.alg = "RS256";
+      const { payload } = await jwtVerify(assertion, createLocalJWKSet({ keys: [jwk] }), {
+        issuer: TEST_EMAIL, audience: GOOGLE_TOKEN_URL, currentDate: new Date(NOW),
+      });
+      expect(payload.iss).toBe(TEST_EMAIL);
+    });
+
     it("joins multiple scopes with spaces", async () => {
       const scopes = [
         "https://www.googleapis.com/auth/calendar.readonly",

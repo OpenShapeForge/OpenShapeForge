@@ -155,7 +155,10 @@ export async function buildServiceAccountAssertion(input: {
 
   let key: CryptoKey;
   try {
-    key = await importPKCS8(input.privateKey, "RS256");
+    // Google JSON credentials store PEM line breaks as literal backslash-n.
+    // A password input cannot retain pasted newlines, so accept that standard
+    // single-line representation as well as the decoded PEM.
+    key = await importPKCS8(input.privateKey.replace(/\\n/g, "\n"), "RS256");
   } catch (cause) {
     throw new JwtBearerError(
       "JWT_BEARER_CONFIGURATION",

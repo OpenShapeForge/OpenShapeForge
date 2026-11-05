@@ -20,6 +20,8 @@ import {
 import { keyringFromEnv } from "../../connectors/secrets.js";
 import { mintAuthorization } from "../../mcp/entity-oauth.js";
 import { mintConfiguration } from "../../mcp/configuration-handoff.js";
+import { readPublicMcpOAuthClient, savePublicMcpOAuthClient } from "../../mcp/native-oauth-client-store.js";
+import { preparePublicMcpOAuth } from "../../mcp/native-oauth-setup.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -75,6 +77,43 @@ async function withScratchDb<T>(fn: (name: string) => Promise<T>): Promise<T> {
 }
 
 describe("MCP browser handoff persistence", () => {
+  test("stores public MCP client registration per tenant and provider revision", async () => {
+    await withScratchDb(async name => {
+      await withDb(databaseUrl(name), db => db.connection().execute(conn => runMigrationChain(conn)));
+      await withDb(databaseUrl(name, true), async db => {
+        const session = { tenantId: randomUUID(), userId: randomUUID(), roles: [], groups: [], scope: "tenant" as const };
+        const binding = { session, providerTable: "integration.adapters", providerId: randomUUID(), providerUpdatedAt: "2026-01-01T00:00:00Z", resource: "https://mcp.example/mcp", redirectUri: "https://app.example/callback" };
+        const first = { resource: binding.resource, issuer: "https://auth.example", clientId: "public-1", redirectUri: binding.redirectUri, metadata: { test: true } };
+        expect(await savePublicMcpOAuthClient(db, binding, first)).toEqual(first);
+        await expect(savePublicMcpOAuthClient(db, binding, { ...first, metadata: { nested: { client_secret: "must-not-be-stored" } } })).rejects.toThrow("invalid");
+        expect(await readPublicMcpOAuthClient(db, { ...binding, session: { ...session, tenantId: randomUUID() } })).toBeUndefined();
+        expect(await readPublicMcpOAuthClient(db, { ...binding, providerUpdatedAt: "2026-01-02T00:00:00Z" })).toBeUndefined();
+        expect(await savePublicMcpOAuthClient(db, binding, { ...first, clientId: "public-racing" })).toEqual(first);
+        const concurrent = { ...binding, providerId: randomUUID() };
+        const races = await Promise.all([
+          savePublicMcpOAuthClient(db, concurrent, { ...first, clientId: "race-1" }),
+          savePublicMcpOAuthClient(db, concurrent, { ...first, clientId: "race-2" }),
+        ]);
+        expect(races[0]?.clientId).toBe(races[1]?.clientId);
+        const updated = { ...binding, providerUpdatedAt: "2026-01-02T00:00:00Z" };
+        expect(await savePublicMcpOAuthClient(db, updated, { ...first, clientId: "public-2" })).toMatchObject({ clientId: "public-2" });
+        expect(await readPublicMcpOAuthClient(db, binding)).toBeUndefined();
+        await expect(savePublicMcpOAuthClient(db, binding, first)).rejects.toThrow("changed during setup");
+        let registrations = 0;
+        const setup = { ...binding, db, providerId: randomUUID(), owner: undefined, clientName: "Kern", auth: {},
+          egress: ["mcp.example", "auth.example"],
+          fetchMetadata: async ({ url }: { url: string }) => ({ status: 200, contentType: "application/json", body: JSON.stringify(
+            url.includes("oauth-protected-resource") ? { resource: binding.resource, authorization_servers: ["https://auth.example"] } :
+              { issuer: "https://auth.example", authorization_endpoint: "https://auth.example/authorize", token_endpoint: "https://auth.example/token", registration_endpoint: "https://auth.example/register", token_endpoint_auth_methods_supported: ["none"], grant_types_supported: ["authorization_code", "refresh_token"], code_challenge_methods_supported: ["S256"] }
+          ) }),
+          fetchRegistration: async () => { registrations++; return { status: 201, contentType: "application/json", body: JSON.stringify({ client_id: "auto-public", token_endpoint_auth_method: "none", redirect_uris: [binding.redirectUri] }) }; },
+        };
+        expect(await preparePublicMcpOAuth(setup)).toMatchObject({ clientId: "auto-public", profile: { resource: binding.resource, issuer: "https://auth.example" } });
+        expect(await preparePublicMcpOAuth(setup)).toMatchObject({ clientId: "auto-public" });
+        expect(registrations).toBe(1);
+      });
+    });
+  }, TEST_TIMEOUT);
   test("OAuth handoff joins its canonical Operation transaction without replacing identity or authority", async () => {
     await withScratchDb(async name => {
       await withDb(databaseUrl(name), db => db.connection().execute(conn => runMigrationChain(conn)));

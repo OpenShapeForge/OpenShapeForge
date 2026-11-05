@@ -34,6 +34,8 @@ import {
   urlSafeConnectionValues,
 } from "./session-connections.js";
 import { ok } from "./tool-results.js";
+import { preparePublicMcpOAuth } from "./native-oauth-setup.js";
+import { productName } from "../config/product-name.js";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
 /** What one provider's sign-in step reads beyond the call: the derived entry and what the connect call resolved before the loop. */
@@ -99,8 +101,23 @@ export async function connectProviderStep(
       "This shared tenant connection requires an explicitly delegated organization role.",
     );
   }
-  const authorizationUrl = auth.authorizationUrl;
-  const tokenUrl = auth.tokenUrl;
+  const egress = Array.isArray(providerRow.egressHosts)
+    ? (providerRow.egressHosts as string[])
+    : [];
+  const autoMcp = providerRow.discovery === "mcp" && auth.clientAuthentication === "none";
+  let automatic: Awaited<ReturnType<typeof preparePublicMcpOAuth>> | undefined;
+  if (autoMcp) {
+    if (scope_ === "user") requireActingRelationId(session, "A personal connection");
+    if (typeof auth.resource !== "string" || (typeof providerRow.updatedAt !== "string" && !(providerRow.updatedAt instanceof Date))) {
+      throw new HttpError(400, "PROVIDER_MISCONFIGURED", "The MCP Adapter needs its protected resource and current version.");
+    }
+    automatic = await preparePublicMcpOAuth({ db, session, providerTable: execution.providerTable,
+      providerId: providerRowId, providerUpdatedAt: providerRow.updatedAt, resource: auth.resource,
+      redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`, clientName: productName(), auth, egress,
+      owner: scope.egressOwner, ...(scope.signal ? { signal: scope.signal } : {}) });
+  }
+  const authorizationUrl = automatic?.authorizationUrl ?? auth.authorizationUrl;
+  const tokenUrl = automatic?.tokenUrl ?? auth.tokenUrl;
   if (
     typeof authorizationUrl !== "string" ||
     typeof tokenUrl !== "string"
@@ -111,10 +128,7 @@ export async function connectProviderStep(
       "The provider declares no authorization and token endpoints.",
     );
   }
-  const oauthProfile = oauthClientProfile(auth);
-  const egress = Array.isArray(providerRow.egressHosts)
-    ? (providerRow.egressHosts as string[])
-    : [];
+  const oauthProfile = automatic?.profile ?? oauthClientProfile(auth);
   const adapterScopes = Array.isArray(auth.scopes)
     ? (auth.scopes as unknown[]).filter(
         (scope): scope is string => typeof scope === "string",
@@ -184,7 +198,7 @@ export async function connectProviderStep(
       ?.sourceTable ?? execution.providerTable;
   let credentials: ReturnType<typeof readClientCredentials>;
   try {
-    credentials = readClientCredentials(
+    credentials = automatic ? { clientId: automatic.clientId } : readClientCredentials(
       tenantConnection,
       execution.connectionValuesField,
       secretScope,

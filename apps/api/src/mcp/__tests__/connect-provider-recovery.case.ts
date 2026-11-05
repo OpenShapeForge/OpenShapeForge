@@ -8,6 +8,14 @@ const organization = { id: "organization-1", ownerUserId: null, values: {} };
 let refreshCalls: Record<string, unknown>[] = [];
 let handoffs: Record<string, unknown>[] = [];
 let refreshFailure: Error | undefined;
+let automaticCalls = 0;
+
+mock.module("../native-oauth-setup.js", () => ({
+  preparePublicMcpOAuth: async () => {
+    automaticCalls++;
+    return { clientId: "auto-client", authorizationUrl: "https://example.test/authorize", tokenUrl: "https://example.test/token", profile: { clientAuthentication: "none", resource: "https://example.test/mcp", audiences: ["https://example.test/mcp"], issuerResponseRequired: false, refreshUnsupported: false, strictGrants: true } };
+  },
+}));
 
 mock.module("../session-connections.js", () => ({
   looksLikeStoredSecret: (value: any) => Boolean(value?.ciphertext && value?.keyId),
@@ -71,6 +79,19 @@ describe("connect recovers an expired personal grant", () => {
     refreshFailure = new HttpError(502, "TOKEN_REFRESH_FAILED", "temporary");
     await expect(connectProviderStep(context(), 0, provider)).rejects.toBe(refreshFailure);
     expect(handoffs).toHaveLength(0);
+  });
+});
+
+describe("MCP client registration on the existing connection flow", () => {
+  it("uses the automatic public client for consent without an organization secret", async () => {
+    automaticCalls = 0; handoffs = []; refreshCalls = [];
+    const mcp = { ...provider, row: { ...provider.row, discovery: "mcp", updatedAt: "2026-01-01T00:00:00Z" },
+      auth: { connectionScope: "user", clientAuthentication: "none", resource: "https://example.test/mcp", scopes: ["calendar.read"] } };
+    const result = await connectProviderStep(context(), 0, mcp);
+    expect(result?.structuredContent).toMatchObject({ action: "authorize" });
+    expect(automaticCalls).toBe(1);
+    expect(handoffs[0]).toMatchObject({ clientId: "auto-client", profile: { clientAuthentication: "none", resource: "https://example.test/mcp" } });
+    expect(handoffs[0]).not.toHaveProperty("clientSecret");
   });
 });
 

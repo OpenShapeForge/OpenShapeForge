@@ -770,6 +770,7 @@ export class ModulePlatformRuntime {
             db: this.#db,
             session,
             selector: parseConnectionSelector(selector),
+            egressOwner: this.#egressOwner,
           });
         },
       },

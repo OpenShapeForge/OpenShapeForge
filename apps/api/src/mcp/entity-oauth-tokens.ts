@@ -113,6 +113,8 @@ export async function exchangeCodeForTokens(
     pending.egress,
     fetchImpl,
     egress,
+    pending.profile?.strictGrants ? "https-only" : "http-or-https",
+    pending.profile?.strictGrants ? "deny" : "follow",
   );
   const text = await readBoundedResponse(response, 1024 * 1024);
   if (!response.ok) {
@@ -219,6 +221,8 @@ export async function refreshTokens(input: {
           input.egress,
           fetchImpl,
           input.moduleEgress,
+          input.resource ? "https-only" : "http-or-https",
+          input.resource ? "deny" : "follow",
         ),
     });
     const scope = connectionTokenSecretScope(input.connectionTable);

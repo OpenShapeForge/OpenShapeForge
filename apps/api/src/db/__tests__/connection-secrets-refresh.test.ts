@@ -286,8 +286,8 @@ describe("a public client's token stays bound to its resource", () => {
       const seed = await seedOAuthMailbox(admin, new Date(Date.now() - 60_000), {
         auth: PUBLIC_AUTH, personal: { oauthBinding: { resource: RESOURCE, issuer } },
       });
-      const changed = await admin.connection().execute(conn => sql<{ updated_at: Date }>`
-        update integration.adapters set discovery = 'mcp' where id = ${seed.adapterId}::uuid returning updated_at
+      const changed = await admin.connection().execute(conn => sql<{ updated_at: string }>`
+        update integration.adapters set discovery = 'mcp', updated_at = '2026-01-01T00:00:00.123456Z'::timestamptz where id = ${seed.adapterId}::uuid returning updated_at::text
       `.execute(conn));
       const session = sessionFor(seed.tenantId, seed.userId, seed.relationId);
       await admin.connection().execute(conn => sql`delete from integration.connections where adapter_id = ${seed.adapterId}::uuid and owner_user_id is null`.execute(conn));

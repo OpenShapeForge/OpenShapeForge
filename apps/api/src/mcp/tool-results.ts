@@ -13,6 +13,7 @@ import type {
   RuntimeHostOperationRequest,
   RuntimeOperationExecutionResult,
 } from "@openshapeforge/plugin-runtime";
+import { parseNativeMcpToolResult } from "@openshapeforge/plugin-runtime";
 import { Server } from "@modelcontextprotocol/server";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { toHttpError } from "../rest/http-error.js";
@@ -233,6 +234,38 @@ export function runtimeOperationToolResult(
   return resources.length > 0
     ? { ...projected, content: [...projected.content, ...resources] }
     : projected;
+}
+
+/**
+ * A native tool's dedicated answer: the upstream `CallToolResult` itself, with
+ * its content blocks, `isError` and metadata unchanged. A value that is not one
+ * came back after the tool may already have acted, so the failure says so and
+ * is never retryable.
+ */
+export function nativeOperationToolResult(
+  result: RuntimeOperationExecutionResult,
+): ToolResult {
+  if ("error" in result) return failed(new OperationFailure(result.error));
+  const native = "data" in result ? parseNativeMcpToolResult(result.data) : undefined;
+  if (native) return native as unknown as ToolResult;
+  return failed(new OperationFailure({
+    code: "NATIVE_TOOL_RESULT_INVALID",
+    message: "The external tool ran, but its answer could not be read. Check its outcome before calling it again.",
+    retryable: false,
+  }));
+}
+
+/**
+ * The same tool through the generic executor, which answers one envelope for
+ * every Operation: `data` holds the complete upstream result, and `isError`
+ * stays visible at the level a client reads it.
+ */
+export function nativeOperationEnvelopeResult(
+  result: RuntimeOperationExecutionResult,
+): ToolResult {
+  const projected = runtimeOperationToolResult(result);
+  const reportedError = "data" in result && parseNativeMcpToolResult(result.data)?.isError === true;
+  return reportedError ? { ...projected, isError: true } : projected;
 }
 
 export const __failedForTests = failed;

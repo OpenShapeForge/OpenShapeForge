@@ -8,7 +8,7 @@
 import { serializeEntityRow } from "../operations/entity/serialize-result.js";
 import { createHash } from "node:crypto";
 import { compareCodeUnits } from "@openshapeforge/operations";
-import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
+import type { RuntimeNativeMcpTool, RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import type { Tool } from "@modelcontextprotocol/server";
 import { deriveToolName } from "./derived-tools.js";
 import { localizedText, type ResolvedLocale } from "./locale.js";
@@ -134,10 +134,51 @@ export function authorityFingerprint(capture: CapturedDerivedExecution): string 
     .digest("base64url");
 }
 
+/**
+ * A discovered tool as the upstream server describes it. No field is derived
+ * from the Operation's effects: those are core's conservative reading, the
+ * annotations are the server's own hints, and neither stands in for the other.
+ */
+function projectNativeMcpTool(
+  definition: RuntimeOperationDefinition,
+  native: RuntimeNativeMcpTool,
+  locale: ResolvedLocale,
+): ProjectedRuntimeOperationTool {
+  const description = localizedText(definition.description, locale);
+  // Upstream resources are not served here, so a UI reference could only ever
+  // resolve to one of this server's own apps, such as its secure input form.
+  const meta = native.meta ? structuredClone(native.meta) as Record<string, unknown> : undefined;
+  if (meta) {
+    delete meta.ui;
+    delete meta["ui/resourceUri"];
+  }
+  return {
+    definition,
+    tool: {
+      name: native.name,
+      ...(native.title ? { title: native.title } : {}),
+      ...(description ? { description } : {}),
+      inputSchema: canonicalRuntimeOperationSchema(
+        definition.input,
+        definition.id,
+        "input",
+      ) as Tool["inputSchema"],
+      ...(native.outputSchema
+        ? { outputSchema: structuredClone(native.outputSchema) as Tool["outputSchema"] }
+        : {}),
+      ...(native.annotations
+        ? { annotations: structuredClone(native.annotations) as Tool["annotations"] }
+        : {}),
+      ...(meta ? { _meta: meta as Tool["_meta"] } : {}),
+    },
+  };
+}
+
 export function projectRuntimeOperationTool(
   definition: RuntimeOperationDefinition,
   locale: ResolvedLocale,
 ): ProjectedRuntimeOperationTool {
+  if (definition.nativeMcpTool) return projectNativeMcpTool(definition, definition.nativeMcpTool, locale);
   const name = deriveToolName(definition.key);
   if (!name) {
     throw new Error(

@@ -311,6 +311,38 @@ CRUD, authored operation and provider tools no longer consume individual slots
 in `tools/list`; tools without a canonical replacement remain advertised.
 The dedicated projection continues to offer its authored tool names.
 
+A runtime provider may mark an Operation as one tool of an external MCP server
+(`RuntimeOperationDefinition.nativeMcpTool`, contract in
+`packages/plugin-runtime/src/native-mcp-tool.ts`). Such a tool stays listed in
+both projections, per session, under the exact name the provider gives it, with
+its input schema, title, description, output schema, annotations and metadata
+unchanged. An upstream UI reference (`_meta.ui`) is the one thing removed:
+upstream resources are not served here, so it could only resolve to one of this
+server's own apps. The output schema gains the usual failure branch. A call
+answers the upstream `CallToolResult` itself, including `isError` and `_meta`;
+through `osf_execute_operation` the same result is the envelope's `data`. New
+tools need no approval: the next `tools/list` has them.
+
+This changes the projection, not the authority. A call resolves the tool again
+under the live session and runs through canonical execution: provider `get`,
+execution policies, module interceptors. Upstream decides what the person may do
+there; OSF enforces the verified tenant and person and the Connection. Every
+native tool names its Connection, and core binds the execution to it when the
+provider obtains credentials through `resolveConnectionValues`; row-level
+security and the Adapter's connection scope decide ownership. This contract
+does not itself verify the provider's discovery filtering or prevent a provider
+from using some other transport. Upstream annotations are hints that
+are passed on and decide nothing. Core accepts only the effects it can know, a
+possible external write with no idempotency, so no native tool is retried on an
+assumption. A provider's `list` and `get` answer from stored discovery and never
+call upstream. A provider explicitly marked `failureIsolation: "external-catalog"`
+that fails, or does not answer within five seconds, loses its own Operations for
+that read and nothing else; an invalid definition or
+a colliding name loses only that tool, and two tools claiming a name lose it both.
+
+Core ships the contract only. Discovery, the snapshot store and the upstream MCP
+client belong to a plugin, and no such integration ships here.
+
 Entity execution uses the existing MCP adapter, preserving private configuration,
 confirmation, edit leases and definition-change notifications. A private
 configuration handoff is returned under `data` with an Operation reference in

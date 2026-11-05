@@ -18,6 +18,14 @@ import type {
   RuntimeDeclarativeServiceConnectionUse,
 } from "./declarative-service.js";
 export { RUNTIME_EXPECTED_CONNECTION_UNAVAILABLE_CODE } from "./declarative-service.js";
+import type { RuntimeNativeMcpTool } from "./native-mcp-tool.js";
+export {
+  RUNTIME_NATIVE_MCP_EFFECTS,
+  RUNTIME_NATIVE_MCP_OUTPUT,
+  nativeMcpToolProblem,
+  parseNativeMcpToolResult,
+} from "./native-mcp-tool.js";
+export type { RuntimeNativeMcpTool, RuntimeNativeMcpToolResult } from "./native-mcp-tool.js";
 export type {
   RuntimeDeclarativeServiceCapabilities,
   RuntimeDeclarativeServiceConnectionExpectation,
@@ -406,6 +414,8 @@ export type RuntimeOperationDefinition = OperationReference & {
   prerequisites?: readonly OperationPrerequisite[];
   /** The declared failure catalogue: what a caller can be answered with. */
   errors?: readonly { status: number; code: string; description: string }[];
+  /** A tool of an external MCP server, offered as itself (native-mcp-tool.ts). */
+  nativeMcpTool?: RuntimeNativeMcpTool;
   concurrency?: {
     version?: { mode: "required"; field: string };
     editLease?: { mode: "required"; expiresAfterInactivity: string };
@@ -536,6 +546,8 @@ export type RuntimeOperationExecutionContext = {
  */
 export type RuntimeOperationProvider = {
   id: string;
+  /** An external catalog may fail independently of the application's own Operations. */
+  failureIsolation?: "external-catalog";
   list(session: PluginSessionContext): Promise<readonly RuntimeOperationDefinition[]>;
   get(
     session: PluginSessionContext,

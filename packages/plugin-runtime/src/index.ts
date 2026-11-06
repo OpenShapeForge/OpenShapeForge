@@ -56,7 +56,7 @@ export type { RuntimeExecutionPolicy, RuntimeExecutionPolicyContract, RuntimeExe
   RuntimeExecutionOperation, RuntimeExecutionAdmission, RuntimeExecutionRefusal } from "./execution-policy.js";
 export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js";
 export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwner, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
-  RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
+  RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactStageContext, RuntimeArtifactExpiryJob, RuntimeArtifactExpiryInput, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type {
   OperationAcceptance,
   OperationAccepted,

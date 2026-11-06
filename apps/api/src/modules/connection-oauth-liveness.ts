@@ -43,7 +43,7 @@ import {
 } from "../mcp/entity-oauth-profile.js";
 import { readPublicMcpOAuthClient } from "../mcp/native-oauth-client-store.js";
 import { preparedPublicMcpOAuth, type PreparedMcpOAuth } from "../mcp/native-oauth-setup.js";
-import { callbackOrigin, ENTITY_OAUTH_CALLBACK_PATH } from "../mcp/handoff-config.js";
+import { oauthCallbackUrl } from "../mcp/handoff-config.js";
 import type { RuntimeModule } from "./contract.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -179,7 +179,7 @@ export async function liveConnectionValues(
       }
       const client = await readPublicMcpOAuthClient(input.db, { session: input.session, providerTable: input.providerTable,
         providerId: row.adapterId, providerUpdatedAt: row.adapterUpdatedAt, resource: auth.resource,
-        redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}` });
+        redirectUri: oauthCallbackUrl() });
       if (!client) return { ok: false, code: "REAUTHORIZATION_REQUIRED", message: "The MCP provider registration is missing or changed; sign in again." };
       automatic = preparedPublicMcpOAuth(auth, client, row.egress);
     }

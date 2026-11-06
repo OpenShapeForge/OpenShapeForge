@@ -32,13 +32,7 @@ import { resourcesForSession } from "./session-projection.js";
 import { derivedToolsForSession } from "./derived-session-tools.js";
 import { entitiesForSession, entityResourceUri } from "./entity-resources.js";
 import { entityDescription, entityTitle } from "./entity-tool-projection.js";
-import {
-  ENTITY_CONFIGURATION_APP_URI,
-  ENTITY_OAUTH_CALLBACK_PATH,
-  MCP_APP_MIME_TYPE,
-  callbackOrigin,
-  supportsMcpApp,
-} from "./handoff-config.js";
+import { ENTITY_CONFIGURATION_APP_URI, MCP_APP_MIME_TYPE, supportsMcpApp, oauthCallbackUrl } from "./handoff-config.js";
 import { type ServerScope } from "./server-scope.js";
 import { runtimeRowsByFilter } from "./session-connections.js";
 export type ListedTool = SourcedTool & {
@@ -178,7 +172,7 @@ export function createSessionSurface(scope: ServerScope) {
       }).then((rows) => rows.find((row) => !row.ownerUserId) ?? null),
     redirectUri: () => {
       try {
-        return `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`;
+        return oauthCallbackUrl();
       } catch {
         return null;
       }

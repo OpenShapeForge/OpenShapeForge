@@ -386,6 +386,27 @@ a colliding name loses only that tool, and two tools claiming a name lose it bot
 Core ships the contract only. Discovery, the snapshot store and the upstream MCP
 client belong to a plugin, and no such integration ships here.
 
+`RuntimeOperationProvider.refresh` is the one place a provider reaches upstream,
+and core calls it only inside an authenticated request that carries the
+authority the upstream belongs to: during stateful `initialize` or modern
+`server/discover`, before the client's first `tools/list`, and after an authenticated
+`tools/call`, where a connection this session may use was established, replaced
+or re-authorized. So a normal stateful client sees its personal and shared
+upstream tools on its first listing, without a preparatory stateless request,
+and a later change is picked up by the next call. `tools/list` itself never
+reaches upstream, and neither does building a session's server. The caller owns
+the bound: the refresh is awaited, abandoned after twelve seconds or when the
+client disconnects or cancels, and the session keeps the snapshot it already had
+when the provider fails, stalls or is cancelled. One discovery runs per session
+at a time. The session handed to `refresh` is an invocation-scoped capability —
+its Relation, RelationGroup memberships and roles are the live request's, and
+secrets, database sessions and egress are refused through it the moment the
+refresh returns, so a continuation that outlived the bound reaches nothing. A
+refresh that answers `true` sends `tools/list_changed` to the live sessions of
+that tenant, including discovery that prepares another session's first listing.
+A single-shot stateless request discovers only on
+`tools/call`, and never notifies: it is not a live session.
+
 Entity execution uses the existing MCP adapter, preserving private configuration,
 confirmation, edit leases and definition-change notifications. A private
 configuration handoff is returned under `data` with an Operation reference in

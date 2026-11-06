@@ -98,6 +98,14 @@ import { withAdmittedRecordAction } from "../operations/entity/record-action-adm
 /** How long a provider may take to read stored definitions; it never calls upstream. */
 const PROVIDER_READ_TIMEOUT_MS = 5_000;
 
+/**
+ * The fallback bound for a discovery whose caller states none. Callers that
+ * run inside a live request state their own, smaller one: this is what an
+ * out-of-band caller — a job, a maintenance path — may spend reaching
+ * upstream before the existing snapshot is answered with instead.
+ */
+const EXTERNAL_CATALOG_REFRESH_BUDGET_MS = 15_000;
+
 /** Discovered definitions are data: a bad one is left out, and says why in the log. */
 function nativeMcpToolUsable(definition: RuntimeOperationDefinition): boolean {
   const problem = nativeMcpToolProblem(definition);
@@ -972,27 +980,61 @@ export class ModulePlatformRuntime {
     );
   }
 
-  /** Refresh only explicitly isolated providers; a slow external server cannot block the session. */
-  async refreshExternalCatalogs(session: TrustedSessionContext): Promise<boolean> {
+  /**
+   * Refresh only explicitly isolated providers; a slow external server cannot
+   * block the session.
+   *
+   * The caller owns the bound and the cancellation, because the caller is the
+   * live request whose authority this runs on: `signal` is that request's, and
+   * `budgetMs` is what it is willing to wait before answering with the
+   * snapshot it already has. Whichever ends first aborts the providers and
+   * resolves this call, so an uncooperative continuation is left outside the
+   * active Operation session — the capability below stops being accepted the
+   * moment `withActiveOperationSession` returns.
+   *
+   * `notify` is for the one caller that has nothing to invalidate yet: a
+   * session discovering before its own first `tools/list`.
+   */
+  async refreshExternalCatalogs(
+    session: TrustedSessionContext,
+    options: {
+      signal?: AbortSignal;
+      budgetMs?: number;
+      notify?: boolean;
+    } = {},
+  ): Promise<boolean> {
     const providers = [...this.#operationProviders.values()].filter(
       provider => provider.failureIsolation === "external-catalog" && provider.refresh,
     );
     if (!providers.length) return false;
+    const budgetMs = options.budgetMs ?? EXTERNAL_CATALOG_REFRESH_BUDGET_MS;
     return this.withActiveOperationSession(session, async live => {
       const results = await Promise.all(providers.map(async provider => {
         const controller = new AbortController();
+        const abort = () => controller.abort();
+        // The bound is the race's own answer, not a cancellation the provider
+        // may ignore: a provider that never settles leaves the existing
+        // snapshot in place rather than holding this request. Built before the
+        // provider runs, so a refresh that aborts immediately still resolves.
+        const stopped = new Promise<boolean>(resolve => {
+          if (controller.signal.aborted) resolve(false);
+          else controller.signal.addEventListener("abort", () => resolve(false), { once: true });
+        });
         let timer: ReturnType<typeof setTimeout> | undefined;
         try {
-          return await Promise.race([
-            provider.refresh!(live, controller.signal),
-            new Promise<boolean>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(false); }, 15_000); }),
-          ]);
+          if (options.signal?.aborted) return false;
+          options.signal?.addEventListener("abort", abort, { once: true });
+          timer = setTimeout(abort, budgetMs);
+          return await Promise.race([provider.refresh!(live, controller.signal), stopped]);
         } catch {
           return false;
-        } finally { clearTimeout(timer); }
+        } finally {
+          clearTimeout(timer);
+          options.signal?.removeEventListener("abort", abort);
+        }
       }));
       const changed = results.some(Boolean);
-      if (changed) this.#notify(live.tenantId, "tools");
+      if (changed && options.notify !== false) this.#notify(live.tenantId, "tools");
       return changed;
     });
   }

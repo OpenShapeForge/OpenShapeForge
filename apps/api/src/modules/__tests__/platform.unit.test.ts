@@ -105,6 +105,88 @@ describe("runtime module platform session authority", () => {
     expect(retained).toBeDefined();
     expect(() => runtime.assertActiveOperationSession(retained!)).toThrow();
   });
+
+  /** The provider never settles and never reads its signal: the worst caller. */
+  const stalledCatalog = (
+    runtime: ModulePlatformRuntime,
+    onRefresh: (session: TrustedSessionContext, signal: AbortSignal) => void,
+  ) => {
+    runtime.registerOperationProviders([{ name: "external", operationProviders: [{
+      id: "external.stalled", failureIsolation: "external-catalog",
+      refresh: (session, signal) => {
+        onRefresh(session as TrustedSessionContext, signal);
+        return new Promise<boolean>(() => undefined);
+      },
+      list: async () => [], get: async () => undefined,
+      execute: async () => ({ error: { code: "NOT_FOUND", message: "Unavailable", retryable: false } }),
+    }] }]);
+  };
+
+  it("abandons a stalled catalog at the caller's bound and takes its authority with it", async () => {
+    const runtime = new ModulePlatformRuntime(testDatabase());
+    let live: TrustedSessionContext | undefined;
+    let aborted: AbortSignal | undefined;
+    stalledCatalog(runtime, (session, signal) => { live = session; aborted = signal; });
+
+    expect(await runtime.refreshExternalCatalogs(operationClaims(), { budgetMs: 20 })).toBe(false);
+    expect(aborted?.aborted).toBe(true);
+    // The continuation is still running; what it may reach is nothing.
+    expect(() => runtime.assertActiveOperationSession(live!)).toThrow();
+    expect(() => runtime.services.db.withSession(live!, async () => undefined)).toThrow(
+      "Module database work requires a live verified session.",
+    );
+    await expect(runtime.services.secrets.resolveConnectionValues(live!, {
+      connectionId: "33333333-3333-4333-8333-333333333333",
+    })).rejects.toThrow("Module connection resolution requires a live verified session.");
+  });
+
+  it("ends a discovery when the caller's request is cancelled", async () => {
+    const runtime = new ModulePlatformRuntime(testDatabase());
+    const request = new AbortController();
+    let aborted: AbortSignal | undefined;
+    stalledCatalog(runtime, (_session, signal) => {
+      aborted = signal;
+      setTimeout(() => request.abort(), 0);
+    });
+
+    expect(await runtime.refreshExternalCatalogs(operationClaims(), {
+      signal: request.signal, budgetMs: 60_000,
+    })).toBe(false);
+    expect(aborted?.aborted).toBe(true);
+    // A caller that was already gone never reaches upstream at all.
+    let reached = false;
+    const runtimeAgain = new ModulePlatformRuntime(testDatabase());
+    stalledCatalog(runtimeAgain, () => { reached = true; });
+    expect(await runtimeAgain.refreshExternalCatalogs(operationClaims(), {
+      signal: request.signal,
+    })).toBe(false);
+    expect(reached).toBe(false);
+  });
+
+  it("tells a live session only about a change, and not before its first listing", async () => {
+    const runtime = new ModulePlatformRuntime(testDatabase());
+    const session = operationClaims();
+    let notifications = 0;
+    runtime.registerServer(binding(session, {
+      notifyToolsChanged: async () => { notifications += 1; },
+    }));
+    let changed = true;
+    runtime.registerOperationProviders([{ name: "external", operationProviders: [{
+      id: "external.catalog", failureIsolation: "external-catalog",
+      refresh: async () => changed,
+      list: async () => [], get: async () => undefined,
+      execute: async () => ({ error: { code: "NOT_FOUND", message: "Unavailable", retryable: false } }),
+    }] }]);
+
+    expect(await runtime.refreshExternalCatalogs(session, { notify: false })).toBe(true);
+    expect(notifications).toBe(0);
+    expect(await runtime.refreshExternalCatalogs(session)).toBe(true);
+    expect(notifications).toBe(1);
+    changed = false;
+    expect(await runtime.refreshExternalCatalogs(session)).toBe(false);
+    expect(notifications).toBe(1);
+  });
+
   it("keeps RelationGroup memberships request-fresh without exposing mutable authority", () => {
     const source = claims();
     source.relationGroupIds = ["11111111-1111-4111-8111-111111111111"];

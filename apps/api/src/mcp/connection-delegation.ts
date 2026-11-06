@@ -14,6 +14,8 @@ type Identity = Readonly<{
   ownerRelationId: string;
   operationId: string;
   consentId: string;
+  connectionTable?: string;
+  executionFingerprint?: string;
 }>;
 
 type Authority = { readonly identity: Identity; readonly validate: () => Promise<boolean> };
@@ -49,4 +51,28 @@ export async function verifiedConnectionDelegation(
   if (identity.tenantId !== session.tenantId || identity.actorId !== session.userId ||
       identity.connectionId !== connectionId || identity.operationId !== operationId || !await authority.validate()) throw refusal();
   return identity;
+}
+
+// Only the canonical Operation dispatcher supplies this origin. Request JSON
+// cannot choose it, and unrelated nested Operations replace it.
+const origin = new AsyncLocalStorage<string>();
+export const withConnectionDelegationOrigin = <T>(operation: string, work: () => T): T =>
+  withoutConnectionDelegation(() => origin.run(operation, work));
+export const connectionDelegationOrigin = (): string | undefined => origin.getStore();
+
+/** Identity projection only. Credential access additionally calls validate. */
+export function connectionDelegationIdentity(session: { tenantId?: string | null | undefined; userId?: string | null | undefined }): Identity | undefined {
+  const identity = active.getStore()?.identity;
+  if (!identity) return undefined;
+  if (identity.tenantId !== session.tenantId || identity.actorId !== session.userId) throw refusal();
+  return identity;
+}
+export async function revalidateConnectionDelegation(session: { tenantId?: string | null | undefined; userId?: string | null | undefined }): Promise<Identity | undefined> {
+  const identity = connectionDelegationIdentity(session);
+  if (identity && !await active.getStore()!.validate()) throw refusal();
+  return identity;
+}
+export function isDelegatedConnection(session: { tenantId?: string | null | undefined; userId?: string | null | undefined }, table: string, row: Record<string, unknown> | undefined): boolean {
+  const identity = connectionDelegationIdentity(session);
+  return !!identity && identity.connectionTable === table && identity.connectionId === row?.id && identity.ownerRelationId === row?.ownerUserId;
 }

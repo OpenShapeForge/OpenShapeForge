@@ -1,3 +1,4 @@
+import { connectionDelegationIdentity, isDelegatedConnection } from "./connection-delegation.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The connection a derived tool's binding runs with. Split out of the
@@ -60,7 +61,7 @@ export async function resolveDerivedConnection(
   const elicitScope =
     entityForTable(execution.connectionTable)?.elicitOnCreate
       ?.sourceTable ?? execution.providerTable;
-  const selectedConnectionId = captured?.selectedConnectionId;
+  const selectedConnectionId = connectionDelegationIdentity(session)?.connectionId ?? captured?.selectedConnectionId;
   const selectedConnection = selectedConnectionId
     ? connectionRows.find((row) => row.id === selectedConnectionId)
     : connectionRows.length === 1
@@ -77,7 +78,7 @@ export async function resolveDerivedConnection(
   const personalExecution =
     declaredScope === "user" ||
     (declaredScope === "both" &&
-      ownedByActingRelation(selectedConnection?.ownerUserId, session));
+      (isDelegatedConnection(session, execution.connectionTable, selectedConnection) || ownedByActingRelation(selectedConnection?.ownerUserId, session)));
   const effectiveScope = personalExecution ? "user" : "tenant";
 
   // Both Connection controls govern the provider calls of a Service — the
@@ -95,6 +96,7 @@ export async function resolveDerivedConnection(
   // (connection-expectation.ts), so a Connection that Operation opens, or a
   // declarative Service it invokes, is checked and recorded like any other
   // credential boundary of this invocation.
+  if (connectionDelegationIdentity(session) && (providerRow.transport !== "rest" || !personalExecution)) throw new HttpError(403, "CONNECTION_CONSENT_REQUIRED", "The delegated service is unavailable.");
   const withControls: DerivedConnectionInput =
     providerRow.transport === "native"
       ? { ...input, controls: undefined }

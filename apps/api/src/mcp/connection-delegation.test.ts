@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { TrustedSessionContext } from '../auth/trusted-context.js';
-import { withVerifiedConnectionDelegation, withoutConnectionDelegation, verifiedConnectionDelegation } from './connection-delegation.js';
+import { withVerifiedConnectionDelegation, withoutConnectionDelegation, verifiedConnectionDelegation, withConnectionDelegationOrigin, connectionDelegationOrigin, isDelegatedConnection } from './connection-delegation.js';
 const session = { tenantId: 'tenant', userId: 'service' } as TrustedSessionContext;
 const identity = { tenantId: 'tenant', actorId: 'service', connectionId: 'connection', ownerRelationId: 'owner', operationId: 'availability', consentId: 'consent' };
 test('revocation is checked at the credential boundary, not only admission', async () => {
@@ -26,4 +26,23 @@ test('nested authority cannot widen an existing delegation', async () => {
   await withVerifiedConnectionDelegation(session, identity, async () => true, async () => {
     await expect(withVerifiedConnectionDelegation(session, identity, async () => true, async () => undefined)).rejects.toThrow();
   });
+});
+
+test('canonical origin replaces unrelated nested authority and is isolated between concurrent invocations', async()=>{
+  const jobs=['availability','booking'].map(operation=>withConnectionDelegationOrigin(operation,async()=>{
+    await Promise.resolve();
+    expect(connectionDelegationOrigin()).toBe(operation);
+    await withVerifiedConnectionDelegation(session,{...identity,operationId:operation,connectionTable:'integration.connections'},async()=>true,async()=>{
+      expect(isDelegatedConnection(session,'integration.connections',{id:'connection',ownerUserId:'owner'})).toBe(true);
+      expect(isDelegatedConnection(session,'integration.connections',{id:'other',ownerUserId:'owner'})).toBe(false);
+      expect(isDelegatedConnection(session,'other.connections',{id:'connection',ownerUserId:'owner'})).toBe(false);
+      await withConnectionDelegationOrigin('unrelated',async()=>{
+        expect(connectionDelegationOrigin()).toBe('unrelated');
+        expect(await verifiedConnectionDelegation(session,'connection',operation)).toBeUndefined();
+      });
+      expect(await verifiedConnectionDelegation(session,'connection',operation)).toBeDefined();
+    });
+  }));
+  await Promise.all(jobs);
+  expect(connectionDelegationOrigin()).toBeUndefined();
 });

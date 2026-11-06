@@ -1,3 +1,4 @@
+import { isDelegatedConnection } from "./connection-delegation.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The expected-Connection control of one declarative Service invocation, and
@@ -324,7 +325,7 @@ function connectionSourceReference(input: ConnectionInContext): string | undefin
   ) {
     return undefined;
   }
-  const personal = ownedByActingRelation(connection?.ownerUserId, session);
+  const personal = isDelegatedConnection(session, input.connectionTable, connection) || ownedByActingRelation(connection?.ownerUserId, session);
   if (personal && !session.userId) return undefined;
   try {
     return mintInvocationSourceReference({

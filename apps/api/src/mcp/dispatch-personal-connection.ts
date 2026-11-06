@@ -1,3 +1,4 @@
+import { revalidateConnectionDelegation } from "./connection-delegation.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The caller's personal sign-in for a derived tool's binding. Split out of
@@ -66,7 +67,8 @@ export async function resolvePersonalConnection(
   // captured connection. OAuth adds tenant support/config and
   // refresh below; API-key/header/basic profiles use this same
   // personal row without falling into tenant selection.
-  const personal = selectOAuthConnectionRow(
+  const delegation = await revalidateConnectionDelegation(session);
+  const personal = delegation ? connectionRows.find(row => row.id === delegation.connectionId && row.ownerUserId === delegation.ownerRelationId) : selectOAuthConnectionRow(
     connectionRows,
     "user",
     actingRelationId(session),
@@ -136,6 +138,7 @@ export async function resolvePersonalConnection(
     connectionId: String(personal?.id ?? ""),
     scope: "user",
     correlationId: String(extra.requestId ?? randomUUID()),
+    ...(delegation ? { delegation: { ownerRelationId: delegation.ownerRelationId, consentId: delegation.consentId, operationId: delegation.operationId } } : {}),
   };
   let values = (personal?.[execution.connectionValuesField] ??
     null) as Record<string, unknown> | null;
@@ -217,7 +220,7 @@ export async function resolvePersonalConnection(
       valuesField: execution.connectionValuesField,
       providerField: execution.connectionProviderRef,
       expectedProviderId: String(providerId),
-      expectedOwnerUserId: actingRelationId(session),
+      expectedOwnerUserId: delegation?.ownerRelationId ?? actingRelationId(session),
       refreshLeewaySeconds: refreshLeewaySeconds(providerAuth),
       audit: oauthConnectionAudit!,
       tokenUrl: resolveTemplate(providerAuth.tokenUrl as string, tenantUrlValues.plain, "auth.tokenUrl", tenantUrlValues.secretKeys),

@@ -999,6 +999,36 @@ tables:
       - name: capability_grants_expires_idx
         columns: [expires_at]
 
+  # Owner-issued authority for one canonical Operation to use one personal
+  # Connection. This is internal authorization state, never generated CRUD.
+  - schema: platform
+    name: connection_use_grants
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: connection_table, type: text, required: true }
+      - { name: values_column, type: text, required: true }
+      - { name: connection_id, type: uuid, required: true }
+      - { name: owner_relation_id, type: uuid, required: true }
+      - { name: consumer_operation, type: text, required: true }
+      - { name: subject_entity, type: text, required: true }
+      - { name: subject_id, type: uuid, required: true }
+      - { name: service_definition, type: jsonb, required: true }
+      - { name: definition_fingerprint, type: text, required: true }
+      - { name: input_schema, type: jsonb, required: true }
+      - { name: issued_by, type: uuid, required: true }
+      - { name: issued_at, type: timestamptz, required: true, default: now() }
+      - { name: expires_at, type: timestamptz }
+      - { name: revoked_at, type: timestamptz }
+    indexes:
+      - name: connection_use_grants_subject_idx
+        columns: [tenant_id, subject_entity, subject_id]
+      - name: connection_use_grants_connection_idx
+        columns: [tenant_id, connection_id]
+
   # ---------------------------------------------------------------------------
   # Runtime bookkeeping
   #

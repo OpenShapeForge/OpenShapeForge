@@ -1,3 +1,5 @@
+import { delegatedConnectionRow } from "../modules/connection-use-grants.js";
+import { connectionDelegationIdentity, isDelegatedConnection } from "./connection-delegation.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Authorized invocation sources of derived tools. Split out of
@@ -53,6 +55,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
     session,
     snapshotDefinitionsByToolName,
     snapshotRowsByFilter,
+    tables,
   } = base;
   const authorizedSources = async (
     toolName: string,
@@ -200,6 +203,14 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
             ),
             execution.connectionValuesField,
           );
+          const delegation = connectionDelegationIdentity(session);
+          if (delegation) {
+            const table = tables.get(execution.connectionTable);
+            if (!table) throw new Error('Delegated connection table is unavailable.');
+            const delegated = await delegatedConnectionRow(trx, session, table);
+            if (!delegated || delegated[execution.connectionProviderRef] !== providerId) throw new Error('Delegated provider is unavailable.');
+            connectionRows.splice(0, connectionRows.length, ...connectionRows.filter(row => !row.ownerUserId), delegated);
+          }
           const providerAuth = (providerRow.auth ?? null) as Record<
             string,
             unknown
@@ -217,7 +228,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
             try {
               personalCapture = capturePersonalOAuthConnections(
                 connectionRows,
-                actingRelationId(session),
+                delegation?.ownerRelationId ?? actingRelationId(session),
               );
             } catch {
               // No (single) tenant support row: the organization's side is
@@ -237,7 +248,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
               ]
             : connectionRows
                 .filter((row) =>
-                  (allowsPersonal && ownedByActingRelation(row.ownerUserId, session)) ||
+                  (allowsPersonal && (isDelegatedConnection(session, execution.connectionTable, row) || (!delegation && ownedByActingRelation(row.ownerUserId, session)))) ||
                   (allowsTenant &&
                     (row.ownerUserId === null || row.ownerUserId === undefined)),
                 )
@@ -288,7 +299,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
               needsReauthorization = true;
               continue;
             }
-            const sourceIsPersonal = ownedByActingRelation(connection.ownerUserId, session);
+            const sourceIsPersonal = isDelegatedConnection(session, execution.connectionTable, connection) || ownedByActingRelation(connection.ownerUserId, session);
             const identity = {
               tenantId,
               actorId: sourceIsPersonal ? session.userId : null,

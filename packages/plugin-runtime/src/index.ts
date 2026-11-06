@@ -460,8 +460,26 @@ export type RuntimeDeclarativeServiceDefinition = {
   version: string | number;
 };
 
+/** Internal credential use; never a bearer token or an impersonated session. */
+export type RuntimeConnectionUseGrantServices<Session> = {
+  issue(session: Session, input: {
+    connectionId: string;
+    consumerOperation: string;
+    subject: { entity: string; id: string };
+    definition: RuntimeDeclarativeServiceDefinition;
+    inputSchema: Record<string, unknown>;
+  }): Promise<{ id: string }>;
+  revoke(session: Session, subject: { entity: string; id: string }): Promise<void>;
+  list(session: Session, subject: { entity: string; id: string }): Promise<readonly {
+    id: string; connectionId: string; consumerOperation: string;
+    definition: RuntimeDeclarativeServiceDefinition;
+  }[]>;
+};
+
 export type RuntimeDeclarativeServiceRequest = {
   definition: RuntimeDeclarativeServiceDefinition;
+  /** Owner-issued authority, verified against the originating canonical Operation. */
+  connectionGrantId?: string;
   input?: Record<string, unknown>;
   /** Reused across retries; core derives a stable key per Service step. */
   idempotencyKey?: string;
@@ -823,6 +841,7 @@ export type PluginPlatformServices = {
    * when there is one, so a grant and the record it covers commit together.
    */
   grants: RuntimeCapabilityGrantServices<PluginSessionContext>;
+  readonly connectionUseGrants?: RuntimeConnectionUseGrantServices<PluginSessionContext>;
   operations: {
     /** Definitions currently available to this live verified session. */
     list(

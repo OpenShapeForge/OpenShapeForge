@@ -94,6 +94,7 @@ import { applyOrganizationAccessMigration } from "./migrations/organization-acce
 import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
 import { applyMemberAccessStateMigration } from "./migrations/member-access-state.js";
 import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
+import { applyConnectionUseGrantsMigration } from './migrations/connection-use-grants.js';
 import { applyCapabilityGrantsMigration } from "./migrations/capability-grants.js";
 import { applyApiKeysMigration } from "./migrations/api-keys.js";
 import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
@@ -199,6 +200,7 @@ export async function runMigrationChain(
   );
   await applyEmployeeInvitationsMigration(db);
   await applyCapabilityGrantsMigration(db);
+  await applyConnectionUseGrantsMigration(db);
   await applyApiKeysMigration(db);
   await applyOrganizationRelationLinkMigration(db);
   await applyUpdateNoticesMigration(db);

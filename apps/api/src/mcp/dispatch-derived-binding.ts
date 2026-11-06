@@ -1,3 +1,6 @@
+import { withDbSession } from "../db/session.js";
+import { delegatedConnectionRow, connectionGrantFingerprint } from "../modules/connection-use-grants.js";
+import { connectionDelegationIdentity, revalidateConnectionDelegation, isDelegatedConnection } from "./connection-delegation.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * One binding of a derived tool. Split out of the derived-tool section of
@@ -181,6 +184,18 @@ export async function runDerivedBinding(
           ),
           execution.connectionValuesField,
         );
+    const delegation = await revalidateConnectionDelegation(session);
+    if (delegation) {
+      const service = scope.internalDerivedDefinition?.row;
+      if (providerRow.transport !== 'rest' || !service || connectionGrantFingerprint({ execution, service, binding, capability: operationRow, adapter: providerRow }) !== delegation.executionFingerprint) {
+        throw new HttpError(403, 'CONNECTION_CONSENT_REQUIRED', 'The delegated service changed after permission was granted.');
+      }
+      const table = tables.get(execution.connectionTable);
+      if (!table) throw new HttpError(403, 'CONNECTION_CONSENT_REQUIRED', 'The delegated connection is unavailable.');
+      const delegated = await withDbSession(db, session, trx => delegatedConnectionRow(trx, session, table));
+      if (!delegated || delegated[execution.connectionProviderRef] !== providerId) throw new HttpError(403, 'CONNECTION_CONSENT_REQUIRED', 'The delegated provider is unavailable.');
+      connectionRows = [...connectionRows.filter(row => !row.ownerUserId), delegated];
+    }
     const providerAuth = (providerRow.auth ?? null) as Record<
       string,
       unknown
@@ -192,9 +207,9 @@ export async function runDerivedBinding(
           mintInvocationSourceReference({
             tenantId: session.tenantId!,
             actorId:
-              ownedByActingRelation(row.ownerUserId, session) ? session.userId : null,
+              (isDelegatedConnection(session, execution.connectionTable, row) || ownedByActingRelation(row.ownerUserId, session)) ? session.userId : null,
             scope:
-              ownedByActingRelation(row.ownerUserId, session) ? "personal" : "tenant",
+              (isDelegatedConnection(session, execution.connectionTable, row) || ownedByActingRelation(row.ownerUserId, session)) ? "personal" : "tenant",
             connectionTable: execution.connectionTable,
             connectionId: String(row.id),
           }),
@@ -242,6 +257,7 @@ export async function runDerivedBinding(
     try {
       assertParentInvocationActive?.();
       assertInterceptorActive?.();
+      await revalidateConnectionDelegation(session);
       outputs = await executeBindingStep({
         binding,
         operationRow,

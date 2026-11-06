@@ -1,3 +1,4 @@
+import { withStoredConnectionGrant } from "../modules/connection-use-grants.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { randomUUID } from "node:crypto";
 import type {
@@ -68,7 +69,7 @@ export function createRuntimeDeclarativeServiceExecutor(input: {
       throw new Error("The core declarative Service executor did not initialise.");
     }
     try {
-      return await execute(request, randomUUID(), undefined, options?.signal);
+      return await withStoredConnectionGrant(input.db, session, request, () => execute(request, randomUUID(), undefined, options?.signal));
     } finally {
       input.modulePlatform.unregisterServer(server);
       runtimeDeclarativeServiceExecutors.delete(server);

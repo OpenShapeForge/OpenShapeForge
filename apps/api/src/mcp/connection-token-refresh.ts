@@ -1,3 +1,4 @@
+import { revalidateConnectionDelegation } from "./connection-delegation.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Refreshing the OAuth tokens stored on an authored Connection row.
@@ -114,6 +115,7 @@ export type ConnectionTokenAudit = {
   connectionId: string;
   scope: "user" | "tenant";
   correlationId: string;
+  delegation?: { ownerRelationId: string; consentId: string; operationId: string };
 };
 
 export async function recordConnectionTokenAudit(input: {
@@ -135,6 +137,7 @@ export async function recordConnectionTokenAudit(input: {
         connectionId: input.audit.connectionId,
         scope: input.audit.scope,
         correlationId: input.audit.correlationId,
+        ...(input.audit.delegation ? { delegation: input.audit.delegation } : {}),
       },
     }),
   );
@@ -209,8 +212,9 @@ export async function refreshConnectionRowLocked(input: {
         }
       },
       ...(input.signal ? { signal: input.signal } : {}),
-      boundFetch: (url, init) =>
-        fetchWithAllowedRedirects(
+      boundFetch: async (url, init) => {
+        await revalidateConnectionDelegation(input.session);
+        return fetchWithAllowedRedirects(
           url instanceof Request ? url.url : url,
           { ...init, signal: boundedAbortSignal(input.signal, 15_000) },
           input.egress,
@@ -218,13 +222,24 @@ export async function refreshConnectionRowLocked(input: {
           egressInvocation.dispatch,
           input.profile.strictGrants ? "https-only" : "http-or-https",
           input.profile.strictGrants ? "deny" : "follow",
-        ),
+        );
+      },
       store: {
         withLockedRow: (work) =>
           withReadBarrierMaintenanceDatabase(input.db, input.session.tenantId, database => withDbSession(database, input.session, async (lockedTrx) => {
             trx = lockedTrx;
             input.signal?.throwIfAborted();
-            const locked = await sql<{
+            const delegation = await revalidateConnectionDelegation(input.session);
+            if (delegation && (delegation.connectionId !== input.rowId || delegation.connectionTable !== `${input.table.schema}.${input.table.table}` || delegation.ownerRelationId !== input.expectedOwnerUserId)) {
+              throw new HttpError(403, 'CONNECTION_CONSENT_REQUIRED', 'The connection permission is unavailable.');
+            }
+            const delegated = delegation ? await sql<{ row: Record<string, unknown> | null }>`select app.delegated_connection_row(${delegation.consentId}::uuid,${delegation.operationId},true) as row`.execute(lockedTrx) : undefined;
+            const delegatedRow = delegated?.rows[0]?.row;
+            const locked = delegation ? { rows: delegatedRow ? [{
+              values: delegatedRow[valuesColumn.name] as Record<string, unknown> | null,
+              provider_id: delegatedRow[providerColumn.name] as string | null,
+              owner_user_id: delegatedRow[ownerColumn.name] as string | null,
+            }] : [] } : await sql<{
               values: Record<string, unknown> | null;
               provider_id: string | null;
               owner_user_id: string | null;
@@ -296,7 +311,11 @@ export async function refreshConnectionRowLocked(input: {
           // `::text::jsonb`: the parameter must reach Postgres as text. Typed
           // straight as jsonb, the driver JSON-encodes the already-serialized
           // string once more and the column becomes a jsonb *string*.
-          await sql`
+          const delegation = await revalidateConnectionDelegation(input.session);
+          if (delegation) {
+            const written = await sql<{ updated: boolean }>`select app.delegated_connection_token_update(${delegation.consentId}::uuid,${delegation.operationId},${JSON.stringify(result)}::text::jsonb) as updated`.execute(trx!);
+            if (written.rows[0]?.updated !== true) throw new HttpError(403, 'CONNECTION_CONSENT_REQUIRED', 'The connection permission is no longer valid.');
+          } else await sql`
             update ${sql.id(input.table.schema, input.table.table)}
                set ${sql.id(valuesColumn.name)} = ${JSON.stringify(result)}::text::jsonb
              where ${sql.id(input.table.primaryKey!)}::text = ${input.rowId}

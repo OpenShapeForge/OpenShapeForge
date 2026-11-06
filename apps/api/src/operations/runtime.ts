@@ -1,3 +1,4 @@
+import { withConnectionDelegationOrigin } from "../mcp/connection-delegation.js";
 import { assertCurrentAccountAuthority } from "../accounts/account-current-authority.js";
 import { nativeCollectionOptionsHandler } from "./collection-options.js";
 import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
@@ -1794,12 +1795,12 @@ export async function invokeOperation(
         options,
       ),
       invokeDeclarativeService: (request, options) =>
-        invokeModuleDeclarativeService(
+        withConnectionDelegationOrigin(bound.operation.key, () => invokeModuleDeclarativeService(
           context.platform,
           session,
           request,
           options,
-        ),
+        )),
     });
     },
   ), context.session?.principalKind);

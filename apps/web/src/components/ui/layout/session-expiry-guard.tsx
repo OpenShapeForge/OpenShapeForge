@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/overlay/dialog";
-import type { Session } from "@/lib/auth";
+import { readSessionContinuation } from "@/lib/auth/session-continuation";
 import { useAppSession, useSetAppSession } from "./session-provider";
 
 const WARNING_BEFORE_EXPIRY_S = 120;
@@ -54,6 +54,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   const [showDialog, setShowDialog] = useState(false);
   const [countdown, setCountdown] = useState(AUTO_REDIRECT_AFTER_S);
   const [refreshing, setRefreshing] = useState(false);
+  const [retryAt, setRetryAt] = useState<number | null>(null);
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const redirectingRef = useRef(false);
@@ -121,23 +122,21 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
     setRefreshing(true);
 
     try {
-      const response = await fetch("/api/auth/session", { cache: "no-store" });
-      if (!response.ok) {
+      const result = await readSessionContinuation(() => fetch("/api/auth/session", { cache: "no-store" }));
+      if (result.state === "unavailable") {
+        if (result.session) setSession?.(result.session);
+        clearTimers();
+        setShowDialog(false);
+        setRetryAt(Math.max(Date.now() + 1000, result.session?.refreshRetryAt ?? Date.now() + 5000));
+        return;
+      }
+      if (result.state === "expired") {
         setSession?.(null);
         logout("session_expired");
         return;
       }
-
-      const refreshedSession = await response.json() as Session;
-      if (
-        refreshedSession?.error === "RefreshTokenError"
-        || !refreshedSession?.accessToken
-      ) {
-        setSession?.(null);
-        logout("session_expired");
-        return;
-      }
-
+      const refreshedSession = result.session;
+      setRetryAt(null);
       setSession?.(refreshedSession);
       setShowDialog(false);
       setCountdown(AUTO_REDIRECT_AFTER_S);
@@ -174,9 +173,6 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
 
       setSession?.(null);
       logout("session_expired");
-    } catch {
-      setSession?.(null);
-      logout("session_expired");
     } finally {
       if (!redirectingRef.current) {
         setRefreshing(false);
@@ -185,6 +181,18 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   }, [clearTimers, logout, setSession, syncSessionExpiry]);
 
   handleContinueRef.current = handleContinue;
+
+  useEffect(() => {
+    if (retryAt === null || redirectingRef.current) return;
+    const timer = setTimeout(() => handleContinueRef.current(), Math.max(0, retryAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [retryAt]);
+
+  useEffect(() => {
+    if (session?.error === "RefreshTokenUnavailable") {
+      setRetryAt(Math.max(Date.now() + 1000, session.refreshRetryAt ?? Date.now() + 5000));
+    }
+  }, [session?.error, session?.refreshRetryAt]);
 
   const monitorExpiry = session?.refreshExpiresAt ?? session?.expiresAt;
 

@@ -31,6 +31,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "bun test",
+    "test:redis": "bun test ./test-session.redis.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

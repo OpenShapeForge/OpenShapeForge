@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { SQL } from 'bun';
 import { createDatabaseRuntime } from '../connection.js';
 import { runMigrationChain } from '../migration-chain.js';
+import { IDENTITY_LINK_ADMIN_ROLE } from '../../auth/organization-roles.js';
 import { provisionDatabaseRoles } from '../database-roles.js';
 const url = process.env.SCRATCH_ADMIN_DATABASE_URL ?? 'postgres://openshapeforge:openshapeforge@localhost:5434/postgres';
 const suffix = crypto.randomUUID().replaceAll('-', '');
@@ -104,14 +105,15 @@ describe('owner-issued connection use grants', () => {
       const offboardingGrant=crypto.randomUUID();
       await as(owner,actor,tenant,'calendar.consent',tx=>issue(tx,offboardingGrant));
       await as(service,service,maintenance?'':tenant,'account.block',async tx=>{
-        await tx`select set_config('app.roles','Organization.All.ReadWrite',true),set_config('app.bypass_rls',${String(maintenance)},true)`;
-        if(remove) await tx`delete from platform.identity_relations where tenant_id=${tenant}::uuid and identity_id=${identity}::uuid`;
-        else await tx`update platform.identity_relations set access_blocked=true where tenant_id=${tenant}::uuid and identity_id=${identity}::uuid`;
+        await tx`select set_config('app.roles',${IDENTITY_LINK_ADMIN_ROLE},true),set_config('app.bypass_rls',${String(maintenance)},true)`;
+        const changed = remove ? await tx`delete from platform.identity_relations where tenant_id=${tenant}::uuid and identity_id=${identity}::uuid returning identity_id`
+          : await tx`update platform.identity_relations set access_blocked=true where tenant_id=${tenant}::uuid and identity_id=${identity}::uuid returning identity_id`;
+        expect(changed).toHaveLength(1);
         expect((await tx`select app.current_tenant() as tenant,app.bypass_rls() as bypass,app.current_user_id() as actor`)[0]).toMatchObject({tenant:maintenance?null:tenant,bypass:maintenance,actor:service});
       });
       await as(service,service,tenant,'calendar.availability',async tx=>expect((await tx`select app.delegated_connection_row(${offboardingGrant}::uuid,'calendar.availability') as value`)[0].value).toBeNull());
       await as(service,service,tenant,'account.unblock',async tx=>{
-        await tx`select set_config('app.roles','Organization.All.ReadWrite',true)`;
+        await tx`select set_config('app.roles',${IDENTITY_LINK_ADMIN_ROLE},true)`;
         if(remove) await tx`insert into platform.identity_relations(identity_id,tenant_id,relation_id,status,linked_at,linked_by) values(${identity}::uuid,${tenant}::uuid,${owner}::uuid,'linked',now(),'jit')`;
         else await tx`update platform.identity_relations set access_blocked=false where tenant_id=${tenant}::uuid and identity_id=${identity}::uuid`;
       });

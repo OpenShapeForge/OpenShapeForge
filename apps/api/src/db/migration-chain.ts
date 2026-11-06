@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { maintenanceJob, drainMaintenanceJobs, acknowledgeMaintenanceFailure } from "../modules/maintenance-jobs.js";
-import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
 /**
  * The ordered chain that builds a database from the compiled manifest,
  * shared by db:migrate, db:reset and the empty-database bootstrap
@@ -78,6 +76,8 @@ import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
  * NOTE: the whole chain runs as the PRIVILEGED migrate role
  * (OPENSHAPEFORGE_MIGRATE_DATABASE_URL) — DDL and GRANT require it.
  */
+import { maintenanceJob, drainMaintenanceJobs, acknowledgeMaintenanceFailure } from "../modules/maintenance-jobs.js";
+import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
 import { sql, type Kysely } from "kysely";
 import { seedTenantOwnRelations } from "../control/tenant-own-relation.js";
 import { fileURLToPath } from "node:url";

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { createConnectionUseGrantServices } from "./connection-use-grants.js";
 /** Core-owned services made available to reviewed runtime modules. */
+import { createConnectionUseGrantServices } from "./connection-use-grants.js";
 import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
 import { inheritAuthorizationProfileAccess } from '../auth/authorization-profile-decision.js';
 import { resolveAuthorizationProfileAccess } from "../auth/authorization-profile-session.js";

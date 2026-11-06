@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { delegatedConnectionRow } from "../modules/connection-use-grants.js";
-import { connectionDelegationIdentity, isDelegatedConnection } from "./connection-delegation.js";
 /**
  * Authorized invocation sources of derived tools. Split out of
  * server-scope.ts, verbatim.
  */
+import { HttpError } from "../rest/http-error.js";
+import { delegatedConnectionRow } from "../modules/connection-use-grants.js";
+import { connectionDelegationIdentity, isDelegatedConnection } from "./connection-delegation.js";
 import { actingRelationId, ownedByActingRelation } from "../db/acting-relation.js";
 import { compareCodeUnits } from "@openshapeforge/operations";
 import { withDbSession } from "../db/session.js";
@@ -206,9 +207,9 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
           const delegation = connectionDelegationIdentity(session);
           if (delegation) {
             const table = tables.get(execution.connectionTable);
-            if (!table) throw new Error('Delegated connection table is unavailable.');
+            if (!table) throw new HttpError(403,'CONNECTION_CONSENT_REQUIRED','The delegated connection is unavailable.');
             const delegated = await delegatedConnectionRow(trx, session, table);
-            if (!delegated || delegated[execution.connectionProviderRef] !== providerId) throw new Error('Delegated provider is unavailable.');
+            if (!delegated || delegated[execution.connectionProviderRef] !== providerId) throw new HttpError(403,'CONNECTION_CONSENT_REQUIRED','The delegated provider is unavailable.');
             connectionRows.splice(0, connectionRows.length, ...connectionRows.filter(row => !row.ownerUserId), delegated);
           }
           const providerAuth = (providerRow.auth ?? null) as Record<

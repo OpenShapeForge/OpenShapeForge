@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import {expect,test} from 'bun:test';
 import {connectionGrantFingerprint} from './connection-grant-fingerprint.js';
-const snapshot={execution:{connectionTable:'integration.connections'},service:{id:'service',key:'availability',version:1,status:'published',name:'Availability'},binding:{order:1,inputMapping:[{from:'from',to:'timeMin'}]},capability:{id:'operation',operation:{method:'POST',pathTemplate:'/freeBusy'},requiredScopes:['calendar.read']},adapter:{id:'adapter',transport:'rest',baseUrlTemplate:'https://calendar.example.test',auth:{profile:'oauth2AuthorizationCode',tokenUrl:'https://login.example.test/token'}}};
+const snapshot={execution:{parentRef:'serviceId',operationRef:'capabilityId',providerRef:'adapterId',connectionTable:'integration.connections'},service:{id:'service',key:'availability',version:1,status:'published',name:'Availability'},binding:{order:1,inputMapping:[{from:'from',to:'timeMin'}]},capability:{id:'operation',operation:{method:'POST',pathTemplate:'/freeBusy'},requiredScopes:['calendar.read']},adapter:{id:'adapter',transport:'rest',baseUrlTemplate:'https://calendar.example.test',auth:{profile:'oauth2AuthorizationCode',tokenUrl:'https://login.example.test/token'}}};
 test('catalogue labels and reconciliation timestamps do not invalidate owner consent',()=>{
  expect(connectionGrantFingerprint({...snapshot,service:{...snapshot.service,name:'Beschikbaarheid',updatedAt:'tomorrow'},adapter:{...snapshot.adapter,name:'Google',updatedAt:'tomorrow'}})).toBe(connectionGrantFingerprint(snapshot));
 });

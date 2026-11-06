@@ -472,7 +472,7 @@ jobs:
       - name: Migration + drift tests
         run: |
           cd apps/api
-          SCRATCH_ADMIN_DATABASE_URL=postgres://openshapeforge:openshapeforge@localhost:5434/postgres bun test src/db
+          bun test src/db
           bun test src/operations
           bun test src/graphql/available-tenants-db.test.ts
           bun test src/auth/relation-group-memberships-db.test.ts src/platform/entity-change-stream.test.ts src/graphql/context-db.test.ts

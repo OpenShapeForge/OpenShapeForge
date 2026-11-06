@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
+/**
+   * A platform operator of the host's control realm: no tenant, ever. Only
+   * the host's own control Operations accept it; a plugin Operation never
+   * sees one, and a plugin must never treat it as a tenant session.
+   */
 import type { RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";
 import type {
   FastifyInstance,
@@ -73,12 +78,7 @@ export type PluginSessionCredential =
   | "bearer"
   | "api-key"
   | "trusted-context"
-  /**
-   * A platform operator of the host's control realm: no tenant, ever. Only
-   * the host's own control Operations accept it; a plugin Operation never
-   * sees one, and a plugin must never treat it as a tenant session.
-   */
-  | "control-bearer"
+    | "control-bearer"
   /**
    * A capability grant the host resolved for an `auth.mode: capability`
    * Operation: a tenant, no user, no roles. `grant` names the Operations and
@@ -529,8 +529,8 @@ export type RuntimeDeclarativeServiceExecutionResult =
   & { intent?: string }
   & Exclude<OperationResult<unknown>, OperationAccepted>
   & { connectionUse?: RuntimeDeclarativeServiceConnectionUse;
-    /** Core-only observation from the admitted single REST binding, never an
-     * OAuth response or provider-controlled body. Not part of public errors. */
+    /** Core-only observation from the admitted single REST binding, never a
+     * token-endpoint response or provider-controlled body. Not part of public errors. */
     delegatedProviderFailure?: {status:number};
   };
 

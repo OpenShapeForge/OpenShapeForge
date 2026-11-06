@@ -19,6 +19,8 @@ describe('owner-issued connection use grants', () => {
     try {
       await provisionDatabaseRoles(runtime.db,{passwords:{app:'openshapeforge_app',worker:'openshapeforge_worker'}});
       await runtime.db.connection().execute(conn=>runMigrationChain(conn));
+      // Reapplying the complete chain must preserve grants and helper dependencies.
+      await runtime.db.connection().execute(conn=>runMigrationChain(conn));
     } finally {await runtime.close();}
     // Standalone core has no host-owned Integration entity. Hubble's generated
     // schema does; use its real table and policy when composed with that host.
@@ -97,18 +99,22 @@ describe('owner-issued connection use grants', () => {
     });
     await expect(as(owner,actor,tenant,'calendar.consent',async tx => { await tx`update platform.connection_use_grants set revoked_at=null where id=${grant}::uuid`; })).rejects.toThrow('scope is immutable');
   });
-  test('offboarding withdraws authority permanently, including after access is restored',async()=>{
-    const offboardingGrant=crypto.randomUUID();
-    await as(owner,actor,tenant,'calendar.consent',tx=>issue(tx,offboardingGrant));
-    // Use the normal tenant context even for the privileged migration fixture.
-    await db.begin(async tx=>{
-      await tx`select set_config('app.tenant_id',${tenant},true),set_config('app.roles','Organization.All.ReadWrite',true)`;
-      await tx`update platform.identity_relations set access_blocked=true where identity_id=${identity}::uuid`;
-    });
-    await as(service,service,tenant,'calendar.availability',async tx=>expect((await tx`select app.delegated_connection_row(${offboardingGrant}::uuid,'calendar.availability') as value`)[0].value).toBeNull());
-    await db.begin(async tx=>{await tx`select set_config('app.roles','Organization.All.ReadWrite',true)`;await tx`update platform.identity_relations set access_blocked=false where identity_id=${identity}::uuid`;});
-    expect((await db`select revoked_at from platform.connection_use_grants where id=${offboardingGrant}::uuid`)[0].revoked_at).not.toBeNull();
-    // New consent is a new row; the old one cannot be reactivated.
-    await as(owner,actor,tenant,'calendar.consent',tx=>issue(tx,crypto.randomUUID()));
+  test('offboarding permanently withdraws consent through both tenant and cross-tenant maintenance sessions',async()=>{
+    for(const maintenance of [false,true]){
+      const offboardingGrant=crypto.randomUUID();
+      await as(owner,actor,tenant,'calendar.consent',tx=>issue(tx,offboardingGrant));
+      await as(owner,actor,maintenance?'':tenant,'account.block',async tx=>{
+        await tx`select set_config('app.roles','Organization.All.ReadWrite',true),set_config('app.bypass_rls',${String(maintenance)},true)`;
+        await tx`update platform.identity_relations set access_blocked=true where tenant_id=${tenant}::uuid and identity_id=${identity}::uuid`;
+        expect((await tx`select app.current_tenant() as tenant,app.bypass_rls() as bypass,app.current_user_id() as actor`)[0]).toMatchObject({tenant:maintenance?null:tenant,bypass:maintenance,actor});
+      });
+      await as(service,service,tenant,'calendar.availability',async tx=>expect((await tx`select app.delegated_connection_row(${offboardingGrant}::uuid,'calendar.availability') as value`)[0].value).toBeNull());
+      await as(owner,actor,tenant,'account.unblock',async tx=>{
+        await tx`select set_config('app.roles','Organization.All.ReadWrite',true)`;
+        await tx`update platform.identity_relations set access_blocked=false where tenant_id=${tenant}::uuid and identity_id=${identity}::uuid`;
+      });
+      expect((await db`select revoked_at from platform.connection_use_grants where id=${offboardingGrant}::uuid`)[0].revoked_at).not.toBeNull();
+      await as(service,service,tenant,'calendar.availability',async tx=>expect((await tx`select app.delegated_connection_row(${offboardingGrant}::uuid,'calendar.availability') as value`)[0].value).toBeNull());
+    }
   });
 });

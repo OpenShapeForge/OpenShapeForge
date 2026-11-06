@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { connectionDelegationIdentity, isDelegatedConnection } from "./connection-delegation.js";
 /**
  * The connection a derived tool's binding runs with. Split out of the
  * binding step of tool dispatch, verbatim.
  */
+import { connectionDelegationIdentity, isDelegatedConnection } from "./connection-delegation.js";
 import { ownedByActingRelation } from "../db/acting-relation.js";
 import { type ConnectionTokenAudit } from "./connection-token-refresh.js";
 import { HttpError } from "../rest/http-error.js";

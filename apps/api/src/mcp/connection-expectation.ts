@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { isDelegatedConnection } from "./connection-delegation.js";
 /**
  * The expected-Connection control of one declarative Service invocation, and
  * the capture that gives a caller something to expect.
@@ -85,6 +84,7 @@ import { isDelegatedConnection } from "./connection-delegation.js";
  * both pass; two that name different rows leave no row able to pass, which is
  * the fail-closed answer rather than a choice between them.
  */
+import { isDelegatedConnection } from "./connection-delegation.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ownedByActingRelation } from "../db/acting-relation.js";
 import { HttpError } from "../rest/http-error.js";

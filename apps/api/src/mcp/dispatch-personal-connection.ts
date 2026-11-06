@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { revalidateConnectionDelegation } from "./connection-delegation.js";
 /**
  * The caller's personal sign-in for a derived tool's binding. Split out of
  * dispatch-derived-connection.ts, verbatim; the branch starts from the same
  * initial values the shared prelude gave it.
  */
+import { revalidateConnectionDelegation } from "./connection-delegation.js";
 import { actingRelationId } from "../db/acting-relation.js";
 import { randomUUID } from "node:crypto";
 import { resolveTemplate } from "./declarative-execution.js";

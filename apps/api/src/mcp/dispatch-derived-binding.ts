@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { withDbSession } from "../db/session.js";
-import { delegatedConnectionRow, connectionGrantFingerprint } from "../modules/connection-use-grants.js";
-import { observeDelegatedProviderFailure, revalidateConnectionDelegation, isDelegatedConnection } from "./connection-delegation.js";
 /**
  * One binding of a derived tool. Split out of the derived-tool section of
  * tool dispatch: the loop body, verbatim, with `continue` spelled as an
  * undefined answer.
  */
+import { withDbSession } from "../db/session.js";
+import { delegatedConnectionRow, connectionGrantFingerprint } from "../modules/connection-use-grants.js";
+import { observeDelegatedProviderFailure, revalidateConnectionDelegation, isDelegatedConnection } from "./connection-delegation.js";
 import { ownedByActingRelation } from "../db/acting-relation.js";
 import { createHash } from "node:crypto";
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";

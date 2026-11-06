@@ -10,11 +10,9 @@ create policy connection_use_grants_tenant_fence on platform.connection_use_gran
 
 create or replace function app.connection_grant_owner_live(identity_id uuid, tenant_id uuid, relation_id uuid)
 returns boolean language sql stable as $$
-  select exists(select 1 from platform.identity_relations m join erp.relations r
-    on r.tenant_id=m.tenant_id and r.id=m.relation_id
+  select exists(select 1 from platform.identity_relations m
     where m.identity_id=$1 and m.tenant_id=$2 and m.relation_id=$3
-      and m.status='linked' and not m.access_blocked
-      and coalesce(lower(r.status),'active') not in ('inactive','archived','retired','deleted'))
+      and m.status='linked' and not m.access_blocked)
 $$;
 create unique index if not exists connection_use_grants_live_identity on platform.connection_use_grants
   (tenant_id,subject_entity,subject_id,connection_id,consumer_operation,(service_definition->>'id')) where revoked_at is null;
@@ -26,8 +24,8 @@ create policy connection_use_grants_owner_insert on platform.connection_use_gran
   as restrictive for insert with check (
     owner_relation_id=app.current_relation_id() and issued_by=app.current_user_id()
     and app.connection_grant_owner_live(issued_identity_id,tenant_id,owner_relation_id)
-    and exists(select 1 from platform.identity_relations m where m.identity_id=issued_identity_id
-      and m.tenant_id=tenant_id and app.identity_subject(m.identity_id))
+    and exists(select 1 from platform.identities i where i.id=issued_identity_id
+      and i.subject=current_setting('app.user_id',true))
   );
 drop policy if exists connection_use_grants_owner_update on platform.connection_use_grants;
 create policy connection_use_grants_owner_update on platform.connection_use_grants
@@ -50,12 +48,22 @@ drop trigger if exists connection_use_grant_immutable on platform.connection_use
 create trigger connection_use_grant_immutable before update on platform.connection_use_grants
   for each row execute function app.connection_use_grant_immutable();
 
-create or replace function app.connection_grants_membership_changed() returns trigger language plpgsql as $$
+-- The membership write was already authorized. Scope its cascading withdrawal
+-- to that row's tenant even for a cross-tenant maintenance session. No identity
+-- or bypass is elevated; both normal completion and exceptions restore context.
+create or replace function app.connection_grants_membership_changed() returns trigger
+language plpgsql set search_path=pg_catalog as $$
+declare previous_tenant text := current_setting('app.tenant_id',true);
 begin
+  perform set_config('app.tenant_id',old.tenant_id::text,true);
   update platform.connection_use_grants g set revoked_at=clock_timestamp()
     where g.tenant_id=old.tenant_id and g.issued_identity_id=old.identity_id and g.revoked_at is null
       and not app.connection_grant_owner_live(g.issued_identity_id,g.tenant_id,g.owner_relation_id);
+  perform set_config('app.tenant_id',coalesce(previous_tenant,''),true);
   return null;
+exception when others then
+  perform set_config('app.tenant_id',coalesce(previous_tenant,''),true);
+  raise;
 end $$;
 drop trigger if exists connection_grants_membership_changed on platform.identity_relations;
 create trigger connection_grants_membership_changed after update or delete on platform.identity_relations

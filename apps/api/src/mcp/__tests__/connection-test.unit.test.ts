@@ -418,4 +418,90 @@ describe("testElicitedRow", () => {
     expect(seen.auth).toBe("Bearer at-1");
     expect(report.checks.find((check) => check.check === "probe")?.outcome).toBe("passed");
   });
+
+  it("still demands the issued token on a personal authorization-code row", async () => {
+    const report = await testElicitedRow({
+      row: { id: "c2", ownerUserId: "user-1", values: {} },
+      sourceRow: {
+        ...SOURCE,
+        auth: { profile: "oauth2AuthorizationCode" },
+        probe: { pathTemplate: "/api/me" },
+        definitions: [],
+      },
+      elicit: ELICIT,
+      table: TABLE,
+      keyring: KEYRING,
+      fetchImpl: refusingFetch,
+    });
+    expect(report.ok).toBe(false);
+    const required = report.checks.find((check) => check.check === "required-values");
+    expect(required?.outcome).toBe("failed");
+    expect(required?.detail).toContain("accessToken");
+    // Nothing was exercised: no token means no request authentication.
+    expect(report.checks.find((check) => check.check === "credentials")?.outcome).toBe("skipped");
+    expect(report.checks.find((check) => check.check === "probe")?.outcome).toBe("skipped");
+  });
+
+  it("verifies a personal Basic credential on its own elicited values", async () => {
+    // A personal row of a non-OAuth provider IS the elicited configuration —
+    // it holds the person's own credential, not a runtime-issued OAuth token.
+    const seen: { auth?: string | undefined; url?: string | undefined } = {};
+    const report = await testElicitedRow({
+      row: { id: "c3", ownerUserId: "user-1", values: values() },
+      sourceRow: {
+        ...SOURCE,
+        auth: { ...SOURCE.auth, connectionScope: "user" },
+        probe: { method: "GET", pathTemplate: "/api/me" },
+      },
+      elicit: ELICIT,
+      table: TABLE,
+      keyring: KEYRING,
+      fetchImpl: (async (url: unknown, init?: RequestInit) => {
+        seen.url = String(url);
+        seen.auth = (init?.headers as Record<string, string>).authorization;
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    expect(report.ok).toBe(true);
+    const required = report.checks.find((check) => check.check === "required-values");
+    expect(required?.outcome).toBe("passed");
+    expect(required?.detail).toContain("apiToken, email, subdomain");
+    expect(required?.detail).not.toContain("accessToken");
+    expect(seen.url).toBe("https://acme.example.com/api/me");
+    expect(seen.auth).toBe(`Basic ${Buffer.from("a@b.c/token:tok-1").toString("base64")}`);
+    expect(report.checks.find((check) => check.check === "probe")?.outcome).toBe("passed");
+    expect(JSON.stringify(report)).not.toContain("tok-1");
+  });
+
+  it("names the missing elicited value on a personal Basic credential", async () => {
+    let probeCalls = 0;
+    const report = await testElicitedRow({
+      row: {
+        id: "c3",
+        ownerUserId: "user-1",
+        values: { subdomain: "acme", email: "a@b.c" },
+      },
+      sourceRow: {
+        ...SOURCE,
+        auth: { ...SOURCE.auth, connectionScope: "user" },
+        probe: { method: "GET", pathTemplate: "/api/me" },
+      },
+      elicit: ELICIT,
+      table: TABLE,
+      keyring: KEYRING,
+      fetchImpl: (async () => {
+        probeCalls++;
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    expect(report.ok).toBe(false);
+    const required = report.checks.find((check) => check.check === "required-values");
+    expect(required?.outcome).toBe("failed");
+    expect(required?.detail).toContain("Missing required values: apiToken");
+    expect(required?.detail).not.toContain("accessToken");
+    // The unresolvable password fails the credentials check, so nothing is sent.
+    expect(report.checks.find((check) => check.check === "credentials")?.outcome).toBe("failed");
+    expect(report.checks.find((check) => check.check === "probe")?.outcome).toBe("skipped");
+    expect(probeCalls).toBe(0);
+  });
 });

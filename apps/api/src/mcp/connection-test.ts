@@ -124,9 +124,16 @@ export async function testElicitedRow(
   const auth = (sourceRow.auth ?? null) as JsonRecord | null;
   const isPersonal = Boolean(row.ownerUserId);
 
-  // 1. Required values. A personal row holds runtime-issued tokens, so it is
-  // judged on those; a tenant row is judged on the elicited contract.
-  const requiredKeys = isPersonal
+  // 1. Required values. Only a personal row of an authorization-code provider
+  // holds runtime-issued tokens instead of configuration, so only that row is
+  // judged on the token. Every other row — including a personal Basic, header
+  // or API-key credential, which IS the elicited configuration — is judged on
+  // the elicited contract and the keys its auth block resolves; demanding an
+  // OAuth accessToken there reports "Missing required values: accessToken" on
+  // a correct personal credential.
+  const personalOAuthTokens =
+    isPersonal && auth?.profile === "oauth2AuthorizationCode";
+  const requiredKeys = personalOAuthTokens
     ? ["accessToken"]
     : [
         ...new Set([

@@ -19572,6 +19572,17 @@
       "shape": [
         {
           "key": "employeeNumber",
+          "authorization": {
+            "roles": {
+              "read": [
+                "Organization.All.Read",
+                "Organization.All.ReadWrite"
+              ],
+              "write": [
+                "Organization.All.ReadWrite"
+              ]
+            }
+          },
           "osfType": "string",
           "required": true,
           "label": {
@@ -19593,6 +19604,17 @@
         },
         {
           "key": "status",
+          "authorization": {
+            "roles": {
+              "read": [
+                "Organization.All.Read",
+                "Organization.All.ReadWrite"
+              ],
+              "write": [
+                "Organization.All.ReadWrite"
+              ]
+            }
+          },
           "required": true,
           "label": {
             "en": "Status",
@@ -19614,6 +19636,17 @@
         },
         {
           "key": "hireDate",
+          "authorization": {
+            "roles": {
+              "read": [
+                "Organization.All.Read",
+                "Organization.All.ReadWrite"
+              ],
+              "write": [
+                "Organization.All.ReadWrite"
+              ]
+            }
+          },
           "osfType": "date",
           "required": false,
           "label": {
@@ -19631,6 +19664,17 @@
         },
         {
           "key": "terminationDate",
+          "authorization": {
+            "roles": {
+              "read": [
+                "Organization.All.Read",
+                "Organization.All.ReadWrite"
+              ],
+              "write": [
+                "Organization.All.ReadWrite"
+              ]
+            }
+          },
           "osfType": "date",
           "required": false,
           "label": {
@@ -19648,6 +19692,17 @@
         },
         {
           "key": "name",
+          "authorization": {
+            "roles": {
+              "read": [
+                "Organization.All.Read",
+                "Organization.All.ReadWrite"
+              ],
+              "write": [
+                "Organization.All.ReadWrite"
+              ]
+            }
+          },
           "osfType": "string",
           "required": false,
           "label": {
@@ -19668,6 +19723,17 @@
         },
         {
           "key": "description",
+          "authorization": {
+            "roles": {
+              "read": [
+                "Organization.All.Read",
+                "Organization.All.ReadWrite"
+              ],
+              "write": [
+                "Organization.All.ReadWrite"
+              ]
+            }
+          },
           "required": false,
           "label": {
             "en": "Description",
@@ -19688,6 +19754,17 @@
         },
         {
           "key": "externalCode",
+          "authorization": {
+            "roles": {
+              "read": [
+                "Organization.All.Read",
+                "Organization.All.ReadWrite"
+              ],
+              "write": [
+                "Organization.All.ReadWrite"
+              ]
+            }
+          },
           "osfType": "string",
           "required": false,
           "label": {
@@ -19708,6 +19785,18 @@
         },
         {
           "key": "relationId",
+          "authorization": {
+            "roles": {
+              "read": [
+                "Organization.All.Read",
+                "Organization.All.ReadWrite",
+                "Organization.EmployeeDirectory.Read"
+              ],
+              "write": [
+                "Organization.All.ReadWrite"
+              ]
+            }
+          },
           "label": {
             "en": "Relation",
             "nl": "Relatie"

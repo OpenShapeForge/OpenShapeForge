@@ -54,8 +54,8 @@ test("compiled version output admits the logical fields declared by the value re
   const projected = operation.outputSchema.anyOf.find((item: any) => item.type === "object").properties.frozenFieldDefinitions;
   const bindings = (manifest as any).entityValues.carriers.flatMap((carrier: any) => Object.values(carrier.definitions).flatMap((definition: any) =>
     definition.fields.filter((field: any) => field.valueFieldsFrom && definition.references.some((ref: any) => ref.fieldKey === field.valueFieldsFrom.reference && ref.targetEntity === "TemplateVersion")).map((field: any) => field.valueFieldsFrom.field)));
-  expect(Object.keys(projected.properties).sort()).toEqual([...new Set(bindings)].sort());
-  const { default: Ajv } = await import("ajv");
+  expect(Object.keys(projected.properties).sort()).toEqual([...new Set<string>(bindings)].sort());
+  const { Ajv } = await import("ajv");
   const validate = new Ajv({ strict: false }).compile(projected);
   expect(validate({ parameters: [{ key: "name", osfType: "string" }] })).toBe(true);
   expect(validate({ unknown: [] })).toBe(false);

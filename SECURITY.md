@@ -71,15 +71,17 @@ refuses to start the API when the **authentication** configuration is unsafe:
 bearer verification is configured without an audience, the
 `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` is unset, still the dev default, too
 short or too uniform, or no complete authentication method is configured.
-Everything else in the list is the operator's responsibility; the API does not
-check it at startup.
+In every environment, API startup also checks the actual connected Postgres
+role before initializing modules or serving requests. It refuses `SUPERUSER`
+and `BYPASSRLS` connections, and fails closed if the role cannot be verified.
+The remaining unchecked requirements below are the operator's responsibility.
 
 - connect the API as a **non-superuser, non-BYPASSRLS** Postgres role so
   `FORCE ROW LEVEL SECURITY` is actually enforced (`DATABASE_URL`); run
   migrations with a separate privileged role (`OPENSHAPEFORGE_MIGRATE_DATABASE_URL`).
-  *Not checked at API startup:* the API starts and serves on a superuser or
-  BYPASSRLS connection. `bun run db:migrate` verifies the provisioned role
-  contract, not the role a running API connects as,
+  *Enforced at API startup*, including programmatic `createApiApp` callers.
+  `bun run db:migrate` separately verifies the provisioned role contract;
+  its privileged connection is not subject to the API startup check,
 - set a real bearer issuer/JWKS **and audience**
   (`OPENSHAPEFORGE_API_VERIFY_BEARER_*`) — *the audience is enforced once a
   JWKS URI or issuer is set*,

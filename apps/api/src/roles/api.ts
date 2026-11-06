@@ -35,6 +35,7 @@ import {
 } from "../mcp/organization-resource.js";
 import { assertProductionEnv } from "../config/production-guard.js";
 import {
+  assertRuntimeDatabaseRole,
   createDatabaseRuntime,
   type DatabaseRuntime,
 } from "../db/connection.js";
@@ -403,6 +404,9 @@ export function createApiApp(options: {
   // added directly on `app` (which happens synchronously, before the deferred
   // plugin loads) would silently escape the limiter.
   void app.register(async (routes) => {
+    // Every API entry point, in every environment: refuse before a module can
+    // read or write through a pool that bypasses tenant and record policies.
+    if (databaseRuntime) await assertRuntimeDatabaseRole(databaseRuntime.db);
     const modulePlatform = databaseRuntime
       ? new ModulePlatformRuntime(databaseRuntime.db)
       : undefined;
@@ -751,6 +755,14 @@ export async function startApiRole() {
     modules: await loadRuntimeModules(),
   });
 
-  await app.listen({ port, host });
+  try {
+    await app.listen({ port, host });
+  } catch (error) {
+    // A rejected startup never returns the app to a caller who could close it.
+    await app.close().catch((closeError: unknown) => {
+      app.log.error({ err: closeError }, "Failed to close API resources after startup refusal.");
+    });
+    throw error;
+  }
   return app;
 }

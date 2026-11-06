@@ -108,6 +108,22 @@ export function createDatabaseRuntime(
   };
 }
 
+/** Check the connected API role before modules or requests can use its pool. */
+export async function assertRuntimeDatabaseRole(db: OpenShapeForgeDatabase): Promise<void> {
+  const { rows: [role] } = await sql<{ rolsuper: boolean; rolbypassrls: boolean }>`
+    select rolsuper, rolbypassrls
+    from pg_catalog.pg_roles where rolname = current_user
+  `.execute(db);
+  // Missing/unknown attributes and query failures must never authorize startup.
+  if (!role || role.rolsuper !== false || role.rolbypassrls !== false) {
+    throw new Error(
+      "API database role must be NOSUPERUSER and NOBYPASSRLS; refusing to start. " +
+      "Set DATABASE_URL to the restricted application connection; use " +
+      "OPENSHAPEFORGE_MIGRATE_DATABASE_URL for privileged migrations.",
+    );
+  }
+}
+
 /** Internal owner guard; credentials and URL aliases do not establish DB identity. */
 export async function assertSameDatabase(left: OpenShapeForgeDatabase, right: OpenShapeForgeDatabase): Promise<void> {
   const identity = async (db: OpenShapeForgeDatabase) => (await sql<{ name: string; oid: string; address: string | null; port: number | null; started: string }>`

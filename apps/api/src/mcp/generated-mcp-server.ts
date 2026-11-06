@@ -61,10 +61,13 @@
  *   runtime-executors.ts                platform
  *   session-admission.ts,               how a request is admitted and the
  *   transport-sessions.ts               stateful transport sessions
+ *   external-discovery.ts               where a live request may discover the
+ *                                       external catalogs it is shown
  *   *-routes.ts, route-context.ts       the browser-facing routes
  */
 import { primeSessionExtensions } from "./extension-schemas.js";
 import { createMcpSessionAdmission } from "./session-admission.js";
+import { createExternalDiscovery } from "./external-discovery.js";
 import { withRuntimeSpan } from "@openshapeforge/observability";
 import { createTransportSessions } from "./transport-sessions.js";
 import { registerSessionWithPlatform } from "./platform-registration.js";
@@ -184,11 +187,14 @@ export function buildServer(
 
   const dispatchTool = createDispatchTool(scope, surface);
 
-  const refreshExternalCatalogs = () => {
-    if (modulePlatform) {
-      void modulePlatform.refreshExternalCatalogs(scope.moduleSession).catch(() => {});
-    }
-  };
+  // Discovery of external catalogs, for the live requests that may run it.
+  // Registered on the server so the stateful transport can run it inside its
+  // authenticated `initialize` (mcp/external-discovery.ts).
+  const discovery = createExternalDiscovery({
+    server,
+    session: scope.session,
+    modulePlatform,
+  });
 
   server.setRequestHandler('tools/call', async (request, ctx) => {
     // osf_describe and every CRUD call read this tenant's field definitions.
@@ -211,17 +217,18 @@ export function buildServer(
           }});
         }, dispatch, ctx.mcpReq.signal)
       : await dispatch();
-    refreshExternalCatalogs();
+    // Still inside the authenticated call: a connection this session may use
+    // can have been established, replaced or re-authorized by what just ran,
+    // and the tools it unlocks are what the caller is waiting for. Bounded
+    // and cancellable, and it tells the live sessions when it changed
+    // anything, so this one re-lists too.
+    await discovery.discover({ signal: ctx.mcpReq.signal });
     return outcome.result;
   });
 
   registerSessionExecutors(scope, dispatchTool);
 
   registerSessionWithPlatform(scope, surface, dispatchTool);
-
-  // Refresh in a separate active capability, never during tools/list. The
-  // existing snapshot stays usable if discovery fails or times out.
-  refreshExternalCatalogs();
 
   return server;
 }

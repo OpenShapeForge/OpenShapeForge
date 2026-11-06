@@ -16,6 +16,7 @@ import {
   sameStatefulMcpAuthorization,
   withFreshRelationGroupMemberships,
 } from "./stateful-session-authorization.js";
+import { externalDiscoveryOf, liveRequestSignal } from "./external-discovery.js";
 import { carrySessionIdentity } from "./session-info.js";
 import { clientInfoFromEnvelopeBody, clientInfoFromInitializeBody, rememberSessionClient } from "./session-client.js";
 import { sessionOpeningSentence } from "./session-opening.js";
@@ -135,12 +136,18 @@ export function createTransportSessions(input: {
     const { db, session, resource } = await requireMcpSession(request);
     rememberSessionClient(session, clientInfoFromEnvelopeBody(request.body));
     const includeInstructions = requestNeedsInstructions(request.body);
-    if (await handleModernMcpRequest(request, reply, async () => buildServer(
-      db, session, options.modules, options.modulePlatform, options.egressOwner,
-      notifyDerivedDefinitionChanged, false, undefined,
-      includeInstructions ? await sessionOpeningSentence({ db, session }) : null,
-      undefined, undefined, undefined, includeInstructions,
-    ), (server) => options.modulePlatform?.unregisterServer(server))) return;
+    if (await handleModernMcpRequest(request, reply, async () => {
+      const server = buildServer(
+        db, session, options.modules, options.modulePlatform, options.egressOwner,
+        notifyDerivedDefinitionChanged, false, undefined,
+        includeInstructions ? await sessionOpeningSentence({ db, session }) : null,
+        undefined, undefined, undefined, includeInstructions,
+      );
+      if ((request.body as { method?: unknown } | null)?.method === "server/discover") {
+        await externalDiscoveryOf(server)?.discover({ signal: liveRequestSignal(reply) });
+      }
+      return server;
+    }, (server) => options.modulePlatform?.unregisterServer(server))) return;
 
     const sessionHeader = request.headers["mcp-session-id"];
     const sessionId = Array.isArray(sessionHeader)
@@ -266,7 +273,18 @@ export function createTransportSessions(input: {
         await server.connect(transport);
         await withFreshRelationGroupMemberships(
           session,
-          () => transport.handleNodeRequest(request.raw, reply.raw, request.body),
+          async () => {
+            // The first and only place this session can discover its upstream
+            // catalogs before it is asked to list them: an authenticated
+            // request, with this request's Relation, memberships and roles
+            // resolved, and the client still waiting for the initialize
+            // answer. Other sessions can already have a listing, so notify
+            // them when discovery changes it. Failure retains the snapshot.
+            await externalDiscoveryOf(server)?.discover({
+              signal: liveRequestSignal(reply),
+            });
+            return transport.handleNodeRequest(request.raw, reply.raw, request.body);
+          },
         );
       } finally {
         // The SDK can refuse an initialize before a session exists (an
@@ -289,6 +307,11 @@ export function createTransportSessions(input: {
     // single-shot behaviour, kept for probes and legacy callers. No
     // server-initiated exchange is possible on this path, but a mutation
     // made through it still nudges the live sessions.
+    //
+    // Discovery here is the `tools/call` one and only that: a single-shot
+    // request has no first listing to prepare, and a probe must not be the
+    // thing a deployment relies on to find its upstream catalogs — a normal
+    // stateful session discovers its own, inside its own initialize.
     const server = buildServer(
       db,
       session,

@@ -14,8 +14,8 @@
  *
  * So discovery is awaited where that authority is live, and nowhere else:
  *
- *   - on authenticated `initialize`, including per-request clients,
- *     request, before the client's first `tools/list` (transport-sessions.ts);
+ *   - on authenticated `initialize` or `server/discover`, before the
+ *     client's first `tools/list` (transport-sessions.ts);
  *   - after an authenticated `tools/call`, which is where a connection this
  *     session may use is established, replaced or re-authorized
  *     (generated-mcp-server.ts).
@@ -31,7 +31,8 @@
  * can no longer open a secret, a database session or an egress connection.
  */
 import type { Server } from "@modelcontextprotocol/server";
-import type { FastifyReply } from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { ModulePlatformRuntime } from "../modules/platform.js";
 
@@ -75,17 +76,28 @@ export function createExternalDiscovery(input: {
 }): ExternalDiscovery {
   const { modulePlatform, server, session } = input;
   const budgetMs = input.budgetMs ?? LIVE_DISCOVERY_BUDGET_MS;
-  // One discovery at a time per session. A second concurrent request does not
-  // start a duplicate upstream sweep, and — more importantly — does not wait
-  // on work another request's authority is carrying.
-  let running = false;
+  // Serialize per server, but let a still-live later request perform its own
+  // refresh: an earlier sweep may have read the catalog before its change.
+  let running: Promise<void> | undefined;
   const discovery: ExternalDiscovery = {
     discover: async (options = {}) => {
-      if (!modulePlatform || running || options.signal?.aborted) return false;
-      running = true;
+      if (!modulePlatform || options.signal?.aborted) return false;
+      const timeout = AbortSignal.timeout(budgetMs);
+      const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+      while (running && !signal.aborted) {
+        const previous = running;
+        await new Promise<void>(resolve => {
+          const done = () => { signal.removeEventListener("abort", done); resolve(); };
+          signal.addEventListener("abort", done, { once: true });
+          void previous.then(done);
+        });
+      }
+      if (signal.aborted) return false;
+      const finished = Promise.withResolvers<void>();
+      running = finished.promise;
       try {
         return await modulePlatform.refreshExternalCatalogs(session, {
-          ...(options.signal ? { signal: options.signal } : {}),
+          signal,
           budgetMs,
           notify: options.notify !== false,
         });
@@ -94,7 +106,8 @@ export function createExternalDiscovery(input: {
         // decides whether the request it ran inside succeeds.
         return false;
       } finally {
-        running = false;
+        running = undefined;
+        finished.resolve();
       }
     },
   };
@@ -111,9 +124,25 @@ export function externalDiscoveryOf(server: Server): ExternalDiscovery | undefin
  * the authority its request carried, so discovery stops with it rather than
  * continuing as a job nobody is waiting for.
  */
-export function liveRequestSignal(reply: FastifyReply): AbortSignal {
+const requestSignal = new AsyncLocalStorage<AbortSignal>();
+
+export function currentLiveRequestSignal(): AbortSignal | undefined {
+  return requestSignal.getStore();
+}
+
+export async function withLiveRequestSignal<T>(request: FastifyRequest, reply: FastifyReply, work: () => Promise<T>): Promise<T> {
   const controller = new AbortController();
+  const close = () => controller.abort();
   if (reply.raw.destroyed || reply.raw.writableEnded) controller.abort();
-  else reply.raw.once("close", () => controller.abort());
-  return controller.signal;
+  else {
+    reply.raw.once("close", close);
+    request.raw.socket.once("close", close);
+  }
+  try {
+    return await requestSignal.run(controller.signal, work);
+  } finally {
+    controller.abort();
+    reply.raw.removeListener("close", close);
+    request.raw.socket.removeListener("close", close);
+  }
 }

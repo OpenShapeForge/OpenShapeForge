@@ -28,6 +28,9 @@ import type { RuntimeModule } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { buildServer } from "../generated-mcp-server.js";
 import { createTransportSessions } from "../transport-sessions.js";
+import { createExternalDiscovery } from "../external-discovery.js";
+import { Server } from "@modelcontextprotocol/server";
+import { spawn } from "node:child_process";
 
 const tenantA = "11111111-1111-4111-8111-111111111111";
 const tenantB = "99999999-9999-4999-8999-999999999999";
@@ -104,7 +107,7 @@ function deployment() {
   const notified: (string | null)[] = [];
   let listings = 0;
   let failure: string | null = null;
-  let barrier: (() => Promise<void>) | undefined;
+  let barrier: ((session: TrustedSessionContext, signal: AbortSignal) => Promise<void>) | undefined;
 
   const visible = (session: { tenantId: string | null; relation?: unknown }) => {
     const relationId = actingRelationId(session);
@@ -130,7 +133,7 @@ function deployment() {
       });
       retained.push(session as TrustedSessionContext);
       if (failure) throw new Error(failure);
-      await barrier?.();
+      await barrier?.(session as TrustedSessionContext, signal);
       const tenantId = session.tenantId;
       // Nobody is acting: there is no personal upstream to discover, and the
       // snapshot of whoever IS linked must not be touched.
@@ -204,7 +207,8 @@ function deployment() {
   };
 
   return {
-    db, platform, modules, identities, connections, refreshes, retained, notified, pending,
+    db, platform, modules, identities, connections, refreshes, retained, notified, pending, listen,
+    setBarrier: (work: typeof barrier) => { barrier = work; },
     counts: () => ({ refreshes: refreshes.length, listings }),
     fail: (reason: string | null) => { failure = reason; },
     /** Hold every discovery until `arrivals` of them are inside the provider. */
@@ -361,6 +365,83 @@ test("a connection added in-session refreshes the catalog and tells the session"
   // The change reached this tenant's live session, once, and no other's.
   expect(fixture.notified.slice(priorNotices)).toEqual([personA]);
   expect(await toolNames(theirs)).not.toContain("github_search");
+}, 15_000);
+
+test("overlapping requests each refresh after an earlier snapshot", async () => {
+  const firstStarted = Promise.withResolvers<void>();
+  const releaseFirst = Promise.withResolvers<void>();
+  let version = 1;
+  const seen: number[] = [];
+  const platform = { refreshExternalCatalogs: async () => {
+    const observed = version;
+    seen.push(observed);
+    if (seen.length === 1) { firstStarted.resolve(); await releaseFirst.promise; }
+    return true;
+  } } as unknown as ModulePlatformRuntime;
+  const server = new Server({ name: "queued-refresh", version: "1" }, { capabilities: { tools: {} } });
+  const discovery = createExternalDiscovery({ server, session: identity(), modulePlatform: platform });
+  const first = discovery.discover();
+  await firstStarted.promise;
+  version = 2;
+  const second = discovery.discover();
+  releaseFirst.resolve();
+  expect(await first).toBe(true);
+  expect(await second).toBe(true);
+  expect(seen).toEqual([1, 2]);
+  await server.close();
+});
+
+test("a cancelled request waiting for another refresh never gains authority", async () => {
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let calls = 0;
+  const platform = { refreshExternalCatalogs: async () => {
+    calls++;
+    started.resolve();
+    await release.promise;
+    return true;
+  } } as unknown as ModulePlatformRuntime;
+  const server = new Server({ name: "cancelled-refresh", version: "1" }, { capabilities: { tools: {} } });
+  const discovery = createExternalDiscovery({ server, session: identity(), modulePlatform: platform });
+  const first = discovery.discover();
+  await started.promise;
+  const controller = new AbortController();
+  const second = discovery.discover({ signal: controller.signal });
+  controller.abort();
+  expect(await second).toBe(false);
+  release.resolve();
+  expect(await first).toBe(true);
+  expect(calls).toBe(1);
+  await server.close();
+});
+
+test("a disconnected stateful call loses discovery authority", async () => {
+  const fixture = deployment();
+  fixture.connections.set(relationA, new Set(["jira"]));
+  const url = `${await fixture.listen()}/mcp`;
+  const headers = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+  const init = await fetch(url, { method: "POST", headers, body: JSON.stringify({
+    jsonrpc: "2.0", id: 1, method: "initialize",
+    params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "disconnect-proof", version: "1" } },
+  }) });
+  const sessionId = init.headers.get("mcp-session-id");
+  expect(sessionId).toBeTruthy();
+  await init.text();
+  const started = Promise.withResolvers<void>();
+  const checked = Promise.withResolvers<boolean>();
+  fixture.setBarrier(async (session, signal) => {
+    started.resolve();
+    if (!signal.aborted) await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+    await new Promise<void>(resolve => setImmediate(resolve));
+    try { await fixture.platform.services.db.withSession(session, async () => undefined); checked.resolve(false); }
+    catch { checked.resolve(true); }
+  });
+  const script = `const http = require('node:http'); const request = http.request(process.argv[1], { method: 'POST', headers: JSON.parse(process.argv[2]) }); request.on('error', () => {}); request.end(process.argv[3]);`;
+  const call = spawn(process.execPath, ["-e", script, url, JSON.stringify({ ...headers, "mcp-session-id": sessionId!, "mcp-protocol-version": "2025-03-26" }),
+    JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "jira_search", arguments: {} } })], { stdio: "ignore" });
+  await started.promise;
+  call.kill();
+  expect(await Promise.race([checked.promise, new Promise(resolve => setTimeout(() => resolve(false), 2_000))])).toBe(true);
 }, 15_000);
 
 test("a failing upstream costs the session nothing it already had", async () => {

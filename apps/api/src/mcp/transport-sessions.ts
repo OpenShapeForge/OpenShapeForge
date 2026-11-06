@@ -16,7 +16,7 @@ import {
   sameStatefulMcpAuthorization,
   withFreshRelationGroupMemberships,
 } from "./stateful-session-authorization.js";
-import { externalDiscoveryOf, liveRequestSignal } from "./external-discovery.js";
+import { currentLiveRequestSignal, externalDiscoveryOf, withLiveRequestSignal } from "./external-discovery.js";
 import { carrySessionIdentity } from "./session-info.js";
 import { clientInfoFromEnvelopeBody, clientInfoFromInitializeBody, rememberSessionClient } from "./session-client.js";
 import { sessionOpeningSentence } from "./session-opening.js";
@@ -128,7 +128,7 @@ export function createTransportSessions(input: {
     );
   };
 
-  const handleMcpRequest = async (
+  const handleAuthenticatedMcpRequest = async (
     request: FastifyRequest,
     reply: FastifyReply,
   ): Promise<void> => {
@@ -144,7 +144,7 @@ export function createTransportSessions(input: {
         undefined, undefined, undefined, includeInstructions,
       );
       if ((request.body as { method?: unknown } | null)?.method === "server/discover") {
-        await externalDiscoveryOf(server)?.discover({ signal: liveRequestSignal(reply) });
+        await externalDiscoveryOf(server)?.discover({ signal: currentLiveRequestSignal() });
       }
       return server;
     }, (server) => options.modulePlatform?.unregisterServer(server))) return;
@@ -281,7 +281,7 @@ export function createTransportSessions(input: {
             // answer. Other sessions can already have a listing, so notify
             // them when discovery changes it. Failure retains the snapshot.
             await externalDiscoveryOf(server)?.discover({
-              signal: liveRequestSignal(reply),
+              signal: currentLiveRequestSignal(),
             });
             return transport.handleNodeRequest(request.raw, reply.raw, request.body);
           },
@@ -337,6 +337,9 @@ export function createTransportSessions(input: {
     );
     await transport.handleNodeRequest(request.raw, reply.raw, request.body);
   };
+
+  const handleMcpRequest = (request: FastifyRequest, reply: FastifyReply): Promise<void> =>
+    withLiveRequestSignal(request, reply, () => handleAuthenticatedMcpRequest(request, reply));
 
   return { handleMcpRequest, notifyDerivedDefinitionChanged };
 }

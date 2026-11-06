@@ -67,7 +67,7 @@
  */
 import { primeSessionExtensions } from "./extension-schemas.js";
 import { createMcpSessionAdmission } from "./session-admission.js";
-import { createExternalDiscovery } from "./external-discovery.js";
+import { createExternalDiscovery, currentLiveRequestSignal } from "./external-discovery.js";
 import { withRuntimeSpan } from "@openshapeforge/observability";
 import { createTransportSessions } from "./transport-sessions.js";
 import { registerSessionWithPlatform } from "./platform-registration.js";
@@ -222,7 +222,9 @@ export function buildServer(
     // and the tools it unlocks are what the caller is waiting for. Bounded
     // and cancellable, and it tells the live sessions when it changed
     // anything, so this one re-lists too.
-    await discovery.discover({ signal: ctx.mcpReq.signal });
+    const httpSignal = currentLiveRequestSignal();
+    await discovery.discover({ signal: httpSignal
+      ? AbortSignal.any([ctx.mcpReq.signal, httpSignal]) : ctx.mcpReq.signal });
     return outcome.result;
   });
 

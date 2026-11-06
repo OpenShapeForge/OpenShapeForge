@@ -1,10 +1,10 @@
-import { withConnectionDelegationOrigin } from "../mcp/connection-delegation.js";
+// SPDX-License-Identifier: BUSL-1.1
+import { withConnectionDelegationOrigin, withConnectionGrantSubject } from "../mcp/connection-delegation.js";
 import { assertCurrentAccountAuthority } from "../accounts/account-current-authority.js";
 import { nativeCollectionOptionsHandler } from "./collection-options.js";
 import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
 import { resolveAuthorizationProfileAccess } from "../auth/authorization-profile-session.js";
 import { nativeApplicationSearchHandler } from "./application-search.js";
-// SPDX-License-Identifier: BUSL-1.1
 import { withAuditContext } from "../platform/audit-context.js";
 import { liveMaintenanceRunner } from "../modules/maintenance.js";
 import { blueprintOperationHandler } from "./entity/blueprints.js";
@@ -1768,7 +1768,7 @@ export async function invokeOperation(
     });
   };
 
-  return withAuditContext(bound.operation.key, context.session?.credential, () => withModuleOperationSession(
+  return withConnectionGrantSubject(ownedTarget ? {entity:ownedTarget.target.entityName,id:ownedTarget.id} : undefined, () => withAuditContext(bound.operation.key, context.session?.credential, () => withModuleOperationSession(
     context.platform,
     context.session,
     (session) => {
@@ -1803,7 +1803,7 @@ export async function invokeOperation(
         )),
     });
     },
-  ), context.session?.principalKind);
+  ), context.session?.principalKind));
 }
 
 function applyErrorResponseMetadata(

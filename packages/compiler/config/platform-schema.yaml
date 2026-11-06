@@ -1020,6 +1020,7 @@ tables:
       - { name: definition_fingerprint, type: text, required: true }
       - { name: input_schema, type: jsonb, required: true }
       - { name: issued_by, type: uuid, required: true }
+      - { name: issued_identity_id, type: uuid, required: true, references: { schema: platform, table: identities, column: id, onDelete: CASCADE } }
       - { name: issued_at, type: timestamptz, required: true, default: now() }
       - { name: expires_at, type: timestamptz }
       - { name: revoked_at, type: timestamptz }

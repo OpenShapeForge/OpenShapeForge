@@ -1,5 +1,5 @@
-import { revalidateConnectionDelegation } from "./connection-delegation.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { revalidateConnectionDelegation } from "./connection-delegation.js";
 /**
  * Refreshing the OAuth tokens stored on an authored Connection row.
  *

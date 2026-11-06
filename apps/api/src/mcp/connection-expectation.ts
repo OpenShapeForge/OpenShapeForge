@@ -1,5 +1,5 @@
-import { isDelegatedConnection } from "./connection-delegation.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { isDelegatedConnection } from "./connection-delegation.js";
 /**
  * The expected-Connection control of one declarative Service invocation, and
  * the capture that gives a caller something to expect.

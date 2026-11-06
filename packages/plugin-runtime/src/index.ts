@@ -468,8 +468,10 @@ export type RuntimeConnectionUseGrantServices<Session> = {
     subject: { entity: string; id: string };
     definition: RuntimeDeclarativeServiceDefinition;
     inputSchema: Record<string, unknown>;
+    /** Omitted means standing consent until revocation or owner offboarding. */
+    expiresAt?: string;
   }): Promise<{ id: string }>;
-  revoke(session: Session, subject: { entity: string; id: string }): Promise<void>;
+  revoke(session: Session, subject: { entity: string; id: string; grantId?: string }): Promise<void>;
   list(session: Session, subject: { entity: string; id: string }): Promise<readonly {
     id: string; connectionId: string; consumerOperation: string;
     definition: RuntimeDeclarativeServiceDefinition;
@@ -480,6 +482,7 @@ export type RuntimeDeclarativeServiceRequest = {
   definition: RuntimeDeclarativeServiceDefinition;
   /** Owner-issued authority, verified against the originating canonical Operation. */
   connectionGrantId?: string;
+  connectionGrantSubject?: {entity:string;id:string};
   input?: Record<string, unknown>;
   /** Reused across retries; core derives a stable key per Service step. */
   idempotencyKey?: string;
@@ -525,7 +528,11 @@ export type RuntimeDeclarativeServiceExecutionResult =
   // answer is its data or a failure, not an acceptance.
   & { intent?: string }
   & Exclude<OperationResult<unknown>, OperationAccepted>
-  & { connectionUse?: RuntimeDeclarativeServiceConnectionUse };
+  & { connectionUse?: RuntimeDeclarativeServiceConnectionUse;
+    /** Core-only observation from the admitted single REST binding, never an
+     * OAuth response or provider-controlled body. Not part of public errors. */
+    delegatedProviderFailure?: {status:number};
+  };
 
 export type RuntimeOperationExecutionContext = {
   /** Exact, host-minted live capability for this invocation. */

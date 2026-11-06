@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from 'bun:test';
 import type { TrustedSessionContext } from '../auth/trusted-context.js';
 import { withVerifiedConnectionDelegation, withoutConnectionDelegation, verifiedConnectionDelegation, withConnectionDelegationOrigin, connectionDelegationOrigin, isDelegatedConnection } from './connection-delegation.js';
@@ -45,4 +46,28 @@ test('canonical origin replaces unrelated nested authority and is isolated betwe
   }));
   await Promise.all(jobs);
   expect(connectionDelegationOrigin()).toBeUndefined();
+});
+
+test('detached asynchronous work loses authority when the canonical invocation ends',async()=>{
+ let release!:()=>void;
+ const pending=new Promise<void>(resolve=>{release=resolve;});
+ let escaped!:Promise<unknown>;
+ await withVerifiedConnectionDelegation(session,identity,async()=>true,async()=>{
+   escaped=pending.then(()=>verifiedConnectionDelegation(session,'connection','availability'));
+ });
+ release();
+ await expect(escaped).rejects.toThrow();
+});
+
+test('provider failure observations are confined to the active delegated call',async()=>{
+ const {observeDelegatedProviderFailure,delegatedProviderFailure}=await import('./connection-delegation.js');
+ observeDelegatedProviderFailure(session,404);
+ expect(delegatedProviderFailure(session)).toBeUndefined();
+ await withVerifiedConnectionDelegation(session,identity,async()=>true,async()=>{
+  expect(delegatedProviderFailure(session)).toBeUndefined();
+  observeDelegatedProviderFailure(session,404);
+  expect(delegatedProviderFailure(session)).toEqual({status:404});
+  await withConnectionDelegationOrigin('other',async()=>expect(delegatedProviderFailure(session)).toBeUndefined());
+ });
+ expect(delegatedProviderFailure(session)).toBeUndefined();
 });

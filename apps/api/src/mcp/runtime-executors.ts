@@ -1,5 +1,6 @@
-import { withStoredConnectionGrant } from "../modules/connection-use-grants.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { delegatedProviderFailure } from "./connection-delegation.js";
+import { withStoredConnectionGrant } from "../modules/connection-use-grants.js";
 import { randomUUID } from "node:crypto";
 import type {
   RuntimeDeclarativeServiceExecutionResult,
@@ -69,7 +70,11 @@ export function createRuntimeDeclarativeServiceExecutor(input: {
       throw new Error("The core declarative Service executor did not initialise.");
     }
     try {
-      return await withStoredConnectionGrant(input.db, session, request, () => execute(request, randomUUID(), undefined, options?.signal));
+      return await withStoredConnectionGrant(input.db, session, request, subject => input.modulePlatform.services.records.assertAccess(session,subject), async () => {
+        const result=await execute(request,randomUUID(),undefined,options?.signal);
+        const failure=delegatedProviderFailure(session);
+        return 'error' in result && failure ? {...result,delegatedProviderFailure:failure} : result;
+      });
     } finally {
       input.modulePlatform.unregisterServer(server);
       runtimeDeclarativeServiceExecutors.delete(server);

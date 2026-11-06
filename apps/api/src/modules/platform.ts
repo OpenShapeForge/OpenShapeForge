@@ -1,5 +1,5 @@
-import { createConnectionUseGrantServices } from "./connection-use-grants.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { createConnectionUseGrantServices } from "./connection-use-grants.js";
 /** Core-owned services made available to reviewed runtime modules. */
 import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
 import { inheritAuthorizationProfileAccess } from '../auth/authorization-profile-decision.js';
@@ -700,7 +700,7 @@ export class ModulePlatformRuntime {
           );
         },
       },
-      connectionUseGrants: createConnectionUseGrantServices(this.#db, session => this.#acceptsScopedSession(session)),
+      connectionUseGrants: createConnectionUseGrantServices(this.#db, session => this.#acceptsScopedSession(session), (session,subject) => this.services.records.assertAccess(session,subject)),
       grants: {
         issue: (session, input) => {
           if (!this.#acceptsScopedSession(session)) {

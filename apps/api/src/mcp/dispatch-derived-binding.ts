@@ -1,7 +1,7 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { withDbSession } from "../db/session.js";
 import { delegatedConnectionRow, connectionGrantFingerprint } from "../modules/connection-use-grants.js";
-import { connectionDelegationIdentity, revalidateConnectionDelegation, isDelegatedConnection } from "./connection-delegation.js";
-// SPDX-License-Identifier: BUSL-1.1
+import { observeDelegatedProviderFailure, revalidateConnectionDelegation, isDelegatedConnection } from "./connection-delegation.js";
 /**
  * One binding of a derived tool. Split out of the derived-tool section of
  * tool dispatch: the loop body, verbatim, with `continue` spelled as an
@@ -13,6 +13,7 @@ import { type DerivedToolsCatalogEntry } from "./derived-tools.js";
 import { executeBindingStep, mergeOutputs } from "./declarative-execution.js";
 import { connectionScopesCovered } from "./entity-oauth.js";
 import { recordConnectionTokenAudit } from "./connection-token-refresh.js";
+import { ProviderOutcomeError } from "../connectors/provider-outcome.js";
 import { SecretError } from "../connectors/secrets.js";
 import { HttpError } from "../rest/http-error.js";
 import { connectionProblemError } from "./connection-guidance.js";
@@ -296,6 +297,7 @@ export async function runDerivedBinding(
           : {}),
       });
     } catch (error) {
+      if (error instanceof ProviderOutcomeError) observeDelegatedProviderFailure(session,error.providerStatus);
       if (error instanceof SecretError && oauthConnectionAudit) {
         try {
           await recordConnectionTokenAudit({

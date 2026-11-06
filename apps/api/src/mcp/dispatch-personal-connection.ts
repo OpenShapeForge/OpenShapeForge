@@ -1,5 +1,5 @@
-import { revalidateConnectionDelegation } from "./connection-delegation.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { revalidateConnectionDelegation } from "./connection-delegation.js";
 /**
  * The caller's personal sign-in for a derived tool's binding. Split out of
  * dispatch-derived-connection.ts, verbatim; the branch starts from the same

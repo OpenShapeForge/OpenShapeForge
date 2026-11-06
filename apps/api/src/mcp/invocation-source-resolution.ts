@@ -1,6 +1,6 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { delegatedConnectionRow } from "../modules/connection-use-grants.js";
 import { connectionDelegationIdentity, isDelegatedConnection } from "./connection-delegation.js";
-// SPDX-License-Identifier: BUSL-1.1
 /**
  * Authorized invocation sources of derived tools. Split out of
  * server-scope.ts, verbatim.

@@ -212,6 +212,8 @@ jobs:
           src/accounts/member-confirmation.test.ts
           src/accounts/source-query.unit.test.ts
           src/mcp/organization-profile-tools.test.ts
+          src/mcp/connection-delegation.test.ts
+          src/modules/connection-grant-fingerprint.test.ts
           src/auth/employee-invitations.unit.test.ts
           src/auth/organization-resource-client.test.ts
           src/jobs/mail/smtp.test.ts
@@ -470,7 +472,7 @@ jobs:
       - name: Migration + drift tests
         run: |
           cd apps/api
-          bun test src/db
+          SCRATCH_ADMIN_DATABASE_URL=postgres://openshapeforge:openshapeforge@localhost:5434/postgres bun test src/db
           bun test src/operations
           bun test src/graphql/available-tenants-db.test.ts
           bun test src/auth/relation-group-memberships-db.test.ts src/platform/entity-change-stream.test.ts src/graphql/context-db.test.ts

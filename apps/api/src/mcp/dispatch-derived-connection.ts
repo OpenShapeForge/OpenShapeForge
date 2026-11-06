@@ -1,5 +1,5 @@
-import { connectionDelegationIdentity, isDelegatedConnection } from "./connection-delegation.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { connectionDelegationIdentity, isDelegatedConnection } from "./connection-delegation.js";
 /**
  * The connection a derived tool's binding runs with. Split out of the
  * binding step of tool dispatch, verbatim.

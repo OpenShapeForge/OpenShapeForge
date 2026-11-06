@@ -3,17 +3,36 @@ import { sql } from 'kysely';
 import type { OpenShapeForgeDatabase } from '../connection.js';
 
 export const CONNECTION_USE_GRANTS_SQL = String.raw`
+-- No bypass may widen the tenant fence on grants themselves.
+drop policy if exists connection_use_grants_tenant_fence on platform.connection_use_grants;
+create policy connection_use_grants_tenant_fence on platform.connection_use_grants
+  as restrictive for all using (tenant_id=app.current_tenant()) with check (tenant_id=app.current_tenant());
+
+create or replace function app.connection_grant_owner_live(identity_id uuid, tenant_id uuid, relation_id uuid)
+returns boolean language sql stable as $$
+  select exists(select 1 from platform.identity_relations m join erp.relations r
+    on r.tenant_id=m.tenant_id and r.id=m.relation_id
+    where m.identity_id=$1 and m.tenant_id=$2 and m.relation_id=$3
+      and m.status='linked' and not m.access_blocked
+      and coalesce(lower(r.status),'active') not in ('inactive','archived','retired','deleted'))
+$$;
+create unique index if not exists connection_use_grants_live_identity on platform.connection_use_grants
+  (tenant_id,subject_entity,subject_id,connection_id,consumer_operation,(service_definition->>'id')) where revoked_at is null;
+
 -- The normal generated tenant policy still applies. Only the connection owner
 -- may issue or revoke authority; all grant scope fields are immutable.
 drop policy if exists connection_use_grants_owner_insert on platform.connection_use_grants;
 create policy connection_use_grants_owner_insert on platform.connection_use_grants
   as restrictive for insert with check (
     owner_relation_id=app.current_relation_id() and issued_by=app.current_user_id()
+    and app.connection_grant_owner_live(issued_identity_id,tenant_id,owner_relation_id)
+    and exists(select 1 from platform.identity_relations m where m.identity_id=issued_identity_id
+      and m.tenant_id=tenant_id and app.identity_subject(m.identity_id))
   );
 drop policy if exists connection_use_grants_owner_update on platform.connection_use_grants;
 create policy connection_use_grants_owner_update on platform.connection_use_grants
-  as restrictive for update using (owner_relation_id=app.current_relation_id())
-  with check (owner_relation_id=app.current_relation_id());
+  as restrictive for update using ((owner_relation_id=app.current_relation_id() or 'Organization.All.ReadWrite'=any(string_to_array(coalesce(current_setting('app.roles',true),''),',')) or not app.connection_grant_owner_live(issued_identity_id,tenant_id,owner_relation_id)))
+  with check ((owner_relation_id=app.current_relation_id() or 'Organization.All.ReadWrite'=any(string_to_array(coalesce(current_setting('app.roles',true),''),',')) or not app.connection_grant_owner_live(issued_identity_id,tenant_id,owner_relation_id)));
 drop policy if exists connection_use_grants_owner_delete on platform.connection_use_grants;
 create policy connection_use_grants_owner_delete on platform.connection_use_grants
   as restrictive for delete using (owner_relation_id=app.current_relation_id());
@@ -31,6 +50,17 @@ drop trigger if exists connection_use_grant_immutable on platform.connection_use
 create trigger connection_use_grant_immutable before update on platform.connection_use_grants
   for each row execute function app.connection_use_grant_immutable();
 
+create or replace function app.connection_grants_membership_changed() returns trigger language plpgsql as $$
+begin
+  update platform.connection_use_grants g set revoked_at=clock_timestamp()
+    where g.tenant_id=old.tenant_id and g.issued_identity_id=old.identity_id and g.revoked_at is null
+      and not app.connection_grant_owner_live(g.issued_identity_id,g.tenant_id,g.owner_relation_id);
+  return null;
+end $$;
+drop trigger if exists connection_grants_membership_changed on platform.identity_relations;
+create trigger connection_grants_membership_changed after update or delete on platform.identity_relations
+  for each row execute function app.connection_grants_membership_changed();
+
 -- One bounded lookup, after core admitted the stored consuming Operation.
 -- The helper never changes the user's identity or leaves RLS bypass enabled.
 create or replace function app.delegated_connection_row(grant_id uuid, operation_id text, lock_row boolean default false)
@@ -44,6 +74,7 @@ begin
   select * into permission from platform.connection_use_grants g
     where g.id=grant_id and g.tenant_id=app.current_tenant()
       and g.consumer_operation=operation_id and g.revoked_at is null
+      and app.connection_grant_owner_live(g.issued_identity_id,g.tenant_id,g.owner_relation_id)
       and (g.expires_at is null or g.expires_at>clock_timestamp());
   if permission.id is null then return null; end if;
   if current_setting('app.audit_operation',true) is distinct from operation_id then return null; end if;
@@ -58,7 +89,7 @@ begin
   -- authorization snapshot from before that wait into token renewal.
   if not exists (select 1 from platform.connection_use_grants g where g.id=grant_id
       and g.tenant_id=app.current_tenant() and g.consumer_operation=operation_id
-      and g.revoked_at is null and (g.expires_at is null or g.expires_at>clock_timestamp())) then
+      and g.revoked_at is null and app.connection_grant_owner_live(g.issued_identity_id,g.tenant_id,g.owner_relation_id) and (g.expires_at is null or g.expires_at>clock_timestamp())) then
     return null;
   end if;
   return result;
@@ -79,7 +110,7 @@ begin
   current_row := app.delegated_connection_row(grant_id,operation_id,true);
   if current_row is null then return false; end if;
   select * into permission from platform.connection_use_grants g where g.id=grant_id and g.tenant_id=app.current_tenant()
-    and g.revoked_at is null and (g.expires_at is null or g.expires_at>clock_timestamp());
+    and g.revoked_at is null and app.connection_grant_owner_live(g.issued_identity_id,g.tenant_id,g.owner_relation_id) and (g.expires_at is null or g.expires_at>clock_timestamp());
   if permission.id is null or permission.values_column!~'^[a-z_][a-z0-9_]*$' then return false; end if;
   parts := string_to_array(permission.connection_table,'.');
   perform set_config('app.bypass_rls','true',true);

@@ -86,10 +86,28 @@ export function elicitedKeyring() {
  */
 export function oauthCallbackUrlForInstructions(): string | null {
   try {
-    return `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`;
+    return oauthCallbackUrl();
   } catch {
     return null;
   }
+}
+
+/** A fixed deployment callback may use a provider-supported loopback origin.
+ * Secure configuration and all other browser handoffs keep the public origin.
+ * Request parameters can never select this redirect destination.
+ */
+export function oauthCallbackUrl(): string {
+  const configured = process.env.OPENSHAPEFORGE_OAUTH_CALLBACK_ORIGIN?.trim();
+  if (!configured) return `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`;
+  let origin: URL;
+  try { origin = new URL(configured); }
+  catch { throw new HttpError(503, "OAUTH_CALLBACK_ORIGIN_INVALID", "The OAuth callback origin is invalid."); }
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname);
+  if (origin.username || origin.password || origin.pathname !== "/" || origin.search || origin.hash ||
+      (origin.protocol !== "https:" && !(origin.protocol === "http:" && loopback))) {
+    throw new HttpError(503, "OAUTH_CALLBACK_ORIGIN_INVALID", "The OAuth callback must use an HTTPS or loopback origin without a path, credentials or query.");
+  }
+  return `${origin.origin}${ENTITY_OAUTH_CALLBACK_PATH}`;
 }
 
 export function callbackOrigin(): string {

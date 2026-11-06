@@ -56,7 +56,7 @@ export type { RuntimeExecutionPolicy, RuntimeExecutionPolicyContract, RuntimeExe
   RuntimeExecutionOperation, RuntimeExecutionAdmission, RuntimeExecutionRefusal } from "./execution-policy.js";
 export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js";
 export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwner, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
-  RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
+  RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactStageContext, RuntimeArtifactExpiryJob, RuntimeArtifactExpiryInput, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type {
   OperationAcceptance,
   OperationAccepted,
@@ -1072,8 +1072,10 @@ export type RuntimeWorkerContract<Context> = {
     fingerprint: string,
   ): Promise<void>;
   /**
-   * Optional. Persist, under the exact active claim and committed before core
-   * dispatches, that this attempt `started` a dispatch; or, once core has
+   * Required for non-repeatable writes. Atomically acquire, under the exact
+   * active claim and committed before core dispatches, this attempt's `started`
+   * mark. Reject a second acquisition of the same attempt, including from
+   * another broker/process. Once core has
    * proof nothing reached the Operation (only rate-limiter refusals), that it
    * was `not-dispatched`. Lets a transient failure retry without being taken
    * for an uncertain repeat (#885). Reported back as `dispatch`.

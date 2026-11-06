@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { AsyncLocalStorage } from "node:async_hooks";
 import { operationFailure } from "@openshapeforge/operations";
 import type {
   RuntimeArtifactDescriptor, RuntimeArtifactOwnerInput, RuntimeArtifactServices, RuntimeArtifactStorageContribution,
-  RuntimeRecordAccessServices,
+  RuntimeRecordAccessServices, RuntimeArtifactExpiryJob, RuntimeArtifactExpiryInput,
 } from "@openshapeforge/plugin-runtime";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -54,6 +55,7 @@ export class ArtifactStorageRuntime<Session, Transaction> {
     currentTransaction(session: Session): Transaction | undefined;
     withTransaction<T>(session: Session, work: (transaction: Transaction) => Promise<T>): Promise<T>;
     records: RuntimeRecordAccessServices<Session>;
+    enqueueExpiry?(session: Session, job: RuntimeArtifactExpiryJob, input: RuntimeArtifactExpiryInput): Promise<void>;
     /** Staged registry rows survive a later owning Operation rollback, so GC can expire their bytes. */
     withStageTransaction?<T>(session: Session, work: (transaction: Transaction) => Promise<T>): Promise<T>;
   }) {
@@ -68,16 +70,31 @@ export class ArtifactStorageRuntime<Session, Transaction> {
         return options.withTransaction(session, work);
       },
     });
+    const stages = new AsyncLocalStorage<symbol>();
     this.services = Object.freeze<RuntimeArtifactServices<Session>>({
       stage: async (session, input) => {
         const active = provider(session);
-        const stageContext = options.withStageTransaction ? { session,
+        const stageId = Symbol("artifact stage");
+        const stageContext = { session,
           withTransaction: <T>(work: (transaction: Transaction) => Promise<T>) => {
             provider(session);
-            return options.withStageTransaction!(session, work);
+            const transact = options.withStageTransaction ?? options.withTransaction;
+            return transact(session, transaction => stages.run(stageId, () => work(transaction)));
           },
-        } : context(session);
-        return descriptor(await active.stage(stageContext, input));
+        };
+        let staging = true;
+        try {
+          return descriptor(await active.stage({ ...stageContext, enqueueExpiry: async (expiry) => {
+            provider(session);
+            if (!staging || stages.getStore() !== stageId || !active.expiryJob || !options.enqueueExpiry) {
+              throw operationFailure({ code: "FORBIDDEN", message: "Artifact expiry requires its active staging transaction." });
+            }
+            if (!UUID.test(expiry.artifactId) || !Number.isFinite(Date.parse(expiry.expiresAt))) {
+              throw operationFailure({ code: "VALIDATION", message: "Artifact expiry requires an artifact and valid expiry time." });
+            }
+            await options.enqueueExpiry(session, active.expiryJob, expiry);
+          } }, input));
+        } finally { staging = false; }
       },
       bind: async (session, input) => {
         const active = provider(session);
@@ -115,7 +132,7 @@ export class ArtifactStorageRuntime<Session, Transaction> {
     });
   }
 
-  configure(modules: readonly { name: string; artifactStorage?: RuntimeArtifactStorageContribution<Session, Transaction> }[], selectedProviderIds: readonly string[]): void {
+  configure(modules: readonly { name: string; artifactStorage?: RuntimeArtifactStorageContribution<Session, Transaction>; jobHandlers?: Readonly<Record<string, unknown>> }[], selectedProviderIds: readonly string[]): void {
     if (this.#configured) throw new Error("Artifact storage was already configured.");
     const candidates = modules.filter(module => module.artifactStorage !== undefined);
     if (candidates.length > 1) throw new Error("Only one runtime module may provide artifact storage.");
@@ -130,7 +147,14 @@ export class ArtifactStorageRuntime<Session, Transaction> {
       if ([contribution.stage, contribution.bind, contribution.read].some(method => typeof method !== "function")) {
         throw new Error("Artifact storage contribution is incomplete.");
       }
-      this.#provider = Object.freeze({ providerId: contribution.providerId, stage: contribution.stage.bind(contribution),
+      const expiryJob = contribution.expiryJob;
+      if (expiryJob && (!expiryJob.kind.startsWith(`${candidates[0]!.name}.`) ||
+          typeof candidates[0]!.jobHandlers?.[expiryJob.kind] !== "function" ||
+          !Number.isSafeInteger(expiryJob.maxAttempts) || expiryJob.maxAttempts < 1 || expiryJob.maxAttempts > 100)) {
+        throw new Error("Artifact expiry must name a bounded cleanup handler owned by the storage module.");
+      }
+      this.#provider = Object.freeze({ providerId: contribution.providerId,
+        ...(expiryJob ? { expiryJob: Object.freeze({ ...expiryJob }) } : {}), stage: contribution.stage.bind(contribution),
         bind: contribution.bind.bind(contribution), read: contribution.read.bind(contribution) });
     }
     this.#configured = true;

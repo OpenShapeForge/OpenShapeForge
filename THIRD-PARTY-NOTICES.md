@@ -4,13 +4,13 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 527 packages.
+Regenerate with `bun run notices`. 528 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 403 |
+| MIT | 404 |
 | Apache-2.0 | 60 |
 | ISC | 31 |
 | BSD-3-Clause | 16 |
@@ -1634,6 +1634,10 @@ Regenerate with `bun run notices`. 527 packages.
 ### raw-body@3.0.2
 - License: **MIT** — stream-utils/raw-body
 - Author: Jonathan Ong <me@jongleberry.com> (http://jongleberry.com)
+
+### re2js@2.9.1
+- License: **MIT** — https://github.com/le0pard/re2js#readme
+- Author: Oleksii Vasyliev
 
 ### react@19.2.7
 - License: **MIT** — https://react.dev/
@@ -10141,6 +10145,33 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
+</details>
+
+<details><summary>re2js@2.9.1</summary>
+
+```
+MIT License
+
+Copyright (c) 2023 Oleksii Vasyliev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 </details>
 

@@ -922,3 +922,14 @@ contributions continue to list zero prompts.
 - [api.md](api.md) — the CRUD engine, RLS, auth, and the REST surface
 - [authoring.md](authoring.md) — entity YAML anatomy and field definitions
 - [architecture.md](architecture.md) — where this sits in the pipeline
+
+### Provider-specific local callback origins
+
+`OPENSHAPEFORGE_OAUTH_CALLBACK_ORIGIN` optionally selects a fixed origin for
+outbound provider OAuth callbacks, such as `http://localhost:3121` when a
+provider disallows development subdomains. Core always appends
+`/api/entity-oauth/callback`; the value must be an HTTPS or loopback origin
+without credentials, a path, query or fragment. Configuration handoffs and
+application URLs continue to use `OPENSHAPEFORGE_PUBLIC_ORIGIN`. Provider
+registration instructions, authorization-code exchange and refresh all use
+the same callback. Register that exact URL in the provider's client settings.

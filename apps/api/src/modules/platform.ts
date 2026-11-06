@@ -492,6 +492,22 @@ export class ModulePlatformRuntime {
       },
     });
     this.#artifactStorage = new ArtifactStorageRuntime({
+      enqueueExpiry: async (session, job, input) => {
+        const stage = this.#artifactStageTransactionStorage.getStore();
+        if (!this.#acceptsScopedSession(session) || !session.tenantId || !session.userId || stage?.session !== session) {
+          throw new Error("Artifact expiry must be enqueued in its live staging transaction.");
+        }
+        // Resource cleanup is core-owned maintenance, not deferred authority to
+        // act as the recipient. No grant, roles, groups or bearer scopes cross
+        // this boundary. Only the registered storage handler and this artifact
+        // can be scheduled; ordinary jobs.enqueue continues to refuse grants.
+        await enqueueJob(stage.trx, {
+          kind: job.kind, payload: { artifactId: input.artifactId },
+          deliveryKey: input.artifactId, availableAt: new Date(input.expiresAt), maxAttempts: job.maxAttempts,
+          tenantId: session.tenantId, actorId: session.userId,
+          actorSession: actorSessionOf({ credential: "trusted-context", roles: [], groups: [], relationGroupIds: [], scope: "self" }),
+        });
+      },
       withStageTransaction: (session, work) => withDbSession(this.#db, session, trx =>
         this.#artifactStageTransactionStorage.run({ session, trx }, () => work(trx)), { independent: true }),
       records: records.services,

@@ -10,6 +10,7 @@ function fixture(mode: "none" | "keyed" | "natural" = "keyed") {
   let work: RuntimeResolvedOperationWork | undefined = {
     tenantId: identity.tenantId, serviceIdentityId: identity.clientId,
     operation: { id: "Note.create", input: { value: "requested" }, idempotencyKey: "stable-key" },
+    dispatch: { tracked: true },
   };
   let deny = false, uncertain = false, pinFails = false;
   let wrongTenant = false, wrongClient = false, now = 1000;
@@ -20,6 +21,11 @@ function fixture(mode: "none" | "keyed" | "natural" = "keyed") {
   const broker = createDurableWorkerBroker({
     identities: [identity], apiUrl: "http://127.0.0.1:3121", tokenUrl: "http://127.0.0.1:8181/token",
     now: () => now, resolveWork: async () => work,
+    markDispatch: async (claim, state) => {
+      if (!work) throw new Error("Claim lost");
+      if (state === "started" && work.dispatch?.attempt === claim.attempt) throw new Error("Dispatch already acquired");
+      work = { ...work, dispatch: { tracked: true, ...(state === "started" ? { attempt: claim.attempt } : {}) } };
+    },
     pinOperationContract: async (_reference, contractFingerprint) => {
       pinCalls += 1;
       if (pinFails) throw new Error("private persistence detail");
@@ -199,11 +205,24 @@ test("invalid authored keys are refused before dispatch rather than retried as t
 
 test("a reclaimed write without a persisted contract never infers safety from the current catalog", async () => {
   const f = fixture("keyed");
+  const { dispatch, ...untracked } = f.work();
+  f.setWork(untracked);
   await expect(f.broker.authorize({ ...reference, attempt: 2 })).rejects.toMatchObject({
     code: "OPERATION_OUTCOME_UNKNOWN",
     retryable: false,
   });
   expect(f.pinCalls()).toBe(0);
+});
+
+test("persisted dispatch blocks a second broker and concurrent same-claim executions", async () => {
+  const f = fixture("none");
+  const [first, second] = await Promise.all([f.broker.authorize(reference), f.broker.authorize(reference)]);
+  const results = await Promise.all([f.broker.execute(first), f.broker.execute(second)]);
+  expect(results.filter(result => "data" in result)).toHaveLength(1);
+  expect(f.calls.filter(call => call.url.endsWith("/execute"))).toHaveLength(1);
+  const restarted = fixture("none");
+  restarted.setWork(f.work());
+  await expect(restarted.broker.authorize(reference)).rejects.toHaveProperty("code", "OPERATION_OUTCOME_UNKNOWN");
 });
 
 test("same-intent contract drift is refused before dispatch and across broker restarts", async () => {

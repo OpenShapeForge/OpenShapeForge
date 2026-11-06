@@ -8,6 +8,7 @@ import { getGeneratedEntity } from "../operations/entity/queries.js";
 import { entityOperationContract, entityOperationRef, executeEntityOperation } from "../operations/entity/runtime.js";
 import { valuesSchemaOf } from "../operations/entity/input-validation.js";
 import { serializeEntityRow } from "../operations/entity/serialize-result.js";
+import { actingRelationId } from "../db/acting-relation.js";
 import { mintConfiguration } from "./configuration-handoff.js";
 import { handoffModelValues } from "./configuration-submission.js";
 
@@ -52,7 +53,11 @@ export async function startConfigurationForSession(
   if (!source || !row || !Array.isArray(row[secure.definitionsField])) throw new HttpError(404, "NOT_FOUND", "The secure field definitions are unavailable.");
   const elicit = { ...secure, sourceTable: source.name };
   const minted = await mintConfiguration({
-    db, session, tenantId: session.tenantId, userId: session.userId, relationId: session.relationId ?? null,
+    // A verified browser session carries its link as the resolved `relation`;
+    // only a replay carries a bare `relationId`. Ask the canonical helper, as
+    // the MCP dispatch path does, so the owner written here is the value the
+    // owner-axis row policies compare against.
+    db, session, tenantId: session.tenantId, userId: session.userId, relationId: actingRelationId(session),
     table: table.name, elicit,
     modelValues: handoffModelValues({ required: [], accepted: Object.keys(valuesSchemaOf(operation)?.properties ?? {}), elicit, modelValues: body.values, sourceRow: row }),
     definitions: row[secure.definitionsField] as Record<string, unknown>[],

@@ -33,19 +33,23 @@ describe("state", () => {
     expect(secret.length).toBeGreaterThanOrEqual(43);
   });
 
-  // Only the secret half is hashed. Knowing which tenant a flow belonged to
-  // must not let anyone recompute the stored hash.
-  it("hashes only the secret half", () => {
-    const { state, secretHash } = buildState(TENANT, USER);
-    const secret = state.split(".")[2]!;
+  // Both routing identities are bound to the unguessable secret.
+  it("hashes the complete state", () => {
+    const { state, stateHash } = buildState(TENANT, USER);
     const expected = createHash("sha256")
-      .update(secret)
+      .update(state)
       .digest("base64")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
       .replace(/=+$/, "");
-    expect(secretHash).toBe(expected);
-    expect(parseState(state)?.secretHash).toBe(secretHash);
+    expect(stateHash).toBe(expected);
+    expect(parseState(state)?.stateHash).toBe(stateHash);
+  });
+
+  it("changing either routing identity invalidates the stored hash", () => {
+    const { state, stateHash } = buildState(TENANT, USER);
+    expect(parseState(state.replace(USER, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))?.stateHash).not.toBe(stateHash);
+    expect(parseState(state.replace(TENANT, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))?.stateHash).not.toBe(stateHash);
   });
 
   // A tenant id that is not a UUID would reach a ::uuid cast and error, and an
@@ -63,9 +67,9 @@ describe("state", () => {
   });
 
   it("does not accept a state whose secret was altered", () => {
-    const { state, secretHash } = buildState(TENANT, USER);
+    const { state, stateHash } = buildState(TENANT, USER);
     const tampered = `${state.slice(0, -1)}${state.endsWith("A") ? "B" : "A"}`;
-    expect(parseState(tampered)?.secretHash).not.toBe(secretHash);
+    expect(parseState(tampered)?.stateHash).not.toBe(stateHash);
   });
 });
 

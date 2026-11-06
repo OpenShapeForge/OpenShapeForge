@@ -58,27 +58,28 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * which is a far worse trade than two ids in a URL that already round-trips
  * through the provider.
  *
- * Neither id authorizes anything. Forge them and the hash simply will not match
- * any row that tenant can see.
+ * The hash binds both routing ids and the random secret. A changed tenant or
+ * actor cannot claim the stored state. The callback uses the stored actor.
  */
 export function buildState(
   tenantId: string,
   userId: string,
-): { state: string; secretHash: string } {
+): { state: string; stateHash: string } {
   const secret = base64url(randomBytes(32));
-  return { state: `${tenantId}.${userId}.${secret}`, secretHash: sha256(secret) };
+  const state = `${tenantId}.${userId}.${secret}`;
+  return { state, stateHash: sha256(state) };
 }
 
 export function parseState(
   state: string,
-): { tenantId: string; userId: string; secretHash: string } | undefined {
+): { tenantId: string; userId: string; stateHash: string } | undefined {
   const parts = state.split(".");
   if (parts.length !== 3) return undefined;
   const [tenantId, userId, secret] = parts as [string, string, string];
   // Ids that are not UUIDs never reach a query: the ::uuid cast would error, and
   // an error that depends on attacker input is a probe worth denying.
   if (!UUID.test(tenantId) || !UUID.test(userId) || secret === "") return undefined;
-  return { tenantId, userId, secretHash: sha256(secret) };
+  return { tenantId, userId, stateHash: sha256(state) };
 }
 
 /** PKCE S256: the verifier stays here, only its hash goes to the provider. */
@@ -123,7 +124,7 @@ export async function createAuthorizationState(input: {
     );
   }
   const now = input.now ?? Date.now();
-  const { state, secretHash } = buildState(tenantId, userId);
+  const { state, stateHash } = buildState(tenantId, userId);
   const pkce = buildPkce();
 
   await withDbSession(input.db, input.session, async (trx) => {
@@ -139,7 +140,7 @@ export async function createAuthorizationState(input: {
          code_verifier_ciphertext, code_verifier_key_id, code_verifier_algorithm,
          redirect_uri, created_by, expires_at)
       values (${id}::uuid, ${tenantId}::uuid, ${input.connectorSlug}, ${input.instanceKey},
-              ${secretHash}, ${encrypted.ciphertext}, ${encrypted.keyId},
+              ${stateHash}, ${encrypted.ciphertext}, ${encrypted.keyId},
               ${encrypted.algorithm}, ${input.redirectUri},
               ${input.session.userId ?? null}, ${new Date(now + AUTHORIZATION_STATE_TTL_MS)})
     `.execute(trx);
@@ -186,11 +187,12 @@ export async function consumeAuthorizationState(input: {
       code_verifier_key_id: string;
       code_verifier_algorithm: string;
       redirect_uri: string;
-      created_by: string | null;
+      created_by: string;
     }>`
       update platform.connector_oauth_states
          set consumed_at = now()
-       where state_hash = ${parsed.secretHash}
+       where state_hash = ${parsed.stateHash}
+         and created_by = ${parsed.userId}::uuid
          and consumed_at is null
          and expires_at > ${now}
       returning id, connector_slug, instance_key, code_verifier_ciphertext,
@@ -210,7 +212,7 @@ export async function consumeAuthorizationState(input: {
 
   return {
     tenantId: parsed.tenantId,
-    userId: parsed.userId,
+    userId: claimed.created_by,
     record: {
       id: claimed.id,
       connectorSlug: claimed.connector_slug,

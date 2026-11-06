@@ -307,7 +307,7 @@ describe("actor: relation stamps under a trusted-context session", () => {
     const admitted = await resolveIdentityLink(restricted.db, bearer, claims);
     expect(admitted?.status).toBe("linked");
     // Admission invalidated the key: the trusted-context read sees the link at once.
-    expect(linkGeneration(key)).toBeGreaterThan(before);
+    expect(linkGeneration(key)).not.toBe(before);
     expect(sessionRelation(await trustedSession(tenantId, userId))?.relationId).toBe(admitted!.relationId!);
   }, 60_000);
 

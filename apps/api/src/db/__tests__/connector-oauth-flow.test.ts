@@ -239,6 +239,22 @@ describe("the authorization state", () => {
     TEST_TIMEOUT,
   );
 
+  test("altering the actor cannot claim or consume another actor's state", async () => {
+    await withMigratedDb(async (db) => {
+      const tenantId = randomUUID(), userId = randomUUID();
+      const { state } = await createAuthorizationState({
+        db, session: { tenantId, userId, roles: [] }, keyring: KEYRING,
+        connectorSlug: CONTRACT.slug, instanceKey: "default", redirectUri: "https://app.example/callback",
+      });
+      const forged = state.replace(userId, randomUUID());
+      await expect(consumeAuthorizationState({ db, keyring: KEYRING, state: forged }))
+        .rejects.toThrow(/unknown, already used, or expired/);
+      const original = await consumeAuthorizationState({ db, keyring: KEYRING, state });
+      expect(original.userId).toBe(userId);
+      expect(original.record.createdBy).toBe(userId);
+    });
+  }, TEST_TIMEOUT);
+
   // The binding that makes the callback safe without a session of ours.
   test(
     "belonging to one tenant is invisible to another",

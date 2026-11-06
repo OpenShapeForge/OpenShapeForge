@@ -31,6 +31,7 @@ import {
   indexRows,
   isClassified,
   normalizedUnique,
+  numericValue,
   record,
   referenceIds,
   typedOperand,
@@ -39,6 +40,7 @@ import {
   type ExtensionFieldSet,
 } from "./model.js";
 import { formulaColumns } from "./formula-columns.js";
+import { lookupForeignKeys } from "./read-access.js";
 import { childEntityTable, evaluateFormulas, fieldValues, formulaGraph, type OwnedChildValues } from "./formulas.js";
 import { conditionValues, storedExtensionSource } from "./read.js";
 import { extensibleEntityOf, loadExtensionFields, loadExtensionFieldsFor, lockExtensionFields } from "./store.js";
@@ -165,7 +167,7 @@ function settleExtensionValues(
     const becameApplicable = operation === "create" || (was !== undefined && !evaluateCondition(field.appliesWhen, was));
     if (blank(after[field.fieldId]) && field.definition.defaultValue !== undefined &&
         (operation === "create" || (becameApplicable && !touched))) {
-      after[field.fieldId] = structuredClone(field.definition.defaultValue);
+      after[field.fieldId] = numericValue(field.definition, structuredClone(field.definition.defaultValue));
     }
     if (field.definition.required === true && (touched || becameApplicable) && blank(after[field.fieldId])) {
       violations.push({ field: `extensions.${field.key}`, code: "REQUIRED", message: `extensions.${field.key} is required.` });
@@ -241,12 +243,9 @@ export async function ownedChildValues(
  * worker holds column grants for exactly these (db/migrations/worker-role.ts).
  */
 export function formulaRowObject(table: GeneratedCrudTable, alias: string): RawBuilder<unknown> {
-  // The foreign keys of an extensible entity's single relations, which its
-  // lookups follow; a classified or field-policed one is no lookup's to follow.
-  const entry = table.subtype ? undefined : extensionRegistry.entity(table.source?.authoringEntityName ?? "");
-  const references = entry?.table === `${table.schema}.${table.table}`
-    ? entry.relations.filter((relation) => relation.kind === "belongsTo").map((relation) => relation.foreignKey)
-      .filter((name) => { const column = table.columns.find((candidate) => candidate.name === name); return !column?.classification && !column?.fieldPolicy; }) : [];
+  const entity = table.subtype ? undefined : table.source?.authoringEntityName;
+  const references = entity && extensionRegistry.entity(entity)?.table === `${table.schema}.${table.table}`
+    ? lookupForeignKeys(extensionRegistry, entity, table.columns) : [];
   const names = [...new Set(["id", "created_at", ...(table.columns.some((column) => column.name === EXTENSION_VALUES_COLUMN) ? [EXTENSION_VALUES_COLUMN] : []),
     ...formulaColumns(table).map((column) => column.name), ...references])].filter((name) => table.columns.some((column) => column.name === name));
   return sql`jsonb_build_object(${sql.join(names.map((name) => sql`${sql.lit(name)}::text, ${sql.id(alias, name)}`))})`;
@@ -299,6 +298,14 @@ export async function prepareExtensionWrite(
       for (const violation of result.error.violations ?? []) {
         const key = String(violation.field ?? "").split("/")[1] ?? "";
         violations.push({ field: `extensions.${key}`, code: violation.code, message: `extensions.${key} is not a valid value.` });
+      }
+    } else {
+      // Valid numeric text is stored as the number it is; what a JSON number cannot hold is refused, never rounded.
+      for (const key of Object.keys(checked)) {
+        const field = set.byKey.get(key)!;
+        after[field.fieldId] = numericValue(field.definition, after[field.fieldId], () => {
+          violations.push({ field: `extensions.${key}`, code: "NOT_REPRESENTABLE", message: `extensions.${key} has more digits than a number holds.` });
+        });
       }
     }
   }

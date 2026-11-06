@@ -245,6 +245,23 @@ describe("Document commands", () => {
     expect(calls[4]!.input.expectedVersion).toBe("2026-09-13T10:00:04Z");
   });
 
+  test("rejects a missing collection version token as a handler contract violation", async () => {
+    const fixture = context({ results: [[{ documentId, documentVersionId }]] });
+    const variantId = "60000000-0000-4000-8000-000000000001";
+    const platform = fixture.operationContext.platform!;
+    const operation = (id: string, intent: string, data: string) => ({ id, entityName: id.split(".")[0], intent, effects: { data, external: "none" } });
+    (platform.operations as any).list = async () => [operation("Document.get", "get", "read"), operation("DocumentVariant.get", "get", "read"), operation("Document.insertVariant", "invoke", "write"), operation("DocumentVariant.insertBlock", "invoke", "write")];
+    (platform.operations as any).execute = async (_session: unknown, request: { operation: { id: string } }) => {
+      switch (request.operation.id) {
+        case "Document.get": return { data: { ...documentRow(), updatedAt: "2026-09-13T10:00:00Z" } };
+        case "Document.insertVariant": return { data: { childId: variantId } };
+        case "DocumentVariant.get": return { data: { id: variantId, updatedAt: "2026-09-13T10:00:00Z" } };
+        default: return { data: {} };
+      }
+    };
+    await failure(createDocument({ document, version, content: { variant: { channel: "document", locale: "nl" }, blocks: [{ definitionKey: "TextBlock", values: { markdown: "Hello" } }] } }, fixture.operationContext), "HANDLER_CONTRACT_VIOLATION");
+  });
+
   test("authorizes the parent Document before appending and returns the authored version head", async () => {
     const nextVersion = { ...version, versionLabel: "2", changeSummary: "Clarified" };
     const fixture = context({

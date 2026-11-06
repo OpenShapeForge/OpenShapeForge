@@ -350,10 +350,12 @@ export const createDocument: ModuleOperationHandler = async (input, context) => 
         const read = await platform.operations.execute(session, { operation: get, input: { id: variant.childId } });
         if ("error" in read) throw operationFailure(read.error);
         let token = (read.data as Record<string, unknown> | undefined)?.updatedAt;
+        if (typeof token !== "string") throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The content variant version token is unavailable.", retryable: false });
         for (const block of content.blocks as unknown[]) {
-          if (!block || typeof block !== "object" || Array.isArray(block) || typeof token !== "string") throw operationFailure({ code: "VALIDATION", message: "The content block or variant version is invalid.", retryable: false });
+          if (!block || typeof block !== "object" || Array.isArray(block)) throw operationFailure({ code: "VALIDATION", message: "The content block is invalid.", retryable: false });
           const inserted = await invoke("DocumentVariant.insertBlock", { id: variant.childId, expectedVersion: token, values: block });
           token = (inserted.parent as Record<string, unknown> | undefined)?.updatedAt;
+          if (typeof token !== "string") throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The content variant version token is unavailable.", retryable: false });
         }
       }
       return authoredRow(await readCanonicalDocument(platform, session, created.documentId), { id: created.documentId });

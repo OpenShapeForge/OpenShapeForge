@@ -16,11 +16,11 @@ Regenerate with `bun run notices`. 527 packages.
 | BSD-3-Clause | 16 |
 | BlueOak-1.0.0 | 6 |
 | MPL-2.0 | 4 |
-| LGPL-3.0-or-later | 2 |
 | 0BSD | 1 |
 | BSD-2-Clause | 1 |
 | CC-BY-4.0 | 1 |
 | EPL-2.0 | 1 |
+| LGPL-3.0-or-later | 1 |
 | Unlicense | 1 |
 
 ## Packages

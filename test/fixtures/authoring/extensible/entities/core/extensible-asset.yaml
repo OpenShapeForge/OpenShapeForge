@@ -10,6 +10,7 @@
 # `ExtensibleAssetSpec` is its owned single child (what a formula may read),
 # `ExtensibleAssetLocation` the reference target the tests point at,
 # `ExtensibleAssetPart` an owned collection a rollup may aggregate,
+# `ExtensibleAssetMember` one whose records lead to the value a rollup reads,
 # `ExtensibleAssetBooking` a collection another role reads (a rollup over it
 # is refused) and `ExtensibleAssetGroup` a second extensible entity, for
 # lookups and rollups across two entities. `syncFanOut` is small so a test

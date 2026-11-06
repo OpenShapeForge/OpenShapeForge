@@ -4,6 +4,10 @@
 
 ### Added
 
+- **`childRelations` on the extension registry.** The single relations of a
+  collection's child that is not extensible itself, by child entity, for
+  `rollup.of` to follow: `RuntimeExtensionRegistryManifest.childRelations` and
+  `RuntimeExtensionRegistry.childRelations(entity)`. Metadata only.
 - **`platform.egress.request`**, one finite HTTPS POST on the `egressGrant` of a
   resolved Connection, in the session that resolved it. The host enforces the
   Adapter's allow-list, public addresses and a bounded JSON or SSE body. It

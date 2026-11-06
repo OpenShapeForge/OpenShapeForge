@@ -255,17 +255,21 @@ one thing that gets somebody in without presenting a passkey.
 mode. There is deliberately no switch:
 
 - **`browserFlow: passkey-browser`** — cookie, then identity-provider
-  redirector, then a sub-flow of *username form → WebAuthn Passwordless*. The
-  stock `auth-username-password-form` execution does not appear anywhere in it,
-  so there is no password box to type into.
+  redirector, then a username form supporting passkey authentication. Without a
+  passkey verified in the current authentication session, the conditional
+  flow requires email verification. The stock `auth-username-password-form`
+  execution does not appear, so there is no password box to type into. The
+  isolated Keycloak journey also checks that an enrolled passkey alone does not
+  admit a user who submits an email and an incorrect code.
 - **`directGrantFlow: passkey-direct-grant-denied`** — a single
   `deny-access-authenticator`. `grant_type=password` is closed at the realm
   rather than left to depend on no user happening to still have a password
   credential. `client_credentials` is a different flow and is untouched, so
   service accounts and confidential clients keep working exactly as before.
 - **`webAuthnPolicyPasswordless*`** — resident key required, user verification
-  required, ES256/RS256, attestation `none`, a 120 s ceremony timeout, no
-  AAGUID allow-list, and authenticator attachment left *unspecified*.
+  required, passkeys enabled with mediation `none`, ES256/RS256, attestation
+  `none`, a 120 s ceremony timeout, no AAGUID allow-list, and authenticator
+  attachment left *unspecified*.
 - **required actions** — the complete registry, with
   `webauthn-register-passwordless` on as a **default action** and
   `UPDATE_PASSWORD`, `webauthn-register` (the second-factor variant),
@@ -316,8 +320,8 @@ laptop.
 
 ### A federated login is an alternative to a passkey, on purpose
 
-The passkey browser flow (`keycloak-passkey-browser-flow.ts`) asks for the
-e-mail address first, with Keycloak's own Organization identity-first step:
+The passkey browser flow (`keycloak-passkey-browser-flow.ts`) offers direct
+passkey sign-in and also supports identifying the person by e-mail:
 
 ```
 passkey-browser
@@ -326,16 +330,18 @@ passkey-browser
   passkey-browser-organization        ALTERNATIVE
     conditional-user-configured + organization     (identity-first, by domain)
   passkey-browser-forms               ALTERNATIVE
-    auth-username-form + webauthn-authenticator-passwordless
+    auth-username-form + conditional-credential + required email sign-in
 ```
+
+The generated profile was exercised on Keycloak 26.7.3 with a virtual
+resident passkey and a local mail sink: passkey sign-in, e-mail-link sign-in,
+and rejection of an incorrect e-mail code all completed as expected.
 
 An address on a domain of an Organization whose linked provider has
 `kc.org.broker.redirect.mode.email-matches` set is redirected to that provider;
-every other address goes on to the passkey prompt, and the username page is not
-asked twice. Keycloak makes one exception, measured on 26.5.3 and 26.7.3: a
-person who already holds a passkey is shown the passkey prompt instead of the
-redirect. On an Organization domain the provider is therefore the way in for
-everybody who has no passkey yet, and `kc_idp_hint` still reaches it for anyone.
+other addresses continue to e-mail sign-in. Keycloak's native passkey support
+offers a passwordless credential on the sign-in page; a verified passkey skips
+the e-mail challenge. `kc_idp_hint` also reaches a configured provider.
 In a realm with Organizations switched off the step is inert.
 
 Both routes to a provider sit at `ALTERNATIVE` next to the passkey sub-flow, so

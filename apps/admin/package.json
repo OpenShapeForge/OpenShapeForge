@@ -18,8 +18,8 @@
     "//deps": "@openshapeforge/auth resolves to dist/ under a bundler (see its package.json), so build it before Next reads it. Same as apps/web.",
     "deps": "bun run --cwd ../../packages/auth build",
     "dev": "bun run deps && next dev -p 3002",
-    "build": "bun run deps && next build",
-    "start": "bun ../../scripts/prepare-next-standalone.mjs && PORT=${PORT:-3002} node .next/standalone/apps/admin/server.js",
+    "build": "bun run deps && next build && bun ../../scripts/prepare-next-standalone.mjs",
+    "start": "PORT=${PORT:-3002} node .next/standalone/apps/admin/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "//dependencies": [

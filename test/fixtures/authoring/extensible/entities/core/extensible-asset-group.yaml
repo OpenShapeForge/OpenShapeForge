@@ -38,6 +38,14 @@ fields:
     relationship:
       ownership: reference
       inverse: false
+  # An owned child as the target of an authored relation: a lookup through it,
+  # and what the collection's remove then owes that lookup.
+  - key: part
+    osfType: ExtensibleAssetPart
+    label: { en: Part, nl: Onderdeel }
+    relationship:
+      ownership: reference
+      inverse: false
   # A lookup through this one would show what it points at to a reader who may
   # not see the relation itself, so it is refused.
   - key: confidentialLocation

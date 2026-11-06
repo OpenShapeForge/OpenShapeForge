@@ -2,6 +2,12 @@
 import { expect, test } from "bun:test";
 import { operationForm } from "./operation-form-presentation.js";
 
+test("form defaults reject values that cannot be represented as JSON", () => {
+  const schema = { type: "object", properties: { value: {} } };
+  const form = { showOnlyGroupedFields: true, groups: [], defaults: { value: undefined } };
+  expect(() => operationForm(form, schema, "Thing.create")).toThrow("invalid form defaults");
+});
+
 const title = { en: "Main", nl: "Hoofdzaak" };
 const schema = { type: "object", required: ["record"], properties: {
   record: { type: "object", required: ["title"], properties: { title: { type: "string" }, note: { type: "string" } } },

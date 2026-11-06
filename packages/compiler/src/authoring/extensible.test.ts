@@ -5,7 +5,7 @@
  * __fixtures__/rowaccess/entities/extensible-part*.yaml (module `parts`).
  */
 import { afterAll, describe, expect, it } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import YAML from "yaml";
@@ -18,6 +18,7 @@ import {
   assertIndexProjection,
   isExtensionTargetCandidate,
 } from "./extensible.js";
+import { resolveAuthoringLayers } from "./layers.js";
 import { loadOsfTypes } from "./loader.js";
 import { generateArtifacts } from "../generate.js";
 import { collectPluginMigrationRegistry } from "../generate-plugin-migrations.js";
@@ -54,6 +55,20 @@ function withDocument(slug: string, transform: (document: Record<string, any>) =
   writeFileSync(path, YAML.stringify(document));
   return dir;
 }
+
+/** The fixture layer under a host layer that patches the interfaces of these entities, as `interfaces: null` hides one. */
+function withInterfacePatch(slugs: Record<string, Record<string, unknown>>, base = fixtureDir): string {
+  const host = mkdtempSync(join(tmpdir(), "osf-extensible-host-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "osf-extensible-repo-"));
+  temporary.push(host, repoRoot);
+  mkdirSync(join(host, "entities"));
+  for (const [slug, interfaces] of Object.entries(slugs)) {
+    writeFileSync(join(host, "entities", `${slug}.yaml`), YAML.stringify({ kind: "entityPatch", interfaces }));
+  }
+  return resolveAuthoringLayers(repoRoot, { layers: [base, host] });
+}
+
+const HIDDEN = { rest: null, graphql: null, mcp: null, web: null };
 
 const refuse = (transform: (document: Record<string, any>) => void, message: string | RegExp) =>
   expect(() => compile(() => {}, { dir: withDocument("extensible-part", transform) })).toThrow(message);
@@ -311,6 +326,19 @@ describe("extensible: the manifest registry", () => {
     });
   });
 
+  it("publishes the single relations of a collection's child, and what they reach counts as reach", () => {
+    const registry = compile(() => {}, { dir: withDocument("extensible-part-spec", (document) => {
+      document.fields.push({ key: "custom", osfType: "RestCustom", label: { en: "Custom" }, relationship: { ownership: "reference", inverse: false } });
+    }) }).extensionRegistry!;
+    expect(registry.childRelations.ExtensiblePartSpec!.map((relation) => relation.key)).toEqual(["custom", "part"]);
+    expect(registry.childRelations.ExtensiblePartSpec![0]).toEqual({ key: "custom", kind: "belongsTo", entity: "RestCustom", table: "erp.rest_customs", foreignKey: "custom_id", ownership: "reference" });
+    // Excluded as a tenant reference target, and reachable by this step all the same: the proof decides.
+    expect(registry.entities.ExtensiblePart!.targets.map((target) => target.entity)).not.toContain("RestCustom");
+    expect(Object.keys(registry.readAccess)).toContain("RestCustom");
+    // No extensible entity's collection, no entry: nothing an extensible child would duplicate.
+    expect(Object.keys(registry.childRelations)).toEqual(["ExtensiblePartSpec"]);
+  });
+
   it("lists an owned child only when it is authorized through its owner", () => {
     const children = (transform: (document: Record<string, any>) => void) =>
       compile(() => {}, { dir: withDocument("extensible-part-spec", transform) }).extensionRegistry!.entities.ExtensiblePart!.ownedSingleChildren;
@@ -337,6 +365,16 @@ describe("extensible: the manifest registry", () => {
     expect(access((document) => { document.authorization.roles.read = ["Spec.Reader"]; }).roles).toEqual(["Spec.Reader"]);
   });
 
+  it("names the fields authored internal: no column carries that, and what a computed field reads decides its floor", () => {
+    const access = (transform: (document: Record<string, any>) => void) =>
+      compile(() => {}, { dir: withDocument("extensible-part-spec", transform) }).extensionRegistry!.readAccess.ExtensiblePartSpec!;
+    expect(access(() => {}).internalFields).toBeUndefined();
+    expect(access((document) => {
+      document.fields.push({ key: "cost", osfType: "number", label: { en: "Cost" }, classification: { sensitivity: "internal" }, persisted: { column: "cost", storageClass: "core" } });
+      document.fields.push({ key: "open", osfType: "number", label: { en: "Open" }, classification: { sensitivity: "public" }, persisted: { column: "open", storageClass: "core" } });
+    }).internalFields).toEqual(["cost"]);
+  });
+
   it("does not list an owned child without a one-per-parent key", () => {
     const dir = withDocument("extensible-part-spec", (document) => { delete document.indexes; });
     expect(compile(() => {}, { dir }).extensionRegistry!.entities.ExtensiblePart!.ownedSingleChildren).toEqual([]);
@@ -346,6 +384,74 @@ describe("extensible: the manifest registry", () => {
     const manifest = compile((contract) => { if (contract.entity.name === "RestEnabled") delete contract.entityOperations.get; });
     expect(manifest.extensionRegistry!.entities.ExtensiblePart!.targets.map((target) => target.entity)).toEqual(["ExtensiblePart", "ExtensiblePartSpec"]);
     expect(manifest.extensionRegistry!.referencedBy.RestEnabled).toBeUndefined();
+  });
+
+  describe("an entity no interface can read", () => {
+    const targetsOf = (registry: NonNullable<PlatformSchemaManifest["extensionRegistry"]>) =>
+      registry.entities.ExtensiblePart!.targets.map((target) => target.entity);
+    const relationsOf = (registry: NonNullable<PlatformSchemaManifest["extensionRegistry"]>) =>
+      registry.entities.ExtensiblePart!.relations.map((relation) => relation.key);
+
+    it("is no target when a host patches its interfaces away", () => {
+      const registry = compile(() => {}, { dir: withInterfacePatch({ "rest-enabled": HIDDEN }) }).extensionRegistry!;
+      expect(targetsOf(registry)).toEqual(["ExtensiblePart", "ExtensiblePartSpec"]);
+      expect(registry.referencedBy.RestEnabled).toBeUndefined();
+      expect(registry.readAccess.RestEnabled).toBeUndefined();
+    });
+
+    it("is no target when its get is disabled on each interface that remains", () => {
+      const registry = compile(() => {}, { dir: withInterfacePatch({
+        "rest-enabled": { rest: { operations: { get: false } }, graphql: { operations: { get: false } } },
+      }) }).extensionRegistry!;
+      expect(targetsOf(registry)).toEqual(["ExtensiblePart", "ExtensiblePartSpec"]);
+      expect(registry.referencedBy.RestEnabled).toBeUndefined();
+    });
+
+    it("stays a target while one interface still projects its get", () => {
+      for (const interfaces of [{ rest: null }, { graphql: null }]) {
+        const registry = compile(() => {}, { dir: withInterfacePatch({ "rest-enabled": interfaces }) }).extensionRegistry!;
+        expect(targetsOf(registry)).toEqual(["ExtensiblePart", "ExtensiblePartSpec", "RestEnabled"]);
+        expect(registry.referencedBy.RestEnabled).toHaveLength(1);
+      }
+    });
+
+    it("may stay in excludedTargets without a build error", () => {
+      let resolved: CompiledEntityContract["extensible"];
+      const manifest = compile((contract) => { if (contract.entity.name === "ExtensiblePart") resolved = contract.extensible; },
+        { dir: withInterfacePatch({ "rest-custom": HIDDEN }) });
+      expect(resolved!.excludedTargets).toEqual(["RestCustom"]);
+      expect(manifest.extensionRegistry!.referencedBy.RestCustom).toBeUndefined();
+    });
+
+    it("is out of reach of a lookup: no single relation leads to it", () => {
+      const base = withDocument("extensible-part", (document) => {
+        document.fields.push({ key: "supplier", osfType: "RestEnabled", label: { en: "Supplier" }, relationship: { ownership: "reference", inverse: false } });
+      });
+      expect(relationsOf(compile(() => {}, { dir: base }).extensionRegistry!)).toEqual(["spec", "supplier"]);
+      const registry = compile(() => {}, { dir: withInterfacePatch({ "rest-enabled": HIDDEN }, base) }).extensionRegistry!;
+      expect(relationsOf(registry)).toEqual(["spec"]);
+      expect(registry.readAccess.RestEnabled).toBeUndefined();
+    });
+
+    it("is out of reach of a rollup: no collection is it, and no step of a child leads to it", () => {
+      const base = withDocument("extensible-part-spec", (document) => {
+        document.fields.push({ key: "custom", osfType: "RestCustom", label: { en: "Custom" }, relationship: { ownership: "reference", inverse: false } });
+      });
+      const step = compile(() => {}, { dir: withInterfacePatch({ "rest-custom": HIDDEN }, base) }).extensionRegistry!;
+      expect(step.childRelations.ExtensiblePartSpec!.map((relation) => relation.key)).toEqual(["part"]);
+      expect(step.readAccess.RestCustom).toBeUndefined();
+
+      const collection = compile(() => {}, { dir: withInterfacePatch({ "extensible-part-spec": HIDDEN }, base) }).extensionRegistry!;
+      expect(relationsOf(collection)).toEqual([]);
+      expect(collection.childRelations).toEqual({});
+      expect(collection.readAccess.ExtensiblePartSpec).toBeUndefined();
+    });
+
+    it("is out of reach of a formula: an owned single child stops being listed", () => {
+      const registry = compile(() => {}, { dir: withInterfacePatch({ "extensible-part-spec": HIDDEN }) }).extensionRegistry!;
+      expect(registry.entities.ExtensiblePart!.ownedSingleChildren).toEqual([]);
+      expect(targetsOf(registry)).toEqual(["ExtensiblePart", "RestEnabled"]);
+    });
   });
 
   it("never lists a tenant registry, an entity without writes of its own or the access-control model as a target", () => {

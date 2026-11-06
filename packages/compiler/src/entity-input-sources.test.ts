@@ -97,14 +97,17 @@ test("version-sourced fields resolve only a stored field-definition collection o
     { key: "version", cardinality: "single", relationship: { target: "HeadVersion" } },
     { key: "values", baseType: "object", cardinality: "single", valueFieldsFrom: { reference: "version", field: "schema" } },
   ] } } as unknown as CompiledEntityContract;
-  materializeEntityInputSources([head, value], {});
+  const version = { ...contract, entity: { ...contract.entity, name: "HeadVersion" }, storage: { columns: [{ field: "snapshot", column: "snapshot", type: "jsonb" }] }, entityOperations: {} } as unknown as CompiledEntityContract;
+  materializeEntityInputSources([head, version, value], {});
   expect(value.model.fields[1]!.valueFieldsFrom).toEqual({ reference: "version", field: "schema", snapshotColumn: "schema_definitions", headEntity: "Head" });
   const bad = structuredClone(value);
   bad.model.fields[1]!.valueFieldsFrom!.field = "missing";
-  expect(() => materializeEntityInputSources([head, bad], {})).toThrow("stored FieldDefinition collection");
+  expect(() => materializeEntityInputSources([head, version, bad], {})).toThrow("stored FieldDefinition collection");
   const ordinary = structuredClone(value);
   ordinary.entity.valueDefinition = false;
-  expect(() => materializeEntityInputSources([head, ordinary], {})).toThrow("only on entity-value definitions");
+  expect(() => materializeEntityInputSources([head, version, ordinary], {})).toThrow("only on entity-value definitions");
+  const invalidVersion = { ...version, storage: { ...version.storage, columns: [] } };
+  expect(() => materializeEntityInputSources([head, invalidVersion, value], {})).toThrow("stored FieldDefinition collection");
 });
 
 test("entity CRUD uses record view groups instead of silently ignoring an operation form", () => {

@@ -4,6 +4,7 @@ import type { CompiledEntityInfo } from "../plugins.js";
 import type { CompiledEntityContract, CompiledField, CompiledViewContext, OperationCatalogDefinition } from "./types.js";
 import { collectAuthoredModulePluginOperations } from "../generate-operations.js";
 import { corpusWebOperations } from "./corpus-web.fixtures.js";
+import { loadActivePlatformCompile } from "../active-manifest.js";
 import { buildWebManifest, renderWebManifest } from "./web-manifest.js";
 import { buildEntityOperations } from "./compiler/entity-operations.js";
 import { compile } from "./compiler/index.js";
@@ -653,10 +654,9 @@ describe("web manifest projection", () => {
     });
   });
 
-  test("flat named views from the merged document chain compile through the shared pipeline", () => {
-    const entries = ["quote", "document", "document-variant", "block", "text-block", "youtube-embed", "template-block"]
-      .map(slug => ({ slug, contract: compile(loadEntity(authoringDir, slug)) }));
-    const result = buildWebManifest(entries);
+  test("flat named views from the merged document chain compile through the shared pipeline", async () => {
+    const active = await loadActivePlatformCompile(join(import.meta.dir, "../../../.."));
+    const result = buildWebManifest(active.entities, {}, corpusWebOperations(authoringDir));
     expect(result.entities.Quote!.views.record!.layout.tabs.some(tab => tab.targetView === "quotePreview")).toBe(true);
     expect(result.entities.Document!.views.named!.quotePreview).toMatchObject({ kind: "record", layout: {
       tabs: [{ id: "content", relationshipId: "variants", targetView: "tabbed" }],
@@ -665,7 +665,7 @@ describe("web manifest projection", () => {
     expect(result.entities.Block!.views.named!.preview).toMatchObject({ kind: "record", layout: {
       tabs: [{ groups: [{ fields: ["values"] }] }],
     } });
-  });
+  }, 30_000);
 
   test("a system-written reference key from the corpus is never create-writable and its collection offers no create", () => {
     // Comment.authorId is authored readOnly (attribution, not an input); the
@@ -2279,6 +2279,7 @@ test("an extensible entity offers its tenant-field routes, and a target its refe
       Product: [{ sourceEntity: "Product", valuesTable: "erp.products_field_values" }],
       Supplier: [{ sourceEntity: "Product", valuesTable: "erp.products_field_values" }],
     },
+    childRelations: {},
     readAccess: {
       Product: { table: "erp.products", roles: ["Catalogue.Read"] },
       Supplier: { table: "erp.suppliers", roles: ["Catalogue.Read"] },

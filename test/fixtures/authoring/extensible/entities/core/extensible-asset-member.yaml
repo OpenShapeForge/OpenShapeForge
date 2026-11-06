@@ -1,0 +1,99 @@
+# Test fixture — membership as a record of its own: an owned collection of
+# extensible-asset.yaml, authorized through its owner, whose records point at
+# what the asset consists of. The number that counts is on that record, not on
+# the membership, so a tenant rollup over `members` follows one relation of the
+# member (`location.capacity`, `group.extensions.<key>`). `item` leads back to
+# the owner's own entity, `booking` to an entity another role reads (refused,
+# naming the role); the last two relations are out of a reader's reach. Only in
+# the test composition. Read-only as an entity: the engine refuses a generic
+# write of an owned child, so the generic CRUD sweeps must not see one offered.
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ExtensibleAssetMember
+title: Extensible asset member
+description: One member of an extensible test asset.
+language: en
+displayTemplate: "{{quantity}}"
+labels: { en: Extensible asset member, nl: Lid van uitbreidbaar object }
+pluralLabels: { en: Extensible asset members, nl: Leden van uitbreidbare objecten }
+domains: [relations]
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite]
+    create: [General.All.ReadWrite]
+    update: [General.All.ReadWrite]
+    delete: [General.All.ReadWrite]
+fields:
+  - key: asset
+    osfType: ExtensibleAsset
+    required: true
+    relationship:
+      inverse:
+        key: members
+        label: { en: Members, nl: Leden }
+        ownership: owned
+        childAuthorization: owner
+  - key: item
+    osfType: ExtensibleAsset
+    label: { en: Item, nl: Onderdeel }
+    relationship:
+      ownership: reference
+      inverse: false
+  - key: group
+    osfType: ExtensibleAssetGroup
+    label: { en: Group, nl: Groep }
+    relationship:
+      ownership: reference
+      inverse: false
+  - key: location
+    osfType: ExtensibleAssetLocation
+    label: { en: Location, nl: Locatie }
+    relationship:
+      ownership: reference
+      inverse: false
+  - key: booking
+    osfType: ExtensibleAssetBooking
+    label: { en: Booking, nl: Boeking }
+    relationship:
+      ownership: reference
+      inverse: false
+  - key: confidentialLocation
+    osfType: ExtensibleAssetLocation
+    label: { en: Confidential location, nl: Vertrouwelijke locatie }
+    classification: { sensitivity: confidential, category: operational }
+    relationship:
+      ownership: reference
+      inverse: false
+  - key: restrictedLocation
+    osfType: ExtensibleAssetLocation
+    label: { en: Restricted location, nl: Afgeschermde locatie }
+    authorization:
+      roles:
+        read: [Test.Fields.Manage]
+        write: [General.All.ReadWrite]
+    relationship:
+      ownership: reference
+      inverse: false
+  - key: quantity
+    osfType: number
+    label: { en: Quantity, nl: Aantal }
+    persisted: { column: quantity, storageClass: core }
+operations:
+  list:
+    name: List extensible asset members
+    description: Read accessible extensible asset members.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read extensible asset member
+    description: Read one accessible extensible asset member.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}

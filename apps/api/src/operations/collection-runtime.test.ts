@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import { nativeCollectionBinding, nativeCollectionHandler } from "./collection-runtime.js";
-import { bindOperationHandlers, operationModulesConfigured, runtimeStaticOperationRegistrations, type OperationContract } from "./runtime.js";
+import { bindOperationHandlers, invokeOperation, operationModulesConfigured, runtimeStaticOperationRegistrations, type OperationContract } from "./runtime.js";
 import { operationContractFingerprint } from "./contract-fingerprint.js";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 
@@ -57,6 +57,43 @@ describe("native canonical collection Operations", () => {
     for (const change of changes) {
       const op = fixture(); change(op);
       expect(() => bindOperationHandlers([], [op])).toThrow("unsupported or incomplete");
+    }
+  });
+
+  const removal = (confirmation: OperationContract["confirmation"] = { mode: "acknowledgement" }): CollectionOperationContract => {
+    const op = fixture();
+    op.key = "Page.removeSection"; op.implementation.action = "remove"; op.confirmation = confirmation;
+    op.inputSchema = { type: "object", additionalProperties: false, required: ["id", "expectedVersion", "childId"], properties: {
+      id: { type: "string" }, expectedVersion: { type: "string" }, childId: { type: "string" }, confirmed: { type: "boolean" },
+    } };
+    return op;
+  };
+
+  test("only a remove may ask an acknowledgement, and never a challenge", () => {
+    expect(nativeCollectionBinding(removal()).action).toBe("remove");
+    expect(() => nativeCollectionBinding(removal({ mode: "challenge", challenge: {
+      kind: "type-current-field", field: "title", issuedBy: "server",
+      bindTo: ["subject", "tenant", "operation", "target.id", "target.version"],
+      expiresAfter: "PT5M", singleUse: true,
+    } }))).toThrow("unsupported or incomplete");
+    for (const action of ["insert", "move", "update"] as const) {
+      const op = removal(); op.implementation.action = action;
+      expect(() => nativeCollectionBinding(op)).toThrow("unsupported or incomplete");
+    }
+  });
+
+  test("an unacknowledged remove is refused before any lease or row is touched", async () => {
+    const op = removal();
+    op.concurrency = { version: { mode: "required", field: "updatedAt" }, editLease: { mode: "required", expiresAfterInactivity: "PT15M" } };
+    (op.inputSchema as { properties: Record<string, unknown> }).properties.leaseToken = { type: "string" };
+    const bound = bindOperationHandlers([], [op]).get(op.key)!;
+    const session = { tenantId: "tenant", userId: "user", roles: ["Example.Write"], groups: [], scope: "tenant" };
+    // A token nobody issued: a lease check would answer first and differently.
+    const input = { id: "page", expectedVersion: "2026-01-01T00:00:00.000Z", childId: "section", leaseToken: "unissued" };
+    for (const denied of [input, { ...input, confirmed: false }]) {
+      await expect(invokeOperation(bound, denied, { transport: "operation", session } as never)).rejects.toMatchObject({
+        operationError: { code: "CONFIRMATION_REQUIRED", data: { confirmation: { kind: "acknowledgement", requiredValue: true } } },
+      });
     }
   });
 

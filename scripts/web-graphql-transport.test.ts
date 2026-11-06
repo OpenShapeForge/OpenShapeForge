@@ -72,12 +72,12 @@ describe("web GraphQL persisted transport", () => {
 
   test("retries a generated mutation only after its hash-only miss", async () => {
     const bodies: Record<string, unknown>[] = [];
-    const query = generatedOperation("mutation PersistTaskOutput");
+    const query = generatedOperation("mutation DeleteTask");
     const fetcher = async (_url: string | URL | Request, init?: RequestInit) => {
       bodies.push(JSON.parse(String(init?.body)));
       return bodies.length === 1
         ? jsonResponse(missPayload)
-        : jsonResponse({ data: { updateTask: { data: { id: "task" }, error: null } } });
+        : jsonResponse({ data: { deleteTask: { data: { deleted: true }, error: null } } });
     };
     await executeGraphqlTransport(transportInput(query, fetcher));
     expect(bodies).toHaveLength(2);
@@ -98,10 +98,10 @@ describe("web GraphQL persisted transport", () => {
   });
 
   test("does not retry a mutation after data or another error is present", async () => {
-    const query = generatedOperation("mutation PersistTaskOutput");
+    const query = generatedOperation("mutation DeleteTask");
     for (const payload of [
       {
-        data: { updateTask: { data: { id: "already-applied" }, error: null } },
+        data: { deleteTask: { data: { deleted: true }, error: null } },
         ...missPayload,
       },
       { errors: [

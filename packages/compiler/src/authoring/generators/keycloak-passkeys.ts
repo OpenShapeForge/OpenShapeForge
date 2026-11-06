@@ -69,9 +69,8 @@
  *
  * ── Google Workspace, and any other Organization-linked provider ──────────
  * Federation IS an accepted alternative to presenting a passkey, and an
- * address on an Organization domain is routed to that Organization's provider
- * before the passkey prompt. Both decisions, and what they cost, are argued in
- * keycloak-passkey-browser-flow.ts, which holds the browser flow.
+ * an address on an Organization domain can route to its provider; the login
+ * screen also offers a passkey directly. See keycloak-passkey-browser-flow.ts.
  */
 
 import { PASSKEY_REQUIRED_ACTIONS } from "./keycloak-passkey-required-actions.js";

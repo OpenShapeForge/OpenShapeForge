@@ -19,6 +19,7 @@ import type { DerivedToolsCatalogEntry } from "../../mcp/derived-tools.js";
 import { toHttpError } from "../../rest/http-error.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { EXTENSION_GRAPH_TABLES } from "./extensions/__tests__/graph-tables.js";
+import { __setExtensionRegistryForTests } from "./extensions/registry.js";
 import { createCollectionMutationExecutor, type CollectionMutationBinding } from "./collection-mutations.js";
 import { assertPublishableRelatedMutationInTransaction } from "./derived-execution-guards.js";
 import { mergeGeneratedEntityObjectForTable, updateGeneratedEntityForTable } from "./mutations.js";
@@ -29,6 +30,7 @@ const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ??
 const scratchName = `exec_bind_guard_${randomUUID().replaceAll("-", "")}`;
 let admin: SQL | undefined, privileged: DatabaseRuntime | undefined, restricted: DatabaseRuntime | undefined;
 let created = false;
+let restoreRegistry: (() => void) | undefined;
 const tenant = randomUUID(), actor = randomUUID();
 const session = {
   tenantId: tenant,
@@ -252,6 +254,8 @@ const fails = (promise: Promise<unknown>, code: string) =>
 
 (adminUrl ? describe : describe.skip)("published owner revalidation on the write engine", () => {
   beforeAll(async () => {
+    // A hand-mirrored schema has no side tables, and a remove asks them what refers to its child.
+    restoreRegistry = __setExtensionRegistryForTests({ entities: {}, indexProjections: {}, referencedBy: {}, childRelations: {}, readAccess: {} });
     admin = new SQL(adminUrl, { max: 1 });
     const roles = await admin`select rolsuper, rolbypassrls from pg_roles where rolname = 'openshapeforge_app'`;
     if (roles.length !== 1 || roles[0].rolsuper || roles[0].rolbypassrls) {
@@ -313,6 +317,7 @@ const fails = (promise: Promise<unknown>, code: string) =>
   });
 
   afterAll(async () => {
+    restoreRegistry?.();
     await restricted?.close();
     await privileged?.close();
     if (created) await admin?.unsafe(`drop database "${scratchName}" with (force)`);

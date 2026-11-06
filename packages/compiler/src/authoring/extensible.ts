@@ -277,9 +277,22 @@ export const EXTENSION_TARGET_DENYLIST: readonly string[] = [
 ];
 
 /**
+ * Whether some interface projects the entity's own `get`. An entity without
+ * one is hidden from every reader, as a host does with `interfaces: { rest:
+ * null, graphql: null, mcp: null, web: null }`, so tenant fields stay away from
+ * it: a reference, lookup or rollup would show what the host took off every
+ * surface, and `referencedBy` would put it back on REST and GraphQL.
+ */
+export function hasReadableGet(contract: CompiledEntityContract): boolean {
+  if (!contract.entityOperations.get) return false;
+  return Boolean(contract.rest?.operations.get || contract.mcp?.operations.get ||
+    contract.graphql.operations?.get || contract.interfaces?.web?.operations.get);
+}
+
+/**
  * Whether a tenant reference field may point at this entity at all, and so
  * whether it carries `referencedBy`: a stored, tenant-scoped record a reader
- * can resolve through its own `get`. Never, by rule:
+ * can resolve through its own `get` (hasReadableGet). Never, by rule:
  *
  *   - a table in the `platform` schema;
  *   - a tenant registry, whose row IS its tenant (`CHECK (id = tenant_id)`,
@@ -300,7 +313,7 @@ export function isExtensionTargetCandidate(
   table?: Pick<TableDefinition, "schema" | "tenantScoped" | "domainInternal" | "generatedCrudEligible" | "constraints" | "tenantIdentityColumn">,
 ): boolean {
   if (!contract.authorization || contract.source || contract.subtype || contract.entity.valueDefinition) return false;
-  if (!contract.entityOperations.get) return false;
+  if (!hasReadableGet(contract)) return false;
   if (EXTENSION_TARGET_DENYLIST.includes(contract.entity.name)) return false;
   const operations = contract.entityOperations;
   if (!operations.create && !operations.update && !operations.delete) return false;
@@ -413,9 +426,9 @@ function uniqueValuesTable(entity: string, table: TableDefinition): TableDefinit
  *
  * This list is what a tenant formula may read beside its own record, and a
  * formula's result is read with the owner's rights. So a child is listed only
- * when it is provably authorized through its owner (childAuthorizedByOwner);
- * any other child stays out, and a formula naming it is refused as out of
- * scope.
+ * when some interface reads it (hasReadableGet) and it is provably authorized
+ * through its owner (childAuthorizedByOwner); any other child stays out, and a
+ * formula naming it is refused as out of scope.
  */
 function ownedSingleChildren(
   owner: { contract: CompiledEntityContract; table: TableDefinition },
@@ -432,6 +445,7 @@ function ownedSingleChildren(
       [`tenant_id,${foreignKey}`, foreignKey].includes(index.columns.join(",")));
     const bounded = typeof relationship.cardinality === "object" && relationship.cardinality.max === 1;
     if (!keyed && !bounded) continue;
+    if (!hasReadableGet(child.contract)) continue;
     if (!childAuthorizedByOwner(owner, child, relationship.childAuthorization === "owner")) continue;
     children.push({ relation: relationship.key, entity: relationship.target, table: qualified(child.table), foreignKey });
   }
@@ -467,12 +481,14 @@ function childAuthorizedByOwner(
 }
 
 /**
- * The authored relations of an extensible entity a tenant lookup may follow
- * or a rollup aggregate: a single reference the entity holds (`belongsTo`,
- * its foreign key on the entity's table) and an inverse collection
- * (`hasMany`, the foreign key on the related table), each to a stored,
- * tenant-scoped entity with a uuid id. Through-, via- and provider-backed
- * relations have no foreign key to follow and stay out.
+ * The authored relations of an entity a tenant lookup may follow or a rollup
+ * aggregate: a single reference the entity holds (`belongsTo`, its foreign key
+ * on the entity's table) and an inverse collection (`hasMany`, the foreign key
+ * on the related table), each to a stored, tenant-scoped entity with a uuid
+ * id that some interface reads (hasReadableGet). Through-, via- and
+ * provider-backed relations have no foreign key to follow and stay out. Of an
+ * extensible entity's collection the single relations count too: `rollup.of`
+ * may follow one.
  */
 function extensionRelations(
   owner: { contract: CompiledEntityContract; table: TableDefinition },
@@ -483,6 +499,7 @@ function extensionRelations(
     if (relationship.through || relationship.provider || relationship.via || !relationship.foreignKey) continue;
     const related = byEntity.get(relationship.target);
     if (!related || !related.table.tenantScoped || related.contract.source || related.contract.subtype) continue;
+    if (!hasReadableGet(related.contract)) continue;
     const id = related.table.columns.find((column) => column.name === "id");
     if (!id || id.type !== "uuid" || !id.primaryKey) continue;
     const holder = relationship.kind === "belongsTo" ? owner.table : related.table;
@@ -504,7 +521,7 @@ function extensionRelations(
 /**
  * Who may read an entity, from its compiled authorization contract: the read
  * roles, the principal classes, the axis that narrows its rows (if any) and
- * the fields with read roles of their own. A lookup or rollup is proven
+ * the fields with read roles of their own or authored `internal`. A lookup or rollup is proven
  * against exactly this; anything that narrows rows is named, never folded
  * into the roles, so the runtime refuses it rather than guess.
  */
@@ -520,12 +537,14 @@ function readAccessOf(entry: { contract: CompiledEntityContract; table: TableDef
   const fieldReadRoles = Object.fromEntries((authorization?.fieldAuthorizations ?? [])
     .map((field) => [field.fieldKey, [...new Set(field.readRoles)].sort()] as const)
     .sort(([left], [right]) => left.localeCompare(right)));
+  const internalFields = entry.contract.model.fields.filter((field) => field.classification?.sensitivity === "internal").map((field) => field.key).sort();
   return {
     table: qualified(entry.table),
     roles: [...new Set(authorization?.roles.read ?? [])].sort(),
     ...(authorization?.principalClasses ? { principalClasses: [...new Set(authorization.principalClasses)].sort() } : {}),
     ...(rowPolicy ? { rowPolicy } : {}),
     ...(Object.keys(fieldReadRoles).length ? { fieldReadRoles } : {}),
+    ...(internalFields.length ? { internalFields } : {}),
   };
 }
 
@@ -549,7 +568,7 @@ export function compileExtensionStorage(
     }
   }
   const candidates = entries.filter((entry) => isExtensionTargetCandidate(entry.contract, entry.table));
-  const registry: ExtensionRegistry = { entities: {}, indexProjections: {}, referencedBy: {}, readAccess: {} };
+  const registry: ExtensionRegistry = { entities: {}, indexProjections: {}, referencedBy: {}, childRelations: {}, readAccess: {} };
   const reachable = new Set<string>();
 
   for (const { contract, table } of [...extensible].sort((left, right) => left.contract.entity.name.localeCompare(right.contract.entity.name))) {
@@ -615,6 +634,16 @@ export function compileExtensionStorage(
     for (const target of targets) {
       (registry.referencedBy[target.entity] ??= []).push({ sourceEntity: name, valuesTable: qualified(values) });
     }
+  }
+  // A collection's child that is not extensible itself has its single
+  // relations here: `rollup.of` may follow one, so what it leads to is in reach.
+  for (const child of [...new Set(Object.values(registry.entities).flatMap((entry) =>
+    entry.relations.filter((relation) => relation.kind === "hasMany").map((relation) => relation.entity)))].sort()) {
+    if (registry.entities[child]) continue;
+    const relations = extensionRelations(byEntity.get(child)!, byEntity).filter((relation) => relation.kind === "belongsTo");
+    if (!relations.length) continue;
+    registry.childRelations[child] = relations;
+    for (const relation of relations) reachable.add(relation.entity);
   }
   registry.readAccess = Object.fromEntries([...reachable].sort().map((entity) => [entity, readAccessOf(byEntity.get(entity)!)]));
   registry.indexProjections = Object.fromEntries(Object.entries(registry.indexProjections).sort(([left], [right]) => left.localeCompare(right)));

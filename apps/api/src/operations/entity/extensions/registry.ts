@@ -14,6 +14,7 @@ import type {
   RuntimeExtensionReadAccess,
   RuntimeExtensionRegistry,
   RuntimeExtensionRegistryManifest,
+  RuntimeExtensionRelation,
 } from "@openshapeforge/plugin-runtime";
 
 const qualified = /^[a-z_][a-z0-9_]*\.[a-z_][a-z0-9_]*$/;
@@ -72,12 +73,16 @@ function entityEntry(name: string, value: unknown): RuntimeExtensibleEntity {
   return structuredClone(entry) as unknown as RuntimeExtensibleEntity;
 }
 
+const singleRelation = (relation: unknown): boolean => record(relation) && matches(relation.key, fieldKey) && relation.kind === "belongsTo" &&
+  matches(relation.entity, entityName) && matches(relation.table, qualified) && matches(relation.foreignKey, columnName);
+
 function readAccessEntry(name: string, value: unknown): RuntimeExtensionReadAccess {
   if (!record(value) || !matches(value.table, qualified) || !strings(value.roles, /^\S+$/) ||
       (value.principalClasses !== undefined && !strings(value.principalClasses, /^[a-z]+$/)) ||
       (value.rowPolicy !== undefined && !ROW_POLICIES.includes(String(value.rowPolicy))) ||
       (value.fieldReadRoles !== undefined && (!record(value.fieldReadRoles) ||
-        !Object.entries(value.fieldReadRoles).every(([field, roles]) => fieldKey.test(field) && strings(roles, /^\S+$/))))) {
+        !Object.entries(value.fieldReadRoles).every(([field, roles]) => fieldKey.test(field) && strings(roles, /^\S+$/)))) ||
+      (value.internalFields !== undefined && !strings(value.internalFields, fieldKey))) {
     invalid(`readAccess.${name} is invalid`);
   }
   return structuredClone(value) as unknown as RuntimeExtensionReadAccess;
@@ -85,9 +90,10 @@ function readAccessEntry(name: string, value: unknown): RuntimeExtensionReadAcce
 
 /** Accepts generated metadata only, never tenant-authored definitions. */
 export function createExtensionRegistry(value: unknown): RuntimeExtensionRegistry {
-  if (value === undefined) value = { entities: {}, indexProjections: {}, referencedBy: {}, readAccess: {} };
-  if (!record(value) || !record(value.entities) || !record(value.indexProjections) || !record(value.referencedBy) || !record(value.readAccess)) {
-    invalid("entities, indexProjections, referencedBy and readAccess are required");
+  if (value === undefined) value = { entities: {}, indexProjections: {}, referencedBy: {}, childRelations: {}, readAccess: {} };
+  if (!record(value) || !record(value.entities) || !record(value.indexProjections) || !record(value.referencedBy) ||
+      !record(value.childRelations) || !record(value.readAccess)) {
+    invalid("entities, indexProjections, referencedBy, childRelations and readAccess are required");
   }
   const source = value as unknown as RuntimeExtensionRegistryManifest;
   const entities = new Map<string, RuntimeExtensibleEntity>();
@@ -111,6 +117,11 @@ export function createExtensionRegistry(value: unknown): RuntimeExtensionRegistr
       item.valuesTable === entities.get(item.sourceEntity)!.valuesTable)) invalid(`referencedBy.${target} is invalid`);
     referencedBy.set(target, freeze(sources.map((item) => ({ sourceEntity: item.sourceEntity, valuesTable: item.valuesTable }))));
   }
+  const childRelations = new Map<string, readonly RuntimeExtensionRelation[]>();
+  for (const [child, relations] of Object.entries(source.childRelations)) {
+    if (!entityName.test(child) || !Array.isArray(relations) || !relations.every(singleRelation)) invalid(`childRelations.${child} is invalid`);
+    childRelations.set(child, freeze(structuredClone(relations)));
+  }
   const readAccess = new Map<string, RuntimeExtensionReadAccess>();
   for (const [entity, access] of Object.entries(source.readAccess)) {
     if (!entityName.test(entity)) invalid(`readAccess.${entity} is not an entity name`);
@@ -123,11 +134,17 @@ export function createExtensionRegistry(value: unknown): RuntimeExtensionRegistr
       if (!readAccess.has(reached)) invalid(`readAccess lacks ${reached}, which ${name} can reach`);
     }
   }
+  for (const [child, relations] of childRelations) {
+    for (const relation of relations) {
+      if (!readAccess.has(relation.entity)) invalid(`readAccess lacks ${relation.entity}, which ${child} can reach`);
+    }
+  }
   return Object.freeze({
     entity: (name: string) => entities.get(name),
     entityNames: () => [...entities.keys()].sort(),
     indexProjection: (type: string) => projections.get(type),
     referencedBy: (name: string) => referencedBy.get(name) ?? [],
+    childRelations: (name: string) => childRelations.get(name) ?? [],
     readAccess: (name: string) => readAccess.get(name),
   });
 }
@@ -153,6 +170,7 @@ export const extensionRegistry: RuntimeExtensionRegistry = Object.freeze({
   entityNames: () => active().entityNames(),
   indexProjection: (type: string) => active().indexProjection(type),
   referencedBy: (name: string) => active().referencedBy(name),
+  childRelations: (name: string) => active().childRelations(name),
   readAccess: (name: string) => active().readAccess(name),
 });
 

@@ -319,13 +319,14 @@ export function isGeneratedCrudTableReadable(name: string) {
 export function generatedCrudError(
   message: string,
   code: string,
-  authored?: { detail?: string; hint?: string },
+  authored?: { detail?: string; hint?: string; retryable?: boolean },
 ) {
   return operationFailure({
     code,
     message,
     ...(authored?.detail === undefined ? {} : { detail: authored.detail }),
     ...(authored?.hint === undefined ? {} : { data: { hint: authored.hint } }),
+    ...(authored?.retryable === undefined ? {} : { retryable: authored.retryable }),
   });
 }
 
@@ -333,16 +334,19 @@ export function generatedCrudError(
  * A database refusal on a generated write becomes an OperationFailure carrying
  * the public meaning, so every interface projects the same canonical error.
  * Anything the classifier declines stays the original driver error and is
- * redacted downstream exactly as before.
+ * redacted downstream exactly as before. A retryable refusal keeps that error
+ * as its cause: whoever retries a whole transaction itself still reads the
+ * SQLSTATE (transition-lock-retry.ts).
  */
 export function translateDatabaseError(table: GeneratedCrudTable, error: unknown): unknown {
   const refusal = classifyDatabaseError(error, databaseErrorContext(table));
-  return refusal
-    ? generatedCrudError(refusal.message, refusal.code, {
-        ...(refusal.detail === undefined ? {} : { detail: refusal.detail }),
-        ...(refusal.hint === undefined ? {} : { hint: refusal.hint }),
-      })
-    : error;
+  if (!refusal) return error;
+  const failure = generatedCrudError(refusal.message, refusal.code, {
+    ...(refusal.detail === undefined ? {} : { detail: refusal.detail }),
+    ...(refusal.hint === undefined ? {} : { hint: refusal.hint }),
+    ...(refusal.retryable ? { retryable: true } : {}),
+  });
+  return refusal.retryable ? Object.assign(failure, { cause: error }) : failure;
 }
 
 function databaseErrorContext(table: GeneratedCrudTable): DatabaseErrorTableContext {

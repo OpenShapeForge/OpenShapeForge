@@ -164,7 +164,7 @@ for (const { schema } of validated) {
 // The test composition's layers (test/fixtures/authoring/test-composition.yaml)
 // and the core entities each adds: two record-action samples, and the
 // extensible acceptance entities with their children and reference targets.
-const FIXTURE_LAYER_CORE_ENTITIES = { "record-actions": 2, extensible: 8 };
+const FIXTURE_LAYER_CORE_ENTITIES = { "record-actions": 2, extensible: 9 };
 const fixtureCoreEntities = Object.entries(FIXTURE_LAYER_CORE_ENTITIES)
   .filter(([layer]) => scanRoots.some(root => relative(repoRoot, root) === join("test", "fixtures", "authoring", layer)))
   .reduce((total, [, count]) => total + count, 0);

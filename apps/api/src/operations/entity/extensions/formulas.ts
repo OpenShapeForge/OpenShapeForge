@@ -46,6 +46,8 @@ import { fieldNameForColumn } from "../columns.js";
 import type { GeneratedCrudTable } from "../types.js";
 import { formulaColumns, outOfScopeFormulaColumns, readContractProperties } from "./formula-columns.js";
 import {
+  authoredSensitivity,
+  classificationOf,
   EXTENSION_META_KEY,
   evaluateCondition,
   extensionError,
@@ -54,6 +56,9 @@ import {
   isEntityOsfType,
   linkedResultType,
   record,
+  refuseSensitivity,
+  sensitivityShortfall,
+  type ComputedInput,
   type ExtensionDefinition,
   type ExtensionField,
   type ExtensionFieldSet,
@@ -191,6 +196,15 @@ export function formulaDependencies(set: ExtensionFieldSet, ast: FormulaAst): Fo
   });
 }
 
+/** What a stored formula reads, with the sensitivity of each. */
+export function formulaInputs(set: ExtensionFieldSet, ast: FormulaAst): ComputedInput[] {
+  return formulaDependencies(set, ast).map((read) => {
+    const tenant = read.via === null ? set.byId.get(read.field) : undefined;
+    return tenant ? { label: tenant.key, sensitivity: classificationOf(tenant.definition) }
+      : { label: read.via ? `${read.via}.${read.field}` : read.field, sensitivity: authoredSensitivity(read.entity, read.field) };
+  });
+}
+
 /** A refusal: a save-time diagnostic, or the error code a formula without field references always yields. */
 type FormulaRefusal = Omit<FormulaDiagnostic, "code"> & { code: FormulaDiagnostic["code"] | FormulaErrorCode };
 
@@ -219,7 +233,8 @@ export type RetypedReader = { field: ExtensionField; definition: ExtensionDefini
  * the canonical text, the AST bound to field ids, the static result type and
  * `osfType` following it. Refused with every diagnostic (code, message,
  * span) in `data.errors`: syntax, unknown or ambiguous field, type conflict,
- * mixed branches, time functions, out of scope, classified field, a cycle
+ * mixed branches, time functions, out of scope, classified field, a
+ * classification below what it reads (CLASSIFICATION_TOO_LOW), a cycle
  * through any other formula of the entity, `limits.formulaDepth` exceeded by
  * this formula or by any formula that reads it (a deprecated one included),
  * a formula that reads it and no longer types with it in place, and a
@@ -251,6 +266,8 @@ export function validateFormulaDefinition(
   }
   assertFormulaSetValid(set, { fieldId: input.fieldId, key: input.key, label: labelText(definition.label, input.key), reads: analysis.dependencies }, limit);
   assertConstantComputes(input, analysis.ast!, analysis.resultType!, (formula as { text: string }).text);
+  const shortfall = sensitivityShortfall(definition, formulaInputs(set, analysis.ast!));
+  if (shortfall) refuseSensitivity(input.key, "formula", shortfall);
   const text = formatFormula(analysis.ast!, env);
   return {
     definition: { ...definition, osfType: FORMULA_OSF_TYPES[analysis.resultType!], formula: { text, ast: analysis.ast!, resultType: analysis.resultType! } },

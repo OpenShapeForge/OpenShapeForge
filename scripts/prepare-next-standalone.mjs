@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Next's standalone server deliberately omits public files and static assets.
-// Stage them beside the generated server whenever an app starts, so a fresh
-// build and a rebuilt app cannot serve missing or stale client assets.
+// Stage them beside the generated server during the build, so startup needs
+// only the immutable standalone output and never deletes live assets.
 import { cpSync, existsSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 

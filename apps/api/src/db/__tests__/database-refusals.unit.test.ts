@@ -350,4 +350,22 @@ describe("errors that must stay redacted", () => {
       },
     });
   });
+
+  it("a deadlock or a serialization failure is a conflict that says repeating is safe, on every path, in the driver's words nowhere", () => {
+    for (const [message, sqlstate] of [
+      ["deadlock detected", "40P01"],
+      ["could not serialize access due to concurrent update", "40001"],
+    ] as const) {
+      const error = postgresError(message, { sqlstate, detail: "Process 1 waits for ShareLock on transaction 2.", hint: "See server log for query details." });
+      const refusal = classifyDatabaseError(error);
+      expect(refusal).toMatchObject({ status: 409, code: "CONFLICT", retryable: true });
+      expect(JSON.stringify(refusal)).not.toContain("Process 1");
+      expect(refusal!.message).not.toContain(message);
+      expect(toHttpError(error)).toEqual({ status: 409, body: { error: { code: "CONFLICT", message: refusal!.message, retryable: true } } });
+    }
+  });
+
+  it("whoever raises one in PL/pgSQL gets the same answer: a plugin's own guard", () => {
+    expect(classifyDatabaseError(postgresError("could not obtain lock", { sqlstate: "40P01", routine: RAISE }))).toMatchObject({ code: "CONFLICT", retryable: true });
+  });
 });

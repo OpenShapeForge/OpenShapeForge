@@ -62,6 +62,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # Check the clean installed dependency tree before builds or tests can add artifacts.
+      - name: Check THIRD-PARTY-NOTICES is up to date
+        run: bun run check:notices
+
       # generate is REQUIRED before the api typecheck/tests (produces
       # apps/api/src/generated/**).
       - name: Verify production and test compositions
@@ -239,9 +243,6 @@ jobs:
       # wording (#182): every authoring YAML against the schema for its kind.
       - name: Check authoring matches its schemas
         run: bun run check:authoring-schemas
-
-      - name: Check THIRD-PARTY-NOTICES is up to date
-        run: bun run check:notices
 
       # A required status check is matched by job NAME. Renaming a job here
       # would silently drop the gate the branch-protection ruleset claims to

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { compileAuthoringBackendManifest } from "./backend-manifest.js";
 import type { CoreEntity, Field } from "./types.js";
 import type { CompiledEntityInfo } from "../plugins.js";
-export const native = (action: "insert" | "move") => ({
+export const native = (action: "insert" | "move" | "remove") => ({
   name: action,
   description: action,
   implementation: { type: "collection" as const, action, field: "children" },

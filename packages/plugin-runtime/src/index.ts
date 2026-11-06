@@ -316,6 +316,7 @@ export type RuntimeExtensionReadAccess = {
   readonly principalClasses?: readonly string[];
   readonly rowPolicy?: string;
   readonly fieldReadRoles?: Readonly<Record<string, readonly string[]>>;
+  readonly internalFields?: readonly string[];
 };
 
 /** The manifest's top-level `extensionRegistry`, as the compiler emits it. */
@@ -323,6 +324,8 @@ export type RuntimeExtensionRegistryManifest = {
   readonly entities: Readonly<Record<string, RuntimeExtensibleEntity>>;
   readonly indexProjections: Readonly<Record<string, Partial<Record<RuntimeExtensionIndexColumn, string>>>>;
   readonly referencedBy: Readonly<Record<string, readonly { readonly sourceEntity: string; readonly valuesTable: string }[]>>;
+  /** The single relations of a collection's child that is not extensible itself, by child entity. */
+  readonly childRelations: Readonly<Record<string, readonly RuntimeExtensionRelation[]>>;
   readonly readAccess: Readonly<Record<string, RuntimeExtensionReadAccess>>;
 };
 
@@ -332,6 +335,8 @@ export type RuntimeExtensionRegistry = {
   entityNames(): readonly string[];
   indexProjection(osfType: string): Partial<Record<RuntimeExtensionIndexColumn, string>> | undefined;
   referencedBy(entityName: string): readonly { readonly sourceEntity: string; readonly valuesTable: string }[];
+  /** What `rollup.of` may follow from a child that is not extensible itself; empty for any other entity. */
+  childRelations(entityName: string): readonly RuntimeExtensionRelation[];
   /** Absent means the entity is out of reach of a lookup or rollup. */
   readAccess(entityName: string): RuntimeExtensionReadAccess | undefined;
 };

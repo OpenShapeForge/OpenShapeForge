@@ -8,6 +8,15 @@ import type { CompiledEntityOperation, EntityOperationDefinition } from "./types
 const uuid = { type: "string", format: "uuid" };
 const title = (en: string, nl: string) => ({ "x-osf-i18n": { title: { en, nl } } });
 
+/**
+ * A removed child is gone, so `remove` alone may ask the caller to acknowledge
+ * it. A challenge stays unsupported: it is bound to the record version the
+ * collection's owner lease consumes, and nothing here asks a child's field.
+ */
+export function collectionConfirmationSupported(action: string, confirmation: EntityOperationDefinition["confirmation"]): boolean {
+  return confirmation.mode === "none" || (confirmation.mode === "acknowledgement" && action === "remove");
+}
+
 /** Complete ordinary invoke Operations from the same compiled entity corpus. */
 export function materializeCollectionOperations(
   entities: readonly Pick<CompiledEntityInfo, "contract">[],
@@ -52,7 +61,7 @@ export function materializeCollectionOperations(
         !owner.storage.columns.some((column) => column.field === "updatedAt" && column.column === "updated_at" && column.type === "timestamptz")) fail("owner update requires persisted updatedAt version concurrency.");
       const declaredLease = definition.concurrency?.editLease;
       const ownerLease = update.concurrency?.editLease;
-      if (definition.effects.data !== "write" || definition.effects.external !== "none" || definition.confirmation.mode !== "none" || definition.reliability.idempotency.mode !== "none" ||
+      if (definition.effects.data !== "write" || definition.effects.external !== "none" || !collectionConfirmationSupported(action, definition.confirmation) || definition.reliability.idempotency.mode !== "none" ||
         (declaredLease && (!ownerLease || declaredLease.mode !== ownerLease.mode ||
           declaredLease.expiresAfterInactivity !== ownerLease.expiresAfterInactivity))) fail("unsupported collection guard/effect combination.");
 

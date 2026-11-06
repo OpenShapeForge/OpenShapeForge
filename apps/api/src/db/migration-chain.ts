@@ -273,7 +273,8 @@ export async function runMigrationChain(
 
 /**
  * Authorization is a compile-time contract, so every migration proves the
- * tenants' lookups and rollups again against the manifest it installed
+ * tenants' lookups and rollups again against the manifest it installed, and
+ * every computed field against the sensitivity of what it reads
  * (operations/entity/extensions/linked.ts); one that no longer holds is
  * suspended. Each tenant in a transaction of its own, scoped to it: one that
  * fails is suspended fail closed and the chain goes on, in the migration report.
@@ -281,7 +282,7 @@ export async function runMigrationChain(
 async function revalidateLinkedFields(db: Kysely<DB>): Promise<LinkedRevalidationReport> {
   if (!extensionRegistry.entityNames().length) return { suspended: 0, failedTenants: [] };
   const tenants = await sql<{ tenant_id: string }>`select distinct tenant_id::text as tenant_id from platform.extension_field_definitions
-    where is_current and kind in ('lookup', 'rollup') and state in ('ready', 'updating') order by 1`.execute(db);
+    where is_current and kind in ('formula', 'lookup', 'rollup') and state in ('ready', 'updating') order by 1`.execute(db);
   return revalidateLinkedFieldsOfEveryTenant((tenantId, work) => db.transaction().execute(async (trx) => {
     await sql`select set_config('app.tenant_id', ${tenantId}, true), set_config('app.bypass_rls', 'true', true)`.execute(trx);
     return work(trx);

@@ -26,6 +26,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
+import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { DEV_WORKER_ROLE_PASSWORD_DEFAULT, WORKER_ROLE } from "../../db/migrations/worker-role.js";
 import { composeJobHandlers } from "../../jobs/handlers.js";
 import { processJobBatch } from "../../jobs/worker.js";
@@ -318,5 +319,48 @@ describe("tenant fields over REST, GraphQL and MCP", () => {
     expect((await http(writer, "PATCH", `${ASSETS}/${asset.body.data.id}`, { extensions: { groep: group.body.data.id }, expectedVersion: current.updatedAt })).status).toBe(200);
     expect((await http(reader, "GET", `${GROUPS}/${group.body.data.id}`)).body.data.extensions.leden).toBe(1);
     expect((await http(tenantB, "GET", `${GROUPS}/${group.body.data.id}`)).status).toBe(404);
+  });
+  test.skipIf(!available)("a number sent as text is stored and read as a number; text stored before reads as one; other text stays refused", async () => {
+    const created = await http(writer, "POST", ASSETS, { name: `text ${tag}`, extensions: { accu: "60" } });
+    expect(created.status).toBe(201);
+    expect(created.body.data.extensions.accu).toBe(60);
+    const id = created.body.data.id as string;
+    const source = async () => (await sql<{ value: unknown }>`select extension_values -> ${fields.accu!} as value from erp.extensible_assets where id = ${id}::uuid`.execute(getSeedRuntime().db)).rows[0]!.value;
+    expect(await source()).toBe(60);
+    const patched = await http(writer, "PATCH", `${ASSETS}/${id}`, { extensions: { accu: "12.50" }, expectedVersion: created.body.data.updatedAt });
+    expect(patched.status).toBe(200);
+    expect(patched.body.data.extensions.accu).toBe(12.5);
+    expect(await source()).toBe(12.5);
+    expect((await http(writer, "PATCH", `${ASSETS}/${id}`, { extensions: { accu: "veel" }, expectedVersion: patched.body.data.updatedAt })).status).toBe(422);
+
+    await sql`update erp.extensible_assets set extension_values = extension_values || ${jsonbLiteral({ [fields.accu!]: "60" })} where id = ${id}::uuid`.execute(getSeedRuntime().db);
+    expect(await source()).toBe("60");
+    expect((await http(reader, "GET", `${ASSETS}/${id}`)).body.data.extensions.accu).toBe(60);
+    const listed = await list(reader, { filter: { name: { eq: `text ${tag}` } } });
+    expect(listed.body.data.items[0].data.extensions.accu).toBe(60);
+  });
+
+  test.skipIf(!available)("a transaction the database gave up on is a retryable 409 on REST and on MCP, on any entity write", async () => {
+    const created = await http(writer, "POST", ASSETS, { name: `deadlock ${tag}` });
+    expect(created.status).toBe(201);
+    const id = created.body.data.id as string;
+    const db = getSeedRuntime().db;
+    const name = `e2e_deadlock_${randomUUID().replaceAll("-", "")}`;
+    await sql.raw(`create function ${name}() returns trigger language plpgsql as $$ begin
+      if new.id = '${id}'::uuid then raise exception 'deadlock detected' using errcode = '40P01'; end if; return new; end $$`).execute(db);
+    await sql.raw(`create trigger ${name} before update on erp.extensible_assets for each row execute function ${name}()`).execute(db);
+    try {
+      const refused = await http(writer, "PATCH", `${ASSETS}/${id}`, { name: "other", expectedVersion: created.body.data.updatedAt });
+      expect(refused).toMatchObject({ status: 409, body: { error: { code: "CONFLICT", retryable: true } } });
+      expect(refused.body.error.message).not.toContain("deadlock detected");
+      const mcp = await rpc(writer, "tools/call", { name: "osf_execute_operation",
+        arguments: { operationId: `${ENTITY}.update`, input: { id, values: { name: "other" }, expectedVersion: created.body.data.updatedAt } } });
+      expect(mcp.body.result.isError).toBe(true);
+      expect(mcp.body.result.structuredContent).toMatchObject({ error: { code: "CONFLICT", retryable: true } });
+    } finally {
+      await sql.raw(`drop trigger ${name} on erp.extensible_assets`).execute(db);
+      await sql.raw(`drop function ${name}()`).execute(db);
+    }
+    expect((await http(writer, "PATCH", `${ASSETS}/${id}`, { name: "other", expectedVersion: created.body.data.updatedAt })).status).toBe(200);
   });
 });

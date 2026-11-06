@@ -2,6 +2,7 @@
 import { expect, test } from "bun:test";
 import { projectFrozenDefinitionFields } from "./frozen-field-definitions.js";
 import type { GeneratedCrudTable } from "./types.js";
+import Ajv2020 from "ajv/dist/2020.js";
 
 const head = { columns: [
   { name: "variable_defs", sourceField: "parameters", type: "jsonb" },
@@ -52,11 +53,10 @@ test("compiled version output admits the logical fields declared by the value re
   const { default: manifest } = await import("../../generated/db/manifest.json", { with: { type: "json" } });
   const operation = (catalog as any).entityOperations.find((item: any) => item.id === "TemplateVersion.get");
   const projected = operation.outputSchema.anyOf.find((item: any) => item.type === "object").properties.frozenFieldDefinitions;
-  const bindings = (manifest as any).entityValues.carriers.flatMap((carrier: any) => Object.values(carrier.definitions).flatMap((definition: any) =>
+  const bindings: string[] = (manifest as any).entityValues.carriers.flatMap((carrier: any) => Object.values(carrier.definitions).flatMap((definition: any) =>
     definition.fields.filter((field: any) => field.valueFieldsFrom && definition.references.some((ref: any) => ref.fieldKey === field.valueFieldsFrom.reference && ref.targetEntity === "TemplateVersion")).map((field: any) => field.valueFieldsFrom.field)));
   expect(Object.keys(projected.properties).sort()).toEqual([...new Set(bindings)].sort());
-  const { default: Ajv } = await import("ajv");
-  const validate = new Ajv({ strict: false }).compile(projected);
+  const validate = new Ajv2020.default({ strict: false }).compile(projected);
   expect(validate({ parameters: [{ key: "name", osfType: "string" }] })).toBe(true);
   expect(validate({ unknown: [] })).toBe(false);
 });

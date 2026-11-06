@@ -595,6 +595,11 @@ export function getEntityOperationContracts(): readonly EntityOperationContract[
   return entityOperations;
 }
 
+/** Withheld from every interface: only another Operation writes through it, under that one's guards. */
+export function isWithheldOperation(id: string): boolean {
+  return entityOperationsById.get(id)?.withheld === true;
+}
+
 /** Lease-protected Operations this identity may reach through the REST adapter. */
 export function restEditLeaseOperationIdsForSession(
   session: OperationAuthorizationSession,
@@ -793,6 +798,7 @@ export function getEntityOperationOffers(
       (operation) =>
         operation.entityName === entityName &&
         intents.includes(operation.intent) &&
+        !operation.withheld &&
         (authorizationProfileDecision(session, operation.id, operation.entityName) ?? operation.authorization.roles.some((role) => heldRoles.has(role))) &&
         (!target || hasRecordPermissions(operation.authorization.recordPermissions)),
     )
@@ -1506,8 +1512,10 @@ async function executeEntityOperationWithContext(
       }
     }
   } catch (error) {
-    const refusal = request.input?.relatedChanges ? classifyDatabaseError(error) : undefined;
-    const operationError = operationErrorOf(error) ?? (refusal ? {code:refusal.code,message:refusal.message,retryable:false} : undefined);
+    const classified = classifyDatabaseError(error);
+    // A retryable refusal is the answer on any path; the rest only for related changes.
+    const refusal = request.input?.relatedChanges || classified?.retryable ? classified : undefined;
+    const operationError = operationErrorOf(error) ?? (refusal ? {code:refusal.code,message:refusal.message,retryable:refusal.retryable === true} : undefined);
     // A canonical failure is the answer; anything else is a defect. Report it
     // before it collapses into the opaque internal error the caller sees, so
     // the server log holds the cause (#471). Message only — no input, no session.

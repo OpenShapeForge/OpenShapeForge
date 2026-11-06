@@ -7,7 +7,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { sql, type RawBuilder } from "kysely";
 import type { RuntimeExtensibleEntity, RuntimeExtensionIndexColumn } from "@openshapeforge/plugin-runtime";
-import { operationFailure, type OperationFieldBaseType } from "@openshapeforge/operations";
+import { exactNumericEquals, operationFailure, type OperationFieldBaseType } from "@openshapeforge/operations";
 import fieldSchemaRegistry from "../../../generated/operations/field-schema-registry.json" with { type: "json" };
 import { generatedRuntimeFieldSchemas, storedFieldBaseType } from "../../../modules/field-schemas.js";
 import { extensionRegistry } from "./registry.js";
@@ -123,9 +123,24 @@ export type StoredLookup = { via: string; field: string; resultType: ComputedRes
  * A rollup as it is stored: `collection` is an authored inverse relation by
  * key or `<Entity>.extensions.<fieldId>` (the records of another entity whose
  * tenant reference names this one); `of` and the paths of `where` name the
- * child's fields as `via` and `field` do.
+ * child's fields as `via` and `field` do, and `of` may follow one single
+ * relation of the child first (rollupPath).
  */
 export type StoredRollup = { collection: string; aggregate: RollupAggregate; of?: string; where?: unknown; resultType: ComputedResultType };
+
+/**
+ * A rollup's `of` in its parts: the field it reads and the one relation of the
+ * child it follows to get there, if any, each an authored name or
+ * `extensions.<key>`. Undefined when it takes more than one step.
+ */
+export function rollupPath(of: string): { via?: string; field: string } | undefined {
+  const segments = of.split(".");
+  const next = () => segments[0] === "extensions" ? segments.splice(0, 2).join(".") : segments.shift()!;
+  const first = next();
+  if (!segments.length) return { field: first };
+  const second = next();
+  return segments.length ? undefined : { via: first, field: second };
+}
 
 const resultTyped = (value: unknown): value is { resultType: ComputedResultType } =>
   record(value) && (COMPUTED_RESULT_TYPES as readonly string[]).includes(String(value.resultType));
@@ -166,6 +181,38 @@ export function isClassified(definition: ExtensionDefinition): boolean {
   return CLASSIFIED.has(classificationOf(definition) ?? "");
 }
 
+/** One thing a computed field reads, or a reference its value travels along. */
+export type ComputedInput = { readonly label: string; readonly sensitivity: string | undefined };
+
+/** The sensitivity of an authored field in reach of a computed field: what is classified never is. */
+export function authoredSensitivity(entity: string, field: string): "public" | "internal" {
+  return extensionRegistry.readAccess(entity)?.internalFields?.includes(field) ? "internal" : "public";
+}
+
+/**
+ * Why a computed field may not be saved under its classification: what it
+ * shows is at least as sensitive as the most sensitive thing it reads, public
+ * below internal, and a public value goes where an internal one does not (a
+ * quote that leaves the house). Nothing classified reaches a computed field,
+ * and each link proved its own inputs when it was saved, so its direct inputs
+ * hold the floor of the whole chain.
+ */
+export function sensitivityShortfall(definition: ExtensionDefinition, inputs: readonly ComputedInput[]): string | undefined {
+  if (classificationOf(definition) !== "public") return undefined;
+  const input = inputs.find((candidate) => candidate.sensitivity === "internal");
+  return input && `it reads ${input.label}, which is internal, so it is internal at least.`;
+}
+
+export function refuseSensitivity(key: string, kind: string, reason: string): never {
+  throw operationFailure({
+    code: "VALIDATION",
+    message: `The ${kind} ${key} cannot be saved: ${reason}`,
+    violations: [{ field: "definition.classification", code: "CLASSIFICATION_TOO_LOW", message: reason }],
+    data: { reason: "CLASSIFICATION_TOO_LOW" },
+    retryable: false,
+  });
+}
+
 export function hasStaticOptions(definition: ExtensionDefinition): boolean {
   return record(definition.options) && definition.options.type === "static";
 }
@@ -191,6 +238,34 @@ export function extensionShape(entry: RuntimeExtensibleEntity, definition: Exten
     staticOptions: hasStaticOptions(definition),
     classified: isClassified(definition),
   };
+}
+
+const numericOsfType = (osfType: unknown): boolean => {
+  const base = typeof osfType === "string" ? osfTypes[osfType]?.baseType ?? osfType : undefined;
+  return base === "integer" || base === "number";
+};
+
+/**
+ * A value as the number its field holds. The value schema admits exact decimal
+ * text beside a number, and a form sends text, but tenant values are JSON
+ * numbers: in the source, and from there in every read, snapshot and formula.
+ * Covers integer, number and the types on them (money, percentage), and the
+ * number of an object type that projects one (measurement). Reads apply it too, so a value stored as text before reads
+ * the same. Text that is no number is left to the validator, and text no JSON
+ * number holds exactly stays what it is, for `unrepresentable` to hear: a write
+ * refuses it, and a read delivers what was stored rather than round it.
+ */
+export function numericValue(definition: ExtensionDefinition, value: unknown, unrepresentable?: (text: string) => void): unknown {
+  const component = numericOsfType(definition.osfType) ? undefined : extensionRegistry.indexProjection(String(definition.osfType))?.number;
+  if (component === undefined && !numericOsfType(definition.osfType)) return value;
+  const number = (item: unknown): unknown => {
+    if (typeof item !== "string" || !item.trim() || Number.isNaN(Number(item))) return item;
+    if (exactNumericEquals(item, Number(item))) return Number(item);
+    unrepresentable?.(item);
+    return item;
+  };
+  return component === undefined ? number(value)
+    : record(value) && typeof value[component] === "string" ? { ...value, [component]: number(value[component]) } : value;
 }
 
 /** The entity id a stored reference value names, or the ids of a collection. */

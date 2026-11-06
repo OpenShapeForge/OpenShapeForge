@@ -29,7 +29,7 @@ test("managed document type operations preserve read access and separate deletio
   expect(web.views.record?.routes.create).toBe("/document-types/new");
   expect(web.operations.create).toBeDefined();
   expect(web.views.record?.operations.update).toMatchObject({ id: "DocumentType.update", intent: "update" });
-  expect(web.views.record?.formGroups.update.map(group => group.fields)).toEqual([
+  expect(web.views.record?.formGroups?.update?.map(group => group.fields)).toEqual([
     ["name", "description"], ["defaultConfidentiality", "requiresRegistration", "allowsExternalPublication"],
   ]);
   expect(web.fields.name?.supports.update).toBe(true);

@@ -21,6 +21,7 @@ import { runMigrationChain } from "../db/migration-chain.js";
 import { APP_ROLE, DEV_APP_ROLE_PASSWORD_DEFAULT } from "../db/migrations/app-role.js";
 import type { ModuleOperationHandler } from "../modules/contract.js";
 import { executeBinding } from "../mcp/declarative-execution.js";
+import { getEntityOperationContracts } from "./entity/runtime.js";
 import { sinceFromSourceVersion, sourceSyncOperationHandler } from "./source-sync-operations.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -93,6 +94,18 @@ describe("source-sync Operations", () => {
     expect((await rows("ledger_accounts", tenantId)).map((row) => [row.external_id, row.name])).toEqual([["a1", "Kas"], ["a2", "Account 8000"]]);
     expect(await run("sourceWatermark", { entity: "LedgerAccount", ...SOURCE, initial: "1" }, session))
       .toEqual({ since: "12", sourceVersion: "00000000000000000012" });
+  });
+
+  test("leaves an entity whose writes are withheld to the Operation that owns them", async () => {
+    const tenantId = await tenant(), session = sessionFor(tenantId);
+    await run("upsertBySource", { entity: "LedgerAccount", ...SOURCE, records: [account("a1", "1000", 7, "Before")] }, session);
+    const update = getEntityOperationContracts().find((operation) => operation.id === "LedgerAccount.update")! as { withheld?: true };
+    update.withheld = true;
+    try {
+      await expect(run("upsertBySource", { entity: "LedgerAccount", ...SOURCE, records: [account("a1", "1000", 8, "After")] }, session))
+        .rejects.toMatchObject({ operationError: { code: "BAD_USER_INPUT" } });
+    } finally { delete update.withheld; }
+    expect((await rows("ledger_accounts", tenantId)).map((row) => row.name)).toEqual(["Before"]);
   });
 
   test("never lets an older replay overwrite newer data", async () => {

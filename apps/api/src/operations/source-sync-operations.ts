@@ -26,6 +26,7 @@ import type { DB } from "../generated/db/types.js";
 import type { ModuleOperationHandler } from "../modules/contract.js";
 import { getGeneratedCrudTables, requireEntityOperation } from "./entity/catalog.js";
 import { createGeneratedEntity, deleteGeneratedEntity, updateGeneratedEntity } from "./entity/mutations.js";
+import { getEntityOperationContracts } from "./entity/runtime.js";
 import type { GeneratedCrudTable } from "./entity/types.js";
 import type { OperationContract } from "./runtime.js";
 
@@ -181,6 +182,11 @@ function sourceValues(record: Rec, source: Source): Rec {
 const upsertBySource: ModuleOperationHandler = async (input, context) => {
   const { db, session } = requireSession(context);
   const source = sourceOf(input);
+  // A sync holds no lease: what only another Operation may write stays with that Operation.
+  if (getEntityOperationContracts().some((operation) => operation.withheld && operation.entityName === source.table.source?.authoringEntityName &&
+      (operation.intent === "create" || operation.intent === "update"))) {
+    throw badInput(`${source.table.source?.authoringEntityName} is written through another Operation, not by a source sync.`);
+  }
   if (!Array.isArray(input.records) || input.records.length > MAX_RECORDS) {
     throw badInput(`records must be an array of at most ${MAX_RECORDS} records.`);
   }

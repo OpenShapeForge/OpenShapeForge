@@ -168,7 +168,9 @@ REST-specific semantics:
   (`src/db/database-refusals.ts`): `NOT_PUBLISHABLE` 400, `REFERENCE_NOT_FOUND`
   404, `OPERATION_REFUSED` / `REFERENCE_IN_USE` / `ALREADY_EXISTS` 409, with the
   authored message forwarded and the driver's text, constraint and table names
-  never.
+  never. A transaction the database gave up on, a deadlock or a serialization
+  failure, is `CONFLICT` 409 with `retryable: true`: nothing in it happened and
+  repeating the request is safe.
 - **OpenAPI** — `bun run generate` also emits
   `apps/api/src/generated/rest/openapi.json` (always, empty `paths` when no
   entity opts in), served verbatim at `GET /api/rest/openapi.json`.

@@ -24,6 +24,7 @@ create policy connection_use_grants_owner_insert on platform.connection_use_gran
   as restrictive for insert with check (
     owner_relation_id=app.current_relation_id() and issued_by=app.current_user_id()
     and app.connection_grant_owner_live(issued_identity_id,tenant_id,owner_relation_id)
+    -- Keep inline: identity-link migration drops identity_subject on each chain run.
     and exists(select 1 from platform.identities i where i.id=issued_identity_id
       and i.subject=current_setting('app.user_id',true))
   );
@@ -61,9 +62,6 @@ begin
       and not app.connection_grant_owner_live(g.issued_identity_id,g.tenant_id,g.owner_relation_id);
   perform set_config('app.tenant_id',coalesce(previous_tenant,''),true);
   return null;
-exception when others then
-  perform set_config('app.tenant_id',coalesce(previous_tenant,''),true);
-  raise;
 end $$;
 drop trigger if exists connection_grants_membership_changed on platform.identity_relations;
 create trigger connection_grants_membership_changed after update or delete on platform.identity_relations

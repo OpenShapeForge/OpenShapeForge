@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-/**
-   * A platform operator of the host's control realm: no tenant, ever. Only
-   * the host's own control Operations accept it; a plugin Operation never
-   * sees one, and a plugin must never treat it as a tenant session.
-   */
 import type { RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";
 import type {
   FastifyInstance,
@@ -78,7 +73,12 @@ export type PluginSessionCredential =
   | "bearer"
   | "api-key"
   | "trusted-context"
-    | "control-bearer"
+  /**
+   * A platform operator of the host's control realm: no tenant, ever. Only
+   * the host's own control Operations accept it; a plugin Operation never
+   * sees one, and a plugin must never treat it as a tenant session.
+   */
+  | "control-bearer"
   /**
    * A capability grant the host resolved for an `auth.mode: capability`
    * Operation: a tenant, no user, no roles. `grant` names the Operations and

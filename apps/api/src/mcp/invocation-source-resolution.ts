@@ -207,7 +207,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
           const delegation = connectionDelegationIdentity(session);
           if (delegation) {
             const table = tables.get(execution.connectionTable);
-            if (!table) throw new HttpError(403,'CONNECTION_CONSENT_REQUIRED','The delegated connection is unavailable.');
+            if (!table) throw new HttpError(500,'CONNECTION_CATALOG_INVALID','The connection catalogue is unavailable.');
             const delegated = await delegatedConnectionRow(trx, session, table);
             if (!delegated || delegated[execution.connectionProviderRef] !== providerId) throw new HttpError(403,'CONNECTION_CONSENT_REQUIRED','The delegated provider is unavailable.');
             connectionRows.splice(0, connectionRows.length, ...connectionRows.filter(row => !row.ownerUserId), delegated);

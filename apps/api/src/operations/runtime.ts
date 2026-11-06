@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-/** Compiler-owned source-adapter normalization. No shape guessing or authored override. */
 import { withConnectionDelegationOrigin, withConnectionGrantSubject } from "../mcp/connection-delegation.js";
 import { assertCurrentAccountAuthority } from "../accounts/account-current-authority.js";
 import { nativeCollectionOptionsHandler } from "./collection-options.js";
@@ -119,7 +118,8 @@ import { nativeConstrainedReferenceCreateHandler } from "./constrained-reference
 import { EXTENSIONS_PLUGIN, nativeExtensionHandler } from "./entity/extensions/operations.js";
 
 export type OperationContract = {
-    resultProjection?: { kind: "entity-record"; entityName: string; idField: string };
+  /** Compiler-owned source-adapter normalization. No shape guessing or authored override. */
+  resultProjection?: { kind: "entity-record"; entityName: string; idField: string };
   key: string;
   /** Built-in executor selected only by the compiler, never request input. */
   implementation?:

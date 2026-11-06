@@ -1289,3 +1289,5 @@ export type RuntimeModule = RuntimeModuleContract<
 export type RuntimeModuleFactory = (configuration: unknown) => RuntimeModule;
 
 export type { MaintenanceQuery, MaintenanceConnection, MaintenanceStore, MaintenanceContext, MaintenanceRequest, RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";
+
+export { hostAllowed } from "./egress-policy.js";

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** The edit-lease trio: acquire, renew and release, bounded to the offered Operations. */
+import { operationErrorSchema } from "./error-schema.js";
 import type { McpToolShape } from "./mcp-tool-shape.js";
 
 export const EDIT_LEASE_TOOL_NAMES = [
@@ -16,33 +17,6 @@ const leaseDataProperties = {
   expiresAt: { type: "string", format: "date-time" },
 } as const;
 
-const operationErrorSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["code", "message", "retryable"],
-  properties: {
-    code: { type: "string" },
-    message: { type: "string" },
-    detail: { type: "string" },
-    retryable: { type: "boolean" },
-    retryAt: { type: "string", format: "date-time" },
-    violations: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["code", "message"],
-        properties: {
-          field: { type: "string" },
-          code: { type: "string" },
-          message: { type: "string" },
-          detail: { type: "string" },
-        },
-      },
-    },
-    data: { type: "object", additionalProperties: true },
-  },
-} as const;
 
 function resultEnvelopeSchema(data: Record<string, unknown>): Record<string, unknown> {
   return {
@@ -64,7 +38,7 @@ function resultEnvelopeSchema(data: Record<string, unknown>): Record<string, unk
         properties: { error: { $ref: "#/$defs/OperationError" } },
       },
     ],
-    $defs: { OperationError: operationErrorSchema },
+    $defs: { OperationError: operationErrorSchema() },
   };
 }
 

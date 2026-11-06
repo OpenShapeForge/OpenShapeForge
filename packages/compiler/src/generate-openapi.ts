@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { operationErrorSchema } from "@openshapeforge/operations";
 /**
  * OpenAPI 3.1 spec generator for entities that opt into generated REST
  * exposure (`rest:` block in the entity YAML → `TableDefinition.source.rest`).
@@ -480,33 +481,7 @@ export function renderOpenApiSpec(
               },
             },
           },
-          OperationError: {
-            type: "object",
-            additionalProperties: false,
-            required: ["code", "message", "retryable"],
-            properties: {
-              code: { type: "string" },
-              message: { type: "string" },
-              detail: { type: "string" },
-              retryable: { type: "boolean" },
-              retryAt: { type: "string", format: "date-time" },
-              violations: {
-                type: "array",
-                items: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: ["code", "message"],
-                  properties: {
-                    field: { type: "string" },
-                    code: { type: "string" },
-                    message: { type: "string" },
-                    detail: { type: "string" },
-                  },
-                },
-              },
-              data: { type: "object", additionalProperties: true },
-            },
-          },
+          OperationError: operationErrorSchema(),
           OperationOffer: {
             oneOf: [
               {

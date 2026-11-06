@@ -77,7 +77,7 @@
  * revoke can act: it now cancels the Keycloak invitation as well, which is what
  * makes the delivered link dead and the address invitable again.
  */
-import type { ServiceAccountTokenProvider } from "./keycloak-service-account.js";
+import type { KeycloakAdminRequestOptions } from "./keycloak-admin-request.js";
 import type { KeycloakAdminError } from "./keycloak-organization-admin-types.js";
 export type InviteOrganizationMemberInput = {
   email: string;
@@ -188,14 +188,7 @@ export type KeycloakMemberCredential = {
   createdAt: number | null;
 };
 
-export type KeycloakOrganizationMembersOptions = {
-  /** Injected in tests; defaults to the global fetch. */
-  fetch?: typeof globalThis.fetch;
-  /** Injected in tests; defaults to Date.now. */
-  now?: () => number;
-  /** Shared with the other Keycloak admin clients so one token serves all. */
-  tokens?: ServiceAccountTokenProvider;
-};
+export type KeycloakOrganizationMembersOptions = KeycloakAdminRequestOptions;
 
 export type OrganizationBootstrapReads = {
   hasInvitationMailConfiguration(): Promise<boolean>;

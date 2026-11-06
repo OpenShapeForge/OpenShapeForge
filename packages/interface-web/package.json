@@ -13,7 +13,8 @@
   "license": "BUSL-1.1",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./server": "./src/server.ts"
   },
   "files": [
     "src",

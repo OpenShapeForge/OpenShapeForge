@@ -238,3 +238,13 @@ test("a stored definition resolves its base type through the generated registry;
   expect(() => storedFieldBaseType({ key: "legacy", osfType: "string", semanticType: "email" }))
     .toThrow('removed legacy key "semanticType"');
 });
+
+
+test("tenant-authored nested quantifiers cannot monopolize runtime validation", () => {
+  const fields = Array.from({ length: 10 }, (_, i) => ({ key: `field${i}`, osfType: "string", validation: { pattern: "^(a+)+$" } }));
+  const values = Object.fromEntries(fields.map(field => [field.key, "a".repeat(28) + "!"]));
+  const start = performance.now();
+  expect(generatedRuntimeFieldSchemas.validateObject(fields, values)).toMatchObject({ valid: false, error: { code: "VALIDATION_FAILED" } });
+  expect(performance.now() - start).toBeLessThan(500);
+  expect(() => generatedRuntimeFieldSchemas.object([{ key: "unsafe", osfType: "string", validation: { pattern: "(?=secret)" } }])).toThrow("Validation pattern is unsupported");
+});

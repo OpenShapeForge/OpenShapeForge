@@ -1181,6 +1181,11 @@ Catalog files under `catalogs/` merge across authoring layers automatically
   entities, and the seven base types are not catalog entries. Resolution
   priority for render/validation: explicit field config → semantic type →
   base-type default → fallback.
+  Validation patterns use the shared RE2-compatible dialect, with unanchored
+  search semantics unless `^` and `$` are supplied. Backreferences and
+  lookarounds are rejected; patterns are limited to 4096 characters and 16384
+  compiled instructions. Both authored field validation and canonical Operation
+  validation use this bounded engine; there is no native-regex fallback.
   An entry may also declare `children`, which is how a typed object value
   (`measurement`, `numericRange`, `dateRange`, `coordinates`, `recurrence`)
   carries its own shape instead of every field restating it. Add an entry when

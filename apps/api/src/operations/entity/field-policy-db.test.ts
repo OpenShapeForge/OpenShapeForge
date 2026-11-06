@@ -524,6 +524,8 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       expect(admitted.id).toBe(pending!.id);
       expect(pending!.pending.modelValues).toEqual(body.values);
       expect(pending!.pending.definitions).toMatchObject([{ key: "token", osfType: "string" }]);
+      // An unlinked session owns nothing personally; it must not invent an owner.
+      expect(pending!.pending.relationId).toBeNull();
       expect(await latestConfigurationForSession({ ...writer, userId: randomUUID() }, runtime.db)).toBeNull();
       expect(await latestConfigurationForSession({ ...writer, tenantId: randomUUID() }, runtime.db)).toBeNull();
       expect(await consumeConfigurationForSession(pending!.id, { ...writer, tenantId: randomUUID() }, runtime.db)).toBe(false);
@@ -532,6 +534,34 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       expect(typeof standalone.id).toBe("string");
       expect((await latestConfigurationForSession(writer, runtime.db))?.id).toBe(standalone.id);
       expect(await consumeConfigurationForSession(standalone.id, writer, runtime.db)).toBe(true);
+      // A real verified browser session carries its party as the resolved
+      // identity link, not as a bare replayed id. The form the person submits
+      // must be owned by that Relation, or the row it creates lands outside
+      // the owner-axis policies that make it personal.
+      const linkedRelationId = randomUUID();
+      const linked = { ...writer, relation: {
+        status: "linked", relationType: "person", relationId: linkedRelationId,
+        identityId: randomUUID(), issuer: "https://identity.example/realms/test", subject: writer.userId,
+      } };
+      const nested = await withDbSession(runtime.db, linked, () => startConfigurationForSession(runtime.db, linked, body));
+      const nestedPending = await latestConfigurationForSession(linked, runtime.db);
+      expect(nestedPending!.id).toBe(nested.id);
+      expect(nestedPending!.pending.relationId).toBe(linkedRelationId);
+      const { configurationOwnerPatch } = await import("../../mcp/configuration-ownership.js");
+      expect(configurationOwnerPatch({ connectionScope: "user" }, nestedPending!.pending)).toEqual({ ownerUserId: linkedRelationId });
+      expect(nestedPending!.pending.tenantId).toBe(writer.tenantId);
+      expect(nestedPending!.pending.userId).toBe(writer.userId);
+      expect(await latestConfigurationForSession({ ...linked, userId: randomUUID() }, runtime.db)).toBeNull();
+      expect(await latestConfigurationForSession({ ...linked, tenantId: randomUUID() }, runtime.db)).toBeNull();
+      expect(await consumeConfigurationForSession(nested.id, { ...linked, userId: randomUUID() }, runtime.db)).toBe(false);
+      expect(await consumeConfigurationForSession(nested.id, { ...linked, tenantId: randomUUID() }, runtime.db)).toBe(false);
+      expect(await consumeConfigurationForSession(nested.id, linked, runtime.db)).toBe(true);
+      // A server-side replay carries the same party as a bare id instead.
+      const replayedRelationId = randomUUID();
+      const replay = { ...writer, relationId: replayedRelationId };
+      const replayed = await startConfigurationForSession(runtime.db, replay, body);
+      expect((await latestConfigurationForSession(replay, runtime.db))?.pending.relationId).toBe(replayedRelationId);
+      expect(await consumeConfigurationForSession(replayed.id, replay, runtime.db)).toBe(true);
       await expect(startConfigurationForSession(runtime.db, viewer, body)).rejects.toBeDefined();
       await expect(startConfigurationForSession(runtime.db, { ...writer, tenantId: randomUUID() }, body)).rejects.toMatchObject({ code: "NOT_FOUND" });
       await expect(startConfigurationForSession(runtime.db, writer, { ...body, values: { ...body.values, data: { token: "must not be accepted" } } })).rejects.toBeDefined();

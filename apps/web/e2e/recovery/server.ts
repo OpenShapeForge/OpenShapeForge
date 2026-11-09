@@ -8,13 +8,16 @@ const issuer = process.env.AUTH_RECOVERY_ISSUER;
 if (!issuer || new URL(issuer).hostname !== "127.0.0.1" || !process.env.REDIS_URL) {
   throw new Error("An isolated loopback Keycloak issuer and REDIS_URL are required.");
 }
+const clientSecret = process.env.AUTH_RECOVERY_CLIENT_SECRET;
+const authSecret = process.env.AUTH_RECOVERY_AUTH_SECRET;
+if (!clientSecret || !authSecret) throw new Error("Generated fixture credentials are required.");
 const prefix = `recovery-${randomUUID()}`;
 const store = createSessionStore({ keyPrefix: prefix, logTag: "recovery-test" });
 let sessionId: string | undefined;
 let mode: "healthy" | "rate-limit" | "stalled" = "healthy";
 let calls = 0;
 let canceled = false;
-const settings = createKeycloakSettings({ issuer, clientId: "recovery-web", clientSecret: "isolated-test-secret", authSecret: "isolated-session-recovery-auth-secret" });
+const settings = createKeycloakSettings({ issuer, clientId: "recovery-web", clientSecret, authSecret });
 settings.issuerInternal = "http://localhost:3950/refresh-provider";
 const sessionAuth = createSessionAuth({
   logTag: "recovery-test", cookiePrefix: "recovery", keycloak: settings,

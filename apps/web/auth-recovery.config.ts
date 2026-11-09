@@ -8,7 +8,7 @@ export default defineConfig({
   webServer: { command: "bun e2e/recovery/server.ts", url: "http://localhost:3950/login", reuseExistingServer: false,
     env: { AUTH_URL: "http://localhost:3950", AUTH_COOKIE_SECURE: "false",
       AUTH_KEYCLOAK_ISSUER: process.env.AUTH_RECOVERY_ISSUER ?? "",
-      AUTH_KEYCLOAK_ID: "recovery-web", AUTH_KEYCLOAK_SECRET: "isolated-test-secret",
-      AUTH_SECRET: "isolated-session-recovery-auth-secret" },
+      AUTH_KEYCLOAK_ID: "recovery-web", AUTH_KEYCLOAK_SECRET: process.env.AUTH_RECOVERY_CLIENT_SECRET ?? "",
+      AUTH_SECRET: process.env.AUTH_RECOVERY_AUTH_SECRET ?? "" },
   },
 });

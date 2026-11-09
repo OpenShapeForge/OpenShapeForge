@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/overlay/dialog";
-import { readSessionContinuation } from "@/lib/auth/session-continuation";
+import { readSessionContinuation, sessionContinuationRetryAt } from "@/lib/auth/session-continuation";
 import { useAppSession, useSetAppSession } from "./session-provider";
 
 const WARNING_BEFORE_EXPIRY_S = 120;
@@ -58,6 +58,8 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const redirectingRef = useRef(false);
+  const recoveryAttemptRef = useRef(0);
+  const continuingRef = useRef(false);
   const lastActivityRef = useRef(Date.now());
   const handleContinueRef = useRef(() => {});
   const copy = lang === "nl" ? COPY.nl : COPY.en;
@@ -119,6 +121,8 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   }, [clearTimers, logout, setSession]);
 
   const handleContinue = useCallback(async () => {
+    if (continuingRef.current || redirectingRef.current) return;
+    continuingRef.current = true;
     setRefreshing(true);
 
     try {
@@ -127,7 +131,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
         if (result.session) setSession?.(result.session);
         clearTimers();
         setShowDialog(false);
-        setRetryAt(Math.max(Date.now() + 1000, result.session?.refreshRetryAt ?? Date.now() + 5000));
+        setRetryAt(sessionContinuationRetryAt(Date.now(), recoveryAttemptRef.current++, result.session?.refreshRetryAt));
         return;
       }
       if (result.state === "expired") {
@@ -136,6 +140,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
         return;
       }
       const refreshedSession = result.session;
+      recoveryAttemptRef.current = 0;
       setRetryAt(null);
       setSession?.(refreshedSession);
       setShowDialog(false);
@@ -173,7 +178,13 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
 
       setSession?.(null);
       logout("session_expired");
+    } catch {
+      // Unexpected client-side failures must settle the click handler too.
+      clearTimers();
+      setShowDialog(false);
+      setRetryAt(sessionContinuationRetryAt(Date.now(), recoveryAttemptRef.current++));
     } finally {
+      continuingRef.current = false;
       if (!redirectingRef.current) {
         setRefreshing(false);
       }
@@ -190,7 +201,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
 
   useEffect(() => {
     if (session?.error === "RefreshTokenUnavailable") {
-      setRetryAt(Math.max(Date.now() + 1000, session.refreshRetryAt ?? Date.now() + 5000));
+      setRetryAt((current) => Math.max(current ?? 0, sessionContinuationRetryAt(Date.now(), Math.max(0, recoveryAttemptRef.current - 1), session.refreshRetryAt)));
     }
   }, [session?.error, session?.refreshRetryAt]);
 

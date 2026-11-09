@@ -63,6 +63,11 @@ jobs:
 
       - name: Start Keycloak with the generated tenant realm
         run: |
+          bun apps/web/e2e/recovery/prepare.ts "$RUNNER_TEMP/osf-session-recovery"
+          while IFS='=' read -r name value; do
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done < "$RUNNER_TEMP/osf-session-recovery/fixture.env"
           image=$(grep -m1 '^FROM quay.io/keycloak/keycloak' packages/keycloak-spi/Dockerfile | awk '{print $2}')
           echo "keycloak image: $image"
           docker run -d --name keycloak --network host \
@@ -187,13 +192,18 @@ jobs:
 
       - name: Start isolated session recovery dependencies
         run: |
+          bun apps/web/e2e/recovery/prepare.ts "$RUNNER_TEMP/osf-session-recovery"
+          while IFS='=' read -r name value; do
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done < "$RUNNER_TEMP/osf-session-recovery/fixture.env"
           image=$(grep -m1 '^FROM quay.io/keycloak/keycloak' packages/keycloak-spi/Dockerfile | awk '{print $2}')
           docker run -d --name session-recovery-redis -p 127.0.0.1:56383:6379 redis:8-alpine
           docker run -d --name session-recovery-keycloak --network host --memory=768m \
             -e JAVA_OPTS_APPEND="-Xms64m -Xmx384m" \
             -e KC_HTTP_ENABLED=true -e KC_HTTP_PORT=58183 \
             -e KC_HOSTNAME=http://127.0.0.1:58183 -e KC_HOSTNAME_STRICT=true \
-            -v "$PWD/apps/web/e2e/recovery/realm.json:/opt/keycloak/data/import/session-recovery-test-realm.json:ro" \
+            -v "$RUNNER_TEMP/osf-session-recovery/session-recovery-test-realm.json:/opt/keycloak/data/import/session-recovery-test-realm.json:ro" \
             "$image" start-dev --import-realm
           for i in $(seq 1 120); do
             if curl -fsS http://127.0.0.1:58183/realms/session-recovery-test/.well-known/openid-configuration | jq -e '.issuer == "http://127.0.0.1:58183/realms/session-recovery-test"' >/dev/null; then
@@ -212,7 +222,9 @@ jobs:
 
       - name: Stop isolated session recovery dependencies
         if: always()
-        run: docker rm -f session-recovery-keycloak session-recovery-redis 2>/dev/null || true
+        run: |
+          docker rm -f session-recovery-keycloak session-recovery-redis 2>/dev/null || true
+          rm -rf "$RUNNER_TEMP/osf-session-recovery"
 
       - name: Retain browser authentication evidence
         if: always()

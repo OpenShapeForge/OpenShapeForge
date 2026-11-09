@@ -2,6 +2,8 @@
 import { expect, test } from "@playwright/test";
 
 test("a real browser session recovers from rate limits and a stalled response without another login", async ({ page }, info) => {
+  const password = process.env.AUTH_RECOVERY_PASSWORD;
+  if (!password) throw new Error("Generated fixture credentials are required.");
   await page.goto("/login");
   await page.getByRole("button", { name: "Sign in with Keycloak" }).click();
   await page.waitForURL(url => url.port === "58183");
@@ -14,7 +16,7 @@ test("a real browser session recovers from rate limits and a stalled response wi
   expect(authorization.searchParams.get("redirect_uri")).toBe("http://localhost:3950/api/auth/callback/keycloak");
   await expect(page.locator("#username")).toBeVisible({ timeout: 10_000 });
   await page.locator("#username").fill("recovery-reader");
-  await page.locator("#password").fill("isolated-test-password");
+  await page.locator("#password").fill(password);
   await page.locator("#kc-login").click();
   await page.waitForURL(url => url.host === "localhost:3950", { timeout: 15_000 });
   expect(new URL(page.url()).pathname).toBe("/");

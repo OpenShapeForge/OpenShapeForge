@@ -19,3 +19,9 @@ export async function readSessionContinuation(fetchSession: () => Promise<Respon
     return { state: "unavailable" };
   }
 }
+
+/** Respect server pacing while bounding repeated recovery traffic during an outage. */
+export function sessionContinuationRetryAt(now: number, attempt: number, serverRetryAt?: number): number {
+  const delay = Math.min(30_000, 1000 * 2 ** Math.min(5, Math.max(0, attempt)));
+  return Math.max(now + delay, Number.isFinite(serverRetryAt) ? serverRetryAt! : 0);
+}

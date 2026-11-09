@@ -63,11 +63,6 @@ jobs:
 
       - name: Start Keycloak with the generated tenant realm
         run: |
-          bun apps/web/e2e/recovery/prepare.ts "$RUNNER_TEMP/osf-session-recovery"
-          while IFS='=' read -r name value; do
-            echo "::add-mask::$value"
-            echo "$name=$value" >> "$GITHUB_ENV"
-          done < "$RUNNER_TEMP/osf-session-recovery/fixture.env"
           image=$(grep -m1 '^FROM quay.io/keycloak/keycloak' packages/keycloak-spi/Dockerfile | awk '{print $2}')
           echo "keycloak image: $image"
           docker run -d --name keycloak --network host \

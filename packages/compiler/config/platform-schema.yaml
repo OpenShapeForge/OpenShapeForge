@@ -1029,6 +1029,9 @@ tables:
         columns: [tenant_id, subject_entity, subject_id]
       - name: connection_use_grants_connection_idx
         columns: [tenant_id, connection_id]
+      - name: connection_use_grants_issued_identity_idx
+        columns: [tenant_id, issued_identity_id]
+        where: revoked_at IS NULL
 
   # ---------------------------------------------------------------------------
   # Runtime bookkeeping

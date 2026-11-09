@@ -1003,7 +1003,10 @@ permission checks. Sending `tasks/cancel` is the caller's explicit cancellation
 acknowledgement, translated to `confirmed: true` on that Operation. Terminal
 executions and owners without a cancellation Operation acknowledge without a
 new effect; cancellation never promises rollback of completed effects.
-The seven-day handle TTL is retention, not an execution timeout. Expired handles
+The seven-day handle TTL is retention, not an execution timeout. As specified
+by the extension, `ttlMs` is the duration from `createdAt` (`expires_at` minus
+`created_at`), not the remaining duration at each poll. Reading or reusing a
+handle does not extend its expiry. Expired handles
 are unavailable; the underlying workflow remains governed by its own lifecycle.
 Expired handles of a caller are removed when that caller creates another handle;
 there is no deployment-wide expiry sweeper in this increment.

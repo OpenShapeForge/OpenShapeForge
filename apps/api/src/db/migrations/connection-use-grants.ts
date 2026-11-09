@@ -51,7 +51,8 @@ create trigger connection_use_grant_immutable before update on platform.connecti
 
 -- The membership write was already authorized. Scope its cascading withdrawal
 -- to that row's tenant even for a cross-tenant maintenance session. No identity
--- or bypass is elevated; both normal completion and exceptions restore context.
+-- or bypass is elevated. Normal completion restores context explicitly; errors
+-- restore transaction-local settings through PostgreSQL rollback.
 create or replace function app.connection_grants_membership_changed() returns trigger
 language plpgsql set search_path=pg_catalog as $$
 declare previous_tenant text := current_setting('app.tenant_id',true);
@@ -64,7 +65,7 @@ begin
   return null;
 end $$;
 drop trigger if exists connection_grants_membership_changed on platform.identity_relations;
-create trigger connection_grants_membership_changed after update or delete on platform.identity_relations
+create trigger connection_grants_membership_changed after update of status,access_blocked,identity_id,tenant_id,relation_id or delete on platform.identity_relations
   for each row execute function app.connection_grants_membership_changed();
 
 -- One bounded lookup, after core admitted the stored consuming Operation.

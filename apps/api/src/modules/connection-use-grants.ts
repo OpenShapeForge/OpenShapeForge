@@ -52,6 +52,25 @@ async function readGrant(db: OpenShapeForgeDatabase, session: TrustedSessionCont
       and app.connection_grant_owner_live(issued_identity_id,tenant_id,owner_relation_id)
       and (expires_at is null or expires_at>clock_timestamp())`.execute(trx)).rows[0]);
 }
+/** @internal Only called after owner, subject, connection and Service validation.
+ * Serialize the unique consent scope; a replacement and its withdrawal commit
+ * together. The database's tenant/owner policies still apply to this update.
+ */
+export async function withdrawSupersededConnectionGrants(trx: Transaction<DB>, input: {
+  tenantId: string; subject: {entity: string; id: string}; connectionId: string;
+  consumerOperation: string; definitionId: string; fingerprint: string;
+}): Promise<void> {
+  const key = canonical([input.tenantId, input.subject.entity, input.subject.id,
+    input.connectionId, input.consumerOperation, input.definitionId]);
+  await sql`select pg_advisory_xact_lock(hashtext('osf.connection-use-grant'),hashtext(${key}))`.execute(trx);
+  await sql`update platform.connection_use_grants set revoked_at=clock_timestamp()
+    where tenant_id=${input.tenantId}::uuid and subject_entity=${input.subject.entity}
+      and subject_id=${input.subject.id}::uuid and connection_id=${input.connectionId}::uuid
+      and consumer_operation=${input.consumerOperation} and service_definition->>'id'=${input.definitionId}
+      and revoked_at is null
+      and (definition_fingerprint<>${input.fingerprint} or expires_at<=clock_timestamp())`.execute(trx);
+}
+
 export function createConnectionUseGrantServices(db: OpenShapeForgeDatabase, accepts: (session: TrustedSessionContext) => boolean, assertSubject: (session: TrustedSessionContext, subject: {entityName:string;id:string;intent:'get'|'update'}) => Promise<void>): RuntimeConnectionUseGrantServices<TrustedSessionContext> {
   const live = (session: TrustedSessionContext) => { if (!accepts(session) || !session.tenantId) throw refused(); };
   const owner = (session: TrustedSessionContext) => {
@@ -76,6 +95,11 @@ export function createConnectionUseGrantServices(db: OpenShapeForgeDatabase, acc
       const connection = await runtimeRowByFilter(db, session, tables(), snapshot.execution.connectionTable, { id: input.connectionId });
       if (!connection || connection.ownerUserId !== relation || connection[snapshot.execution.connectionProviderRef] !== snapshot.providerId) throw refused();
       return withDbSession(db, session, async trx => {
+        await withdrawSupersededConnectionGrants(trx, {
+          tenantId: session.tenantId!, subject: input.subject, connectionId: input.connectionId,
+          consumerOperation: input.consumerOperation, definitionId: input.definition.id,
+          fingerprint: snapshot.fingerprint,
+        });
         const id = randomUUID();
         await sql`insert into platform.connection_use_grants
           (id,tenant_id,connection_table,values_column,connection_id,owner_relation_id,consumer_operation,subject_entity,subject_id,service_definition,definition_fingerprint,input_schema,issued_by,issued_identity_id,expires_at)

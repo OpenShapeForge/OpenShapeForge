@@ -74,7 +74,13 @@ export function createTasks(input: {
   return {
     async project(result: CallToolResult, meta: unknown) {
       const reference = executionReferenceOf(result);
-      if (!supportsTasks(meta) || result.isError || !reference || !input.providers.has(reference.kind)) return result;
+      if (!supportsTasks(meta) || result.isError || !reference || !input.providers.has(reference.kind)) {
+        // A canonical execution remains a normal result when this projection
+        // cannot track it. Keep the reason inspectable without logging data.
+        if (reference || record(result.structuredContent)?.execution) input.onUnavailable?.(
+          !reference ? "EXECUTION_REFERENCE_MISSING" : !supportsTasks(meta) ? "TASK_CAPABILITY_ABSENT" : "EXECUTION_PROVIDER_UNAVAILABLE");
+        return result;
+      }
       try {
         // Prove follow access BEFORE retaining a handle. A record-action user
         // may start a process without holding a general workflow-read role.

@@ -185,13 +185,44 @@ jobs:
           E2E_WEB_URL: http://localhost:3000
         run: bun run test:browser
 
+      - name: Start isolated session recovery dependencies
+        run: |
+          image=$(grep -m1 '^FROM quay.io/keycloak/keycloak' packages/keycloak-spi/Dockerfile | awk '{print $2}')
+          docker run -d --name session-recovery-redis -p 127.0.0.1:56383:6379 redis:8-alpine
+          docker run -d --name session-recovery-keycloak --network host --memory=768m \
+            -e JAVA_OPTS_APPEND="-Xms64m -Xmx384m" \
+            -e KC_HTTP_ENABLED=true -e KC_HTTP_PORT=58183 \
+            -e KC_HOSTNAME=http://127.0.0.1:58183 -e KC_HOSTNAME_STRICT=true \
+            -v "$PWD/apps/web/e2e/recovery/realm.json:/opt/keycloak/data/import/session-recovery-test-realm.json:ro" \
+            "$image" start-dev --import-realm
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:58183/realms/session-recovery-test/.well-known/openid-configuration | jq -e '.issuer == "http://127.0.0.1:58183/realms/session-recovery-test"' >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs session-recovery-keycloak
+          exit 1
+
+      - name: Run isolated browser session recovery suite
+        env:
+          AUTH_RECOVERY_ISSUER: http://127.0.0.1:58183/realms/session-recovery-test
+          REDIS_URL: redis://127.0.0.1:56383
+        run: bun run --cwd apps/web test:browser:recovery
+
+      - name: Stop isolated session recovery dependencies
+        if: always()
+        run: docker rm -f session-recovery-keycloak session-recovery-redis 2>/dev/null || true
+
       - name: Retain browser authentication evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: web-e2e-evidence
+          include-hidden-files: true
           path: |
             apps/web/playwright-report/
+            .runtime/auth-recovery/
             apps/web/test-results/
           retention-days: 7
           if-no-files-found: ignore

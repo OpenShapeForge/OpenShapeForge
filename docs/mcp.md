@@ -958,6 +958,7 @@ the same callback. Register that exact URL in the provider's client settings.
 ## Durable executions through MCP Tasks
 
 The `io.modelcontextprotocol/tasks` extension uses the 2026-07-28 protocol.
+Its normative contract is the [2026-07-28 Tasks extension specification](https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks).
 It is advertised only when a module contributes an execution provider and
 an authenticated tenant execution context exists. A `tools/call` may return
 `resultType: "task"` only if that exact request declares the extension.

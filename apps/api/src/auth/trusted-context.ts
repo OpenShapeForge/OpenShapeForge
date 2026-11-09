@@ -113,6 +113,8 @@ export type TrustedSessionContext = {
    * platform.identities row, which is how the session finds its Relation.
    */
   issuer?: string;
+  /** OAuth authorized party from the verified bearer claims, never clientInfo. */
+  oauthClientId?: string;
   /** Display language from verified identity claims; never a permission or client input. */
   locale?: string;
   roles: string[];

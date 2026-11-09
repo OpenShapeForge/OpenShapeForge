@@ -1,3 +1,4 @@
+import { withExecutionReference } from "./execution-reference.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The shapes a tool call answers with: success, failure with the shared
@@ -88,7 +89,10 @@ export function acceptedToolResult(result: Pick<OperationAccepted, "accepted" | 
 export function operationToolResult(
   result: ModuleOperationSuccessResult,
 ): ToolResult {
-  if (!result.mcp) return ok(result.value);
+  if (!result.mcp) {
+    const value = result.resultKind === "operation-envelope" ? result.value as import("@openshapeforge/operations").OperationEnvelope<unknown> : undefined;
+    return withExecutionReference(ok(result.value), value?.execution);
+  }
   const structured =
     result.mcp.structuredContent ??
     (result.value && typeof result.value === "object" && !Array.isArray(result.value)
@@ -231,9 +235,9 @@ export function runtimeOperationToolResult(
     ...(resource.description ? { description: resource.description } : {}),
     ...(resource.mimeType ? { mimeType: resource.mimeType } : {}),
   }));
-  return resources.length > 0
+  return withExecutionReference(resources.length > 0
     ? { ...projected, content: [...projected.content, ...resources] }
-    : projected;
+    : projected, result.execution);
 }
 
 /**

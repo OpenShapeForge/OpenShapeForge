@@ -1760,3 +1760,22 @@ tables:
       - { name: grantable, type: boolean, required: true }
       - { name: fields, type: jsonb, required: true }
       - { name: checksum, type: text, required: true }
+
+  # Durable MCP handles only. Domain state/results stay with the execution owner.
+  - schema: platform
+    name: mcp_tasks
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: actor_id, type: uuid, required: true }
+      - { name: authority_hash, type: text, required: true }
+      - { name: owner_kind, type: text, required: true }
+      - { name: owner_ref, type: text, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: clock_timestamp() }
+      - { name: expires_at, type: timestamptz, required: true }
+    indexes:
+      - { name: mcp_tasks_execution_uidx, columns: [tenant_id, actor_id, authority_hash, owner_kind, owner_ref], unique: true }
+      - { name: mcp_tasks_expiry_idx, columns: [expires_at] }

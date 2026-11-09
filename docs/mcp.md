@@ -954,3 +954,49 @@ without credentials, a path, query or fragment. Configuration handoffs and
 application URLs continue to use `OPENSHAPEFORGE_PUBLIC_ORIGIN`. Provider
 registration instructions, authorization-code exchange and refresh all use
 the same callback. Register that exact URL in the provider's client settings.
+
+## Durable executions through MCP Tasks
+
+The `io.modelcontextprotocol/tasks` extension uses the 2026-07-28 protocol.
+It is advertised only when a module contributes an execution provider and
+an authenticated tenant execution context exists. A `tools/call` may return
+`resultType: "task"` only if that exact request declares the extension.
+Legacy clients and modern clients without the capability receive the ordinary
+Operation envelope, including its execution reference and existing offers.
+There is no Claude-specific branch and no implementation of the older
+2025-11-25 task augmentation contract.
+
+An owner opts a start result into following by returning an interface-neutral
+`execution: { kind, ref }` on its canonical success envelope. This is a
+foundation extension to `OperationEnvelope`, not an authored YAML key. Its
+`RuntimeExecutionProvider` reads the durable execution through current
+canonical Operations and optionally invokes an existing cancellation Operation.
+The workflow plugin contributes the first provider. The MCP adapter owns no
+worker: it persists a handle in `platform.mcp_tasks`, bound to the verified
+tenant, actor, issuer, credential and OAuth authorized party, before returning
+it. Polls on a new connection/process read the same owner state. Repeated
+starts with the owner's idempotency key reuse the execution and handle.
+If retaining or authorizing the initial handle fails after a successful start,
+the client receives the ordinary accepted envelope with an explicit tracking
+unavailable message. The committed process is never reported as a failed start.
+Self-described client names and upstream MCP JSON cannot mint execution
+references or grant authority.
+
+`tasks/get` returns status and, on completion, the current authorized final
+Operation envelope as a tool result. Business failure is a completed tool
+result with `isError: true`; refusal to read is a request error, never a saved
+success or an automatic retry of the process. Every poll, including a terminal
+poll, rechecks access. The adapter stores no result snapshot or token.
+`tasks/cancel` requests the owner's canonical cancellation with its ordinary
+permission/confirmation checks; it never promises rollback of completed effects.
+The seven-day handle TTL is retention, not an execution timeout. Expired handles
+are unavailable; the underlying workflow remains governed by its own lifecycle.
+Expired handles of a caller are removed when that caller creates another handle;
+there is no deployment-wide expiry sweeper in this increment.
+
+Human-input waits continue to use existing authorized workflow interaction
+Operations. Waiting for a colleague is `working`, not an elicitation directed
+at the caller. This increment issues no task `inputRequests`; `tasks/update`
+acknowledges an empty update and refuses unissued input. Subscriptions, task
+enumeration and arbitrary background execution of synchronous tools are not
+part of this extension implementation.

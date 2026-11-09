@@ -224,6 +224,7 @@ export async function resolveVerifiedBearerSession(
       tenantId,
       userId: identity.userId,
       ...(typeof claims.iss === "string" ? { issuer: claims.iss } : {}),
+      ...(typeof claims.azp === "string" && claims.azp.trim() ? { oauthClientId: claims.azp } : {}),
       ...(loginSessionBinding ? { loginSessionBinding } : {}),
       userDisplayName: relation?.displayName ?? null,
       ...(isPerson && claims.email_verified === true && personClaims?.email ? { verifiedEmail: personClaims.email } : {}),

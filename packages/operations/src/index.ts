@@ -83,6 +83,7 @@ export type {
   OperationAccepted,
   OperationAcceptance,
   OperationAcceptedBy,
+  OperationExecutionReference,
   OperationViolation,
 } from "./contract.js";
 export {

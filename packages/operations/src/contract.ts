@@ -191,12 +191,17 @@ export type OperationResourceReference = {
   mimeType?: string;
 };
 
+/** A durable execution owned by a registered runtime provider, independent of its transport. */
+export type OperationExecutionReference = { kind: string; ref: string };
+
 /** The canonical success envelope projected unchanged by every interface. */
 export type OperationEnvelope<TData, TIntent extends string = string> = {
   data: TData;
   operations: readonly OperationOffer<TIntent>[];
   /** Optional bounded resources; adapters decide only how to render the links. */
   resources?: readonly OperationResourceReference[];
+  /** Follow this accepted execution to obtain the eventual envelope. */
+  execution?: OperationExecutionReference;
 };
 
 /**

@@ -9,6 +9,7 @@
  * Split out of generated-mcp-server.ts: the body is the former prologue of
  * buildServer, verbatim.
  */
+import { TASKS_EXTENSION, executionProviders } from "./tasks.js";
 import { hasExtensibleEntities } from "./extension-schemas.js";
 import { createDerivedDefinitionResolution } from "./derived-definitions.js";
 import { projectPrompts } from "./prompts.js";
@@ -119,7 +120,7 @@ function createServerScopePrologue(input: {
           : {},
       resources: hasDynamicModuleResources ? { listChanged: true } : {},
       prompts: {},
-      extensions: { [SKILLS_EXTENSION]: {} },
+      extensions: { [SKILLS_EXTENSION]: {}, ...(modulePlatform && session.tenantId && session.userId && executionProviders(runtimeModules).size > 0 ? { [TASKS_EXTENSION]: {} } : {}) },
     },
     // Written once, here, from the fixed guidance and this session's own
     // parts: who the person is, which client is in front of the model and

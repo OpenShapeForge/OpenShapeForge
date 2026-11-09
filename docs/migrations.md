@@ -718,3 +718,9 @@ explicit data disposition are required before retrying; do not reset or drop
 objects as an automatic upgrade step. This is an operator intervention, not an
 automated carry-forward. Databases without these objects can use the normal
 additive migration path.
+
+MCP Tasks adds the internal `platform.mcp_tasks` handle table additively through
+the platform manifest. `migrations/mcp-tasks.ts` tightens its generated tenant
+policy with a restrictive actor policy. It stores execution references rather
+than results or credentials; the canonical execution owner remains the live
+read and cancellation authorization boundary.

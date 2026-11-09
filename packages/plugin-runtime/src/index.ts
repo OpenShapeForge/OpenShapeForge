@@ -1,3 +1,4 @@
+import type { RuntimeExecutionProvider } from "./execution.js";
 // SPDX-License-Identifier: BUSL-1.1
 import type { RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";
 import type {
@@ -1286,6 +1287,8 @@ export type RuntimeModuleContract<
   /** At most one configured module supplies the internal provider-neutral storage port. */
   artifactStorage?: ArtifactStorage;
   operationProviders?: readonly OperationProvider[];
+  /** Durable execution observers; each kind has exactly one owner. */
+  executionProviders?: readonly RuntimeExecutionProvider[];
   /**
    * Takeovers of generated record-scoped `update` and `delete` Operations. At
    * most one override may answer for one call; two answering is refused.
@@ -1334,3 +1337,5 @@ export type RuntimeModuleFactory = (configuration: unknown) => RuntimeModule;
 export type { MaintenanceQuery, MaintenanceConnection, MaintenanceStore, MaintenanceContext, MaintenanceRequest, RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";
 
 export { hostAllowed } from "./egress-policy.js";
+
+export type { RuntimeExecutionProvider, RuntimeExecutionContext, RuntimeExecutionSnapshot } from "./execution.js";

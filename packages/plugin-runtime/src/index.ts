@@ -578,7 +578,17 @@ export type RuntimeOperationProvider = {
   id: string;
   /** An external catalog may fail independently of the application's own Operations. */
   failureIsolation?: "external-catalog";
-  /** Refresh an external snapshot under a live session, independently of list/get. */
+  /**
+   * Refresh an external snapshot under a live session, independently of
+   * list/get. The only place a provider may reach upstream.
+   *
+   * The host calls this inside an authenticated request — before a stateful
+   * session's first listing, and after an authenticated tool call — and
+   * awaits it under a bound of its own. `session` is live only for the
+   * duration of this call: read it, do not retain it, and stop on `signal`.
+   * Answer whether the snapshot changed; throwing or never settling leaves
+   * the previous snapshot in place.
+   */
   refresh?(session: PluginSessionContext, signal: AbortSignal): Promise<boolean>;
   list(session: PluginSessionContext): Promise<readonly RuntimeOperationDefinition[]>;
   get(

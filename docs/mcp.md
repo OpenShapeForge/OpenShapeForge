@@ -973,12 +973,22 @@ foundation extension to `OperationEnvelope`, not an authored YAML key. Its
 canonical Operations and optionally invokes an existing cancellation Operation.
 The workflow plugin contributes the first provider. The MCP adapter owns no
 worker: it persists a handle in `platform.mcp_tasks`, bound to the verified
-tenant, actor, issuer, credential and OAuth authorized party, before returning
+tenant, actor, issuer, credential, OAuth authorized party and normalized token
+scopes, before returning
 it. Polls on a new connection/process read the same owner state. Repeated
 starts with the owner's idempotency key reuse the execution and handle.
+Follow permission is checked before any handle is retained. A record-action
+start does not grant workflow-read permission: callers without the existing
+follow/read rights keep the ordinary accepted envelope and its canonical
+interaction offers. No broad workflow role is granted by Tasks.
 If retaining or authorizing the initial handle fails after a successful start,
 the client receives the ordinary accepted envelope with an explicit tracking
-unavailable message. The committed process is never reported as a failed start.
+unavailable message and a sanitized diagnostic code is logged. The committed
+process is never reported as a failed start. An already-terminal execution keeps
+the original start result and its offers, including on a fast business failure.
+Bearer tokens without a verified OAuth authorized party do not enable Tasks.
+API-key authority is bound to the stable integration, not a rotating key id;
+current key validity and read permission are still checked on every request.
 Self-described client names and upstream MCP JSON cannot mint execution
 references or grant authority.
 
@@ -988,7 +998,10 @@ result with `isError: true`; refusal to read is a request error, never a saved
 success or an automatic retry of the process. Every poll, including a terminal
 poll, rechecks access. The adapter stores no result snapshot or token.
 `tasks/cancel` requests the owner's canonical cancellation with its ordinary
-permission/confirmation checks; it never promises rollback of completed effects.
+permission checks. Sending `tasks/cancel` is the caller's explicit cancellation
+acknowledgement, translated to `confirmed: true` on that Operation. Terminal
+executions and owners without a cancellation Operation acknowledge without a
+new effect; cancellation never promises rollback of completed effects.
 The seven-day handle TTL is retention, not an execution timeout. Expired handles
 are unavailable; the underlying workflow remains governed by its own lifecycle.
 Expired handles of a caller are removed when that caller creates another handle;

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { createHash } from "node:crypto";
+import { operationErrorOf } from "@openshapeforge/operations";
+import { taskAuthorityHash } from "./task-authority.js";
 import { ProtocolError, ProtocolErrorCode, type CallToolResult, type CallToolRequest, type Server } from "@modelcontextprotocol/server";
 import type { RuntimeExecutionContext, RuntimeExecutionProvider } from "@openshapeforge/plugin-runtime";
 import type { ServerScope } from "./server-scope.js";
@@ -46,15 +47,21 @@ const TaskParams = schema<TaskParamsValue>(value => {
 
 export function createTasks(input: {
   store: TaskStore; providers: ReadonlyMap<string, RuntimeExecutionProvider>; context: RuntimeExecutionContext;
+  onUnavailable?: (code: string) => void;
 }) {
-  const read = async (row: TaskBinding) => {
-    const provider = input.providers.get(row.owner_kind);
+  const snapshotFor = async (kind: string, ref: string) => {
+    const provider = input.providers.get(kind);
     if (!provider) throw unavailable();
+    const snapshot = await provider.read(input.context, { kind, ref });
+    if (!Number.isFinite(Date.parse(snapshot.updatedAt))) throw new ProtocolError(ProtocolErrorCode.InternalError, "Execution owner returned an invalid timestamp.");
+    return snapshot;
+  };
+  const read = async (row: TaskBinding) => {
     // Every poll asks the canonical owner with CURRENT authority, even for a terminal result.
-    const snapshot = await provider.read(input.context, { kind: row.owner_kind, ref: row.owner_ref });
+    const snapshot = await snapshotFor(row.owner_kind, row.owner_ref);
     const base = { taskId: row.id, status: snapshot.status, createdAt: new Date(row.created_at).toISOString(),
       lastUpdatedAt: new Date(Math.max(new Date(row.created_at).getTime(), new Date(snapshot.updatedAt).getTime())).toISOString(), ttlMs: new Date(row.expires_at).getTime() - new Date(row.created_at).getTime(),
-      pollIntervalMs: 1000, ...(snapshot.statusMessage ? { statusMessage: snapshot.statusMessage } : {}) };
+      pollIntervalMs: 5000, ...(snapshot.statusMessage ? { statusMessage: snapshot.statusMessage } : {}) };
     return { ...base, ...(snapshot.status === "completed" ? {
       result: { ...runtimeOperationToolResult(snapshot.result), ...(snapshot.isError ? { isError: true } : {}) },
     } : {}) };
@@ -69,13 +76,21 @@ export function createTasks(input: {
       const reference = executionReferenceOf(result);
       if (!supportsTasks(meta) || result.isError || !reference || !input.providers.has(reference.kind)) return result;
       try {
+        // Prove follow access BEFORE retaining a handle. A record-action user
+        // may start a process without holding a general workflow-read role.
+        const snapshot = await snapshotFor(reference.kind, reference.ref);
+        // Start acceptance is distinct from the eventual outcome. Keep its
+        // exact original envelope, including on an immediately failed run.
+        if (snapshot.status !== "working") return result;
         const row = await input.store.retain(reference);
-        const state = await read(row);
-        // A process already finished during start needs no background task.
-        if (state.status === "completed") return state.result!;
-        if (state.status === "cancelled") return result;
-        return { resultType: "task", ...state };
-      } catch {
+        return { resultType: "task", taskId: row.id, status: snapshot.status,
+          createdAt: new Date(row.created_at).toISOString(),
+          lastUpdatedAt: new Date(Math.max(new Date(row.created_at).getTime(), Date.parse(snapshot.updatedAt))).toISOString(),
+          ttlMs: new Date(row.expires_at).getTime() - new Date(row.created_at).getTime(), pollIntervalMs: 5000,
+          ...(snapshot.statusMessage ? { statusMessage: snapshot.statusMessage } : {}) };
+      } catch (cause) {
+        const code = operationErrorOf(cause)?.code;
+        input.onUnavailable?.(code && /^[A-Z0-9_]{1,80}$/.test(code) ? code : "TRACKING_UNAVAILABLE");
         // The canonical start has already committed. Never report it as a failed
         // start, which could invite a duplicate; the ordinary envelope is durable.
         return { ...result, content: [...result.content, { type: "text" as const,
@@ -88,10 +103,12 @@ export function createTasks(input: {
       }));
       server.setRequestHandler("tasks/cancel", { params: TaskParams }, async params => {
         const row = await lookup(params.taskId);
-        await read(row);
+        const current = await read(row);
         const provider = input.providers.get(row.owner_kind)!;
-        if (!provider.cancel) throw new ProtocolError(ProtocolErrorCode.InvalidParams, "This execution does not support cancellation.");
-        await provider.cancel(input.context, { kind: row.owner_kind, ref: row.owner_ref });
+        // Protocol cancellation is cooperative. Terminal work is a no-op;
+        // an owner with no cancellation operation acknowledges without stopping.
+        if (current.status === "working" && provider.cancel)
+          await provider.cancel(input.context, { kind: row.owner_kind, ref: row.owner_ref });
         return { resultType: "complete" };
       });
       // Human input remains on the owner's existing canonical interaction offers.
@@ -108,12 +125,9 @@ export function createTasks(input: {
 export function tasksForScope(scope: ServerScope) {
   const providers = executionProviders(scope.runtimeModules);
   if (!providers.size || !scope.modulePlatform || !scope.session.tenantId || !scope.session.userId) return undefined;
-  // Self-reported clientInfo is never authority. Bind to verified issuer, actor,
-  // credential class and OAuth authorized party, but not a transient MCP session.
-  const authorityHash = createHash("sha256").update(JSON.stringify([
-    scope.session.issuer ?? null, scope.session.credential, scope.session.oauthClientId ?? null,
-    scope.session.appPrincipal ?? null,
-  ])).digest("hex");
+  const authorityHash = taskAuthorityHash(scope.session);
+  if (!authorityHash) return undefined;
   return createTasks({ store: createTaskStore(scope.db, scope.session, authorityHash), providers,
-    context: { execute: request => scope.modulePlatform!.services.operations.execute(scope.moduleSession, request) } });
+    onUnavailable: code => console.warn(JSON.stringify({ event: "mcp.task_tracking_unavailable", code })),
+    context: { locale: scope.locale.tag, execute: request => scope.modulePlatform!.services.operations.execute(scope.moduleSession, request) } });
 }

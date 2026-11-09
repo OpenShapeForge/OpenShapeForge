@@ -2,13 +2,15 @@
 import type { OperationExecutionReference } from "@openshapeforge/operations";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 
-// Only canonical projections set this. Upstream/native MCP content can never
-// opt an unrelated tool into another owner's execution by forging JSON.
-const references = new WeakMap<CallToolResult, OperationExecutionReference>();
+// JSON from upstream/native MCP cannot forge this core-owned symbol. It is
+// enumerable so ordinary result spreads (configuration metadata) preserve it;
+// JSON serialization ignores symbol keys entirely.
+const execution = Symbol("canonical execution reference");
+type WithExecution = CallToolResult & { [execution]?: OperationExecutionReference };
 export function withExecutionReference<T extends CallToolResult>(result: T, reference?: OperationExecutionReference): T {
-  if (reference) references.set(result, reference);
+  if (reference) (result as WithExecution)[execution] = reference;
   return result;
 }
 export function executionReferenceOf(result: CallToolResult): OperationExecutionReference | undefined {
-  return references.get(result);
+  return (result as WithExecution)[execution];
 }

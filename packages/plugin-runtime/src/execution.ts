@@ -3,6 +3,7 @@ import type { OperationExecutionReference } from "@openshapeforge/operations";
 import type { RuntimeOperationRequest, RuntimeOperationExecutionResult } from "./index.js";
 
 export type RuntimeExecutionContext = {
+  locale?: string;
   /** Always dispatch through the live caller's canonical Operations. */
   execute(request: RuntimeOperationRequest): Promise<RuntimeOperationExecutionResult>;
 };
@@ -16,7 +17,7 @@ export type RuntimeExecutionSnapshot = {
   isError?: boolean;
 };
 
-/** An execution owner, not another worker or authorization layer. */
+/** An execution owner, not another worker or authorization layer. Terminal states must not reopen. */
 export type RuntimeExecutionProvider = {
   kind: string;
   read(context: RuntimeExecutionContext, reference: OperationExecutionReference): Promise<RuntimeExecutionSnapshot>;

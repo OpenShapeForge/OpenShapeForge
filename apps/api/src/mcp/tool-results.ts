@@ -1,5 +1,5 @@
-import { withExecutionReference } from "./execution-reference.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { withExecutionReference } from "./execution-reference.js";
 /**
  * The shapes a tool call answers with: success, failure with the shared
  * error body, the canonical Operation envelope, partial composition results,
@@ -98,10 +98,11 @@ export function operationToolResult(
     (result.value && typeof result.value === "object" && !Array.isArray(result.value)
       ? (result.value as Record<string, unknown>)
       : undefined);
-  return {
+  const value = result.resultKind === "operation-envelope" ? result.value as import("@openshapeforge/operations").OperationEnvelope<unknown> : undefined;
+  return withExecutionReference({
     content: result.mcp.content,
     ...(structured ? { structuredContent: structured } : {}),
-  };
+  }, value?.execution);
 }
 
 export const __operationToolResultForTests = operationToolResult;

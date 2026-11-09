@@ -208,7 +208,7 @@ export type OperationEnvelope<TData, TIntent extends string = string> = {
  * Who took an Operation over: the owner's kind (for example `workflow`) and
  * its own reference to the work it started (for example a run id).
  */
-export type OperationAcceptedBy = { kind: string; ref: string };
+export type OperationAcceptedBy = OperationExecutionReference;
 
 /**
  * The Operation was taken over by another owner (an operation override) and

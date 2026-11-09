@@ -1,5 +1,5 @@
-import type { RuntimeExecutionProvider } from "./execution.js";
 // SPDX-License-Identifier: BUSL-1.1
+import type { RuntimeExecutionProvider } from "./execution.js";
 import type { RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";
 import type {
   FastifyInstance,

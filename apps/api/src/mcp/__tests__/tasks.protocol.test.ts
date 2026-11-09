@@ -71,6 +71,7 @@ describe("MCP Tasks extension over actual HTTP", () => {
     done = true;
     const final = await call("tasks/get", { taskId: id });
     expect(final.result).toMatchObject({ resultType: "complete", status: "completed", result: { structuredContent: { data: { answer: 42 } } } });
+    expect((await call("tasks/cancel", { taskId: id })).error).toBeUndefined(); expect(cancels).toBe(0);
     const before = reads; denied = true;
     expect((await call("tasks/get", { taskId: id })).error).toBeDefined();
     expect(reads).toBe(before + 1); denied = false; done = false;

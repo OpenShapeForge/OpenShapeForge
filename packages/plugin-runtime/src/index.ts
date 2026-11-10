@@ -1087,7 +1087,9 @@ export type RuntimeWorkerContract<Context> = {
     fingerprint: string,
   ): Promise<void>;
   /**
-   * Required for non-repeatable writes. Atomically acquire, under the exact
+   * Required whenever resolveOperationWork/pinOperationContract are supplied;
+   * startup rejects a partial callback triple. Used for non-repeatable writes.
+   * Atomically acquire, under the exact
    * active claim and committed before core dispatches, this attempt's `started`
    * mark. Reject a second acquisition of the same attempt, including from
    * another broker/process. Once core has

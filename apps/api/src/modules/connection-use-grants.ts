@@ -116,7 +116,7 @@ export function createConnectionUseGrantServices(db: OpenShapeForgeDatabase, acc
       await assertSubject(session,{entityName:subject.entity,id:subject.id,intent:'get'});
       await withDbSession(db, session, async trx => { await sql`update platform.connection_use_grants set revoked_at=clock_timestamp()
         where tenant_id=${session.tenantId}::uuid and subject_entity=${subject.entity} and subject_id=${subject.id}::uuid
-          and (owner_relation_id=${relation}::uuid or ${admin}::boolean) and revoked_at is null
+          and (owner_relation_id=${relation ?? null}::uuid or ${admin}::boolean) and revoked_at is null
           and (${subject.grantId ?? null}::uuid is null or id=${subject.grantId ?? null}::uuid)`.execute(trx); });
     },
     async list(session, subject) {

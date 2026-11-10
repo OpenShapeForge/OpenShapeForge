@@ -1771,6 +1771,37 @@
             }
           }
         },
+        "toolbar": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Which collection controls the web table offers. Presentation only: the list and create Operations stay available to every other channel.",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Toolbar",
+              "nl": "Werkbalk"
+            }
+          },
+          "properties": {
+            "search": {
+              "type": "boolean",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Show search",
+                  "nl": "Zoeken tonen"
+                }
+              }
+            },
+            "create": {
+              "type": "boolean",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Show create button",
+                  "nl": "Toevoegknop tonen"
+                }
+              }
+            }
+          }
+        },
         "heading": {
           "type": "object",
           "additionalProperties": false,

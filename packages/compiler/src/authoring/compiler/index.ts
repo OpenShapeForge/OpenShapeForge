@@ -382,6 +382,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
                 ? { recordContext: coreEntity.interfaces.web.views.record.layout.context }
                 : {}),
               ...(coreEntity.interfaces.web.views?.collection.emptyState ? { collectionEmptyState: coreEntity.interfaces.web.views.collection.emptyState } : {}),
+              ...(coreEntity.interfaces.web.views?.collection.table ? { collectionTable: coreEntity.interfaces.web.views.collection.table } : {}),
               ...(coreEntity.interfaces.web.views?.collection.tree ? { collectionTree: coreEntity.interfaces.web.views.collection.tree } : {}),
               ...(coreEntity.interfaces.web.views?.collection.board ? { collectionBoard: coreEntity.interfaces.web.views.collection.board } : {}),
               ...(coreEntity.interfaces.web.views?.collection.actions?.length

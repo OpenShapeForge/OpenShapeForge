@@ -497,8 +497,10 @@ function relationshipAnyFilters(
       type: "object",
       properties: {
         any: { type: "object", properties, minProperties: 1, additionalProperties: false },
+        none: { type: "object", properties, additionalProperties: false },
       },
-      required: ["any"],
+      oneOf: [{ required: ["any"] }, { required: ["none"] }],
+      maxProperties: 1,
       additionalProperties: false,
     };
   }
@@ -729,6 +731,8 @@ export function entityOperationJsonSchemas(
       }};
       const sortable = entitySortableFieldKeys(contract, secureInputTarget, contracts);
       const boardAggregate = Boolean(contract.interfaces?.web?.collectionBoard?.aggregate);
+      const collectionGroups = Boolean(contract.interfaces?.web?.collectionTable?.groupBy);
+      const collectionSummary = Boolean(contract.interfaces?.web?.collectionTable?.summary);
       const pageSchema = entityListPageSchema(
         {
           type: "object",
@@ -747,6 +751,8 @@ export function entityOperationJsonSchemas(
           },
         },
       };
+      if (collectionGroups) (pageSchema.properties as JsonObject).collectionGroups = { type: "array", maxItems: 1000, items: { type: "object", additionalProperties: false, required: ["value", "count"], properties: { value: { type: ["string", "number", "boolean", "null"] }, count: { type: "integer", minimum: 0 } } } };
+      if (collectionSummary) (pageSchema.properties as JsonObject).collectionSummary = { type: "array", maxItems: 1000, items: { type: "object", additionalProperties: false, required: ["value", "count"], properties: { value: { type: ["string", "number", "boolean", "null"] }, count: { type: "integer", minimum: 0 } } } };
       return {
         inputSchema: {
           $defs: filterDefinitions,
@@ -772,6 +778,8 @@ export function entityOperationJsonSchemas(
             },
             includeTotalCount: { type: "boolean" },
             ...(boardAggregate ? { includeBoardTotals: { type: "boolean" } } : {}),
+            ...(collectionGroups ? { includeCollectionGroups: { type: "boolean" } } : {}),
+            ...(collectionSummary ? { includeCollectionSummary: { type: "boolean" } } : {}),
           },
           additionalProperties: false,
         },

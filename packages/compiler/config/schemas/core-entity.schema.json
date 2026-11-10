@@ -1313,6 +1313,473 @@
         }
       ]
     },
+    "webCollectionTableValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Value path",
+              "nl": "Waardepad"
+            }
+          }
+        },
+        "text": {
+          "$ref": "#/$defs/localizedText",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Text",
+              "nl": "Tekst"
+            }
+          }
+        },
+        "format": {
+          "enum": [
+            "money",
+            "percentage",
+            "frequency",
+            "chip"
+          ],
+          "x-osf-i18n": {
+            "title": {
+              "en": "Presentation",
+              "nl": "Weergave"
+            },
+            "enum": {
+              "money": {
+                "en": "Money",
+                "nl": "Geldbedrag"
+              },
+              "percentage": {
+                "en": "Percentage",
+                "nl": "Percentage"
+              },
+              "frequency": {
+                "en": "Frequency in months",
+                "nl": "Frequentie in maanden"
+              },
+              "chip": {
+                "en": "Chip",
+                "nl": "Chip"
+              }
+            }
+          }
+        },
+        "currency": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Currency path",
+              "nl": "Valutapad"
+            }
+          }
+        },
+        "select": {
+          "const": "one",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Single related value",
+              "nl": "Enkele gerelateerde waarde"
+            },
+            "enum": {
+              "one": {
+                "en": "Zero or one",
+                "nl": "Nul of een"
+              }
+            }
+          }
+        },
+        "when": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Value path",
+                  "nl": "Waardepad"
+                }
+              }
+            },
+            "equals": {
+              "type": [
+                "string",
+                "number",
+                "boolean"
+              ],
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Equals",
+                  "nl": "Gelijk aan"
+                }
+              }
+            }
+          },
+          "required": [
+            "path",
+            "equals"
+          ],
+          "x-osf-i18n": {
+            "title": {
+              "en": "Condition",
+              "nl": "Voorwaarde"
+            }
+          }
+        },
+        "defaultValue": {
+          "type": [
+            "string",
+            "number"
+          ],
+          "x-osf-i18n": {
+            "title": {
+              "en": "Default when empty",
+              "nl": "Standaard bij leeg"
+            }
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "path"
+          ],
+          "not": {
+            "required": [
+              "text"
+            ]
+          },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Related value",
+              "nl": "Gerelateerde waarde"
+            }
+          }
+        },
+        {
+          "required": [
+            "text"
+          ],
+          "not": {
+            "required": [
+              "path"
+            ]
+          },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Fixed text",
+              "nl": "Vaste tekst"
+            }
+          }
+        }
+      ],
+      "x-osf-i18n": {
+        "title": {
+          "en": "Record values",
+          "nl": "Recordwaarden"
+        }
+      }
+    },
+    "webCollectionTableColumn": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Key",
+              "nl": "Sleutel"
+            }
+          }
+        },
+        "label": {
+          "$ref": "#/$defs/localizedText",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Column label",
+              "nl": "Kolomnaam"
+            }
+          }
+        },
+        "values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/webCollectionTableValue"
+          },
+          "minItems": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Record values",
+              "nl": "Recordwaarden"
+            }
+          }
+        },
+        "membershipValues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/webCollectionTableValue"
+          },
+          "minItems": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Membership values",
+              "nl": "Lidmaatschapswaarden"
+            }
+          }
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "values"
+      ],
+      "x-osf-i18n": {
+        "title": {
+          "en": "Columns",
+          "nl": "Kolommen"
+        }
+      }
+    },
+    "webCollectionTable": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "heading": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Title",
+                  "nl": "Titel"
+                }
+              }
+            },
+            "subtitle": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Subtitle",
+                  "nl": "Ondertitel"
+                }
+              }
+            }
+          },
+          "required": [
+            "title"
+          ],
+          "x-osf-i18n": {
+            "title": {
+              "en": "Heading",
+              "nl": "Kop"
+            }
+          }
+        },
+        "views": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tree": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Grouped view",
+                  "nl": "Gegroepeerde weergave"
+                }
+              }
+            },
+            "flat": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "All records",
+                  "nl": "Alle records"
+                }
+              }
+            }
+          },
+          "required": [
+            "tree",
+            "flat"
+          ],
+          "x-osf-i18n": {
+            "title": {
+              "en": "View labels",
+              "nl": "Weergavenamen"
+            }
+          }
+        },
+        "label": {
+          "$ref": "#/$defs/localizedText",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Column label",
+              "nl": "Kolomnaam"
+            }
+          }
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Description field",
+              "nl": "Beschrijvingsveld"
+            }
+          }
+        },
+        "groupBy": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Group by",
+              "nl": "Groeperen op"
+            }
+          }
+        },
+        "ungrouped": {
+          "$ref": "#/$defs/localizedText",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Without a group",
+              "nl": "Zonder groep"
+            }
+          }
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/webCollectionTableColumn"
+          },
+          "minItems": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Columns",
+              "nl": "Kolommen"
+            }
+          }
+        },
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "field": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Field",
+                  "nl": "Veld"
+                }
+              }
+            },
+            "labels": {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/localizedText"
+              },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Value labels",
+                  "nl": "Waardenamen"
+                }
+              }
+            }
+          },
+          "required": [
+            "field"
+          ],
+          "x-osf-i18n": {
+            "title": {
+              "en": "Summary",
+              "nl": "Samenvatting"
+            }
+          }
+        },
+        "recordPanel": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title"
+          ],
+          "x-osf-i18n": {
+            "title": {
+              "en": "Floating record panel",
+              "nl": "Zwevend recordpaneel"
+            }
+          },
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Panel title",
+                  "nl": "Paneeltitel"
+                }
+              }
+            }
+          }
+        }
+      },
+      "required": [
+        "heading",
+        "views",
+        "label",
+        "columns"
+      ],
+      "x-osf-i18n": {
+        "title": {
+          "en": "Grouped table",
+          "nl": "Gegroepeerde tabel"
+        }
+      }
+    },
+    "webCollectionTreeThrough": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "record": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Member reference",
+              "nl": "Lidverwijzing"
+            }
+          }
+        },
+        "orderBy": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Membership order",
+              "nl": "Volgorde lidmaatschappen"
+            }
+          }
+        }
+      },
+      "required": [
+        "record"
+      ],
+      "x-osf-i18n": {
+        "title": {
+          "en": "Through membership",
+          "nl": "Via lidmaatschap"
+        }
+      }
+    },
     "webViewsV2": {
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/webNamedViewV2" },
@@ -1329,6 +1796,7 @@
           "additionalProperties": false,
           "required": ["route", "columns"],
           "properties": {
+            "table": {"$ref": "#/$defs/webCollectionTable"},
             "tree": {
               "type": "object", "additionalProperties": false, "required": ["children"],
               "description": "Optional collapsible tree presentation of this same collection: each record is a group whose members are the records its `children` collection holds, nested without a depth limit.",
@@ -1336,7 +1804,8 @@
               "properties": {
                 "children": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Children collection", "nl": "Collectie met onderdelen" } } },
                 "label": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group label field", "nl": "Groepslabelveld" } } },
-                "count": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group count field", "nl": "Groepstellingsveld" } } }
+                "count": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group count field", "nl": "Groepstellingsveld" } } },
+                "through": {"$ref": "#/$defs/webCollectionTreeThrough"}
               }
             },
             "board": {

@@ -926,6 +926,8 @@ function buildSubtypeTable(
     ...(baseTable.retention ? { retention: structuredClone(baseTable.retention) } : {}),
     source: {
       path: candidate.path,
+      ...(contract.interfaces?.web?.collectionTable?.summary ? { collectionSummaryBy: contract.interfaces.web.collectionTable.summary.field } : {}),
+      ...(contract.interfaces?.web?.collectionTable?.groupBy ? { collectionGroupBy: contract.interfaces.web.collectionTable.groupBy } : {}),
       ...(contract.interfaces?.web?.collectionBoard?.aggregate ? { boardAggregate: { groupBy: contract.interfaces.web.collectionBoard.groupBy, ...contract.interfaces.web.collectionBoard.aggregate } } : {}),
       authoringEntityName: contract.entity.name,
       authoringEntitySlug: candidate.slug,
@@ -1737,6 +1739,8 @@ export function compileAuthoringBackendManifest(
       ...(retention === undefined ? {} : { retention }),
       source: {
         path: candidate.path,
+        ...(candidate.contract.interfaces?.web?.collectionTable?.summary ? { collectionSummaryBy: candidate.contract.interfaces.web.collectionTable.summary.field } : {}),
+        ...(candidate.contract.interfaces?.web?.collectionTable?.groupBy ? { collectionGroupBy: candidate.contract.interfaces.web.collectionTable.groupBy } : {}),
         ...(candidate.contract.interfaces?.web?.collectionBoard?.aggregate ? { boardAggregate: { groupBy: candidate.contract.interfaces.web.collectionBoard.groupBy, ...candidate.contract.interfaces.web.collectionBoard.aggregate } } : {}),
         ...(candidate.contract.blueprint ? { blueprint: candidate.contract.blueprint } : {}),
         ...(candidate.contract.transitions ? { transitions: candidate.contract.transitions } : {}),

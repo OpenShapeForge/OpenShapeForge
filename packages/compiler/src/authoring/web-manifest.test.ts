@@ -2315,3 +2315,40 @@ test("a collection tree names a stored collection of the entity and fields for i
   product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", count: "missing" };
   expect(build).toThrow("Product: collection tree count missing is not a field of Product.");
 });
+
+describe('declarative collection tables', () => {
+  const fixture = () => {
+    const product = entity('Product', 'products', [field('displayName'), field('category')], coreView(), [{ key: 'parts', kind: 'hasMany', target: 'Membership', foreignKey: 'parent_id' }]);
+    const member = entity('Membership', 'memberships', [field('role'), field('amount', { baseType: 'number', osfType: 'money' }), field('currency'), field('position', { baseType: 'integer' })], coreView(), [{ key: 'item', fieldKey: 'item', kind: 'belongsTo', target: 'Product', foreignKey: 'item_id' }]);
+    product.contract.interfaces!.web!.collectionTree = { children: 'parts', through: { record: 'item', orderBy: 'position' } };
+    product.contract.interfaces!.web!.collectionTable = { heading: { title: text('Catalogue') }, views: { tree: text('Grouped'), flat: text('All') }, label: text('Product'), groupBy: 'category', columns: [{ key: 'role', label: text('Role'), values: [{ text: text('Standalone') }], membershipValues: [{ path: 'role' }] }] };
+    return { product, member, build: () => buildWebManifest([product, member]) };
+  };
+  test('preserves explicit traversal and compiles membership values in the association context', () => {
+    const { build } = fixture(); const view = build().entities.Product!.views.collection;
+    expect(view.tree?.through).toEqual({ record: 'item', orderBy: 'position' });
+    expect(view.table?.columns[0]?.membershipValues?.[0]?.path).toEqual({ path: [], targetEntityId: 'Membership', field: 'role', osfType: 'string', cardinality: 'one' });
+  });
+  test('rejects a guessed member reference and duplicate column identities', () => {
+    const { product, build } = fixture();
+    product.contract.interfaces!.web!.collectionTree!.through!.record = 'missing';
+    expect(build).toThrow('through.record');
+    product.contract.interfaces!.web!.collectionTree!.through!.record = 'item';
+    const columns = product.contract.interfaces!.web!.collectionTable!.columns;
+    columns.push(columns[0]!); expect(build).toThrow('duplicate table column');
+  });
+  test('requires explicit single-result selection on a collection path', () => {
+    const { product, build } = fixture();
+    const value = { path: 'parts.role' } as { path: string; select?: 'one' };
+    product.contract.interfaces!.web!.collectionTable!.columns[0]!.values = [value];
+    expect(build).toThrow('select: one'); value.select = 'one';
+    expect(build().entities.Product!.views.collection.table?.columns[0]?.values[0]?.path?.cardinality).toBe('many');
+  });
+  test('keeps money and currency on the same readable record', () => {
+    const { product, build } = fixture();
+    product.contract.interfaces!.web!.collectionTable!.columns[0]!.membershipValues = [{ path: 'amount', currency: 'currency', format: 'money' }];
+    expect(build().entities.Product!.views.collection.table?.columns[0]?.membershipValues?.[0]?.currency?.field).toBe('currency');
+    product.contract.interfaces!.web!.collectionTable!.columns[0]!.membershipValues![0]!.currency = 'item.displayName';
+    expect(build).toThrow('same related record');
+  });
+});

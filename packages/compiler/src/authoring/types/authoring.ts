@@ -446,6 +446,28 @@ export type EntityWebNamedViewDefinition =
     | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
     | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
+
+export type CollectionTableValueDefinition = {
+  path?: string;
+  text?: LocalizedText;
+  format?: "money" | "percentage" | "frequency" | "chip";
+  currency?: string;
+  select?: "one";
+  when?: { path: string; equals: string | number | boolean };
+  defaultValue?: string | number;
+};
+export type CollectionTableDefinition = {
+  recordPanel?: { title: LocalizedText };
+  heading: { title: LocalizedText; subtitle?: LocalizedText };
+  views: { tree: LocalizedText; flat: LocalizedText };
+  label: LocalizedText;
+  description?: string;
+  groupBy?: string;
+  ungrouped?: LocalizedText;
+  columns: Array<{ key: string; label: LocalizedText; values: CollectionTableValueDefinition[]; membershipValues?: CollectionTableValueDefinition[] }>;
+  summary?: { field: string; labels?: Record<string, LocalizedText> };
+};
+
 export interface EntityWebViewDefinition {
   /** Additional target-owned views, addressable by relationship placements. */
   named?: Record<string, EntityWebNamedViewDefinition>;
@@ -456,7 +478,8 @@ export interface EntityWebViewDefinition {
      * Optional collapsible tree presentation of this same collection: each
      * record groups the records its `children` collection holds.
      */
-    tree?: { children: string; label?: string; count?: string };
+    table?: CollectionTableDefinition;
+    tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
     /** Optional grouped board presentation of this same collection. */
     board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: string; currency: string }; card: { title: string | string[]; timestamp?: string; indicator?: string; subtitle?: string[]; amount?: { value: string; currency: string }; body?: string[] } };
     /** Opaque host renderer-registry key; omission uses the generic collection renderer. */

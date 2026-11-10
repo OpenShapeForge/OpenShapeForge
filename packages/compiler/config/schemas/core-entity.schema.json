@@ -1266,53 +1266,206 @@
       }
     },
     "webNamedViewV2": {
-      "x-osf-i18n": { "title": { "en": "View", "nl": "Weergave" } },
+      "x-osf-i18n": {
+        "title": {
+          "en": "View",
+          "nl": "Weergave"
+        }
+      },
       "oneOf": [
-        { "$ref": "#/$defs/webMatrixView" },
+        {
+          "$ref": "#/$defs/webMatrixView"
+        },
         {
           "type": "object",
-          "x-osf-i18n": { "title": { "en": "Record view", "nl": "Recordweergave" } },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Record view",
+              "nl": "Recordweergave"
+            }
+          },
           "additionalProperties": false,
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "oneOf": [
-            { "required": ["fields"], "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } } },
-            { "required": ["layout"], "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } } }
+            {
+              "required": [
+                "fields"
+              ],
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Fields",
+                  "nl": "Velden"
+                }
+              }
+            },
+            {
+              "required": [
+                "layout"
+              ],
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Layout",
+                  "nl": "Indeling"
+                }
+              }
+            }
           ],
           "properties": {
-            "kind": { "const": "record", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
+            "kind": {
+              "const": "record",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Kind",
+                  "nl": "Soort"
+                }
+              }
+            },
             "fields": {
               "type": "array",
               "minItems": 1,
               "uniqueItems": true,
-              "x-osf-i18n": { "title": { "en": "Fields", "nl": "Velden" } },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Fields",
+                  "nl": "Velden"
+                }
+              },
               "items": {
                 "$ref": "#/$defs/fieldKey",
                 "x-osf-choice": "field",
-                "x-osf-i18n": { "title": { "en": "Field", "nl": "Veld" } }
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Field",
+                    "nl": "Veld"
+                  }
+                }
               }
             },
-            "title": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title", "nl": "Titel" } } },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Title",
+                  "nl": "Titel"
+                }
+              }
+            },
             "layout": {
               "$ref": "#/$defs/webViewsV2/properties/record/properties/layout",
-              "x-osf-i18n": { "title": { "en": "Layout", "nl": "Indeling" } }
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Layout",
+                  "nl": "Indeling"
+                }
+              }
             }
           }
         },
         {
           "type": "object",
-          "x-osf-i18n": { "title": { "en": "Collection view", "nl": "Collectieweergave" } },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Collection view",
+              "nl": "Collectieweergave"
+            }
+          },
           "additionalProperties": false,
-          "required": ["kind", "collectionLayout"],
+          "required": [
+            "kind",
+            "collectionLayout"
+          ],
           "properties": {
-            "kind": { "const": "collection", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
-            "collectionLayout": { "enum": ["table", "tabs", "stack"], "x-osf-i18n": { "title": { "en": "Collection layout", "nl": "Collectie-indeling" }, "enum": { "table": { "en": "Table", "nl": "Tabel" }, "tabs": { "en": "Tabs", "nl": "Tabbladen" }, "stack": { "en": "Stack", "nl": "Onder elkaar" } } } },
-            "route": { "$ref": "#/$defs/webViewsV2/properties/collection/properties/route" },
-            "title": { "$ref": "#/$defs/webViewsV2/properties/collection/properties/title" },
-            "tree": { "$ref": "#/$defs/webViewsV2/properties/collection/properties/tree" },
-            "table": { "$ref": "#/$defs/webViewsV2/properties/collection/properties/table" },
-            "itemView": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$", "x-osf-i18n": { "title": { "en": "Item view", "nl": "Itemweergave" } } },
-            "tabLabel": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Tab label field", "nl": "Tabbladlabelveld" } } },
-            "showItemTitle": { "type": "boolean", "default": true, "x-osf-i18n": { "title": { "en": "Show item title", "nl": "Itemtitel tonen" } } }
+            "kind": {
+              "const": "collection",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Kind",
+                  "nl": "Soort"
+                }
+              }
+            },
+            "collectionLayout": {
+              "enum": [
+                "table",
+                "tabs",
+                "stack"
+              ],
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Collection layout",
+                  "nl": "Collectie-indeling"
+                },
+                "enum": {
+                  "table": {
+                    "en": "Table",
+                    "nl": "Tabel"
+                  },
+                  "tabs": {
+                    "en": "Tabs",
+                    "nl": "Tabbladen"
+                  },
+                  "stack": {
+                    "en": "Stack",
+                    "nl": "Onder elkaar"
+                  }
+                }
+              }
+            },
+            "route": {
+              "$ref": "#/$defs/webViewsV2/properties/collection/properties/route"
+            },
+            "title": {
+              "$ref": "#/$defs/webViewsV2/properties/collection/properties/title"
+            },
+            "tree": {
+              "$ref": "#/$defs/webViewsV2/properties/collection/properties/tree"
+            },
+            "table": {
+              "$ref": "#/$defs/webViewsV2/properties/collection/properties/table"
+            },
+            "itemView": {
+              "type": "string",
+              "pattern": "^[a-z][A-Za-z0-9]*$",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Item view",
+                  "nl": "Itemweergave"
+                }
+              }
+            },
+            "tabLabel": {
+              "$ref": "#/$defs/fieldKey",
+              "x-osf-choice": "field",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Tab label field",
+                  "nl": "Tabbladlabelveld"
+                }
+              }
+            },
+            "showItemTitle": {
+              "type": "boolean",
+              "default": true,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Show item title",
+                  "nl": "Itemtitel tonen"
+                }
+              }
+            },
+            "filter": {
+              "type": "object",
+              "additionalProperties": true,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Canonical record filter",
+                  "nl": "Canoniek recordfilter"
+                }
+              }
+            }
           }
         }
       ]
@@ -1447,6 +1600,16 @@
               "nl": "Standaard bij leeg"
             }
           }
+        },
+        "binding": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Read binding",
+              "nl": "Leesbinding"
+            }
+          }
         }
       },
       "oneOf": [
@@ -1556,10 +1719,58 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "rowLabel": {"type": "string", "minLength": 1, "x-osf-i18n": {"title": {"en": "Row identity path", "nl": "Pad naar rij-identiteit"}}},
-        "membershipDescription": {"type": "string", "minLength": 1, "x-osf-i18n": {"title": {"en": "Membership description path", "nl": "Pad naar lidmaatschapsomschrijving"}}},
-        "groupRows": {"type": "string", "enum": ["plain", "bundle"], "x-osf-i18n": {"title": {"en": "Group row appearance", "nl": "Groepsrijweergave"}, "enum": {"plain": {"en": "Plain", "nl": "Eenvoudig"}, "bundle": {"en": "Bundle", "nl": "Bundel"}}}},
-        "viewSwitch": {"type": "boolean", "x-osf-i18n": {"title": {"en": "Show view switch", "nl": "Weergavekeuze tonen"}}},
+        "rowLabel": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Row identity path",
+              "nl": "Pad naar rij-identiteit"
+            }
+          }
+        },
+        "membershipDescription": {
+          "type": "string",
+          "minLength": 1,
+          "x-osf-i18n": {
+            "title": {
+              "en": "Membership description path",
+              "nl": "Pad naar lidmaatschapsomschrijving"
+            }
+          }
+        },
+        "groupRows": {
+          "type": "string",
+          "enum": [
+            "plain",
+            "bundle"
+          ],
+          "x-osf-i18n": {
+            "title": {
+              "en": "Group row appearance",
+              "nl": "Groepsrijweergave"
+            },
+            "enum": {
+              "plain": {
+                "en": "Plain",
+                "nl": "Eenvoudig"
+              },
+              "bundle": {
+                "en": "Bundle",
+                "nl": "Bundel"
+              }
+            }
+          }
+        },
+        "viewSwitch": {
+          "type": "boolean",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Show view switch",
+              "nl": "Weergavekeuze tonen"
+            }
+          }
+        },
         "heading": {
           "type": "object",
           "additionalProperties": false,
@@ -1728,6 +1939,7 @@
             }
           },
           "properties": {
+            "currency": { "type": "string", "minLength": 1, "x-osf-i18n": {"title": {"en": "Currency field", "nl": "Valutaveld"}} },
             "title": {
               "$ref": "#/$defs/localizedText",
               "x-osf-i18n": {
@@ -1736,6 +1948,201 @@
                   "nl": "Paneeltitel"
                 }
               }
+            },
+            "binding": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Read binding",
+                  "nl": "Leesbinding"
+                }
+              }
+            },
+            "heading": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Heading field",
+                  "nl": "Titelveld"
+                }
+              }
+            },
+            "subtitle": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Subtitle field",
+                  "nl": "Ondertitelveld"
+                }
+              }
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Summary fields",
+                  "nl": "Samenvattingsvelden"
+                }
+              }
+            },
+            "note": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Explanation",
+                  "nl": "Toelichting"
+                }
+              }
+            },
+            "collection": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "field",
+                "columns",
+                "title"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Collection field",
+                      "nl": "Collectieveld"
+                    }
+                  }
+                },
+                "columns": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Columns",
+                      "nl": "Kolommen"
+                    }
+                  }
+                },
+                "title": {
+                  "$ref": "#/$defs/localizedText",
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Title",
+                      "nl": "Titel"
+                    }
+                  }
+                }
+              },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Related rows",
+                  "nl": "Bijbehorende regels"
+                }
+              }
+            }
+          }
+        },
+        "bindings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "entity",
+              "operation"
+            ],
+            "properties": {
+              "entity": {
+                "type": "string",
+                "minLength": 1,
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Record entity",
+                    "nl": "Recordentiteit"
+                  }
+                }
+              },
+              "operation": {
+                "type": "string",
+                "minLength": 1,
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Read operation",
+                    "nl": "Leesoperatie"
+                  }
+                }
+              },
+              "parameters": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean"
+                  ]
+                },
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Fixed parameters",
+                    "nl": "Vaste parameters"
+                  }
+                }
+              }
+            }
+          },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Read bindings",
+              "nl": "Leesbindingen"
+            }
+          }
+        },
+        "navigation": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "route",
+              "label"
+            ],
+            "properties": {
+              "route": {
+                "type": "string",
+                "minLength": 1,
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Route",
+                    "nl": "Route"
+                  }
+                }
+              },
+              "label": {
+                "$ref": "#/$defs/localizedText",
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Label",
+                    "nl": "Label"
+                  }
+                }
+              }
+            }
+          },
+          "x-osf-i18n": {
+            "title": {
+              "en": "View navigation",
+              "nl": "Weergavenavigatie"
             }
           }
         }

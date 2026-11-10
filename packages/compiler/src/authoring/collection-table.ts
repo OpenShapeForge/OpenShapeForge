@@ -1,3 +1,4 @@
+import { bindingField, compileReadBindings } from './read-bindings.js';
 // SPDX-License-Identifier: BUSL-1.1
 import type { WebCollectionTable, WebCollectionTableValue, WebValuePath } from '@openshapeforge/interface-web';
 import type { CollectionTableValueDefinition } from './types/authoring.js';
@@ -27,7 +28,18 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     if (result.cardinality === 'many' && select !== 'one') throw new Error(`${name}: table path ${expression} is collection-valued; declare select: one to require zero or one readable result.`);
     return result;
   };
+  const bindings = compileReadBindings(source, all);
   const value = (owner: ProjectableEntity, input: CollectionTableValueDefinition): WebCollectionTableValue => {
+    if (input.binding) {
+      const binding = bindings?.[input.binding];
+      if (!binding || !input.path || input.when || input.text) throw new Error(`${name}: invalid bound value.`);
+      const schema = bindingField(binding.schema, input.path);
+      if ([schema.type].flat().some(type => type === 'object' || type === 'array')) throw new Error(`${name}: a bound table cell must be scalar.`);
+      if (input.format === 'money') {
+        if (!input.currency || ![schema.type].flat().includes('number') || bindingField(binding.schema, input.currency).type !== 'string') throw new Error(`${name}: bound money needs a numeric amount and typed currency.`);
+      }
+      return { binding: input.binding, boundPath: input.path.split('.'), schema, ...(input.currency ? { boundCurrency: input.currency.split('.') } : {}), ...(input.format ? { format: input.format } : {}) };
+    }
     const result = input.path ? path(owner, input.path, input.select) : undefined;
     const currency = input.currency ? path(owner, input.currency, input.select) : undefined;
     if (input.format === 'money' && (!result?.field || !currency?.field || result.targetEntityId !== currency.targetEntityId || JSON.stringify(result.path) !== JSON.stringify(currency.path))) throw new Error(`${name}: money requires amount and currency on the same related record.`);
@@ -51,5 +63,19 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     if (column.membershipValues && !tree?.through) throw new Error(`${name}: membership values require explicit tree.through.`);
     return { key: column.key, label: local(column.label), values: column.values.map(item => value(record, item)), ...(column.membershipValues ? { membershipValues: column.membershipValues.map(item => value(membership!, item)) } : {}) };
   });
-  return { ...authored, ...(authored.rowLabel ? { rowLabel: path(record, authored.rowLabel, undefined) } : {}), ...(authored.membershipDescription ? { membershipDescription: path(membership!, authored.membershipDescription, undefined) } : {}), ...(authored.recordPanel ? { recordPanel: { title: local(authored.recordPanel.title) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
+  if (authored.recordPanel?.binding) {
+    const panel = authored.recordPanel, binding = bindings?.[panel.binding!];
+    if (!binding) throw new Error(`${name}: record panel binding is unknown.`);
+    for (const field of [...panel.fields ?? [], ...panel.heading ? [panel.heading] : [], ...panel.subtitle ? [panel.subtitle] : []]) bindingField(binding.schema, field);
+    if (panel.collection) {
+      const schema = bindingField(binding.schema, panel.collection.field);
+      if (schema.type !== 'array' || !schema.items?.properties) throw new Error(`${name}: panel collection must be a typed record array.`);
+      for (const field of panel.collection.columns) bindingField(schema.items, field);
+    }
+  }
+  const navigation = authored.navigation?.map(link => {
+    if (!link.route.startsWith('/') || link.route.startsWith('//')) throw new Error(`${name}: collection navigation requires local routes.`);
+    return { ...link, label: local(link.label) };
+  });
+  return { ...authored, ...(bindings ? { bindings } : {}), ...(navigation ? { navigation } : {}), ...(authored.rowLabel ? { rowLabel: path(record, authored.rowLabel, undefined) } : {}), ...(authored.membershipDescription ? { membershipDescription: path(membership!, authored.membershipDescription, undefined) } : {}), ...(authored.recordPanel ? { recordPanel: { ...authored.recordPanel, title: local(authored.recordPanel.title), ...(authored.recordPanel.collection ? { collection: { ...authored.recordPanel.collection, title: local(authored.recordPanel.collection.title) } } : {}), ...(authored.recordPanel.note ? { note: local(authored.recordPanel.note) } : {}) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
 }

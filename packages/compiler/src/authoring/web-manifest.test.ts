@@ -2381,7 +2381,7 @@ describe('declarative collection tables', () => {
   test('a routed named collection preserves the default collection and canonical Operations', () => {
     const { product, member } = fixture();
     const web = product.contract.interfaces!.web!;
-    web.namedViews = { workforce: { kind: 'collection', collectionLayout: 'table', route: '/workforce', title: text('Workforce'), tree: web.collectionTree!, table: web.collectionTable! } };
+    web.namedViews = { workforce: { kind: 'collection', collectionLayout: 'table', route: '/workforce', title: text('Workforce'), filter: { category: { eq: 'Design' } }, tree: web.collectionTree!, table: web.collectionTable! } };
     delete web.collectionTree; delete web.collectionTable;
     const manifest = buildWebManifest([product, member]);
     const canonical = manifest.entities.Product!;
@@ -2389,6 +2389,8 @@ describe('declarative collection tables', () => {
     const selected = matchWebRoute(manifest, '/workforce');
     expect(selected?.entity.views.collection.table?.groupBy).toBe('category');
     expect(selected?.entity.title.en).toBe('Workforce');
+    expect(selected?.entity.views.collection.filter).toEqual({ category: { eq: 'Design' } });
+    expect(canonical.views.collection.filter).toBeUndefined();
     expect(selected?.entity.views.collection.operations.read.id).toBe(canonical.views.collection.operations.read.id);
     expect(matchWebRoute(manifest, canonical.views.collection.route)?.entity.views.collection.table).toBeUndefined();
   });

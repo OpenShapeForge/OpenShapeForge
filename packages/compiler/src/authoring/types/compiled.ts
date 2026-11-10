@@ -447,7 +447,7 @@ export type CompiledEntityWebNamedViewDefinition =
       title?: string;
       layout: { tabs: CompiledViewGroup[] };
     }
-  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | CompiledLocalizedText; title?: CompiledLocalizedText; tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: import("./authoring.js").CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
+  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | CompiledLocalizedText; title?: CompiledLocalizedText; filter?: Record<string, unknown>; tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: import("./authoring.js").CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
   | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 export interface CompiledViewAction extends ViewAction {}

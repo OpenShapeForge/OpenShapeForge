@@ -1343,7 +1343,7 @@ function projectEntity(
         collection: { ...source.collection, route, title: localized(definition.title, source.collection.title.en) },
         contract: { ...contract, interfaces: { ...contract.interfaces, web: { ...web, ...(definition.tree ? { collectionTree: definition.tree } : {}), ...(definition.table ? { collectionTable: definition.table } : {}) } } },
       }, all, providers);
-      return [name, { ...projected.views.collection, id: `${entityName}.${name}`, collectionLayout: "table" as const }];
+      return [name, { ...projected.views.collection, ...(definition.filter ? { filter: definition.filter } : {}), id: `${entityName}.${name}`, collectionLayout: "table" as const }];
     }
     if (definition.kind === "collection" && definition.collectionLayout === "matrix") {
       const { rowField, columnField, valueField } = definition.matrix;

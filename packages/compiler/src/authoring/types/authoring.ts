@@ -443,11 +443,12 @@ export interface EntityWebRecordLayout {
 export type EntityWebNamedViewDefinition =
     | { kind: "record"; title?: string; fields: string[] }
     | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
-    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | LocalizedText; title?: LocalizedText; tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
+    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | LocalizedText; title?: LocalizedText; filter?: Record<string, unknown>; tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
     | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 
 export type CollectionTableValueDefinition = {
+  binding?: string;
   path?: string;
   text?: LocalizedText;
   format?: "money" | "percentage" | "frequency" | "chip";
@@ -457,11 +458,13 @@ export type CollectionTableValueDefinition = {
   defaultValue?: string | number;
 };
 export type CollectionTableDefinition = {
+  bindings?: Record<string, { entity: string; operation: string; parameters?: Record<string, string | number | boolean> }>;
+  navigation?: Array<{ route: string; label: LocalizedText }>;
   rowLabel?: string;
   membershipDescription?: string;
   groupRows?: "plain" | "bundle";
   viewSwitch?: boolean;
-  recordPanel?: { title: LocalizedText };
+  recordPanel?: { title: LocalizedText; binding?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;

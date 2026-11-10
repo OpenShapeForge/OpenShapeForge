@@ -245,6 +245,10 @@ export type WebTimelinePresentation = {
 
 /** Declarative table values. Membership values refer to the association, never the target record. */
 export type WebCollectionTableValue = {
+  binding?: string;
+  boundPath?: string[];
+  boundCurrency?: string[];
+  schema?: Readonly<Record<string, unknown>>;
   path?: WebValuePath;
   text?: LocalizedText;
   format?: "money" | "percentage" | "frequency" | "chip";
@@ -254,11 +258,13 @@ export type WebCollectionTableValue = {
   defaultValue?: string | number;
 };
 export type WebCollectionTable = {
+  bindings?: Record<string, { entityId: string; operation: WebCustomOperationRef; schema: Readonly<Record<string, unknown>>; parameters?: Record<string, string | number | boolean> }>;
+  navigation?: Array<{ route: string; label: LocalizedText }>;
   rowLabel?: WebValuePath;
   membershipDescription?: WebValuePath;
   groupRows?: "plain" | "bundle";
   viewSwitch?: boolean;
-  recordPanel?: { title: LocalizedText };
+  recordPanel?: { title: LocalizedText; binding?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;
@@ -270,6 +276,7 @@ export type WebCollectionTable = {
 };
 
 export type WebCollectionView = {
+  filter?: Readonly<Record<string, unknown>>;
   table?: WebCollectionTable;
   /**
    * Collapsible tree presentation of this same collection: each record is a

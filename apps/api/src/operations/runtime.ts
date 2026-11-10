@@ -1966,7 +1966,7 @@ function operationRestInputFromParts(
     const schema = properties[name];
     const value = params[name];
     if (schema && typeof schema === "object" && !Array.isArray(schema) && (schema as Record<string, unknown>).type === "integer" &&
-        typeof value === "string" && /^-?(?:0|[1-9]\d*)$/.test(value)) {
+        typeof value === "string" && /^(?:0|-?[1-9]\d*)$/.test(value)) {
       const number = Number(value);
       if (Number.isSafeInteger(number)) typedParams[name] = number;
     }

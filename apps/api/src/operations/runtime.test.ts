@@ -2290,6 +2290,7 @@ test("REST binds integer path parameters for write operations without coercing t
   expect(operationRestInput(request("12"), operation)).toEqual({ code: "001", version: 12 });
   expect(operationRestInput(request("01"), operation)).toEqual({ code: "001", version: "01" });
   expect(operationRestInput(request("9007199254740992"), operation)).toEqual({ code: "001", version: "9007199254740992" });
+  expect(operationRestInput(request("-0"), operation)).toEqual({ code: "001", version: "-0" });
 });
 
 test("REST binds server-supplied input (a grant's record target) before a GET query is validated", () => {

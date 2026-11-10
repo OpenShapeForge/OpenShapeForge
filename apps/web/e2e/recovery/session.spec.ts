@@ -44,4 +44,20 @@ test("a real browser session recovers from rate limits and a stalled response wi
     await info.attach(`${mode}-recovered`, { body: JSON.stringify({ sameBrowser: true, providerCalls: (await (await page.request.get("/test/state")).json()).calls }), contentType: "application/json" });
     await page.screenshot({ path: info.outputPath(`${mode}-recovered.png`) });
   }
+  await page.goto('/guard');
+  await page.getByRole('textbox',{name:'Unsaved draft'}).fill('Keep this unsaved work');
+  expect((await page.request.post('/test/expire',{data:{mode:'rate-limit',omitRefreshExpiry:true}})).status()).toBe(204);
+  await page.getByRole('button',{name:'Check session',exact:true}).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Reconnecting your session'})).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe('/guard');
+  await info.attach('guard reconnecting without refresh lifetime',{body:await page.screenshot(),contentType:'image/png'});
+  expect((await page.request.post('/test/recover')).status()).toBe(204);
+  await expect(page.getByRole('dialog')).toBeHidden({timeout:15000});
+  await expect(page.getByRole('textbox',{name:'Unsaved draft'})).toHaveValue('Keep this unsaved work');
+  expect(new URL(page.url()).pathname).toBe('/guard');
+  await info.attach('guard recovered with draft retained',{body:await page.screenshot(),contentType:'image/png'});
+
 });

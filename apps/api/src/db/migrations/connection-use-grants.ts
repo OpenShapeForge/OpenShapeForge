@@ -21,6 +21,7 @@ returns boolean language sql stable as $$
     where m.identity_id=$1 and m.tenant_id=$2 and m.relation_id=$3
       and m.status='linked' and not m.access_blocked)
 $$;
+-- Stable index name: uniqueness is the live consent scope, not the issuing identity.
 create unique index if not exists connection_use_grants_live_identity on platform.connection_use_grants
   (tenant_id,subject_entity,subject_id,connection_id,consumer_operation,(service_definition->>'id')) where revoked_at is null;
 
@@ -41,7 +42,7 @@ create policy connection_use_grants_owner_update on platform.connection_use_gran
   with check ((owner_relation_id=app.current_relation_id() or 'Organization.All.ReadWrite'=any(string_to_array(coalesce(current_setting('app.roles',true),''),',')) or not app.connection_grant_owner_live(issued_identity_id,tenant_id,owner_relation_id)));
 drop policy if exists connection_use_grants_owner_delete on platform.connection_use_grants;
 create policy connection_use_grants_owner_delete on platform.connection_use_grants
-  as restrictive for delete using (owner_relation_id=app.current_relation_id());
+  as restrictive for delete using (false); -- withdraw through revoked_at; retain the consent record
 
 create or replace function app.connection_use_grant_immutable() returns trigger
 language plpgsql as $$
@@ -124,9 +125,10 @@ begin
   current_row := app.delegated_connection_row(grant_id,operation_id,true);
   if current_row is null then return false; end if;
   select * into permission from platform.connection_use_grants g where g.id=grant_id and g.tenant_id=app.current_tenant()
-    and g.revoked_at is null and app.connection_grant_owner_live(g.issued_identity_id,g.tenant_id,g.owner_relation_id) and (g.expires_at is null or g.expires_at>clock_timestamp());
+    and g.consumer_operation=operation_id and g.revoked_at is null and app.connection_grant_owner_live(g.issued_identity_id,g.tenant_id,g.owner_relation_id) and (g.expires_at is null or g.expires_at>clock_timestamp());
   if permission.id is null or permission.values_column!~'^[a-z_][a-z0-9_]*$' then return false; end if;
   parts := string_to_array(permission.connection_table,'.');
+  if cardinality(parts)<>2 or parts[1]!~'^[a-z_][a-z0-9_]*$' or parts[2]!~'^[a-z_][a-z0-9_]*$' then return false; end if;
   perform set_config('app.bypass_rls','true',true);
   execute format('update %I.%I set %I=$1 where id=$2 and tenant_id=$3 and owner_user_id=$4',parts[1],parts[2],permission.values_column)
     using token_values,permission.connection_id,permission.tenant_id,permission.owner_relation_id;

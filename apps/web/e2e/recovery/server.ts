@@ -25,6 +25,9 @@ const sessionAuth = createSessionAuth({
   admit: claims => Boolean(claims.accessTokenClaims?.sub), initialFields: () => ({}),
   refreshedFields: () => ({}), refreshInvariant: () => undefined, sessionFields: () => ({}),
 });
+const guardBundle=await Bun.build({entrypoints:[new URL('./guard-client.tsx',import.meta.url).pathname],target:'browser',define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'loopback-pathname',setup(build){build.onResolve({filter:/^next\/navigation$/},()=>({path:new URL('./guard-navigation.ts',import.meta.url).pathname}));}}]});
+if(!guardBundle.success)throw new AggregateError(guardBundle.logs,'Session guard fixture did not build');
+const guardScript=guardBundle.outputs.find(file=>file.path.endsWith('.js'))!;
 const server = Bun.serve({ hostname: "127.0.0.1", port: 3950, async fetch(request) {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/api/auth/")) {
@@ -45,18 +48,20 @@ const server = Bun.serve({ hostname: "127.0.0.1", port: 3950, async fetch(reques
     return Response.json({ exists: Boolean(stored), error: stored?.error ?? null, calls, canceled });
   }
   if (url.pathname === "/test/expire" && request.method === "POST") {
-    const requested = await request.json() as { mode: typeof mode };
+    const requested = await request.json() as { mode: typeof mode; omitRefreshExpiry?: boolean };
     if (!["healthy", "rate-limit", "stalled"].includes(requested.mode) || !sessionId) return new Response(null, { status: 400 });
     const stored = await store.getSession(sessionId);
     if (!stored) return new Response(null, { status: 404 });
     mode = requested.mode; calls = 0; canceled = false;
-    await store.updateSession(sessionId, { ...stored, expiresAt: Math.floor(Date.now() / 1000) - 1, error: undefined, refreshRetryAt: undefined });
+    await store.updateSession(sessionId, { ...stored, expiresAt: Math.floor(Date.now() / 1000) - 1, error: undefined, refreshRetryAt: undefined, ...(requested.omitRefreshExpiry ? {refreshExpiresAt:undefined} : {}) });
     return new Response(null, { status: 204 });
   }
   if (url.pathname === "/test/recover" && request.method === "POST") {
     mode = "healthy";
     return new Response(null, { status: 204 });
   }
+  if(url.pathname==='/guard.js')return new Response(guardScript,{headers:{'content-type':'application/javascript'}});
+  if(url.pathname==='/guard')return new Response('<!doctype html><html><body><div id="root"></div><script type="module" src="/guard.js"></script></body></html>',{headers:{'content-type':'text/html'}});
   if (url.pathname === "/login") {
     const csrf = await sessionAuth.handlers.GET(new NextRequest(new URL("/api/auth/csrf", request.url), { headers: request.headers }));
     const body = await csrf.json();

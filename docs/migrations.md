@@ -724,3 +724,33 @@ the platform manifest. `migrations/mcp-tasks.ts` tightens its generated tenant
 policy with a restrictive actor policy. It stores execution references rather
 than results or credentials; the canonical execution owner remains the live
 read and cancellation authorization boundary.
+
+### Stored field-pattern dialect upgrades
+
+Migration `0025_check-stored-field-patterns` audits compiler-declared stored
+FieldDefinitions and their published-snapshot positions before advancing a built
+database. It refuses unsupported patterns without editing any record. Mutable
+source definitions can be corrected through their canonical editing Operations.
+For an immutable setting or frozen version, correcting the editable source does
+not repair the already-frozen definition: the refusal is an operator intervention,
+not an automatic carry-forward.
+
+Retain the previous deployment and a verified backup. The database owner must
+assess the reported carrier, bound documents/settings, retained history and
+consumers, then approve an explicit data disposition and a reviewed corrective
+maintenance transaction before retrying this guard. Record that separate
+operator change and its validation; adding a later ledger migration cannot
+bypass a failing earlier step. Depending on the records, this may
+mean creating replacement versions/settings and deliberately migrating their
+consumers, or disposing only of demonstrably unused records. Such a correction is
+specific to that data and its required semantics; never rewrite published history,
+weaken validation, reset the database or force the ledger as an automatic upgrade
+step. Retry only after the approved disposition makes the audit pass. Compatible
+immutable history is retained byte-for-byte by the ordinary migration path.
+
+Skipping this refusal would break existing uses: template parameter projection
+rejects unsupported frozen definitions with `DEPENDENCY_INVALID`; typed tenant
+setting reads report `INVALID_DEFINITION` and value writes refuse `VALIDATION`.
+There is no native-regex or compile-for-read fallback. The carry-forward tests
+prove compatible immutable history survives, incompatible frozen/settings data
+is refused without a ledger advance, and corrected editable data advances once.

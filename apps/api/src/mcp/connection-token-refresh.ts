@@ -235,6 +235,7 @@ export async function refreshConnectionRowLocked(input: {
             }
             const delegated = delegation ? await sql<{ row: Record<string, unknown> | null }>`select app.delegated_connection_row(${delegation.consentId}::uuid,${delegation.operationId},true) as row`.execute(lockedTrx) : undefined;
             const delegatedRow = delegated?.rows[0]?.row;
+            if (delegation && !delegatedRow) throw new HttpError(403, "CONNECTION_CONSENT_REQUIRED", "The connection permission is unavailable.");
             const locked = delegation ? { rows: delegatedRow ? [{
               values: delegatedRow[valuesColumn.name] as Record<string, unknown> | null,
               provider_id: delegatedRow[providerColumn.name] as string | null,

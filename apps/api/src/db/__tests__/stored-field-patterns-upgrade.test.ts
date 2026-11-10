@@ -18,7 +18,7 @@ const legacyPattern='^(?=.*[A-Z]).{8,}$';
 const unrelated={key:'business',osfType:'string',validation:{pattern:legacyPattern}};
 const valid=[{key:'code',osfType:'string',validation:{pattern:'^[A-Z]+$'},defaultValue:unrelated}];
 const old=[{key:'group',osfType:'object',shape:[{key:'code',osfType:'string',validation:{pattern:legacyPattern}}]}];
-const snapshot={parameters:old};
+const snapshot={schemaVersion:1,entity:'Template',head:{table:'erp.templates',row:{id:record,tenant_id:second,parameters:valid},children:{}}};
 async function payload(){return (await sql<{parameters:unknown}>`select parameters from erp.templates where id=${record}::uuid`.execute(runtime.db)).rows[0]!.parameters;}
 beforeAll(async()=>{
  admin=new SQL(adminUrl);await admin.unsafe(`create database "${name}"`);
@@ -27,6 +27,7 @@ beforeAll(async()=>{
  await provisionDatabaseRoles(runtime.db,{passwords:{app:'openshapeforge_app',worker:'openshapeforge_worker'}});
  await runtime.db.connection().execute(db=>runMigrationChain(db,{versioned:versionedMigrations.filter(m=>m.version!==version)}));
  await sql`insert into platform.tenants(id,slug,name,status) values(${first}::uuid,${'first-'+name},'First','active'),(${second}::uuid,${'second-'+name},'Second','active')`.execute(runtime.db);
+ await sql`insert into erp.tenants(id,tenant_id,slug,name) values(${second}::uuid,${second}::uuid,${'pattern-'+name},'Pattern test tenant')`.execute(runtime.db);
  await sql`insert into erp.templates(id,tenant_id,key,name,parameters) values(${record}::uuid,${second}::uuid,'pattern-proof','Pattern proof',${JSON.stringify(valid)}::text::jsonb)`.execute(runtime.db);
  await sql`create policy pattern_upgrade_tenant_fence on erp.templates as restrictive using(tenant_id=app.current_tenant());
   create schema pattern_fixture;
@@ -41,7 +42,7 @@ beforeAll(async()=>{
   create trigger pattern_frozen before update or delete on erp.template_versions for each row execute function pattern_fixture.frozen()`.execute(runtime.db);
 },120000);
 afterAll(async()=>{await runtime?.close();if(admin){await admin.unsafe(`drop database if exists "${name}" with(force)`);await admin.close();}});
-test('only canonical field positions are checked across tenants; arbitrary JSON and immutable snapshots survive',async()=>{
+test('only canonical field positions are checked across tenants; arbitrary JSON and compatible immutable snapshots survive',async()=>{
  await runtime.db.transaction().execute(async trx=>{
   await sql`set local role openshapeforge_app`.execute(trx);
   await sql`select set_config('app.tenant_id',${first},true),set_config('app.bypass_rls','false',true)`.execute(trx);
@@ -51,6 +52,21 @@ test('only canonical field positions are checked across tenants; arbitrary JSON 
  });
  expect(await payload()).toEqual(valid);
  await expect(sql`update erp.template_versions set snapshot='{}'::jsonb where id=${frozen}::uuid`.execute(runtime.db)).rejects.toThrow('immutable');
+});
+test('incompatible immutable snapshots and settings refuse upgrade with an explicit owner disposition',async()=>{
+ const rollback=Error('discard only this transaction-owned incompatible fixture');
+ for(const carrier of ['snapshot','setting'] as const){
+  await expect(runtime.db.transaction().execute(async trx=>{
+   if(carrier==='snapshot')await sql`insert into erp.template_versions(id,tenant_id,template_id,version_number,snapshot,content_hash,published_by,published_at)
+    values(${randomUUID()}::uuid,${second}::uuid,${record}::uuid,2,${JSON.stringify({...snapshot,head:{...snapshot.head,row:{...snapshot.head.row,parameters:old}}})}::text::jsonb,repeat('b',64),${randomUUID()}::uuid,now())`.execute(trx);
+   else await sql`insert into erp.tenant_settings(id,tenant_id,namespace,key,definition,value)
+    values(${randomUUID()}::uuid,${second}::uuid,'pattern-proof','legacy',${JSON.stringify(old[0])}::text::jsonb,'{}'::jsonb)`.execute(trx);
+   await expect(checkStoredFieldPatterns(trx)).rejects.toThrow('immutable definition requires a reviewed owner data disposition');
+   expect((await sql`select 1 from platform.schema_migrations where version=${version}`.execute(trx)).rows).toHaveLength(0);
+   throw rollback;
+  })).rejects.toBe(rollback);
+ }
+ expect((await sql<{snapshot:unknown}>`select snapshot from erp.template_versions where id=${frozen}::uuid`.execute(runtime.db)).rows[0]!.snapshot).toEqual(snapshot);
 });
 test('an incompatible nested editable definition stops the upgrade; correction carries immutable history forward',async()=>{
  expect(()=>new RegExp(legacyPattern)).not.toThrow();

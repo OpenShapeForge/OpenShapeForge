@@ -4,8 +4,12 @@ This test signs in through real Keycloak authorization-code login and the shared
 Auth.js callbacks, uses real Redis and retains Playwright video/screenshots.
 The loopback test host injects a 429 and a response that stops after headers at
 the refresh transport boundary. No session cookie or initial token is injected.
-It proves cookie/session continuity and refusal of expired authority, not the
-complete application UI or a deployed identity provider outage.
+It proves cookie/session continuity and refusal of expired authority. The same
+authenticated fixture also mounts the real SessionExpiryGuard and SessionProvider,
+with only Next pathname routing supplied by its loopback host. It covers the
+non-dismissable reconnecting dialog and retention of an unsaved draft when the
+provider omits refresh expiry. This is guard integration evidence, not acceptance
+of the complete application UI or a deployed identity-provider outage.
 
 From the repository root, generate ephemeral credentials into a new private
 folder outside retained evidence with `bun apps/web/e2e/recovery/prepare.ts <folder>`.

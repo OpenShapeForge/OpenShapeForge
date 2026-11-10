@@ -28,6 +28,8 @@ const COPY = {
     logout: "Log out",
     continue: "Continue",
     refreshing: "Refreshing...",
+    reconnectTitle: "Reconnecting your session",
+    reconnectDescription: "The sign-in service is temporarily unavailable. We are retrying automatically; your work remains open.",
   },
   nl: {
     title: "Sessie verloopt binnenkort",
@@ -36,6 +38,8 @@ const COPY = {
     logout: "Uitloggen",
     continue: "Doorgaan",
     refreshing: "Bezig...",
+    reconnectTitle: "Sessie opnieuw verbinden",
+    reconnectDescription: "De inlogdienst is tijdelijk niet beschikbaar. We proberen automatisch opnieuw; uw werk blijft open.",
   },
 } as const;
 
@@ -205,7 +209,9 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
     }
   }, [session?.error, session?.refreshRetryAt]);
 
-  const monitorExpiry = session?.refreshExpiresAt ?? session?.expiresAt;
+  const reconnecting = retryAt !== null || session?.error === "RefreshTokenUnavailable";
+  const monitorExpiry = session?.error === "RefreshTokenUnavailable"
+    ? session.refreshExpiresAt : session?.refreshExpiresAt ?? session?.expiresAt;
 
   useEffect(() => {
     if (session?.error === "RefreshTokenError") {
@@ -274,40 +280,41 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   }, [showDialog]);
 
   useEffect(() => {
-    if (!showDialog || countdown > 0) {
+    if (reconnecting || !showDialog || countdown > 0) {
       return;
     }
 
     setSession?.(null);
     logout("session_expired");
-  }, [countdown, logout, setSession, showDialog]);
+  }, [countdown, logout, reconnecting, setSession, showDialog]);
 
-  if (!showDialog) {
+  if (!showDialog && !reconnecting) {
     return null;
   }
 
   return (
-    <Dialog open={showDialog} onOpenChange={() => {}}>
+    <Dialog open={showDialog || reconnecting} onOpenChange={() => {}}>
       <DialogContent
-        className="sm:max-w-md [&>.absolute]:hidden"
+        className="sm:max-w-md"
+        showCloseButton={false}
         onPointerDownOutside={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle>{copy.title}</DialogTitle>
+          <DialogTitle>{reconnecting ? copy.reconnectTitle : copy.title}</DialogTitle>
           <DialogDescription>
-            {copy.description}{" "}
+            {reconnecting ? copy.reconnectDescription : <>{copy.description}{" "}
             <span className="font-semibold tabular-nums">{countdown}</span>{" "}
-            {copy.suffix}
+            {copy.suffix}</>}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => logout()}>
             {copy.logout}
           </Button>
-          <Button onClick={handleContinue} disabled={refreshing}>
-            {refreshing ? copy.refreshing : copy.continue}
+          <Button onClick={handleContinue} disabled={refreshing || reconnecting}>
+            {refreshing || reconnecting ? copy.refreshing : copy.continue}
           </Button>
         </DialogFooter>
       </DialogContent>

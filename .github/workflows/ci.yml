@@ -178,6 +178,7 @@ jobs:
           src/auth/organization-service-identities.test.ts
           src/auth/login-session-binding.test.ts
           src/auth/relation-group-memberships.test.ts
+          src/auth/identity-link-cache.test.ts
           src/auth/identity-link.test.ts
           src/auth/identity.test.ts
           src/auth/principal-class.unit.test.ts

@@ -105,6 +105,16 @@ describe('owner-issued connection use grants', () => {
     });
     await expect(as(owner,actor,tenant,'calendar.consent',async tx => { await tx`update platform.connection_use_grants set revoked_at=null where id=${grant}::uuid`; })).rejects.toThrow('scope is immutable');
   });
+  test('an owner withdraws consent without hard-deleting its record',async()=>{
+    const retained=crypto.randomUUID();
+    await as(owner,actor,tenant,'calendar.consent',tx=>issue(tx,retained));
+    await as(owner,actor,tenant,'calendar.consent',async tx=>{
+      expect(await tx`delete from platform.connection_use_grants where id=${retained}::uuid returning id`).toHaveLength(0);
+      expect(await tx`select id from platform.connection_use_grants where id=${retained}::uuid`).toHaveLength(1);
+      await tx`update platform.connection_use_grants set revoked_at=now() where id=${retained}::uuid`;
+    });
+    expect((await db`select revoked_at from platform.connection_use_grants where id=${retained}::uuid`)[0].revoked_at).not.toBeNull();
+  });
   test('offboarding permanently withdraws consent through both tenant and cross-tenant maintenance sessions',async()=>{
     for(const maintenance of [false,true]) for(const remove of [false,true]){
       const offboardingGrant=crypto.randomUUID();

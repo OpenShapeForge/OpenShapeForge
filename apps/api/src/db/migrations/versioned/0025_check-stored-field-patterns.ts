@@ -3,17 +3,34 @@ import {sql,type Kysely} from 'kysely';
 import {schemaRegExp} from '@openshapeforge/operations';
 import manifest from '../../../generated/db/manifest.json' with {type:'json'};
 import type {VersionedMigration} from '../versioned-runner.js';
-type DefinitionTable={schema:string;table:string;tenantScoped:boolean;columns:readonly {name:string;immutable?:boolean;storedFieldDefinition?:'single'|'collection'}[]};
+type Owned={schema:string;table:string;children:readonly Owned[]};
+type DefinitionColumn={name:string;immutable?:boolean;storedFieldDefinition?:'single'|'collection';path?:string;sourceColumn?:string};
+type DefinitionTable={schema:string;table:string;tenantScoped:boolean;columns:readonly DefinitionColumn[];source?:{versioning?:{storage:{version:{schema:string;table:string};owned:readonly Owned[]}}}};
+function definitionCarriers(tables:readonly DefinitionTable[]){
+ const carriers=tables.flatMap(table=>table.columns.filter(c=>c.storedFieldDefinition).map(column=>({table,column})));
+ for(const head of tables){
+  const storage=head.source?.versioning?.storage;if(!storage)continue;
+  const version=tables.find(t=>t.schema===storage.version.schema&&t.table===storage.version.table);
+  if(!version?.columns.some(c=>c.name==='snapshot'))continue;
+  const visit=(table:DefinitionTable,path:string,owned:readonly Owned[])=>{
+   for(const field of table.columns.filter(c=>c.storedFieldDefinition))carriers.push({table:version,column:{name:'snapshot',immutable:true,storedFieldDefinition:field.storedFieldDefinition!,sourceColumn:table.schema+'.'+table.table+'.'+field.name,path:path+'.row.'+JSON.stringify(field.name)+(field.storedFieldDefinition==='collection'?'[*]':'')}});
+   for(const child of owned){const target=tables.find(t=>t.schema===child.schema&&t.table===child.table);if(target)visit(target,path+'.children.'+JSON.stringify(child.schema+'.'+child.table)+'[*]',child.children);}
+  };
+  visit(head,'$.head',storage.owned);
+ }
+ return carriers;
+}
 
-/** Check only mutable, compiler-declared FieldDefinition columns. Historical
- * snapshots and arbitrary JSON values are not editable definitions. Within a
+/** Check compiler-declared FieldDefinition columns and their compiler-bound
+ * published snapshot positions. Immutable incompatibilities require an owner
+ * disposition before upgrade; the audit never rewrites frozen data. Within a
  * definition, visit only its canonical shape/children/item field positions.
  * The savepoint restores temporary tenant/bypass settings even on refusal.
  */
 export async function checkStoredFieldPatterns(db:Kysely<any>,tables:readonly DefinitionTable[]=manifest.tables as DefinitionTable[]):Promise<void>{
  await sql`savepoint osf_field_pattern_audit`.execute(db);
  try{
-  const declared=tables.flatMap(t=>t.columns.filter(c=>c.storedFieldDefinition&&!c.immutable).map(c=>({table:t,column:c})));
+  const declared=definitionCarriers(tables);
   if(!declared.length)return;
   await sql`select set_config('app.bypass_rls','true',true)`.execute(db);
   const {rows:[registry]}=await sql<{exists:boolean}>`select to_regclass('platform.tenants') is not null as exists`.execute(db);
@@ -28,7 +45,7 @@ export async function checkStoredFieldPatterns(db:Kysely<any>,tables:readonly De
     const {rows:patterns}=await sql<{pattern:string}>`
      with recursive definitions(value) as (
       select f.value from ${sql.id(table.schema,table.table)} t
-       cross join lateral jsonb_path_query(t.${sql.id(column.name)}::jsonb,${column.storedFieldDefinition==='collection'?'$[*]':'$'}::jsonpath) f(value)
+       cross join lateral jsonb_path_query(t.${sql.id(column.name)}::jsonb,${column.path??(column.storedFieldDefinition==='collection'?'$[*]':'$')}::jsonpath) f(value)
        where ${table.tenantScoped?sql`t.tenant_id=${tenant}::uuid`:sql`true`}
       union all
       select nested.value from definitions d cross join lateral (
@@ -45,7 +62,7 @@ export async function checkStoredFieldPatterns(db:Kysely<any>,tables:readonly De
     if(patterns.length>10000)throw Error('Stored FieldDefinition pattern audit exceeded its bound; inspect definitions before upgrading.');
     for(const row of patterns){
      try{schemaRegExp(row.pattern);}
-     catch{throw Error(`Stored FieldDefinition validation pattern is unsupported in ${table.schema}.${table.table}.${column.name}; correct the editable definition before upgrading. Historical snapshots and records were not changed.`);}
+     catch{throw Error(`Stored FieldDefinition validation pattern is unsupported in ${table.schema}.${table.table}.${column.name}; ${column.immutable ? "immutable definition requires a reviewed owner data disposition before upgrading; retain the previous release and consult docs/migrations.md" : "correct the editable definition before upgrading"}. No definitions or records were changed.`);}
     }
    }
   }

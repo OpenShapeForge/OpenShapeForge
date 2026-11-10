@@ -8,7 +8,10 @@ It proves cookie/session continuity and refusal of expired authority. The same
 authenticated fixture also mounts the real SessionExpiryGuard and SessionProvider,
 with only Next pathname routing supplied by its loopback host. It covers the
 non-dismissable reconnecting dialog and retention of an unsaved draft when the
-provider omits refresh expiry. This is guard integration evidence, not acceptance
+provider omits refresh expiry. The same native session also exercises the admin
+operator-session policy: temporary refresh unavailability redirects to recovery,
+withholds console access, and admits the same session after provider recovery.
+The loopback admin response is a fixture, not the complete admin UI. This is guard integration evidence, not acceptance
 of the complete application UI or a deployed identity-provider outage.
 
 From the repository root, generate ephemeral credentials into a new private

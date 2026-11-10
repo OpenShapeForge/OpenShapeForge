@@ -44,6 +44,19 @@ test("a real browser session recovers from rate limits and a stalled response wi
     await info.attach(`${mode}-recovered`, { body: JSON.stringify({ sameBrowser: true, providerCalls: (await (await page.request.get("/test/state")).json()).calls }), contentType: "application/json" });
     await page.screenshot({ path: info.outputPath(`${mode}-recovered.png`) });
   }
+  await page.goto('/admin/tenants');
+  await expect(page.getByRole('heading',{name:'Authorized console fixture'})).toBeVisible();
+  expect((await page.request.post('/test/expire',{data:{mode:'rate-limit'}})).status()).toBe(204);
+  await page.goto('/admin/tenants');
+  expect(new URL(page.url()).pathname).toBe('/login');
+  expect(new URL(page.url()).searchParams.get('reason')).toBe('session_unavailable');
+  await expect(page.getByRole('heading',{name:'Authorized console fixture'})).toHaveCount(0);
+  await info.attach('admin withheld during recoverable session',{body:await page.screenshot(),contentType:'image/png'});
+  expect((await page.request.post('/test/recover')).status()).toBe(204);
+  await expect.poll(async()=> (await page.request.get('/admin/tenants',{maxRedirects:0})).status(),{timeout:10000,intervals:[1000]}).toBe(200);
+  await page.goto('/admin/tenants');
+  await expect(page.getByRole('heading',{name:'Authorized console fixture'})).toBeVisible();
+  await info.attach('admin admitted after native session recovery',{body:await page.screenshot(),contentType:'image/png'});
   await page.goto('/guard');
   await page.getByRole('textbox',{name:'Unsaved draft'}).fill('Keep this unsaved work');
   expect((await page.request.post('/test/expire',{data:{mode:'rate-limit',omitRefreshExpiry:true}})).status()).toBe(204);

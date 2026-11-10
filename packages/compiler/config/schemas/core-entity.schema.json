@@ -2064,6 +2064,7 @@
               "operation"
             ],
             "properties": {
+              "refreshOn": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 }, "x-osf-i18n": { "title": { "en": "Refresh on source changes", "nl": "Verversen bij bronwijzigingen" } } },
               "entity": {
                 "type": "string",
                 "minLength": 1,

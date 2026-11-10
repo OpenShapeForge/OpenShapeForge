@@ -458,7 +458,7 @@ export type CollectionTableValueDefinition = {
   defaultValue?: string | number;
 };
 export type CollectionTableDefinition = {
-  bindings?: Record<string, { entity: string; operation: string; parameters?: Record<string, string | number | boolean> }>;
+  bindings?: Record<string, { entity: string; operation: string; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;
   navigation?: Array<{ route: string; label: LocalizedText }>;
   rowLabel?: string;
   membershipDescription?: string;

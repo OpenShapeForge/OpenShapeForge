@@ -9,7 +9,7 @@ function fixture(entity: string) {
   const op = operation();
   const owner = { customOperations: { readTerms: op } } as any;
   const source = { contract: { interfaces: { web: { collectionTable: { bindings: { terms: { entity, operation: op.id } } } } } } } as any;
-  return { op, run: () => compileReadBindings(source, new Map([[entity, owner]])) };
+  return { source, op, run: () => compileReadBindings(source, new Map([[entity, owner]])) };
 }
 test('read bindings share one typed contract across domains', () => {
   for (const entity of ['Agreement', 'Employee']) expect(fixture(entity).run()?.terms?.entityId).toBe(entity);
@@ -25,3 +25,5 @@ test('bound fields must exist in the declared output schema', () => {
   expect(() => bindingField(schema, 'cost.secret')).toThrow('Unknown typed');
   expect(() => bindingField(schema, '__proto__')).toThrow('Invalid binding');
 });
+
+test('read bindings validate their declared source invalidation entities',()=>{const f=fixture('Employee');f.source.contract.interfaces.web.collectionTable.bindings.terms.refreshOn=['Employee'];expect(f.run()?.terms?.refreshOn).toEqual(['Employee']);f.source.contract.interfaces.web.collectionTable.bindings.terms.refreshOn=['UnknownSource'];expect(f.run).toThrow('known source entities');});

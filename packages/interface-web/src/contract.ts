@@ -258,7 +258,7 @@ export type WebCollectionTableValue = {
   defaultValue?: string | number;
 };
 export type WebCollectionTable = {
-  bindings?: Record<string, { entityId: string; operation: WebCustomOperationRef; schema: Readonly<Record<string, unknown>>; parameters?: Record<string, string | number | boolean> }>;
+  bindings?: Record<string, { entityId: string; operation: WebCustomOperationRef; schema: Readonly<Record<string, unknown>>; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;
   navigation?: Array<{ route: string; label: LocalizedText }>;
   rowLabel?: WebValuePath;
   membershipDescription?: WebValuePath;

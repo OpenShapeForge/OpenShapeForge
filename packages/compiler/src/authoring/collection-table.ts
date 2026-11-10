@@ -67,7 +67,8 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
   if (panel?.actions?.some(action => !["edit", "openFull"].includes(action))) throw new Error(`${name}: invalid summary action.`);
   if (panel?.summaryColumns) {
     if (panel.binding || !panel.heading || panel.summaryColumns.some(key => !keys.has(key))) throw new Error(`${name}: record summaries require a heading and known table columns.`);
-    for (const key of [panel.heading, panel.subtitle].filter(Boolean)) path(record, key!, undefined);
+    if (panel.fields?.some(key => !record.contract.model.fields.some(field => field.key === key))) throw new Error(`${name}: summary fields require direct record fields.`);
+    for (const key of [panel.heading, panel.subtitle, ...(panel.fields ?? [])].filter(Boolean)) path(record, key!, undefined);
   }
   if (panel?.primaryMembership) {
     if (!membership || !through || !panel.summaryColumns) throw new Error(`${name}: primaryMembership requires a summary and a membership tree.`);

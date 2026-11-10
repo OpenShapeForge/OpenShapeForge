@@ -2370,6 +2370,15 @@ describe('declarative collection tables', () => {
     expect(build).toThrow('select: one'); value.select = 'one';
     expect(build().entities.Product!.views.collection.table?.columns[0]?.values[0]?.path?.cardinality).toBe('many');
   });
+
+  test('single-result value selection never selects a collection-valued condition', () => {
+    const { product, build } = fixture();
+    const value = { path: 'parts.role', select: 'one' as const, when: { path: 'parts.role', equals: 'main' } };
+    product.contract.interfaces!.web!.collectionTable!.columns[0]!.values = [value];
+    expect(build).toThrow('select: one');
+    value.when.path = 'category';
+    expect(build().entities.Product!.views.collection.table?.columns[0]?.values[0]?.when?.path.cardinality).toBe('one');
+  });
   test('keeps money and currency on the same readable record', () => {
     const { product, build } = fixture();
     product.contract.interfaces!.web!.collectionTable!.columns[0]!.membershipValues = [{ path: 'amount', currency: 'currency', format: 'money' }];

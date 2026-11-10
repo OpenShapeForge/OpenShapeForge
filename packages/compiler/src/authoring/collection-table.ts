@@ -52,7 +52,7 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
       const field = all.get(result.targetEntityId)?.contract.model.fields.find(field => field.key === result.field);
       if (!field || !['number', 'integer'].includes(field.baseType)) throw new Error(`${name}: ${input.format} requires a numeric field.`);
     }
-    return { ...input, ...(input.text ? { text: local(input.text) } : {}), ...(result ? { path: result } : {}), ...(currency ? { currency } : {}), ...(input.when ? { when: { path: path(owner, input.when.path, input.select), equals: input.when.equals } } : {}) } as WebCollectionTableValue;
+    return { ...input, ...(input.text ? { text: local(input.text) } : {}), ...(result ? { path: result } : {}), ...(currency ? { currency } : {}), ...(input.when ? { when: { path: path(owner, input.when.path, undefined), equals: input.when.equals } } : {}) } as WebCollectionTableValue;
   };
   const local = (text: { en?: string; nl?: string }) => ({ en: text.en ?? text.nl ?? "", nl: text.nl ?? text.en ?? "" });
   if (authored.membershipDescription && !through) throw new Error(`${name}: membershipDescription requires explicit tree.through.`);

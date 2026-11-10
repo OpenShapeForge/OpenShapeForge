@@ -1940,6 +1940,7 @@
           },
           "properties": {
             "includeRecord": { "type": "boolean", "description": "Keep the canonical record editor alongside the typed summary.", "x-osf-i18n": { "title": { "en": "Include record", "nl": "Record tonen" } } },
+            "actions": { "type": "array", "uniqueItems": true, "items": { "enum": ["edit", "openFull"] } },
             "primaryMembership": {
               "type": "object",
               "additionalProperties": false,
@@ -1991,6 +1992,8 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "orderBy": { "type": "string", "minLength": 1 },
+                  "presentation": { "enum": ["options", "rows"] },
                   "relationship": {
                     "type": "string",
                     "minLength": 1

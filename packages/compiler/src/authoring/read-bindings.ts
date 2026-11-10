@@ -36,3 +36,26 @@ export function compileReadBindings(source: ProjectableEntity, all: ReadonlyMap<
     return [name, { entityId: binding.entity, operation, schema: value, ...(binding.refreshOn ? { refreshOn: [...new Set(binding.refreshOn)] } : {}), ...(binding.parameters ? { parameters: binding.parameters } : {}) }];
   }));
 }
+
+/**
+ * A table footer's totals read: a canonical collection read that takes the
+ * list's matching filter and answers one amount per currency, the population
+ * and how many records have no known amount. Currencies are never added
+ * together, so the contract carries them apart.
+ */
+export function compileTableTotals(source: ProjectableEntity, all: ReadonlyMap<string, ProjectableEntity>): WebCollectionTable['totals'] {
+  const totals = source.contract.interfaces?.web?.collectionTable?.totals;
+  if (!totals) return undefined;
+  const owner = all.get(totals.entity);
+  const operation = owner && Object.values(owner.customOperations).find(op => op.id === totals.operation || op.key === totals.operation);
+  if (!operation || operation.target.scope !== 'collection' || operation.effects.data !== 'read' || operation.effects.external !== 'none' || operation.confirmation.mode !== 'none') throw new Error('totals: requires a canonical collection read with no external effects or confirmation.');
+  const input = operation.input.schema as Schema, output = operation.output.schema as Schema;
+  const item = output.properties?.totals?.items;
+  const states = output.properties?.status?.enum;
+  if (input.properties?.filter?.type !== 'object' || (input.required ?? []).length ||
+      output.properties?.totals?.type !== 'array' || item?.properties?.currencyCode?.type !== 'string' || item?.properties?.amount?.type !== 'number' ||
+      output.properties?.count?.type !== 'integer' || output.properties?.excluded?.type !== 'integer' ||
+      !Array.isArray(states) || !['available', 'unavailable', 'failed'].every(state => states.includes(state))) throw new Error('totals: requires an optional filter input and status, count, excluded and per-currency { currencyCode, amount } totals output.');
+  const local = (text: { en?: string; nl?: string }) => ({ en: text.en ?? text.nl ?? '', nl: text.nl ?? text.en ?? '' });
+  return { entityId: totals.entity, operation, count: local(totals.count), label: local(totals.label), ...(totals.note ? { note: local(totals.note) } : {}) } as WebCollectionTable['totals'];
+}

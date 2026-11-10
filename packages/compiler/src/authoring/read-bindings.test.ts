@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from 'bun:test';
-import { bindingField, compileReadBindings } from './read-bindings.js';
+import { bindingField, compileReadBindings, compileTableTotals } from './read-bindings.js';
 const operation = () => ({ id: 'Record.readTerms', key: 'readTerms', target: { scope: 'collection' }, effects: { data: 'read', external: 'none' }, confirmation: { mode: 'none' },
   input: { schema: { type: 'object', required: ['ids'], properties: { ids: { type: 'array', items: { type: 'string' } } } } },
   output: { schema: { properties: { items: { type: 'array', items: { properties: { source: { type: 'object', properties: { id: { type: 'string' } } }, id: { type: 'string' }, status: { enum: ['available','missing','unavailable','ambiguous','failed'] }, value: { type: 'object', properties: { amount: { type: 'number' } } } } } } } } },
@@ -27,3 +27,27 @@ test('bound fields must exist in the declared output schema', () => {
 });
 
 test('read bindings validate their declared source invalidation entities',()=>{const f=fixture('Employee');f.source.contract.interfaces.web.collectionTable.bindings.terms.refreshOn=['Employee'];expect(f.run()?.terms?.refreshOn).toEqual(['Employee']);f.source.contract.interfaces.web.collectionTable.bindings.terms.refreshOn=['UnknownSource'];expect(f.run).toThrow('known source entities');});
+
+const totalsOperation = () => ({ id: 'Record.totalTerms', key: 'totalTerms', target: { scope: 'collection' }, effects: { data: 'read', external: 'none' }, confirmation: { mode: 'none' },
+  input: { schema: { type: 'object', properties: { filter: { type: 'object' } } } as any },
+  output: { schema: { properties: { status: { enum: ['available', 'unavailable', 'failed'] }, count: { type: 'integer' }, excluded: { type: 'integer' },
+    totals: { type: 'array', items: { properties: { currencyCode: { type: 'string' }, amount: { type: 'number' } } } } } } as any },
+});
+function totalsFixture() {
+  const op = totalsOperation();
+  const source = { contract: { interfaces: { web: { collectionTable: { totals: { entity: 'Agreement', operation: op.id, count: { en: 'contracts' }, label: { en: 'total value', nl: 'totale waarde' } } } } } } } as any;
+  return { op, run: () => compileTableTotals(source, new Map([['Agreement', { customOperations: { totalTerms: op } } as any]])) };
+}
+test('table totals bind a per-currency collection read and localize their wording', () => {
+  const totals = totalsFixture().run()!;
+  expect(totals.entityId).toBe('Agreement');
+  expect(totals.operation.id).toBe('Record.totalTerms');
+  expect(totals.count).toEqual({ en: 'contracts', nl: 'contracts' });
+  expect(totals.label.nl).toBe('totale waarde');
+});
+test('table totals refuse writes, required inputs and a summed-across-currencies shape', () => {
+  const write = totalsFixture(); write.op.effects.data = 'write'; expect(write.run).toThrow('canonical collection read');
+  const required = totalsFixture(); (required.op.input.schema as any).required = ['ids']; expect(required.run).toThrow('optional filter');
+  const single = totalsFixture(); (single.op.output.schema as any).properties.totals = { type: 'number' }; expect(single.run).toThrow('per-currency');
+  const noExcluded = totalsFixture(); delete (noExcluded.op.output.schema as any).properties.excluded; expect(noExcluded.run).toThrow('excluded');
+});

@@ -724,3 +724,20 @@ the platform manifest. `migrations/mcp-tasks.ts` tightens its generated tenant
 policy with a restrictive actor policy. It stores execution references rather
 than results or credentials; the canonical execution owner remains the live
 read and cancellation authorization boundary.
+
+## Plugin-owned schema transitions
+
+A trusted compiler plugin may declare `phase: beforeGenerated` on a
+`schemaMigrations` entry for an immutable schema transformation. Such entries
+use registry protocol 2 and run through the canonical versioned runner before
+the generated-schema roll-forward. Their IDs are namespaced as
+`plugin:<owner>:<version>`; numbering and ordering are independent per owner.
+The exact compiled SQL is checksummed, applied once with its ledger row in one
+transaction, and verified on every later migration. Applied SQL is immutable.
+An empty database records the transition as baseline without executing it.
+
+Entries without a phase remain repeatable post-schema invariants, preserving
+the existing protocol and execution order. The compiler emits protocol 1 when
+there are no pre-schema entries. A host using protocol 2 must consume an API
+image with this migration capability before migrating. Plugin SQL stays in its
+owning package; the host contributes no private core migration implementation.

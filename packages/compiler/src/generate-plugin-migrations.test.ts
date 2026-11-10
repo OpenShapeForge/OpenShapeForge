@@ -432,3 +432,9 @@ describe("composite column-level keys", () => {
     ).toThrow(/no matching primary key or unique constraint/);
   });
 });
+
+test("immutable pre-schema plugin SQL requires the versioned registry protocol",()=>{
+ const result=registry([],[{name:"example",schemaMigrations:[{version:"0016_remove-obsolete-column",phase:"beforeGenerated",sql:"alter table example.records drop column obsolete;"}]}]);
+ expect(result.version).toBe(2);expect(result.migrations[0]).toMatchObject({plugin:"example",phase:"beforeGenerated",version:"0016_remove-obsolete-column"});
+ expect(()=>registry([],[{name:"example",schemaMigrations:[{version:"0016_bad",phase:"unknown" as any,sql:"select 1;"}]}])).toThrow("Invalid plugin migration phase");
+});

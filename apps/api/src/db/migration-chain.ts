@@ -120,6 +120,7 @@ import {
 import { versionedMigrations } from "./migrations/versioned/index.js";
 import {
   applyGeneratedPluginMigrations,
+  pluginSchemaTransitions,
   loadGeneratedPluginMigrations,
   type GeneratedPluginMigration,
 } from "./migrations/generated-plugin-migrations.js";
@@ -180,7 +181,8 @@ export async function runMigrationChain(
   await applyAppRoleMigration(db);
   await applyWorkerRoleMigration(db);
   await applyAppHelpersMigration(db);
-  const registry = options.versioned ?? versionedMigrations;
+  const pluginMigrationRegistry = options.pluginMigrations ?? await loadGeneratedPluginMigrations();
+  const registry = [...(options.versioned ?? versionedMigrations), ...pluginSchemaTransitions(pluginMigrationRegistry)];
   const versioned = await applyVersionedMigrations(db, registry);
   const generated = await applyGeneratedSchemaMigration(db, {
     appliedBy: options.appliedBy,
@@ -197,7 +199,7 @@ export async function runMigrationChain(
   await applyOrganizationAccessMigration(db);
   const pluginMigrations = await applyGeneratedPluginMigrations(
     db,
-    options.pluginMigrations ?? (await loadGeneratedPluginMigrations()),
+    pluginMigrationRegistry,
   );
   await applyEmployeeInvitationsMigration(db);
   await applyCapabilityGrantsMigration(db);

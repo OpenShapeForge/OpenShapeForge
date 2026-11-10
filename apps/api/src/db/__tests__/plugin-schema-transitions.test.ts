@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: BUSL-1.1
+import {test,expect} from 'bun:test';import{SQL}from'bun';import{sql}from'kysely';
+import{createDatabaseRuntime}from'../connection.js';import{pluginSchemaTransitions}from'../migrations/generated-plugin-migrations.js';
+import{applyVersionedMigrations,versionedMigrationBaseline,validateVersionedRegistry}from'../migrations/versioned-runner.js';import{GENERATED_SCHEMA_MIGRATION_VERSION}from'../schema-drift.js';
+const adminUrl=process.env.SCRATCH_ADMIN_DATABASE_URL;
+(adminUrl?test:test.skip)('namespaced plugin transitions carry rows forward once, enforce checksums and roll failures back',async()=>{
+ const name='plugin_transition_'+crypto.randomUUID().replaceAll('-',''),admin=new SQL(adminUrl!);let runtime:ReturnType<typeof createDatabaseRuntime>|undefined;
+ try{await admin.unsafe(`create database "${name}"`);const url=new URL(adminUrl!);url.pathname='/'+name;runtime=createDatabaseRuntime({databaseUrl:url.href,maxConnections:1});await runtime.db.connection().execute(async db=>{
+ await sql`create schema platform;create table platform.schema_migrations(version text primary key,checksum text not null,applied_by text);create table public.records(id integer primary key,old_amount numeric);insert into public.records values(1,20)`.execute(db);
+ const entries=[{plugin:'first',version:'0016_rename-value',phase:'beforeGenerated' as const,sql:'alter table public.records rename column old_amount to amount;'}, {plugin:'second',version:'0016_double-value',phase:'beforeGenerated' as const,sql:'update public.records set amount=amount*2;'}];const registry=pluginSchemaTransitions(entries);
+ // An empty/unbuilt database is not transformed; its later build records the baseline.
+ expect((await applyVersionedMigrations(db,registry)).applied).toEqual([]);expect((await versionedMigrationBaseline(registry)).map(r=>r.version)).toEqual(['plugin:first:0016_rename-value','plugin:second:0016_double-value']);
+ await sql`insert into platform.schema_migrations values(${GENERATED_SCHEMA_MIGRATION_VERSION},'old-manifest','test')`.execute(db);
+ expect((await applyVersionedMigrations(db,registry)).applied).toHaveLength(2);expect((await sql<{amount:string}>`select amount from public.records where id=1`.execute(db)).rows[0]?.amount).toBe('40');
+ expect((await applyVersionedMigrations(db,registry)).skipped).toHaveLength(2);
+ await expect(applyVersionedMigrations(db,pluginSchemaTransitions([{...entries[0]!,sql:'select 1;'}]))).rejects.toThrow('immutable');
+ const bad=pluginSchemaTransitions([{plugin:'third',version:'0016_atomic-failure',phase:'beforeGenerated',sql:'insert into public.records values(2,99);select 1/0;'}]);await expect(applyVersionedMigrations(db,bad)).rejects.toThrow('rolled back');expect((await sql`select id from public.records where id=2`.execute(db)).rows).toHaveLength(0);expect((await sql`select version from platform.schema_migrations where version like 'plugin:third:%'`.execute(db)).rows).toHaveLength(0);
+ expect(()=>validateVersionedRegistry([...registry,registry[0]!])).toThrow('out of order');expect(pluginSchemaTransitions([{plugin:'first',version:'0001_invariant',sql:'select 1;'}])).toEqual([]);
+ });}finally{await runtime?.close();await admin.unsafe(`drop database if exists "${name}" with(force)`);await admin.close();}
+});

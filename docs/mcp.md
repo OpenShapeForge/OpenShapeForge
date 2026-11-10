@@ -1008,7 +1008,7 @@ by the extension, `ttlMs` is the duration from `createdAt` (`expires_at` minus
 `created_at`), not the remaining duration at each poll. Reading or reusing a
 handle does not extend its expiry. Expired handles
 are unavailable; the underlying workflow remains governed by its own lifecycle.
-Expired handles of a caller are removed when that caller creates another handle;
+Expired handles of a caller and matching authority are removed when that caller creates another handle;
 there is no deployment-wide expiry sweeper in this increment.
 
 Human-input waits continue to use existing authorized workflow interaction

@@ -112,6 +112,15 @@ describe("database role contract", () => {
     await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
     const result = await migrator.db.connection().execute((db) => runMigrationChain(db));
     expect(result.pageConfigs).toBeDefined();
+    for (const signature of ['app.delegated_connection_row(uuid,text,boolean)', 'app.delegated_connection_token_update(uuid,text,jsonb)']) {
+      const {rows:[privileges]}=await sql<{app:boolean;worker:boolean;public:boolean}>`
+        select has_function_privilege(${databaseRole('app').name},${signature},'EXECUTE') as app,
+          has_function_privilege(${databaseRole('worker').name},${signature},'EXECUTE') as worker,
+          exists(select 1 from pg_proc p cross join lateral aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+            where p.oid=${signature}::regprocedure and a.grantee=0 and a.privilege_type='EXECUTE') as public
+      `.execute(migrator.db);
+      expect(privileges).toEqual({app:true,worker:false,public:false});
+    }
     const owner = await migrator.db.connection().execute((db) =>
       sql<{ owner: string; create: boolean }>`
         select proowner::regrole::text as owner,

@@ -1186,6 +1186,12 @@ Catalog files under `catalogs/` merge across authoring layers automatically
   lookarounds are rejected; patterns are limited to 4096 characters and 16384
   compiled instructions. Both authored field validation and canonical Operation
   validation use this bounded engine; there is no native-regex fallback.
+  Upgrade migration `0025_check-stored-field-patterns` checks existing
+  JSON/JSONB FieldDefinition `validation.pattern` members before advancing a
+  built database. An incompatible stored pattern stops the upgrade with its
+  table and column; correct that definition explicitly in the existing
+  environment, then rerun migration. The check changes no definitions and
+  never drops a validation rule. Fresh databases baseline the current dialect.
   An entry may also declare `children`, which is how a typed object value
   (`measurement`, `numericRange`, `dateRange`, `coordinates`, `recurrence`)
   carries its own shape instead of every field restating it. Add an entry when

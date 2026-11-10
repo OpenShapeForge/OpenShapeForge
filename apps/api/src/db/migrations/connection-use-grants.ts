@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from 'kysely';
 import type { OpenShapeForgeDatabase } from '../connection.js';
+import {databaseRole} from '../database-roles.js';
+const roleIdentifier=(name:string)=>'"'+name.replaceAll('"','""')+'"';
+export const CONNECTION_USE_GRANTS_PRIVILEGES_SQL = `
+revoke all on function app.delegated_connection_row(uuid,text,boolean), app.delegated_connection_token_update(uuid,text,jsonb) from public;
+revoke all on function app.delegated_connection_row(uuid,text,boolean), app.delegated_connection_token_update(uuid,text,jsonb) from ${roleIdentifier(databaseRole('worker').name)};
+grant execute on function app.delegated_connection_row(uuid,text,boolean), app.delegated_connection_token_update(uuid,text,jsonb) to ${roleIdentifier(databaseRole('app').name)};
+`;
 
 export const CONNECTION_USE_GRANTS_SQL = String.raw`
 -- No bypass may widen the tenant fence on grants themselves.
@@ -130,8 +137,14 @@ exception when others then
   perform set_config('app.bypass_rls',coalesce(previous_bypass,''),true);
   raise;
 end $$;
+${CONNECTION_USE_GRANTS_PRIVILEGES_SQL}
 `;
 
 export async function applyConnectionUseGrantsMigration(db: OpenShapeForgeDatabase): Promise<void> {
   await sql.raw(CONNECTION_USE_GRANTS_SQL).execute(db);
+}
+
+/** Reapply after the generic EXECUTE sweeps, which otherwise include these helpers. */
+export async function applyConnectionUseGrantsPrivileges(db: OpenShapeForgeDatabase): Promise<void> {
+  await sql.raw(CONNECTION_USE_GRANTS_PRIVILEGES_SQL).execute(db);
 }

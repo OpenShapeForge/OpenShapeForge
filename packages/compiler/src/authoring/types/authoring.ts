@@ -493,6 +493,8 @@ export type CollectionTableDefinition = {
   ungrouped?: LocalizedText;
   columns: Array<{ key: string; label: LocalizedText; values: CollectionTableValueDefinition[]; membershipValues?: CollectionTableValueDefinition[] }>;
   summary?: { field: string; labels?: Record<string, LocalizedText> };
+  /** Footer: the matching population and one total per currency from a collection read over the whole authorized set. */
+  totals?: { entity: string; operation: string; count: LocalizedText; label: LocalizedText; note?: LocalizedText };
 };
 
 export interface EntityWebViewDefinition {

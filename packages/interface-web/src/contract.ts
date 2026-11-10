@@ -294,6 +294,12 @@ export type WebCollectionTable = {
   ungrouped?: LocalizedText;
   columns: Array<{ key: string; label: LocalizedText; values: WebCollectionTableValue[]; membershipValues?: WebCollectionTableValue[] }>;
   summary?: { field: string; labels?: Record<string, LocalizedText> };
+  /**
+   * Footer: the read is executed with `{ filter }` (the list's matching filter) and answers
+   * `{ status, count, totals: [{ currencyCode, amount }], excluded }`. Currencies are never added together;
+   * `excluded` counts records whose amount is not known, which are never zero.
+   */
+  totals?: { entityId: string; operation: WebCustomOperationRef; count: LocalizedText; label: LocalizedText; note?: LocalizedText };
 };
 
 export type WebCollectionView = {

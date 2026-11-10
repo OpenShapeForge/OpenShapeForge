@@ -1920,6 +1920,72 @@
             }
           }
         },
+        "totals": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "A footer that states the matching population and one aggregate total per currency, computed by a collection read Operation over the whole authorized matching set. Currencies are never added together.",
+          "required": [
+            "entity",
+            "operation",
+            "count",
+            "label"
+          ],
+          "properties": {
+            "entity": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Entity",
+                  "nl": "Entiteit"
+                }
+              }
+            },
+            "operation": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Totals Operation",
+                  "nl": "Totaal-Operation"
+                }
+              }
+            },
+            "count": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Population noun",
+                  "nl": "Naam van de populatie"
+                }
+              }
+            },
+            "label": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Total label",
+                  "nl": "Totaallabel"
+                }
+              }
+            },
+            "note": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Note",
+                  "nl": "Notitie"
+                }
+              }
+            }
+          },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Totals",
+              "nl": "Totalen"
+            }
+          }
+        },
         "summary": {
           "type": "object",
           "additionalProperties": false,

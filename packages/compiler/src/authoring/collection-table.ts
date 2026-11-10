@@ -1,4 +1,4 @@
-import { bindingField, compileReadBindings } from './read-bindings.js';
+import { bindingField, compileReadBindings, compileTableTotals } from './read-bindings.js';
 // SPDX-License-Identifier: BUSL-1.1
 import type { WebCollectionTable, WebCollectionTableValue, WebValuePath } from '@openshapeforge/interface-web';
 import type { CollectionTableValueDefinition } from './types/authoring.js';
@@ -29,6 +29,7 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     return result;
   };
   const bindings = compileReadBindings(source, all);
+  const totals = compileTableTotals(source, all);
   const value = (owner: ProjectableEntity, input: CollectionTableValueDefinition): WebCollectionTableValue => {
     if (input.binding) {
       const binding = bindings?.[input.binding];
@@ -104,5 +105,5 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     if (!link.route.startsWith('/') || link.route.startsWith('//')) throw new Error(`${name}: collection navigation requires local routes.`);
     return { ...link, label: local(link.label) };
   });
-  return { ...authored, ...(bindings ? { bindings } : {}), ...(navigation ? { navigation } : {}), ...(authored.rowLabel ? { rowLabel: path(record, authored.rowLabel, undefined) } : {}), ...(authored.membershipDescription ? { membershipDescription: path(membership!, authored.membershipDescription, undefined) } : {}), ...(authored.recordPanel ? { recordPanel: { ...authored.recordPanel, ...(sections ? { sections } : {}), title: local(authored.recordPanel.title), ...(authored.recordPanel.collection ? { collection: { ...authored.recordPanel.collection, title: local(authored.recordPanel.collection.title) } } : {}), ...(authored.recordPanel.note ? { note: local(authored.recordPanel.note) } : {}) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
+  return { ...authored, ...(bindings ? { bindings } : {}), ...(totals ? { totals } : {}), ...(navigation ? { navigation } : {}), ...(authored.rowLabel ? { rowLabel: path(record, authored.rowLabel, undefined) } : {}), ...(authored.membershipDescription ? { membershipDescription: path(membership!, authored.membershipDescription, undefined) } : {}), ...(authored.recordPanel ? { recordPanel: { ...authored.recordPanel, ...(sections ? { sections } : {}), title: local(authored.recordPanel.title), ...(authored.recordPanel.collection ? { collection: { ...authored.recordPanel.collection, title: local(authored.recordPanel.collection.title) } } : {}), ...(authored.recordPanel.note ? { note: local(authored.recordPanel.note) } : {}) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
 }

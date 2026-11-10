@@ -49,6 +49,11 @@ export function matchWebRoute(manifest: WebManifestV1, pathname: string): WebRou
     if (collectionParams) {
       return { entity, view: entity.views.collection, mode: "read", params: collectionParams };
     }
+    for (const view of Object.values(entity.views.named ?? {})) {
+      if (view.kind !== "collection" || !("route" in view)) continue;
+      const params = matchPattern(view.route, pathname);
+      if (params) return { entity: { ...entity, title: view.title, views: { ...entity.views, collection: view } }, view, mode: "read", params };
+    }
     if (record?.routes.read) {
       const params = matchPattern(record.routes.read, pathname);
       if (params) return { entity, view: record, mode: "read", params };

@@ -927,7 +927,7 @@ function buildSubtypeTable(
     source: {
       path: candidate.path,
       ...(contract.interfaces?.web?.collectionTable?.summary ? { collectionSummaryBy: contract.interfaces.web.collectionTable.summary.field } : {}),
-      ...(contract.interfaces?.web?.collectionTable?.groupBy ? { collectionGroupBy: contract.interfaces.web.collectionTable.groupBy } : {}),
+      ...collectionGroupMetadata(contract),
       ...(contract.interfaces?.web?.collectionBoard?.aggregate ? { boardAggregate: { groupBy: contract.interfaces.web.collectionBoard.groupBy, ...contract.interfaces.web.collectionBoard.aggregate } } : {}),
       authoringEntityName: contract.entity.name,
       authoringEntitySlug: candidate.slug,
@@ -1740,7 +1740,7 @@ export function compileAuthoringBackendManifest(
       source: {
         path: candidate.path,
         ...(candidate.contract.interfaces?.web?.collectionTable?.summary ? { collectionSummaryBy: candidate.contract.interfaces.web.collectionTable.summary.field } : {}),
-        ...(candidate.contract.interfaces?.web?.collectionTable?.groupBy ? { collectionGroupBy: candidate.contract.interfaces.web.collectionTable.groupBy } : {}),
+        ...collectionGroupMetadata(candidate.contract),
         ...(candidate.contract.interfaces?.web?.collectionBoard?.aggregate ? { boardAggregate: { groupBy: candidate.contract.interfaces.web.collectionBoard.groupBy, ...candidate.contract.interfaces.web.collectionBoard.aggregate } } : {}),
         ...(candidate.contract.blueprint ? { blueprint: candidate.contract.blueprint } : {}),
         ...(candidate.contract.transitions ? { transitions: candidate.contract.transitions } : {}),
@@ -2018,4 +2018,13 @@ export function buildAuthoringBackendReport(
     tables,
     hasDifferences: tables.some((table) => !table.matches),
   };
+}
+
+/** All routed collection projections share one authorized grouping key per entity. */
+function collectionGroupMetadata(contract: CompiledEntityContract): { collectionGroupBy?: string } {
+  const web = contract.interfaces?.web;
+  const keys = new Set([web?.collectionTable?.groupBy, ...Object.values(web?.namedViews ?? {}).flatMap(view => view.kind === "collection" && "table" in view ? [view.table?.groupBy] : [])].filter((key): key is string => Boolean(key)));
+  if (keys.size > 1) throw new Error(`${contract.entity.name}: routed collections currently require the same grouping field.`);
+  const key = [...keys][0];
+  return key ? { collectionGroupBy: key } : {};
 }

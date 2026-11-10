@@ -1306,6 +1306,10 @@
           "properties": {
             "kind": { "const": "collection", "x-osf-i18n": { "title": { "en": "Kind", "nl": "Soort" } } },
             "collectionLayout": { "enum": ["table", "tabs", "stack"], "x-osf-i18n": { "title": { "en": "Collection layout", "nl": "Collectie-indeling" }, "enum": { "table": { "en": "Table", "nl": "Tabel" }, "tabs": { "en": "Tabs", "nl": "Tabbladen" }, "stack": { "en": "Stack", "nl": "Onder elkaar" } } } },
+            "route": { "$ref": "#/$defs/webViewsV2/properties/collection/properties/route" },
+            "title": { "$ref": "#/$defs/webViewsV2/properties/collection/properties/title" },
+            "tree": { "$ref": "#/$defs/webViewsV2/properties/collection/properties/tree" },
+            "table": { "$ref": "#/$defs/webViewsV2/properties/collection/properties/table" },
             "itemView": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$", "x-osf-i18n": { "title": { "en": "Item view", "nl": "Itemweergave" } } },
             "tabLabel": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Tab label field", "nl": "Tabbladlabelveld" } } },
             "showItemTitle": { "type": "boolean", "default": true, "x-osf-i18n": { "title": { "en": "Show item title", "nl": "Itemtitel tonen" } } }
@@ -1552,6 +1556,10 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "rowLabel": {"type": "string", "minLength": 1, "x-osf-i18n": {"title": {"en": "Row identity path", "nl": "Pad naar rij-identiteit"}}},
+        "membershipDescription": {"type": "string", "minLength": 1, "x-osf-i18n": {"title": {"en": "Membership description path", "nl": "Pad naar lidmaatschapsomschrijving"}}},
+        "groupRows": {"type": "string", "enum": ["plain", "bundle"], "x-osf-i18n": {"title": {"en": "Group row appearance", "nl": "Groepsrijweergave"}, "enum": {"plain": {"en": "Plain", "nl": "Eenvoudig"}, "bundle": {"en": "Bundle", "nl": "Bundel"}}}},
+        "viewSwitch": {"type": "boolean", "x-osf-i18n": {"title": {"en": "Show view switch", "nl": "Weergavekeuze tonen"}}},
         "heading": {
           "type": "object",
           "additionalProperties": false,

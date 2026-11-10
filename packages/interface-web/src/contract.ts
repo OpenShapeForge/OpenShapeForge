@@ -254,6 +254,10 @@ export type WebCollectionTableValue = {
   defaultValue?: string | number;
 };
 export type WebCollectionTable = {
+  rowLabel?: WebValuePath;
+  membershipDescription?: WebValuePath;
+  groupRows?: "plain" | "bundle";
+  viewSwitch?: boolean;
   recordPanel?: { title: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
@@ -405,6 +409,7 @@ export type WebRecordView = {
 };
 
 export type WebNamedView =
+  | (WebCollectionView & { collectionLayout: "table"; itemView?: string; tabLabel?: string; showItemTitle?: boolean })
   | (WebRecordView & { relationships?: Record<string, WebRelationshipProjection> })
   /** Compatibility with manifests compiled before named record layouts. */
   | { kind: "record"; fields: string[] }

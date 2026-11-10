@@ -16,6 +16,7 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
   if (tree.through && (!through || through.kind !== 'belongsTo' || !all.has(through.target))) throw new Error(`${name}: tree through.record must name a readable member reference.`);
   if (through && !all.get(through.target)?.operations.list) throw new Error(`${name}: tree members require a canonical list operation.`);
   if (tree.through?.orderBy && !membership?.contract.model.fields.some(field => field.key === tree.through!.orderBy && field.cardinality !== 'collection')) throw new Error(`${name}: tree orderBy must name a membership scalar.`);
+  const record = through ? all.get(through.target)! : source;
   if (authored.description && !source.contract.model.fields.some(field => field.key === authored.description && field.cardinality !== 'collection')) throw new Error(`${name}: table description must name a scalar field.`);
   if (authored.groupBy) {
     const field = source.contract.model.fields.find(field => field.key === authored.groupBy);
@@ -43,12 +44,13 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     return { ...input, ...(input.text ? { text: local(input.text) } : {}), ...(result ? { path: result } : {}), ...(currency ? { currency } : {}), ...(input.when ? { when: { path: path(owner, input.when.path, input.select), equals: input.when.equals } } : {}) } as WebCollectionTableValue;
   };
   const local = (text: { en?: string; nl?: string }) => ({ en: text.en ?? text.nl ?? "", nl: text.nl ?? text.en ?? "" });
+  if (authored.membershipDescription && !through) throw new Error(`${name}: membershipDescription requires explicit tree.through.`);
   const keys = new Set<string>();
   const columns = authored.columns.map(column => {
     if (keys.has(column.key)) throw new Error(`${name}: duplicate table column ${column.key}.`);
     keys.add(column.key);
     if (column.membershipValues && !tree.through) throw new Error(`${name}: membership values require explicit tree.through.`);
-    return { key: column.key, label: local(column.label), values: column.values.map(item => value(source, item)), ...(column.membershipValues ? { membershipValues: column.membershipValues.map(item => value(membership!, item)) } : {}) };
+    return { key: column.key, label: local(column.label), values: column.values.map(item => value(record, item)), ...(column.membershipValues ? { membershipValues: column.membershipValues.map(item => value(membership!, item)) } : {}) };
   });
-  return { ...authored, ...(authored.recordPanel ? { recordPanel: { title: local(authored.recordPanel.title) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
+  return { ...authored, ...(authored.rowLabel ? { rowLabel: path(record, authored.rowLabel, undefined) } : {}), ...(authored.membershipDescription ? { membershipDescription: path(membership!, authored.membershipDescription, undefined) } : {}), ...(authored.recordPanel ? { recordPanel: { title: local(authored.recordPanel.title) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
 }

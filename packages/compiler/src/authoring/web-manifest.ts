@@ -1334,6 +1334,17 @@ function projectEntity(
   // Named records use exactly the same projection as the default record. Their
   // relationship overrides stay local to the selected view, not the entity.
   const named = Object.fromEntries(Object.entries(contract.interfaces?.web?.namedViews ?? {}).map(([name, definition]) => {
+    if (definition.kind === "collection" && "route" in definition && definition.route) {
+      if (definition.collectionLayout !== "table") throw new Error(`${entityName}.${name}: a routed collection requires table layout.`);
+      const route = projectedRoute(definition.route, source.routeLocale ?? "en", source.route);
+      if (route === source.route) throw new Error(`${entityName}.${name}: a named collection route must differ from the default route.`);
+      const { namedViews: _named, collectionTree: _tree, collectionTable: _table, ...web } = contract.interfaces!.web!;
+      const projected = projectEntity({ ...source, route,
+        collection: { ...source.collection, route, title: localized(definition.title, source.collection.title.en) },
+        contract: { ...contract, interfaces: { ...contract.interfaces, web: { ...web, ...(definition.tree ? { collectionTree: definition.tree } : {}), ...(definition.table ? { collectionTable: definition.table } : {}) } } },
+      }, all, providers);
+      return [name, { ...projected.views.collection, id: `${entityName}.${name}`, collectionLayout: "table" as const }];
+    }
     if (definition.kind === "collection" && definition.collectionLayout === "matrix") {
       const { rowField, columnField, valueField } = definition.matrix;
       for (const key of [rowField, columnField, valueField]) {

@@ -1,3 +1,4 @@
+import { matchWebRoute } from "@openshapeforge/interface-web";
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import type { CompiledEntityInfo } from "../plugins.js";
@@ -2351,4 +2352,36 @@ describe('declarative collection tables', () => {
     product.contract.interfaces!.web!.collectionTable!.columns[0]!.membershipValues![0]!.currency = 'item.displayName';
     expect(build).toThrow('same related record');
   });
+  test('a grouping collection compiles identity and values against its distinct member entity', () => {
+    const { product, member } = fixture();
+    const person = entity('Person', 'people', [field('displayName')], coreView());
+    const employee = entity('Employee', 'employees', [field('fte', { baseType: 'number' }), field('person')], coreView(), [{ key: 'person', fieldKey: 'person', kind: 'belongsTo', target: 'Person', foreignKey: 'person_id' }]);
+    member.contract.model.relationships.find(item => item.key === 'item')!.target = 'Employee';
+    const table = product.contract.interfaces!.web!.collectionTable!;
+    table.rowLabel = 'person'; table.membershipDescription = 'role'; table.groupRows = 'plain'; table.viewSwitch = false;
+    table.columns = [{ key: 'fte', label: text('FTE'), values: [{ path: 'fte' }] }];
+    const projected = buildWebManifest([product, member, employee, person]).entities.Product!.views.collection.table!;
+    expect(projected.columns[0]!.values[0]!.path?.targetEntityId).toBe('Employee');
+    expect(projected.rowLabel?.targetEntityId).toBe('Person');
+    expect(projected.membershipDescription?.targetEntityId).toBe('Membership');
+    expect(projected.groupRows).toBe('plain'); expect(projected.viewSwitch).toBe(false);
+    table.rowLabel = 'missing';
+    expect(() => buildWebManifest([product, member, employee, person])).toThrow('missing');
+  });
+
+  test('a routed named collection preserves the default collection and canonical Operations', () => {
+    const { product, member } = fixture();
+    const web = product.contract.interfaces!.web!;
+    web.namedViews = { workforce: { kind: 'collection', collectionLayout: 'table', route: '/workforce', title: text('Workforce'), tree: web.collectionTree!, table: web.collectionTable! } };
+    delete web.collectionTree; delete web.collectionTable;
+    const manifest = buildWebManifest([product, member]);
+    const canonical = manifest.entities.Product!;
+    expect(canonical.views.collection.table).toBeUndefined();
+    const selected = matchWebRoute(manifest, '/workforce');
+    expect(selected?.entity.views.collection.table?.groupBy).toBe('category');
+    expect(selected?.entity.title.en).toBe('Workforce');
+    expect(selected?.entity.views.collection.operations.read.id).toBe(canonical.views.collection.operations.read.id);
+    expect(matchWebRoute(manifest, canonical.views.collection.route)?.entity.views.collection.table).toBeUndefined();
+  });
+
 });

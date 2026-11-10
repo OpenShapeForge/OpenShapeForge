@@ -131,6 +131,17 @@
     }
   },
   "osfTypes": {
+    "icon": {
+      "label": {
+        "en": "Icon",
+        "nl": "Icoon"
+      },
+      "baseType": "string",
+      "validation": {
+        "pattern": "^[a-z][a-z0-9-]{0,63}$",
+        "maxLength": 64
+      }
+    },
     "color": {
       "label": {
         "en": "Color",
@@ -17227,6 +17238,19 @@
           "cardinality": "collection",
           "relationship": {
             "inverse": "document",
+            "ownership": "reference"
+          }
+        },
+        {
+          "key": "relations",
+          "label": {
+            "en": "Relations",
+            "nl": "Relaties"
+          },
+          "osfType": "Relation",
+          "cardinality": "collection",
+          "relationship": {
+            "inverse": "avatar",
             "ownership": "reference"
           }
         },
@@ -34708,6 +34732,89 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "ReferenceValueAppearance": {
+      "kind": "entity",
+      "entity": "ReferenceValueAppearance",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Reference value appearance",
+        "nl": "Weergave referentiewaarde"
+      },
+      "pluralLabel": {
+        "en": "Reference value appearances",
+        "nl": "Weergaven referentiewaarden"
+      },
+      "shape": [
+        {
+          "key": "groupKey",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "label": {
+            "en": "Catalog group",
+            "nl": "Catalogusgroep"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "persisted": {
+            "column": "group_key",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "code",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "label": {
+            "en": "Value code",
+            "nl": "Waardecode"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "persisted": {
+            "column": "code",
+            "storageClass": "core"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "referenceValueAppearanceId": {
+      "kind": "entityId",
+      "entity": "ReferenceValueAppearance",
+      "baseType": "string",
+      "label": {
+        "en": "Reference value appearance",
+        "nl": "Weergave referentiewaarde"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "ReferenceValueAppearance",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{groupKey}} / {{code}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Relation": {
       "kind": "entity",
       "entity": "Relation",
@@ -34737,6 +34844,30 @@
           "description": {
             "en": "Runtime-resolved label rule outputs for this relation. Not persisted; computed per request from label_rules.",
             "nl": "Runtime-afgeleide uitkomsten van labelregels voor deze relatie. Niet gepersisteerd; elke request opnieuw bepaald op basis van label_rules."
+          }
+        },
+        {
+          "key": "avatar",
+          "osfType": "Document",
+          "required": false,
+          "label": {
+            "en": "Avatar",
+            "nl": "Avatar"
+          },
+          "document": {
+            "content": "file",
+            "mimeTypes": [
+              "image/png",
+              "image/jpeg",
+              "image/webp"
+            ]
+          },
+          "persisted": {
+            "column": "avatar_document_id",
+            "storageClass": "core"
+          },
+          "relationship": {
+            "ownership": "reference"
           }
         },
         {

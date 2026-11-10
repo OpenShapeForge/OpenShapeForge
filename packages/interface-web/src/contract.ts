@@ -268,6 +268,7 @@ export type WebCollectionTable = {
   recordPanel?: {
     actions?: Array<"edit" | "openFull">;
     primaryMembership?: { field: string; equals: string };
+    avatar?: string;
     summaryColumns?: string[];
     sections?: Array<{
       title: LocalizedText;

@@ -443,7 +443,7 @@ export interface EntityWebRecordLayout {
 export type EntityWebNamedViewDefinition =
     | { kind: "record"; title?: string; fields: string[] }
     | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
-    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
+    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | LocalizedText; title?: LocalizedText; tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
     | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 
@@ -457,8 +457,10 @@ export type CollectionTableValueDefinition = {
   defaultValue?: string | number;
 };
 export type CollectionTableDefinition = {
-  /** Named projections over this same canonical collection. */
-  variants?: Array<{ id: string; label: LocalizedText; match?: { field: string; value: string | number | boolean }; columns?: CollectionTableDefinition["columns"] }>;
+  rowLabel?: string;
+  membershipDescription?: string;
+  groupRows?: "plain" | "bundle";
+  viewSwitch?: boolean;
   recordPanel?: { title: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };

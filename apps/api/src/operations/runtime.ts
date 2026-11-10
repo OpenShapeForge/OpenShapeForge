@@ -1965,11 +1965,11 @@ function operationRestInputFromParts(
   for (const name of pathParameters) {
     const schema = properties[name];
     const value = params[name];
-    if (schema && typeof schema === "object" && !Array.isArray(schema) && (schema as Record<string, unknown>).type === "integer" &&
-        typeof value === "string" && /^-?(?:0|[1-9]\d*)$/.test(value)) {
-      const number = Number(value);
-      if (Number.isSafeInteger(number)) typedParams[name] = number;
-    }
+    if (!schema || typeof schema !== "object" || Array.isArray(schema) || (schema as Record<string,unknown>).type!=="integer" || typeof value!=="string")continue;
+    const canonical=/^(?:0|-?[1-9]\d*)$/.test(value) && Number.isSafeInteger(Number(value));
+    if(canonical)typedParams[name]=Number(value);
+    // Query coercion must not turn a rejected path spelling into a valid int.
+    else if(readsInputFromQuery)throw new HttpError(400,"BAD_USER_INPUT","Operation integer path input must use a canonical safe integer.");
   }
   const input = bind(readsInputFromQuery ? { ...query, ...typedParams } : { ...body, ...typedParams });
   if (operation.idempotency.mode === "idempotency-key") {

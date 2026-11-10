@@ -275,8 +275,9 @@ describe("startWorkerRole", () => {
     await handle.stop();
   });
 
-  test("requires claim resolution and atomic contract pinning as one durable boundary", async () => {
-    for (const partial of ["resolver", "pinner"] as const) {
+  test("requires all three durable callbacks before starting a worker", async () => {
+    for (let subset = 1; subset < 7; subset += 1) {
+      let started = false;
       await expect(startWorkerRole("probe", {
         databaseUrl,
         log: silentLog,
@@ -284,18 +285,19 @@ describe("startWorkerRole", () => {
           name: "probe-module",
           workers: {
             probe: {
-              ...(partial === "resolver"
-                ? { resolveOperationWork: async () => undefined }
-                : { pinOperationContract: async () => {} }),
-              start: () => ({ stop: async () => {} }),
+              ...(subset & 1 ? { resolveOperationWork: async () => undefined } : {}),
+              ...(subset & 2 ? { pinOperationContract: async () => {} } : {}),
+              ...(subset & 4 ? { markOperationDispatch: async () => {} } : {}),
+              start: () => { started = true; return { stop: async () => {} }; },
             },
           },
         }]),
-      })).rejects.toThrow(/must contribute resolveOperationWork and pinOperationContract together/);
+      })).rejects.toThrow(/must contribute resolveOperationWork, pinOperationContract and markOperationDispatch together/);
+      expect(started).toBe(false);
     }
   });
 
-  test("binds the module resolver and pinner into one host-owned durable broker", async () => {
+  test("binds all three callbacks into one host-owned durable broker", async () => {
     let started: ModuleWorkerContext | undefined;
     const handle = await startWorkerRole("probe", {
       databaseUrl,
@@ -315,6 +317,7 @@ describe("startWorkerRole", () => {
           probe: {
             resolveOperationWork: async () => undefined,
             pinOperationContract: async () => {},
+            markOperationDispatch: async () => {},
             start: (context) => {
               started = context;
               return { stop: async () => {} };

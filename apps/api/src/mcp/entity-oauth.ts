@@ -191,7 +191,7 @@ export function scopesCovered(
 /** Service-account JWTs are minted with the adapter's configured scopes;
  * authorization-code connections instead prove scopes from their consent. */
 export function connectionScopesCovered(required: readonly string[], auth: Record<string, unknown> | null | undefined, values: unknown): boolean {
-  return scopesCovered(required, auth?.profile === "googleServiceAccount" ? auth.scopes : grantedScopesOf(auth, values));
+  return scopesCovered(required, auth?.scheme === "googleServiceAccount" ? auth.scopes : grantedScopesOf(auth, values));
 }
 
 /** Single use: reading a state consumes it, valid or not. */

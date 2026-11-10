@@ -74,6 +74,10 @@ short or too uniform, or no complete authentication method is configured.
 In every environment, API startup also checks the actual connected Postgres
 role before initializing modules or serving requests. It refuses `SUPERUSER`
 and `BYPASSRLS` connections, and fails closed if the role cannot be verified.
+This includes an unreachable database during boot: the API serves no liveness
+or readiness endpoint until startup verification succeeds. Configure startup
+probe budgets and restart backoff for that dependency. Once started, an outage
+is reported through readiness while liveness remains available.
 The remaining unchecked requirements below are the operator's responsibility.
 
 - connect the API as a **non-superuser, non-BYPASSRLS** Postgres role so

@@ -23,6 +23,7 @@ test("recovery backs off through stale server hints and respects future pacing",
   const now = 100_000;
   expect(Array.from({ length: 8 }, (_, attempt) => sessionContinuationRetryAt(now, attempt, now - 1) - now))
     .toEqual([1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000]);
-  expect(sessionContinuationRetryAt(now, 0, now + 60_000)).toBe(now + 60_000);
+  expect(sessionContinuationRetryAt(now, 0, now + 60_000)).toBe(now + 30_000);
+  expect(sessionContinuationRetryAt(now, 0, now + 15_000)).toBe(now + 15_000);
   expect(sessionContinuationRetryAt(now, 0, Number.NaN)).toBe(now + 1000);
 });

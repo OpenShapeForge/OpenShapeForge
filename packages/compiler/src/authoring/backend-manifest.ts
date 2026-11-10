@@ -1,3 +1,4 @@
+import { collectionGroupingFields } from './collection-grouping.js';
 import { validateDefaultTemplates } from "./compiler/default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { sortablePositionColumn } from "./sortable-position.js";
@@ -926,6 +927,7 @@ function buildSubtypeTable(
     ...(baseTable.retention ? { retention: structuredClone(baseTable.retention) } : {}),
     source: {
       path: candidate.path,
+      ...collectionGroupingFields(contract),
       ...(contract.interfaces?.web?.collectionBoard?.aggregate ? { boardAggregate: { groupBy: contract.interfaces.web.collectionBoard.groupBy, ...contract.interfaces.web.collectionBoard.aggregate } } : {}),
       authoringEntityName: contract.entity.name,
       authoringEntitySlug: candidate.slug,
@@ -1738,6 +1740,7 @@ export function compileAuthoringBackendManifest(
       ...(retention === undefined ? {} : { retention }),
       source: {
         path: candidate.path,
+        ...collectionGroupingFields(candidate.contract),
         ...(candidate.contract.interfaces?.web?.collectionBoard?.aggregate ? { boardAggregate: { groupBy: candidate.contract.interfaces.web.collectionBoard.groupBy, ...candidate.contract.interfaces.web.collectionBoard.aggregate } } : {}),
         ...(candidate.contract.blueprint ? { blueprint: candidate.contract.blueprint } : {}),
         ...(candidate.contract.transitions ? { transitions: candidate.contract.transitions } : {}),

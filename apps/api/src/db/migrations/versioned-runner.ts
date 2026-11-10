@@ -43,6 +43,10 @@ export type VersionedMigration = {
   version: string;
   /** file: URL of the migration source file, normally `import.meta.url`. */
   fileUrl: string;
+  /** Compiled plugin SQL is checksummed independently of unrelated registry entries. */
+  sourceSql?: string;
+  /** Trusted plugin owner; core migrations retain their historical unqualified IDs. */
+  namespace?: string;
   up: (db: Kysely<any>) => Promise<void>;
   /**
    * Checksums this file was previously recorded under, listed only for edits
@@ -83,9 +87,13 @@ const versionPattern = /^(\d{4})_[a-z0-9][a-z0-9-]*$/;
 export function validateVersionedRegistry(
   migrations: readonly VersionedMigration[],
 ): void {
-  let previousNumber = FIRST_VERSIONED_MIGRATION_NUMBER - 1;
-  let previousVersion: string | undefined;
+  const previous = new Map<string,{number:number;version:string}>();
   for (const migration of migrations) {
+    const namespace = migration.namespace ?? "";
+    if (namespace && !/^[a-z][a-z0-9-]*$/.test(namespace)) throw new Error("Invalid migration namespace.");
+    const minimumNumber = namespace ? 1 : FIRST_VERSIONED_MIGRATION_NUMBER;
+    const previousNumber = previous.get(namespace)?.number ?? minimumNumber - 1;
+    const previousVersion = previous.get(namespace)?.version;
     const numberText = versionPattern.exec(migration.version)?.[1];
     if (numberText === undefined) {
       throw new Error(
@@ -93,7 +101,8 @@ export function validateVersionedRegistry(
       );
     }
     const number = Number(numberText);
-    if (number < FIRST_VERSIONED_MIGRATION_NUMBER) {
+    if (number < minimumNumber) {
+      if (namespace) throw new Error("Plugin migration numbers start at 0001.");
       throw new Error(
         `Versioned migration "${migration.version}" uses number ${numberText} — 0001 is the generated-schema record and 0002–0015 belong to the retired chain; versioned migrations start at ${String(FIRST_VERSIONED_MIGRATION_NUMBER).padStart(4, "0")}.`,
       );
@@ -103,14 +112,17 @@ export function validateVersionedRegistry(
         `Versioned migration registry is out of order: "${migration.version}" must be numbered strictly after "${previousVersion}".`,
       );
     }
-    previousNumber = number;
-    previousVersion = migration.version;
+    previous.set(namespace,{number,version:migration.version});
   }
 }
+
+export function versionedMigrationIdentity(migration: Pick<VersionedMigration,"version"|"namespace">):string { return migration.namespace ? `plugin:${migration.namespace}:${migration.version}` : migration.version; }
 
 export async function migrationFileChecksum(
   migration: VersionedMigration,
 ): Promise<string> {
+  if (migration.sourceSql !== undefined) return createHash("sha256").update(migration.sourceSql).digest("hex");
+  if (!migration.fileUrl) throw new Error("A versioned migration needs an immutable source.");
   let contents: Buffer;
   try {
     contents = await readFile(fileURLToPath(new URL(migration.fileUrl)));
@@ -134,7 +146,7 @@ export async function versionedMigrationBaseline(
   validateVersionedRegistry(migrations);
   return Promise.all(
     migrations.map(async (migration) => ({
-      version: migration.version,
+      version: versionedMigrationIdentity(migration),
       checksum: await migrationFileChecksum(migration),
     })),
   );
@@ -173,14 +185,15 @@ export async function applyVersionedMigrations(
   // 0020 implementation in the same transaction. Re-read each ledger entry
   // so later registry entries see records created by earlier migrations.
   for (const migration of migrations) {
+    const identity = versionedMigrationIdentity(migration);
     const fileChecksum = await migrationFileChecksum(migration);
-    const recorded = (await sql<{checksum:string}>`select checksum from platform.schema_migrations where version = ${migration.version}`.execute(db)).rows[0]?.checksum;
+    const recorded = (await sql<{checksum:string}>`select checksum from platform.schema_migrations where version = ${identity}`.execute(db)).rows[0]?.checksum;
 
     if (recorded !== undefined) {
       if (recorded !== fileChecksum) {
         if (!migration.supersededChecksums?.includes(recorded)) {
           throw new Error(
-            `Versioned migration ${migration.version} was applied with checksum ${recorded}, but its file now hashes to ${fileChecksum}. Applied migrations are immutable — revert the edit and create a new migration instead (bun run db:migration:new <name>). If the edit provably cannot have changed what this migration did, record ${recorded} in its supersededChecksums instead.`,
+            `Versioned migration ${identity} was applied with checksum ${recorded}, but its file now hashes to ${fileChecksum}. Applied migrations are immutable — revert the edit and create a new migration instead (bun run db:migration:new <name>). If the edit provably cannot have changed what this migration did, record ${recorded} in its supersededChecksums instead.`,
           );
         }
         // Reconcile once, so the next run takes the plain skip path and the
@@ -188,14 +201,14 @@ export async function applyVersionedMigrations(
         await sql`
           update platform.schema_migrations
           set checksum = ${fileChecksum}
-          where version = ${migration.version} and checksum = ${recorded}
+          where version = ${identity} and checksum = ${recorded}
         `.execute(db);
-        result.reconciled.push(migration.version);
+        result.reconciled.push(identity);
         continue;
       }
       // A prior migration may have recorded this entry in its transaction.
       // Report that as applied on this run, not as a pre-existing skip.
-      (initiallyRecorded.has(migration.version) ? result.skipped : result.applied).push(migration.version);
+      (initiallyRecorded.has(identity) ? result.skipped : result.applied).push(identity);
       continue;
     }
 
@@ -204,17 +217,17 @@ export async function applyVersionedMigrations(
       await migration.up(db);
       await sql`
         insert into platform.schema_migrations (version, checksum, applied_by)
-        values (${migration.version}, ${fileChecksum}, ${"apps/api versioned"})
+        values (${identity}, ${fileChecksum}, ${"apps/api versioned"})
       `.execute(db);
       await sql`commit`.execute(db);
     } catch (error) {
       await sql`rollback`.execute(db);
       throw new Error(
-        `Versioned migration ${migration.version} failed and was rolled back: ${error instanceof Error ? error.message : String(error)}`,
+        `Versioned migration ${identity} failed and was rolled back: ${error instanceof Error ? error.message : String(error)}`,
         { cause: error },
       );
     }
-    result.applied.push(migration.version);
+    result.applied.push(identity);
   }
 
   return result;

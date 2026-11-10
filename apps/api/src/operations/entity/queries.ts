@@ -174,13 +174,15 @@ export function buildFilterConditions(
       continue;
     }
     const relationship = table.source?.graphql?.relationships?.find((candidate) => candidate.name === key);
-    if (relationship && value && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "any")) {
+    if (relationship && value && typeof value === "object" && !Array.isArray(value) && (Object.hasOwn(value, "any") || Object.hasOwn(value, "none"))) {
       if (relationship.resolve !== "hasMany" || !relationship.foreignKey || !table.primaryKey) {
         throw generatedCrudError(`Relationship filter ${key} is not a supported collection for ${table.name}.`, "BAD_USER_INPUT");
       }
-      const any = (value as { any?: unknown }).any;
-      if (!any || typeof any !== "object" || Array.isArray(any) || Object.keys(any).length === 0) {
-        throw generatedCrudError(`Relationship filter ${key}.any requires exact field constraints.`, "BAD_USER_INPUT");
+      const quantifier = Object.hasOwn(value, "none") ? "none" : "any";
+      if (Object.keys(value).length !== 1) throw generatedCrudError(`Relationship filter ${key} requires exactly one quantifier.`, "BAD_USER_INPUT");
+      const any = (value as Record<string, unknown>)[quantifier];
+      if (!any || typeof any !== "object" || Array.isArray(any) || (quantifier === "any" && Object.keys(any).length === 0)) {
+        throw generatedCrudError(`Relationship filter ${key}.${quantifier} requires exact field constraints.`, "BAD_USER_INPUT");
       }
       const related = getGeneratedCrudTables().find((candidate) => candidate.source?.graphql?.typeName === relationship.target);
       if (!related) throw generatedCrudError(`Relationship filter ${key} has no generated target.`, "INTERNAL_SERVER_ERROR");
@@ -204,7 +206,7 @@ export function buildFilterConditions(
         relatedConditions.push(sql`${sql.id("related", column.name)} = ${eq}`);
       }
       if (related.tenantScoped) relatedConditions.push(sql`${sql.id("related", "tenant_id")} = ${session.tenantId}`);
-      conditions.push(sql`exists (
+      conditions.push(sql`${quantifier === "none" ? sql`not ` : sql``}exists (
         select 1 from ${sql.id(related.schema, related.table)} as related
         where ${sql.id("related", relationship.foreignKey)} = ${sql.id("row_source", table.primaryKey)}
           and ${sql.join(relatedConditions, sql` and `)}

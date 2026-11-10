@@ -117,3 +117,23 @@ describe("relationship traversal guard", () => {
       })).rejects.toMatchObject({ operationError: { code: "FORBIDDEN" } }));
   });
 });
+
+describe('authorized absent memberships', () => {
+  test('an empty none predicate compiles a tenant-bounded not-exists query', () => {
+    const query = buildFilterConditions(parent, session(readRole), { [relationship.name]: { none: {} } }).compile(runtime.db);
+    expect(query.sql).toContain('not exists');
+    expect(query.sql).toContain('tenant_id');
+    expect(query.parameters).toContain(session(readRole).tenantId);
+  });
+  test('absence does not bypass target list authorization', () => {
+    expect(() => buildFilterConditions(parent, session('unrelated'), { [relationship.name]: { none: {} } })).toThrow();
+  });
+  test('a negative predicate protects classified related fields like a positive predicate', () => {
+    withColumn(probe, { sourceField: 'probeIn', classification: 'pii' }, () => {
+      expect(() => buildFilterConditions(parent, session(readRole), { [relationship.name]: { none: { probeIn: { eq: 'probe' } } } })).toThrow();
+    });
+  });
+  test('mixed quantifiers are refused', () => {
+    expect(() => buildFilterConditions(parent, session(readRole), { [relationship.name]: { none: {}, any: {} } })).toThrow('exactly one quantifier');
+  });
+});

@@ -447,7 +447,7 @@ export type CompiledEntityWebNamedViewDefinition =
       title?: string;
       layout: { tabs: CompiledViewGroup[] };
     }
-  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
+  | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | CompiledLocalizedText; title?: CompiledLocalizedText; filter?: Record<string, unknown>; tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: import("./authoring.js").CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
   | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 export interface CompiledViewAction extends ViewAction {}
@@ -819,9 +819,11 @@ export interface CompiledEntityContract {
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
+      collectionFilter?: Record<string, unknown>;
       collectionEmptyState?: { title: LocalizedText; description?: LocalizedText; illustration?: "empty-collection"; primaryAction?: "create" };
       /** Authored collapsible tree presentation; `children` names a collection relationship of this entity. */
-      collectionTree?: { children: string; label?: string; count?: string };
+      collectionTable?: import("./authoring.js").CollectionTableDefinition;
+      collectionTree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
       collectionBoard?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: string; currency: string }; card: { title: string | string[]; timestamp?: string; indicator?: string; subtitle?: string[]; amount?: { value: string; currency: string }; body?: string[] } };
       recordContext?: { fields: string[]; relationships?: string[]; contacts?: import("./views.js").ContactContextPresentation; records?: import("./views.js").RelatedRecordContextPresentation[] };
       /** Authored layout-renderer exceptions; hosts resolve these opaque keys. */

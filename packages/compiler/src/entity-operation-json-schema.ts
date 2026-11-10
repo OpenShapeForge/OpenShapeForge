@@ -1,3 +1,4 @@
+import { collectionGroupingFields } from './authoring/collection-grouping.js';
 import { relatedUpdateSchema } from "./related-update-schema.js";
 import { blueprintBindingsSchema } from "./blueprint-create-schema.js";
 import { sortablePositionFieldKeys } from "./authoring/sortable-position.js";
@@ -497,8 +498,10 @@ function relationshipAnyFilters(
       type: "object",
       properties: {
         any: { type: "object", properties, minProperties: 1, additionalProperties: false },
+        none: { type: "object", properties, additionalProperties: false },
       },
-      required: ["any"],
+      oneOf: [{ required: ["any"] }, { required: ["none"] }],
+      maxProperties: 1,
       additionalProperties: false,
     };
   }
@@ -729,6 +732,9 @@ export function entityOperationJsonSchemas(
       }};
       const sortable = entitySortableFieldKeys(contract, secureInputTarget, contracts);
       const boardAggregate = Boolean(contract.interfaces?.web?.collectionBoard?.aggregate);
+      const grouping = collectionGroupingFields(contract);
+      const collectionGroups = Boolean(grouping.collectionGroupBy);
+      const collectionSummary = Boolean(grouping.collectionSummaryBy);
       const pageSchema = entityListPageSchema(
         {
           type: "object",
@@ -747,6 +753,8 @@ export function entityOperationJsonSchemas(
           },
         },
       };
+      if (collectionGroups) (pageSchema.properties as JsonObject).collectionGroups = { type: "array", maxItems: 1000, items: { type: "object", additionalProperties: false, required: ["value", "count"], properties: { value: { type: ["string", "number", "boolean", "null"] }, count: { type: "integer", minimum: 0 } } } };
+      if (collectionSummary) (pageSchema.properties as JsonObject).collectionSummary = { type: "array", maxItems: 1000, items: { type: "object", additionalProperties: false, required: ["value", "count"], properties: { value: { type: ["string", "number", "boolean", "null"] }, count: { type: "integer", minimum: 0 } } } };
       return {
         inputSchema: {
           $defs: filterDefinitions,
@@ -772,6 +780,8 @@ export function entityOperationJsonSchemas(
             },
             includeTotalCount: { type: "boolean" },
             ...(boardAggregate ? { includeBoardTotals: { type: "boolean" } } : {}),
+            ...(collectionGroups ? { includeCollectionGroups: { type: "boolean" } } : {}),
+            ...(collectionSummary ? { includeCollectionSummary: { type: "boolean" } } : {}),
           },
           additionalProperties: false,
         },

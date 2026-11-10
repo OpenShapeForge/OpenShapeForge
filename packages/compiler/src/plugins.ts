@@ -162,10 +162,12 @@ export type PluginExecutionCompatibility = {
 };
 
 export type PluginSchemaMigration = {
+  /** Immutable, ledgered transformation before generated schema; omitted means repeatable post-schema invariant. */
+  phase?: "beforeGenerated";
   /** Plugin-local immutable migration version, e.g. `0100_install-triggers`. */
   version: string;
   /**
-   * PostgreSQL DDL applied after the generated tables exist: the invariants
+   * PostgreSQL DDL. By default this runs after generated tables exist: invariants
    * the manifest cannot express on a contributed table. A database is built
    * from the manifest, so there is no earlier phase in which legacy ownership
    * could be transformed — a contributed table's shape is declared, not

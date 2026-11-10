@@ -23,11 +23,12 @@ export const PLUGIN_MIGRATION_REGISTRY_PATH =
 export type GeneratedPluginMigration = {
   plugin: string;
   version: string;
+  phase?: "beforeGenerated";
   sql: string;
 };
 
 export type GeneratedPluginMigrationRegistry = {
-  version: 1;
+  version: 1 | 2;
   migrations: GeneratedPluginMigration[];
 };
 
@@ -232,7 +233,8 @@ export function collectPluginMigrationRegistry(
       migrations = plugin.schemaMigrations ?? [];
     }
     for (const migration of migrations) {
-      entries.push(migrationEntry(plugin.name, migration));
+      if (migration.phase !== undefined && migration.phase !== "beforeGenerated") throw new Error("Invalid plugin migration phase.");
+      entries.push({ ...migrationEntry(plugin.name, migration), ...(migration.phase ? {phase:migration.phase} : {}) });
     }
   }
 
@@ -248,7 +250,7 @@ export function collectPluginMigrationRegistry(
     seen.add(identity);
   }
 
-  return { version: 1, migrations: entries };
+  return { version: entries.some(entry=>entry.phase) ? 2 : 1, migrations: entries };
 }
 
 export function renderPluginMigrationRegistry(

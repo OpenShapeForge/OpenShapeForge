@@ -161,6 +161,8 @@ export type GeneratedCrudTable = {
   realtime?: { readPredicate: string; visibilityColumns: string[] };
   source?: {
     /** Server-owned grouped total definition compiled from entity authoring. */
+    collectionGroupBy?: string;
+    collectionSummaryBy?: string;
     boardAggregate?: { groupBy: string; sum: string; currency: string };
     blueprint?: { fields: string[]; labelField: string; operations: { list: string; status: string; reset: string; publish: string } };
     /** Status state machines declared on fields; each rule is the Operation `operation`. */
@@ -334,6 +336,8 @@ export type EntityOperationInput = ListPageInput & {
   /** Plugin-backed CRUD takes its canonical authored input, not forced values. */
   [key: string]: unknown;
   includeBoardTotals?: boolean;
+  includeCollectionGroups?: boolean;
+  includeCollectionSummary?: boolean;
   id?: string;
   blueprintId?: string;
   blueprintBindings?: Record<string, Record<string, string>>;
@@ -377,6 +381,8 @@ export type EntityCollectionData = {
   nextCursor: string | null;
   totalCount: number | null;
   boardTotals?: import("./board-aggregate.js").BoardGroupTotal[];
+  collectionGroups?: import("./collection-groups.js").CollectionGroup[];
+  collectionSummary?: import("./collection-groups.js").CollectionGroup[];
 };
 
 type EntityOfferIntent = GeneratedCrudExposureOperation | "invoke";

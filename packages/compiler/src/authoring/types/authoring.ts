@@ -443,8 +443,54 @@ export interface EntityWebRecordLayout {
 export type EntityWebNamedViewDefinition =
     | { kind: "record"; title?: string; fields: string[] }
     | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
-    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
+    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | LocalizedText; title?: LocalizedText; filter?: Record<string, unknown>; tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
     | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
+
+
+export type CollectionTableValueDefinition = {
+  binding?: string;
+  path?: string;
+  text?: LocalizedText;
+  format?: "money" | "percentage" | "frequency" | "chip";
+  currency?: string;
+  select?: "one";
+  when?: { path: string; equals: string | number | boolean };
+  defaultValue?: string | number;
+};
+export type CollectionTableDefinition = {
+  bindings?: Record<string, { entity: string; operation: string; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;
+  navigation?: Array<{ route: string; label: LocalizedText }>;
+  rowLabel?: string;
+  membershipDescription?: string;
+  groupRows?: "plain" | "bundle";
+  viewSwitch?: boolean;
+  recordPanel?: {
+    actions?: Array<"edit" | "openFull">;
+    primaryMembership?: { field: string; equals: string };
+    summaryColumns?: string[];
+    sections?: Array<{
+      title: LocalizedText;
+      scope?: "treeParent" | "recordAndTreeParent";
+      relationship: string;
+      orderBy?: string;
+      presentation?: "options" | "rows";
+      groupBy?: string;
+      where?: Record<string, string>;
+      label: CollectionTableValueDefinition;
+      description?: CollectionTableValueDefinition;
+      details?: CollectionTableValueDefinition[];
+      values: CollectionTableValueDefinition[];
+    }>;
+    title: LocalizedText; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+  heading: { title: LocalizedText; subtitle?: LocalizedText };
+  views: { tree: LocalizedText; flat: LocalizedText };
+  label: LocalizedText;
+  description?: string;
+  groupBy?: string;
+  ungrouped?: LocalizedText;
+  columns: Array<{ key: string; label: LocalizedText; values: CollectionTableValueDefinition[]; membershipValues?: CollectionTableValueDefinition[] }>;
+  summary?: { field: string; labels?: Record<string, LocalizedText> };
+};
 
 export interface EntityWebViewDefinition {
   /** Additional target-owned views, addressable by relationship placements. */
@@ -452,11 +498,14 @@ export interface EntityWebViewDefinition {
   /** Authoring shorthand: every non-reserved key is a target-owned named view. */
   [name: string]: unknown;
   collection: {
+    /** Server query constraint for the default Web collection, as for a routed named view. */
+    filter?: Record<string, unknown>;
     /**
      * Optional collapsible tree presentation of this same collection: each
      * record groups the records its `children` collection holds.
      */
-    tree?: { children: string; label?: string; count?: string };
+    table?: CollectionTableDefinition;
+    tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
     /** Optional grouped board presentation of this same collection. */
     board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: string; currency: string }; card: { title: string | string[]; timestamp?: string; indicator?: string; subtitle?: string[]; amount?: { value: string; currency: string }; body?: string[] } };
     /** Opaque host renderer-registry key; omission uses the generic collection renderer. */

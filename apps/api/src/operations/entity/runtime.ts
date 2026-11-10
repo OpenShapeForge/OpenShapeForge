@@ -1,3 +1,4 @@
+import { readCollectionGroups } from "./collection-groups.js";
 import { assertCurrentAccountAuthority } from "../../accounts/account-current-authority.js";
 import { withFrozenFieldDefinitions } from "./frozen-field-definitions.js";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
@@ -1192,6 +1193,8 @@ async function executeEntityOperationWithContext(
     if (collectionError) throw operationFailure(collectionError);
     switch (request.operation.intent) {
       case "list": {
+        if (request.input?.includeCollectionSummary !== undefined && typeof request.input.includeCollectionSummary !== "boolean") throw generatedCrudError("includeCollectionSummary must be a boolean.", "BAD_USER_INPUT");
+        if (request.input?.includeCollectionGroups !== undefined && typeof request.input.includeCollectionGroups !== "boolean") throw generatedCrudError("includeCollectionGroups must be a boolean.", "BAD_USER_INPUT");
         if (request.input?.includeBoardTotals !== undefined && typeof request.input.includeBoardTotals !== "boolean") {
           throw generatedCrudError("includeBoardTotals must be a boolean.", "BAD_USER_INPUT");
         }
@@ -1199,12 +1202,14 @@ async function executeEntityOperationWithContext(
         const readPage = async () => {
           const connection = await listGeneratedEntities(db, session, { ...pageInput, table: table.name });
           const boardTotals = request.input?.includeBoardTotals ? await aggregateBoardGroups(db, session, { table: table.name, ...(pageInput.filter !== undefined ? { filter: pageInput.filter } : {}) }) : undefined;
-          return { connection, boardTotals };
+          const collectionGroups = request.input?.includeCollectionGroups ? await readCollectionGroups(db, session, table.name, pageInput.filter) : undefined;
+          const collectionSummary = request.input?.includeCollectionSummary ? await readCollectionGroups(db, session, table.name, pageInput.filter, true) : undefined;
+          return { connection, boardTotals, collectionGroups, collectionSummary };
         };
         // One snapshot prevents a concurrent write from appearing in the sums
         // but not in the page (or the reverse). Nested reads reapply their own
         // audit and authorization context on this transaction.
-        const { connection, boardTotals } = request.input?.includeBoardTotals
+        const { connection, boardTotals, collectionGroups, collectionSummary } = (request.input?.includeBoardTotals || request.input?.includeCollectionGroups || request.input?.includeCollectionSummary)
           ? await withDbSession(db, session, readPage, { isolationLevel: "repeatable read" })
           : await readPage();
         const targets = connection.rows.map((row) => offerTarget(row, table));
@@ -1232,6 +1237,8 @@ async function executeEntityOperationWithContext(
             totalCount: connection.totalCount,
             nextCursor: connection.nextCursor,
             ...(boardTotals ? { boardTotals } : {}),
+            ...(collectionGroups ? { collectionGroups } : {}),
+            ...(collectionSummary ? { collectionSummary } : {}),
           },
           operations: getEntityOperationOffers(
             entityName,

@@ -242,14 +242,68 @@ export type WebTimelinePresentation = {
   relatedField?: string;
 };
 
+
+/** Declarative table values. Membership values refer to the association, never the target record. */
+export type WebCollectionTableValue = {
+  binding?: string;
+  boundPath?: string[];
+  boundCurrency?: string[];
+  schema?: Readonly<Record<string, unknown>>;
+  path?: WebValuePath;
+  text?: LocalizedText;
+  format?: "money" | "percentage" | "frequency" | "chip";
+  currency?: WebValuePath;
+  /** Every path in this value, including currency and when, must resolve to zero or one result.
+   * Consumers refuse partial, unavailable or multiple results rather than selecting the first. */
+  select?: "one";
+  when?: { path: WebValuePath; equals: string | number | boolean };
+  defaultValue?: string | number;
+};
+export type WebCollectionTable = {
+  bindings?: Record<string, { entityId: string; operation: WebCustomOperationRef; schema: Readonly<Record<string, unknown>>; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;
+  navigation?: Array<{ route: string; label: LocalizedText }>;
+  rowLabel?: WebValuePath;
+  membershipDescription?: WebValuePath;
+  groupRows?: "plain" | "bundle";
+  viewSwitch?: boolean;
+  recordPanel?: {
+    actions?: Array<"edit" | "openFull">;
+    primaryMembership?: { field: string; equals: string };
+    summaryColumns?: string[];
+    sections?: Array<{
+      title: LocalizedText;
+      scope?: "treeParent" | "recordAndTreeParent";
+      relationship: string;
+      orderBy?: string;
+      presentation?: "options" | "rows";
+      groupBy?: WebValuePath;
+      where?: Record<string, string>;
+      label: WebCollectionTableValue;
+      description?: WebCollectionTableValue;
+      details?: WebCollectionTableValue[];
+      values: WebCollectionTableValue[];
+    }>;
+    title: LocalizedText; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+  heading: { title: LocalizedText; subtitle?: LocalizedText };
+  views: { tree: LocalizedText; flat: LocalizedText };
+  label: LocalizedText;
+  description?: string;
+  groupBy?: string;
+  ungrouped?: LocalizedText;
+  columns: Array<{ key: string; label: LocalizedText; values: WebCollectionTableValue[]; membershipValues?: WebCollectionTableValue[] }>;
+  summary?: { field: string; labels?: Record<string, LocalizedText> };
+};
+
 export type WebCollectionView = {
+  filter?: Readonly<Record<string, unknown>>;
+  table?: WebCollectionTable;
   /**
    * Collapsible tree presentation of this same collection: each record is a
    * group of the records its `children` relationship holds, nested without a
    * depth limit. `label` and `count` name fields of the entity shown on the
    * group heading; without `count` the renderer counts the children.
    */
-  tree?: { children: string; label?: string; count?: string };
+  tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
   board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: WebValuePath; currency: WebValuePath }; card: { title: WebValuePath[]; timestamp?: WebValuePath; indicator?: string; subtitle?: WebValuePath[]; amount?: { value: WebValuePath; currency: WebValuePath }; body: WebValuePath[] } };
   presentation?: WebTimelinePresentation;
   id: string;
@@ -381,6 +435,7 @@ export type WebRecordView = {
 };
 
 export type WebNamedView =
+  | (WebCollectionView & { collectionLayout: "table"; itemView?: string; tabLabel?: string; showItemTitle?: boolean })
   | (WebRecordView & { relationships?: Record<string, WebRelationshipProjection> })
   /** Compatibility with manifests compiled before named record layouts. */
   | { kind: "record"; fields: string[] }

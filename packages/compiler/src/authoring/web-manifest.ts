@@ -1,3 +1,4 @@
+import { compileCollectionTable } from "./collection-table.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { operationForm } from "./operation-form-presentation.js";
 import { collectBlueprintOperations } from "../blueprint-operations.js";
@@ -472,7 +473,7 @@ function collectionFor(
   };
 }
 
-type ProjectableEntity = {
+export type ProjectableEntity = {
   slug: string;
   contract: CompiledEntityContract;
   view?: CompiledViewContext;
@@ -506,6 +507,34 @@ function compileRelationshipPath(
     return step;
   });
   return { path, target: owner, many };
+}
+
+export function compileWebValuePath(source: ProjectableEntity, all: ReadonlyMap<string, ProjectableEntity>, expression: string, kind = "value"): WebValuePath {
+  const entityName = source.contract.entity.name;
+      const parts = expression.split(".");
+      if (parts.length > 5 || parts.some(part => !part)) throw new Error(`${entityName}: invalid ${kind} path ${expression}.`);
+      let owner = source;
+      let many = false;
+      const path: WebValuePath["path"] = [];
+      for (let i = 0; i < parts.length; i++) {
+        const key = parts[i]!;
+        const relation = owner.contract.model.relationships.find(item => item.key === key);
+        if (relation) {
+          if (path.length >= 4) throw new Error(`${entityName}: ${kind} path ${expression} requires at most four relationships.`);
+          const resolved = compileRelationshipPath(entityName, owner, all, [key], "value");
+          if (!resolved.target.operations.list) throw new Error(`${entityName}: ${kind} path ${expression} requires a readable collection.`);
+          path.push(...resolved.path);
+          many ||= resolved.many;
+          owner = resolved.target;
+          if (i === parts.length - 1) return { path, targetEntityId: owner.contract.entity.name, osfType: owner.contract.entity.name, cardinality: many ? "many" : "one" };
+        } else {
+          const field = owner.contract.model.fields.find(item => item.key === key);
+          const providerField = owner.contract.model.relationships.some(item => item.provider && item.fieldKey === key);
+          if (!field || field.baseType === "object" || field.relationship?.target || providerField || i !== parts.length - 1) throw new Error(`${entityName}: invalid ${kind} path ${expression}.`);
+          return { path, targetEntityId: owner.contract.entity.name, field: key, osfType: field.osfType, cardinality: many || field.cardinality === "collection" ? "many" : "one" };
+        }
+      }
+      throw new Error(`${entityName}: invalid ${kind} path ${expression}.`);
 }
 
 function projectableEntities(
@@ -889,7 +918,7 @@ function collectionTree(contract: CompiledEntityContract): WebCollectionView["tr
       throw new Error(`${entityName}: collection tree ${key} ${field} is not a field of ${entityName}.`);
     }
   }
-  return { children: tree.children, ...(tree.label ? { label: tree.label } : {}), ...(tree.count ? { count: tree.count } : {}) };
+  return { children: tree.children, ...(tree.label ? { label: tree.label } : {}), ...(tree.count ? { count: tree.count } : {}), ...(tree.through ? { through: tree.through } : {}) };
 }
 
 function projectEntity(
@@ -924,6 +953,7 @@ function projectEntity(
   // presentation are projected above; relationships add no implicit fields.
   const fields = Object.fromEntries(explicitFields);
   const tree = collectionTree(contract);
+  const table = compileCollectionTable(source, all);
   const authoredBoard = contract.interfaces?.web?.collectionBoard;
   let board: WebCollectionView["board"];
   if (authoredBoard) {
@@ -963,32 +993,7 @@ function projectEntity(
         throw new Error(`${entityName}: board group summary must name a scalar field on the grouping entity.`);
       }
     }
-    const valuePath = (expression: string): WebValuePath => {
-      const parts = expression.split(".");
-      if (parts.length > 5 || parts.some(part => !part)) throw new Error(`${entityName}: invalid board path ${expression}.`);
-      let owner = source;
-      let many = false;
-      const path: WebValuePath["path"] = [];
-      for (let i = 0; i < parts.length; i++) {
-        const key = parts[i]!;
-        const relation = owner.contract.model.relationships.find(item => item.key === key);
-        if (relation) {
-          if (path.length >= 4) throw new Error(`${entityName}: board path ${expression} requires at most four relationships.`);
-          const resolved = compileRelationshipPath(entityName, owner, all, [key], "board");
-          if (!resolved.target.operations.list) throw new Error(`${entityName}: board path ${expression} requires a readable collection.`);
-          path.push(...resolved.path);
-          many ||= resolved.many;
-          owner = resolved.target;
-          if (i === parts.length - 1) return { path, targetEntityId: owner.contract.entity.name, osfType: owner.contract.entity.name, cardinality: many ? "many" : "one" };
-        } else {
-          const field = owner.contract.model.fields.find(item => item.key === key);
-          const providerField = owner.contract.model.relationships.some(item => item.provider && item.fieldKey === key);
-          if (!field || field.baseType === "object" || field.relationship?.target || providerField || i !== parts.length - 1) throw new Error(`${entityName}: invalid board path ${expression}.`);
-          return { path, targetEntityId: owner.contract.entity.name, field: key, osfType: field.osfType, cardinality: many || field.cardinality === "collection" ? "many" : "one" };
-        }
-      }
-      throw new Error(`${entityName}: invalid board path ${expression}.`);
-    };
+    const valuePath = (expression: string) => compileWebValuePath(source, all, expression, "board");
     const title = (Array.isArray(authoredBoard.card.title) ? authoredBoard.card.title : [authoredBoard.card.title]).map(valuePath);
     if (!title.length) throw new Error(`${entityName}: board card title requires at least one path.`);
     if (title.some(part => part.cardinality !== "one")) throw new Error(`${entityName}: board card title must be single-valued.`);
@@ -1329,6 +1334,17 @@ function projectEntity(
   // Named records use exactly the same projection as the default record. Their
   // relationship overrides stay local to the selected view, not the entity.
   const named = Object.fromEntries(Object.entries(contract.interfaces?.web?.namedViews ?? {}).map(([name, definition]) => {
+    if (definition.kind === "collection" && "route" in definition && definition.route) {
+      if (definition.collectionLayout !== "table") throw new Error(`${entityName}.${name}: a routed collection requires table layout.`);
+      const route = projectedRoute(definition.route, source.routeLocale ?? "en", source.route);
+      if (route === source.route) throw new Error(`${entityName}.${name}: a named collection route must differ from the default route.`);
+      const { namedViews: _named, collectionTree: _tree, collectionTable: _table, collectionFilter: _filter, ...web } = contract.interfaces!.web!;
+      const projected = projectEntity({ ...source, route,
+        collection: { ...source.collection, route, title: localized(definition.title, source.collection.title.en) },
+        contract: { ...contract, interfaces: { ...contract.interfaces, web: { ...web, ...(definition.tree ? { collectionTree: definition.tree } : {}), ...(definition.table ? { collectionTable: definition.table } : {}) } } },
+      }, all, providers);
+      return [name, { ...projected.views.collection, ...(definition.filter ? { filter: definition.filter } : {}), id: `${entityName}.${name}`, collectionLayout: "table" as const }];
+    }
     if (definition.kind === "collection" && definition.collectionLayout === "matrix") {
       const { rowField, columnField, valueField } = definition.matrix;
       for (const key of [rowField, columnField, valueField]) {
@@ -1400,7 +1416,7 @@ function projectEntity(
       message: "Generic create requires an atomic collection Operation and is currently unsupported.",
     } } } : {}),
     views: {
-      collection: { ...source.collection, ...(tree ? { tree } : {}), ...(board ? { board } : {}), ...(createUnsupported ? { operations: withoutCreate(source.collection.operations) } : {}) },
+      collection: { ...source.collection, ...(contract.interfaces?.web?.collectionFilter ? { filter: contract.interfaces.web.collectionFilter } : {}), ...(tree ? { tree } : {}), ...(table ? { table } : {}), ...(board ? { board } : {}), ...(createUnsupported ? { operations: withoutCreate(source.collection.operations) } : {}) },
       ...(record ? { record } : {}),
       ...(Object.keys(named).length ? { named } : {}),
     },

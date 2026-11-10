@@ -1,3 +1,4 @@
+import { matchWebRoute } from "@openshapeforge/interface-web";
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import type { CompiledEntityInfo } from "../plugins.js";
@@ -2314,4 +2315,124 @@ test("a collection tree names a stored collection of the entity and fields for i
   expect(build).toThrow("Product: collection tree children displayName must be a stored collection relationship of Product.");
   product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", count: "missing" };
   expect(build).toThrow("Product: collection tree count missing is not a field of Product.");
+});
+
+describe('declarative collection tables', () => {
+  const fixture = () => {
+    const product = entity('Product', 'products', [field('displayName'), field('category')], coreView(), [{ key: 'parts', kind: 'hasMany', target: 'Membership', foreignKey: 'parent_id' }]);
+    const member = entity('Membership', 'memberships', [field('role'), field('amount', { baseType: 'number', osfType: 'money' }), field('currency'), field('position', { baseType: 'integer' })], coreView(), [{ key: 'item', fieldKey: 'item', kind: 'belongsTo', target: 'Product', foreignKey: 'item_id' }]);
+    product.contract.interfaces!.web!.collectionTree = { children: 'parts', through: { record: 'item', orderBy: 'position' } };
+    product.contract.interfaces!.web!.collectionTable = { heading: { title: text('Catalogue') }, views: { tree: text('Grouped'), flat: text('All') }, label: text('Product'), groupBy: 'category', columns: [{ key: 'role', label: text('Role'), values: [{ text: text('Standalone') }], membershipValues: [{ path: 'role' }] }] };
+    return { product, member, build: () => buildWebManifest([product, member]) };
+  };
+  test('validates authored summary ordering and presentation while preserving an empty action list', () => {
+    const { product, build } = fixture();
+    const table = product.contract.interfaces!.web!.collectionTable!;
+    table.recordPanel = { title: text('Details'), heading: 'displayName', summaryColumns: ['role'], actions: [], sections: [{ title: text('Options'), scope: 'treeParent', relationship: 'parts', orderBy: 'position', presentation: 'options', groupBy: 'role', label: { path: 'role' }, values: [{ path: 'amount', currency: 'currency', format: 'money' }] }] };
+    table.recordPanel.fields = ['displayName'];
+    const panel = build().entities.Product!.views.collection.table!.recordPanel!;
+    expect(panel.fields).toEqual(['displayName']);
+    table.recordPanel.fields = ['missing'];
+    expect(build).toThrow('summary fields');
+    table.recordPanel.fields = ['displayName'];
+    expect(panel.actions).toEqual([]);
+    expect(panel.sections![0]!.orderBy).toBe('position');
+    expect(panel.sections![0]!.presentation).toBe('options');
+    table.recordPanel.sections![0]!.orderBy = 'missing';
+    expect(build).toThrow('summary orderBy');
+  });
+  test('compiles a flat table and refuses membership-only values without a tree', () => {
+    const { product, build } = fixture(); delete product.contract.interfaces!.web!.collectionTree;
+    const table = product.contract.interfaces!.web!.collectionTable!;
+    table.columns = [{ key: 'name', label: text('Name'), values: [{ path: 'displayName' }] }];
+    expect(build().entities.Product!.views.collection.table?.columns[0]?.values[0]?.path?.field).toBe('displayName');
+    expect(build().entities.Product!.views.collection.tree).toBeUndefined();
+    table.columns[0]!.membershipValues = [{ path: 'role' }];
+    expect(build).toThrow('membership values require explicit tree.through');
+  });
+  test('preserves explicit traversal and compiles membership values in the association context', () => {
+    const { build } = fixture(); const view = build().entities.Product!.views.collection;
+    expect(view.tree?.through).toEqual({ record: 'item', orderBy: 'position' });
+    expect(view.table?.columns[0]?.membershipValues?.[0]?.path).toEqual({ path: [], targetEntityId: 'Membership', field: 'role', osfType: 'string', cardinality: 'one' });
+  });
+  test('rejects a guessed member reference and duplicate column identities', () => {
+    const { product, build } = fixture();
+    product.contract.interfaces!.web!.collectionTree!.through!.record = 'missing';
+    expect(build).toThrow('through.record');
+    product.contract.interfaces!.web!.collectionTree!.through!.record = 'item';
+    const columns = product.contract.interfaces!.web!.collectionTable!.columns;
+    columns.push(columns[0]!); expect(build).toThrow('duplicate table column');
+  });
+  test('requires explicit single-result selection on a collection path', () => {
+    const { product, build } = fixture();
+    const value = { path: 'parts.role' } as { path: string; select?: 'one' };
+    product.contract.interfaces!.web!.collectionTable!.columns[0]!.values = [value];
+    expect(build).toThrow('select: one'); value.select = 'one';
+    expect(build().entities.Product!.views.collection.table?.columns[0]?.values[0]?.path?.cardinality).toBe('many');
+  });
+
+  test('explicit single-result selection applies to conditional paths without erasing their cardinality', () => {
+    const { product, build } = fixture();
+    const value = { text: text('Primary'), when: { path: 'parts.role', equals: 'main' } } as { text: ReturnType<typeof text>; select?: 'one'; when: { path: string; equals: string } };
+    product.contract.interfaces!.web!.collectionTable!.columns[0]!.values = [value];
+    expect(build).toThrow('select: one');
+    value.select = 'one';
+    const compiled = build().entities.Product!.views.collection.table?.columns[0]?.values[0];
+    expect(compiled?.select).toBe('one');
+    expect(compiled?.when?.path.cardinality).toBe('many');
+    expect(compiled?.when?.path.targetEntityId).toBe('Membership');
+  });
+  test('keeps money and currency on the same readable record', () => {
+    const { product, build } = fixture();
+    product.contract.interfaces!.web!.collectionTable!.columns[0]!.membershipValues = [{ path: 'amount', currency: 'currency', format: 'money' }];
+    expect(build().entities.Product!.views.collection.table?.columns[0]?.membershipValues?.[0]?.currency?.field).toBe('currency');
+    product.contract.interfaces!.web!.collectionTable!.columns[0]!.membershipValues![0]!.currency = 'item.displayName';
+    expect(build).toThrow('same related record');
+  });
+  test('a grouping collection compiles identity and values against its distinct member entity', () => {
+    const { product, member } = fixture();
+    const person = entity('Person', 'people', [field('displayName')], coreView());
+    const employee = entity('Employee', 'employees', [field('fte', { baseType: 'number' }), field('person')], coreView(), [{ key: 'person', fieldKey: 'person', kind: 'belongsTo', target: 'Person', foreignKey: 'person_id' }]);
+    member.contract.model.relationships.find(item => item.key === 'item')!.target = 'Employee';
+    const table = product.contract.interfaces!.web!.collectionTable!;
+    table.rowLabel = 'person'; table.membershipDescription = 'role'; table.groupRows = 'plain'; table.viewSwitch = false;
+    table.columns = [{ key: 'fte', label: text('FTE'), values: [{ path: 'fte' }] }];
+    const projected = buildWebManifest([product, member, employee, person]).entities.Product!.views.collection.table!;
+    expect(projected.columns[0]!.values[0]!.path?.targetEntityId).toBe('Employee');
+    expect(projected.rowLabel?.targetEntityId).toBe('Person');
+    expect(projected.membershipDescription?.targetEntityId).toBe('Membership');
+    expect(projected.groupRows).toBe('plain'); expect(projected.viewSwitch).toBe(false);
+    table.rowLabel = 'missing';
+    expect(() => buildWebManifest([product, member, employee, person])).toThrow('missing');
+  });
+
+  test('a routed named collection preserves the default collection and canonical Operations', () => {
+    const { product, member } = fixture();
+    const web = product.contract.interfaces!.web!;
+    web.namedViews = { workforce: { kind: 'collection', collectionLayout: 'table', route: '/workforce', title: text('Workforce'), filter: { category: { eq: 'Design' } }, tree: web.collectionTree!, table: web.collectionTable! } };
+    delete web.collectionTree; delete web.collectionTable;
+    const manifest = buildWebManifest([product, member]);
+    const canonical = manifest.entities.Product!;
+    expect(canonical.views.collection.table).toBeUndefined();
+    const selected = matchWebRoute(manifest, '/workforce');
+    expect(selected?.entity.views.collection.table?.groupBy).toBe('category');
+    expect(selected?.entity.title.en).toBe('Workforce');
+    expect(selected?.entity.views.collection.filter).toEqual({ category: { eq: 'Design' } });
+    expect(canonical.views.collection.filter).toBeUndefined();
+    expect(selected?.entity.views.collection.operations.read.id).toBe(canonical.views.collection.operations.read.id);
+    expect(matchWebRoute(manifest, canonical.views.collection.route)?.entity.views.collection.table).toBeUndefined();
+  });
+
+});
+
+
+test('default collection filters survive authoring compilation and remain local to that view', () => {
+ const artifacts=loadEntity(authoringDir,'chip');
+ const filter={id:{eq:'00000000-0000-0000-0000-000000000001'}};
+ artifacts.coreEntity.interfaces={...artifacts.coreEntity.interfaces,web:{...artifacts.coreEntity.interfaces?.web,views:{collection:{route:'/chips',columns:[{key:'id'}],filter},unfiltered:{kind:'collection',collectionLayout:'table',route:'/chips/all'}}}};
+ const contract=compile(artifacts);
+ expect(contract.interfaces?.web?.collectionFilter).toEqual(filter);
+ const manifest=buildWebManifest([{slug:'chip',contract}]);
+ expect(manifest.entities.Chip!.views.collection.filter).toEqual(filter);
+ expect(matchWebRoute(manifest,'/chips/all')?.entity.views.collection.filter).toBeUndefined();
 });

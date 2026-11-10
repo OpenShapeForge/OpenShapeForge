@@ -63,6 +63,25 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     if (column.membershipValues && !tree?.through) throw new Error(`${name}: membership values require explicit tree.through.`);
     return { key: column.key, label: local(column.label), values: column.values.map(item => value(record, item)), ...(column.membershipValues ? { membershipValues: column.membershipValues.map(item => value(membership!, item)) } : {}) };
   });
+  const panel = authored.recordPanel;
+  if (panel?.summaryColumns) {
+    if (panel.binding || !panel.heading || panel.summaryColumns.some(key => !keys.has(key))) throw new Error(`${name}: record summaries require a heading and known table columns.`);
+    for (const key of [panel.heading, panel.subtitle].filter(Boolean)) path(record, key!, undefined);
+  }
+  if (panel?.primaryMembership) {
+    if (!membership || !through || !panel.summaryColumns) throw new Error(`${name}: primaryMembership requires a summary and a membership tree.`);
+    path(membership, panel.primaryMembership.field, undefined);
+  }
+  const sections = panel?.sections?.map(section => {
+    const owner = section.scope === "treeParent" ? source : record;
+    const relation = owner.contract.model.relationships.find(item => item.key === section.relationship);
+    const target = relation && all.get(relation.target);
+    if (section.scope && !tree) throw new Error(`${name}: section scope requires a collection tree.`);
+    if (section.scope === "recordAndTreeParent" && record !== source) throw new Error(`${name}: combined scope requires the same entity for parent and record.`);
+    if (!panel?.summaryColumns || !target || relation?.kind !== "hasMany") throw new Error(`${name}: invalid summary relationship ${section.relationship}.`);
+    for (const key of Object.keys(section.where ?? {})) path(target, key, undefined);
+    return { ...section, ...(section.groupBy ? { groupBy: path(target, section.groupBy, undefined) } : {}), title: local(section.title), label: value(target, section.label), description: section.description && value(target, section.description), values: section.values.map(item => value(target, item)) };
+  });
   if (authored.recordPanel?.binding) {
     const panel = authored.recordPanel, binding = bindings?.[panel.binding!];
     if (!binding) throw new Error(`${name}: record panel binding is unknown.`);
@@ -77,5 +96,5 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     if (!link.route.startsWith('/') || link.route.startsWith('//')) throw new Error(`${name}: collection navigation requires local routes.`);
     return { ...link, label: local(link.label) };
   });
-  return { ...authored, ...(bindings ? { bindings } : {}), ...(navigation ? { navigation } : {}), ...(authored.rowLabel ? { rowLabel: path(record, authored.rowLabel, undefined) } : {}), ...(authored.membershipDescription ? { membershipDescription: path(membership!, authored.membershipDescription, undefined) } : {}), ...(authored.recordPanel ? { recordPanel: { ...authored.recordPanel, title: local(authored.recordPanel.title), ...(authored.recordPanel.collection ? { collection: { ...authored.recordPanel.collection, title: local(authored.recordPanel.collection.title) } } : {}), ...(authored.recordPanel.note ? { note: local(authored.recordPanel.note) } : {}) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
+  return { ...authored, ...(bindings ? { bindings } : {}), ...(navigation ? { navigation } : {}), ...(authored.rowLabel ? { rowLabel: path(record, authored.rowLabel, undefined) } : {}), ...(authored.membershipDescription ? { membershipDescription: path(membership!, authored.membershipDescription, undefined) } : {}), ...(authored.recordPanel ? { recordPanel: { ...authored.recordPanel, ...(sections ? { sections } : {}), title: local(authored.recordPanel.title), ...(authored.recordPanel.collection ? { collection: { ...authored.recordPanel.collection, title: local(authored.recordPanel.collection.title) } } : {}), ...(authored.recordPanel.note ? { note: local(authored.recordPanel.note) } : {}) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
 }

@@ -464,7 +464,20 @@ export type CollectionTableDefinition = {
   membershipDescription?: string;
   groupRows?: "plain" | "bundle";
   viewSwitch?: boolean;
-  recordPanel?: { title: LocalizedText; binding?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+  recordPanel?: {
+    primaryMembership?: { field: string; equals: string };
+    summaryColumns?: string[];
+    sections?: Array<{
+      title: LocalizedText;
+      scope?: "treeParent" | "recordAndTreeParent";
+      relationship: string;
+      groupBy?: string;
+      where?: Record<string, string>;
+      label: CollectionTableValueDefinition;
+      description?: CollectionTableValueDefinition;
+      values: CollectionTableValueDefinition[];
+    }>;
+    title: LocalizedText; binding?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;

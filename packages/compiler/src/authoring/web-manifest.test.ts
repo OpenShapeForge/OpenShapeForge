@@ -2329,7 +2329,12 @@ describe('declarative collection tables', () => {
     const { product, build } = fixture();
     const table = product.contract.interfaces!.web!.collectionTable!;
     table.recordPanel = { title: text('Details'), heading: 'displayName', summaryColumns: ['role'], actions: [], sections: [{ title: text('Options'), scope: 'treeParent', relationship: 'parts', orderBy: 'position', presentation: 'options', groupBy: 'role', label: { path: 'role' }, values: [{ path: 'amount', currency: 'currency', format: 'money' }] }] };
+    table.recordPanel.fields = ['displayName'];
     const panel = build().entities.Product!.views.collection.table!.recordPanel!;
+    expect(panel.fields).toEqual(['displayName']);
+    table.recordPanel.fields = ['missing'];
+    expect(build).toThrow('summary fields');
+    table.recordPanel.fields = ['displayName'];
     expect(panel.actions).toEqual([]);
     expect(panel.sections![0]!.orderBy).toBe('position');
     expect(panel.sections![0]!.presentation).toBe('options');

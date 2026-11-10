@@ -2324,6 +2324,25 @@ describe('declarative collection tables', () => {
     product.contract.interfaces!.web!.collectionTable = { heading: { title: text('Catalogue') }, views: { tree: text('Grouped'), flat: text('All') }, label: text('Product'), groupBy: 'category', columns: [{ key: 'role', label: text('Role'), values: [{ text: text('Standalone') }], membershipValues: [{ path: 'role' }] }] };
     return { product, member, build: () => buildWebManifest([product, member]) };
   };
+  test('compiles flat named views and rejects membership-only values without a tree', () => {
+    const { product, build } = fixture();
+    delete product.contract.interfaces!.web!.collectionTree;
+    const table = product.contract.interfaces!.web!.collectionTable!;
+    table.columns = [{ key: 'name', label: text('Name'), values: [{ path: 'displayName' }] }];
+    table.variants = [{ id: 'all', label: text('All') }];
+    expect(build().entities.Product!.views.collection.table?.columns[0]?.values[0]?.path?.field).toBe('displayName');
+    expect(build().entities.Product!.views.collection.tree).toBeUndefined();
+    table.columns[0]!.membershipValues = [{ path: 'role' }];
+    expect(build).toThrow('membership values require explicit tree.through');
+  });
+  test('named views validate identities and require canonical filterable fields', () => {
+    const { product, build } = fixture();
+    const table = product.contract.interfaces!.web!.collectionTable!;
+    table.variants = [{ id: 'same', label: text('One') }, { id: 'same', label: text('Two') }];
+    expect(build).toThrow('unique identifiers');
+    table.variants = [{ id: 'secret', label: text('Secret'), match: { field: 'missing', value: 'x' } }];
+    expect(build).toThrow('canonical filterable scalar field');
+  });
   test('preserves explicit traversal and compiles membership values in the association context', () => {
     const { build } = fixture(); const view = build().entities.Product!.views.collection;
     expect(view.tree?.through).toEqual({ record: 'item', orderBy: 'position' });

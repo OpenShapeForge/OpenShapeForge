@@ -254,6 +254,7 @@ export type WebCollectionTableValue = {
   defaultValue?: string | number;
 };
 export type WebCollectionTable = {
+  variants?: Array<{ id: string; label: LocalizedText; match?: { field: string; value: string | number | boolean }; columns?: WebCollectionTable["columns"] }>;
   recordPanel?: { title: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };

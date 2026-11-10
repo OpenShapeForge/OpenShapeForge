@@ -9,13 +9,12 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
   const tree = source.contract.interfaces?.web?.collectionTree;
   if (!authored) return undefined;
   const name = source.contract.entity.name;
-  if (!tree) throw new Error(`${name}: a declarative tree table requires a collection tree.`);
-  const children = source.contract.model.relationships.find(item => item.key === tree.children);
+  const children = source.contract.model.relationships.find(item => item.key === tree?.children);
   const membership = children && all.get(children.target);
-  const through = tree.through && membership?.contract.model.relationships.find(item => item.key === tree.through!.record);
-  if (tree.through && (!through || through.kind !== 'belongsTo' || !all.has(through.target))) throw new Error(`${name}: tree through.record must name a readable member reference.`);
+  const through = tree?.through && membership?.contract.model.relationships.find(item => item.key === tree.through!.record);
+  if (tree?.through && (!through || through.kind !== 'belongsTo' || !all.has(through.target))) throw new Error(`${name}: tree through.record must name a readable member reference.`);
   if (through && !all.get(through.target)?.operations.list) throw new Error(`${name}: tree members require a canonical list operation.`);
-  if (tree.through?.orderBy && !membership?.contract.model.fields.some(field => field.key === tree.through!.orderBy && field.cardinality !== 'collection')) throw new Error(`${name}: tree orderBy must name a membership scalar.`);
+  if (tree?.through?.orderBy && !membership?.contract.model.fields.some(field => field.key === tree.through!.orderBy && field.cardinality !== 'collection')) throw new Error(`${name}: tree orderBy must name a membership scalar.`);
   if (authored.description && !source.contract.model.fields.some(field => field.key === authored.description && field.cardinality !== 'collection')) throw new Error(`${name}: table description must name a scalar field.`);
   if (authored.groupBy) {
     const field = source.contract.model.fields.find(field => field.key === authored.groupBy);
@@ -43,12 +42,28 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     return { ...input, ...(input.text ? { text: local(input.text) } : {}), ...(result ? { path: result } : {}), ...(currency ? { currency } : {}), ...(input.when ? { when: { path: path(owner, input.when.path, input.select), equals: input.when.equals } } : {}) } as WebCollectionTableValue;
   };
   const local = (text: { en?: string; nl?: string }) => ({ en: text.en ?? text.nl ?? "", nl: text.nl ?? text.en ?? "" });
+  const compileColumns = (definitions: typeof authored.columns) => {
   const keys = new Set<string>();
-  const columns = authored.columns.map(column => {
+  return definitions.map(column => {
     if (keys.has(column.key)) throw new Error(`${name}: duplicate table column ${column.key}.`);
     keys.add(column.key);
-    if (column.membershipValues && !tree.through) throw new Error(`${name}: membership values require explicit tree.through.`);
+    if (column.membershipValues && !tree?.through) throw new Error(`${name}: membership values require explicit tree.through.`);
     return { key: column.key, label: local(column.label), values: column.values.map(item => value(source, item)), ...(column.membershipValues ? { membershipValues: column.membershipValues.map(item => value(membership!, item)) } : {}) };
   });
-  return { ...authored, ...(authored.recordPanel ? { recordPanel: { title: local(authored.recordPanel.title) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
+  };
+  const columns = compileColumns(authored.columns);
+  const ids = new Set<string>();
+  const variants = authored.variants?.map(variant => {
+    if (!/^[a-z][a-zA-Z0-9-]*$/.test(variant.id) || ids.has(variant.id)) throw new Error(`${name}: table view ids must be unique identifiers.`);
+    ids.add(variant.id);
+    if (variant.match) {
+      const field = source.contract.model.fields.find(field => field.key === variant.match!.field);
+      const input = source.collection.operations.read.input;
+      if (!field || field.computed || field.cardinality === "collection" || field.baseType === "object" || input?.kind !== "collection-query" || !input.filterFields.includes(field.key)) throw new Error(`${name}: table view match requires a canonical filterable scalar field.`);
+      const type = field.baseType === "integer" ? "number" : field.baseType;
+      if (typeof variant.match.value !== type) throw new Error(`${name}: table view match must have the field value type.`);
+    }
+    return { ...variant, label: local(variant.label), ...(variant.columns ? { columns: compileColumns(variant.columns) } : {}) };
+  });
+  return { ...authored, ...(variants ? { variants } : {}), ...(authored.recordPanel ? { recordPanel: { title: local(authored.recordPanel.title) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
 }

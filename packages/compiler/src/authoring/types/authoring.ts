@@ -457,6 +457,8 @@ export type CollectionTableValueDefinition = {
   defaultValue?: string | number;
 };
 export type CollectionTableDefinition = {
+  /** Named projections over this same canonical collection. */
+  variants?: Array<{ id: string; label: LocalizedText; match?: { field: string; value: string | number | boolean }; columns?: CollectionTableDefinition["columns"] }>;
   recordPanel?: { title: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };

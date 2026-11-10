@@ -24,8 +24,10 @@ declare module "next-auth" {
     expiresAt?: number | undefined;
     /** Unix timestamp (seconds) when the refresh token expires: the true session lifetime. */
     refreshExpiresAt?: number | undefined;
-    /** Set when token refresh failed (e.g. 400); the client should sign out and redirect to login. */
-    error?: "RefreshTokenError" | undefined;
+    /** Earliest retry after a temporary refresh failure (Unix milliseconds). */
+    refreshRetryAt?: number | undefined;
+    /** Only RefreshTokenError requires a new login; Unavailable can recover. */
+    error?: "RefreshTokenError" | "RefreshTokenUnavailable" | undefined;
     /**
      * Opaque Redis session id. Used server-side only to invalidate the session
      * on logout. Not a secret — it is only useful in combination with the

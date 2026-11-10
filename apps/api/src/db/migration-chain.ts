@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { maintenanceJob, drainMaintenanceJobs, acknowledgeMaintenanceFailure } from "../modules/maintenance-jobs.js";
-import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
 /**
  * The ordered chain that builds a database from the compiled manifest,
  * shared by db:migrate, db:reset and the empty-database bootstrap
@@ -78,6 +76,8 @@ import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
  * NOTE: the whole chain runs as the PRIVILEGED migrate role
  * (OPENSHAPEFORGE_MIGRATE_DATABASE_URL) — DDL and GRANT require it.
  */
+import { maintenanceJob, drainMaintenanceJobs, acknowledgeMaintenanceFailure } from "../modules/maintenance-jobs.js";
+import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
 import { sql, type Kysely } from "kysely";
 import { seedTenantOwnRelations } from "../control/tenant-own-relation.js";
 import { fileURLToPath } from "node:url";
@@ -94,11 +94,13 @@ import { applyOrganizationAccessMigration } from "./migrations/organization-acce
 import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
 import { applyMemberAccessStateMigration } from "./migrations/member-access-state.js";
 import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
+import { applyConnectionUseGrantsMigration, applyConnectionUseGrantsPrivileges } from './migrations/connection-use-grants.js';
 import { applyCapabilityGrantsMigration } from "./migrations/capability-grants.js";
 import { applyApiKeysMigration } from "./migrations/api-keys.js";
 import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
 import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
 import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/blueprints.js";
+import { applyMcpTasksMigration } from "./migrations/mcp-tasks.js";
 import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
 import { applyAuditHistory } from "./migrations/audit-history.js";
 import { applyJobsMigration } from "./migrations/jobs.js";
@@ -199,10 +201,12 @@ export async function runMigrationChain(
   );
   await applyEmployeeInvitationsMigration(db);
   await applyCapabilityGrantsMigration(db);
+  await applyConnectionUseGrantsMigration(db);
   await applyApiKeysMigration(db);
   await applyOrganizationRelationLinkMigration(db);
   await applyUpdateNoticesMigration(db);
   await applyOperationExecutionReceiptsMigration(db);
+  await applyMcpTasksMigration(db);
   await applyJobsMigration(db);
   // After the queue, because an inbound receipt's dispatch rides on it.
   await applyInboundMigration(db);
@@ -220,6 +224,7 @@ export async function runMigrationChain(
   // EXECUTE on every function in `app` to the worker, and the worker may hold
   // only the inbound liveness lookup — not the tenant resolution beside it.
   await applyInboundGrants(db);
+  await applyConnectionUseGrantsPrivileges(db);
   // LAST of the privilege steps, and deliberately so. The two sweeps above
   // grant EXECUTE on every function in `app` to the app and worker roles and
   // set a default privilege that would catch a later one too; the

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import type { RuntimeExecutionProvider } from "./execution.js";
 import type { RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";
 import type {
   FastifyInstance,
@@ -56,7 +57,7 @@ export type { RuntimeExecutionPolicy, RuntimeExecutionPolicyContract, RuntimeExe
   RuntimeExecutionOperation, RuntimeExecutionAdmission, RuntimeExecutionRefusal } from "./execution-policy.js";
 export type { RuntimeSettingValue, RuntimeSettingsService } from "./settings.js";
 export type { RuntimeArtifactDescriptor, RuntimeArtifactStageInput, RuntimeArtifactOwner, RuntimeArtifactOwnerInput, RuntimeArtifactBindInput,
-  RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
+  RuntimeArtifactContents, RuntimeArtifactSessionContext, RuntimeArtifactStageContext, RuntimeArtifactExpiryJob, RuntimeArtifactExpiryInput, RuntimeArtifactServices, RuntimeArtifactStorageContribution } from "./artifacts.js";
 import type {
   OperationAcceptance,
   OperationAccepted,
@@ -460,8 +461,29 @@ export type RuntimeDeclarativeServiceDefinition = {
   version: string | number;
 };
 
+/** Internal credential use; never a bearer token or an impersonated session. */
+export type RuntimeConnectionUseGrantServices<Session> = {
+  issue(session: Session, input: {
+    connectionId: string;
+    consumerOperation: string;
+    subject: { entity: string; id: string };
+    definition: RuntimeDeclarativeServiceDefinition;
+    inputSchema: Record<string, unknown>;
+    /** Omitted means standing consent until revocation or owner offboarding. */
+    expiresAt?: string;
+  }): Promise<{ id: string }>;
+  revoke(session: Session, subject: { entity: string; id: string; grantId?: string }): Promise<void>;
+  list(session: Session, subject: { entity: string; id: string }): Promise<readonly {
+    id: string; connectionId: string; consumerOperation: string;
+    definition: RuntimeDeclarativeServiceDefinition;
+  }[]>;
+};
+
 export type RuntimeDeclarativeServiceRequest = {
   definition: RuntimeDeclarativeServiceDefinition;
+  /** Owner-issued authority, verified against the originating canonical Operation. */
+  connectionGrantId?: string;
+  connectionGrantSubject?: {entity:string;id:string};
   input?: Record<string, unknown>;
   /** Reused across retries; core derives a stable key per Service step. */
   idempotencyKey?: string;
@@ -502,12 +524,19 @@ export type RuntimeOperationExecutionResult =
  * no identity to hand out, including a composition that stopped part-way.
  * Ignoring it leaves behaviour exactly as it was.
  */
+/** In-process provider observation; symbol keys never enter serialized Operation errors. */
+export const DECLARATIVE_PROVIDER_FAILURE: unique symbol = Symbol("declarative-provider-failure");
+
 export type RuntimeDeclarativeServiceExecutionResult =
   // A Service is composed, never taken over by an operation override: its
   // answer is its data or a failure, not an acceptance.
   & { intent?: string }
   & Exclude<OperationResult<unknown>, OperationAccepted>
-  & { connectionUse?: RuntimeDeclarativeServiceConnectionUse };
+  & { connectionUse?: RuntimeDeclarativeServiceConnectionUse;
+    /** Core-only observation from the admitted single REST binding, never a
+     * token-endpoint response or provider-controlled body. Not part of public errors. */
+    [DECLARATIVE_PROVIDER_FAILURE]?: {status:number};
+  };
 
 export type RuntimeOperationExecutionContext = {
   /** Exact, host-minted live capability for this invocation. */
@@ -833,6 +862,7 @@ export type PluginPlatformServices = {
    * when there is one, so a grant and the record it covers commit together.
    */
   grants: RuntimeCapabilityGrantServices<PluginSessionContext>;
+  readonly connectionUseGrants?: RuntimeConnectionUseGrantServices<PluginSessionContext>;
   operations: {
     /** Definitions currently available to this live verified session. */
     list(
@@ -1038,6 +1068,7 @@ export type RuntimeWorkerHandle = {
   stop(): Promise<void>;
 };
 
+/** Durable workers contribute all three callbacks together; ordinary workers omit all three. */
 export type RuntimeWorkerContract<Context> = {
   start(context: Context): RuntimeWorkerHandle | Promise<RuntimeWorkerHandle>;
   /**
@@ -1056,8 +1087,12 @@ export type RuntimeWorkerContract<Context> = {
     fingerprint: string,
   ): Promise<void>;
   /**
-   * Optional. Persist, under the exact active claim and committed before core
-   * dispatches, that this attempt `started` a dispatch; or, once core has
+   * Required whenever resolveOperationWork/pinOperationContract are supplied;
+   * startup rejects a partial callback triple. Used for non-repeatable writes.
+   * Atomically acquire, under the exact
+   * active claim and committed before core dispatches, this attempt's `started`
+   * mark. Reject a second acquisition of the same attempt, including from
+   * another broker/process. Once core has
    * proof nothing reached the Operation (only rate-limiter refusals), that it
    * was `not-dispatched`. Lets a transient failure retry without being taken
    * for an uncertain repeat (#885). Reported back as `dispatch`.
@@ -1258,6 +1293,8 @@ export type RuntimeModuleContract<
   /** At most one configured module supplies the internal provider-neutral storage port. */
   artifactStorage?: ArtifactStorage;
   operationProviders?: readonly OperationProvider[];
+  /** Durable execution observers; each kind has exactly one owner. */
+  executionProviders?: readonly RuntimeExecutionProvider[];
   /**
    * Takeovers of generated record-scoped `update` and `delete` Operations. At
    * most one override may answer for one call; two answering is refused.
@@ -1304,3 +1341,7 @@ export type RuntimeModule = RuntimeModuleContract<
 export type RuntimeModuleFactory = (configuration: unknown) => RuntimeModule;
 
 export type { MaintenanceQuery, MaintenanceConnection, MaintenanceStore, MaintenanceContext, MaintenanceRequest, RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";
+
+export { hostAllowed } from "./egress-policy.js";
+
+export type { RuntimeExecutionProvider, RuntimeExecutionContext, RuntimeExecutionSnapshot } from "./execution.js";

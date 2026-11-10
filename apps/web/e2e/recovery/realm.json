@@ -1,0 +1,45 @@
+{
+  "realm": "session-recovery-test",
+  "enabled": true,
+  "sslRequired": "none",
+  "roles": {
+    "realm": [
+      {
+        "name": "review-reader"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "recovery-web",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "http://localhost:3950/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3950"
+      ],
+      "defaultClientScopes": [
+        "basic",
+        "profile",
+        "email",
+        "roles"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "recovery-reader",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "reader@example.invalid",
+      "firstName": "Recovery",
+      "lastName": "Reader",
+      "realmRoles": [
+        "review-reader"
+      ]
+    }
+  ]
+}

@@ -87,7 +87,7 @@
  * The alternative would be one `GET /organizations/{id}` per organization,
  * which is the same data at N round trips.
  */
-import type { ServiceAccountTokenProvider } from "./keycloak-service-account.js";
+import type { KeycloakAdminRequestOptions } from "./keycloak-admin-request.js";
 export type KeycloakAdminErrorCode =
   /**
    * The registry holds an organization id Keycloak does not have. Genuine
@@ -254,11 +254,4 @@ export type KeycloakOrganizationAdminClient = {
   unlinkIdentityProvider(organizationId: string, alias: string): Promise<void>;
 };
 
-export type KeycloakOrganizationAdminOptions = {
-  /** Injected in tests; defaults to the global fetch. */
-  fetch?: typeof globalThis.fetch;
-  /** Injected in tests; defaults to Date.now. */
-  now?: () => number;
-  /** Shared with the SPI client so one token serves both. */
-  tokens?: ServiceAccountTokenProvider;
-};
+export type KeycloakOrganizationAdminOptions = KeycloakAdminRequestOptions;

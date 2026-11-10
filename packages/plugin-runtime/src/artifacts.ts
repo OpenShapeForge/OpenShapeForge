@@ -38,10 +38,30 @@ export type RuntimeArtifactSessionContext<Session, Transaction> = {
   withTransaction<T>(work: (transaction: Transaction) => Promise<T>): Promise<T>;
 };
 
+/** A storage-owned expiry handler, registered by the same trusted runtime module. */
+export type RuntimeArtifactExpiryJob = Readonly<{ kind: string; maxAttempts: number }>;
+export type RuntimeArtifactExpiryInput = Readonly<{ artifactId: string; expiresAt: string }>;
+/**
+ * Stage opens a staging transaction rather than joining the owning Operation.
+ * Registry rows and expiry work must commit independently, so cleanup can find
+ * staged bytes after a later owning Operation rollback. Only bind joins that
+ * Operation's transaction. Hosts supply an independent staging transaction (or
+ * an already independent default transaction implementation).
+ */
+export type RuntimeArtifactStageContext<Session, Transaction> = RuntimeArtifactSessionContext<Session, Transaction> & {
+  /**
+   * Schedule only this provider's temporary-artifact cleanup, inside the active
+   * staging transaction. Core supplies a restricted maintenance identity; this
+   * never replays a recipient grant or grants it general job-enqueue authority.
+   */
+  enqueueExpiry(input: RuntimeArtifactExpiryInput): Promise<void>;
+};
+
 /** Private storage implements this contribution; public core never imports its implementation. */
 export type RuntimeArtifactStorageContribution<Session, Transaction> = {
   readonly providerId: string;
-  stage(context: RuntimeArtifactSessionContext<Session, Transaction>, input: RuntimeArtifactStageInput): Promise<RuntimeArtifactDescriptor>;
+  readonly expiryJob?: RuntimeArtifactExpiryJob;
+  stage(context: RuntimeArtifactStageContext<Session, Transaction>, input: RuntimeArtifactStageInput): Promise<RuntimeArtifactDescriptor>;
   bind(context: { session: Session; transaction: Transaction }, input: RuntimeArtifactBindInput): Promise<RuntimeArtifactDescriptor>;
   read(context: RuntimeArtifactSessionContext<Session, Transaction>, input: RuntimeArtifactOwnerInput, options?: { signal?: AbortSignal }): Promise<RuntimeArtifactContents>;
 };

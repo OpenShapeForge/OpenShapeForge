@@ -42,7 +42,7 @@ mock.module("../connection-guidance.js", () => ({ missingRequiredConnectionValue
 mock.module("../catalog-rows.js", () => ({ connectionScopeOf: (auth: any) => auth.connectionScope }));
 mock.module("../tool-results.js", () => ({ ok: (data: unknown) => ({ structuredContent: data }) }));
 mock.module("../../connectors/secrets.js", () => ({ connectionTokenSecretScope: () => "connection" }));
-mock.module("../handoff-config.js", () => ({ ENTITY_OAUTH_CALLBACK_PATH: "/callback", callbackOrigin: () => "https://app.test", elicitedKeyring: () => ({}) }));
+mock.module("../handoff-config.js", () => ({ ENTITY_OAUTH_CALLBACK_PATH: "/callback", callbackOrigin: () => "https://app.test", oauthCallbackUrl: () => "https://app.test/callback", elicitedKeyring: () => ({}) }));
 mock.module("../acting-relation-guard.js", () => ({ requireActingRelationId: () => owner }));
 mock.module("../../db/acting-relation.js", () => ({ actingRelationId: () => owner }));
 

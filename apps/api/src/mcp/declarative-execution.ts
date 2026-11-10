@@ -13,7 +13,7 @@ import { readBoundedResponse } from "../modules/outbound-response.js";
  *
  *   provider row:   transport ("rest"), baseUrlTemplate, optional
  *                   baseUrlTemplates, auth
- *                   { scheme: basic|bearer|header|oauth2ClientCredentials|
+ *                   { scheme: basic|bearer|header|oauth2ClientCredentials|googleServiceAccount|
  *                     session, usernameTemplate, passwordFrom, headerName,
  *                     tokenFrom, loginUrl, loginParam, credentialFrom,
  *                     loginResponseFormat, sessionPath, sessionParam,
@@ -65,6 +65,11 @@ import {
   type SecretKeyring,
   type StoredSecret,
 } from "../connectors/secrets.js";
+import {
+  cachedJwtBearerToken,
+  assertGoogleTokenUri,
+  JwtBearerError,
+} from "../connectors/jwt-bearer.js";
 import { storedFieldBaseType } from "../modules/field-schemas.js";
 
 export type ExecutionCatalogEntry = {
@@ -330,6 +335,7 @@ function authOwnedHeaderNames(auth: unknown): Set<string> {
     case "basic":
     case "bearer":
     case "oauth2ClientCredentials":
+    case "googleServiceAccount":
       names.add("authorization");
       break;
     case "header": {
@@ -679,6 +685,8 @@ type AuthConfig = {
   scopes?: unknown;
   clientIdFrom?: unknown;
   clientSecretFrom?: unknown;
+  clientEmailFrom?: unknown;
+  privateKeyFrom?: unknown;
   loginUrl?: unknown;
   loginParam?: unknown;
   credentialFrom?: unknown;
@@ -1322,6 +1330,65 @@ export async function acquireRequestAuth(input: {
     });
     return { headers: { authorization: `Bearer ${token}` }, query: {} };
   }
+  if (config?.scheme === "googleServiceAccount") {
+    const credentialSources = { ...input.plain, ...input.secret };
+    const clientEmailKey =
+      typeof config.clientEmailFrom === "string" ? config.clientEmailFrom : "clientEmail";
+    const privateKeyKey =
+      typeof config.privateKeyFrom === "string" ? config.privateKeyFrom : "privateKey";
+    const clientEmail = credentialSources[clientEmailKey];
+    const privateKey = input.secret[privateKeyKey];
+    if (!clientEmail || !privateKey) {
+      throw new HttpError(
+        400,
+        "CONNECTION_INCOMPLETE",
+        `Service account credentials need the connection values "${clientEmailKey}" and "${privateKeyKey}".`,
+      );
+    }
+    const scopes = Array.isArray(config.scopes)
+      ? (config.scopes as unknown[]).filter(
+          (scope): scope is string => typeof scope === "string",
+        )
+      : [];
+    if (scopes.length === 0) {
+      throw new HttpError(
+        400,
+        "AUTH_MISCONFIGURED",
+        "A Google service account requires at least one scope.",
+      );
+    }
+    try {
+      if (config.tokenUrl !== undefined) assertGoogleTokenUri(config.tokenUrl);
+      const source = input.egressDispatch?.source;
+      const tenantId = input.egressDispatch?.scope.tenantId;
+      const token = await cachedJwtBearerToken({
+        credential: { clientEmail, privateKey, scopes },
+        ...(source && tenantId ? { cachePartition: JSON.stringify([tenantId, source.scope, source.sourceReference]) } : {}),
+        boundFetch: (url, init) =>
+          fetchValidatedOutbound({
+            target: new URL(url instanceof Request ? url.url : url),
+            init: { ...init, redirect: "manual", signal: boundedAbortSignal(input.signal, REQUEST_TIMEOUT_MS) },
+            allowlist: input.egress,
+            fallback: (target, targetInit) => input.fetchImpl(target, targetInit),
+            ...(input.egressDispatch ? { dispatch: deriveModuleEgressDispatch(input.egressDispatch, "oauth") } : {}),
+            denied: () => new HttpError(403, "EGRESS_DENIED", "Google token endpoint is outside the egress allow-list."),
+          }),
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+      return { headers: { authorization: `Bearer ${token}` }, query: {} };
+    } catch (error) {
+      if (error instanceof JwtBearerError) {
+        throw new HttpError(
+          error.code === "JWT_BEARER_CONFIGURATION" ? 400 : 502,
+          error.code === "JWT_BEARER_CONFIGURATION"
+            ? "AUTH_MISCONFIGURED"
+            : "TOKEN_ENDPOINT_ERROR",
+          error.message,
+        );
+      }
+      throw error;
+    }
+  }
   return {
     headers: buildAuthHeaders(input.auth, input.plain, input.secret),
     query: {},
@@ -1356,6 +1423,10 @@ export function describeRequestAuth(auth: unknown): RequestAuth {
     case "oauth2ClientCredentials":
       return headers({
         authorization: `Bearer <token from ${String(config.tokenUrl ?? "the token endpoint")}>`,
+      });
+    case "googleServiceAccount":
+      return headers({
+        authorization: "Bearer <token from Google service account JWT exchange>",
       });
     case "session":
       return {

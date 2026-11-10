@@ -3,6 +3,9 @@
  * Authorized invocation sources of derived tools. Split out of
  * server-scope.ts, verbatim.
  */
+import { HttpError } from "../rest/http-error.js";
+import { delegatedConnectionRow } from "../modules/connection-use-grants.js";
+import { connectionDelegationIdentity, isDelegatedConnection } from "./connection-delegation.js";
 import { actingRelationId, ownedByActingRelation } from "../db/acting-relation.js";
 import { compareCodeUnits } from "@openshapeforge/operations";
 import { withDbSession } from "../db/session.js";
@@ -13,8 +16,8 @@ import {
 } from "./derived-tools.js";
 import { bindingSelected } from "./declarative-execution.js";
 import { loadOrderedBindings } from "./execution-bindings.js";
-import { scopesCovered } from "./entity-oauth.js";
-import { grantedScopesOf, oauthClientProfile, tokenBindingCurrent } from "./entity-oauth-profile.js";
+import { connectionScopesCovered } from "./entity-oauth.js";
+import { oauthClientProfile, tokenBindingCurrent } from "./entity-oauth-profile.js";
 import { accessTokenNeedsRefresh, refreshLeewaySeconds } from "./connection-token-refresh.js";
 import { connectionProblemMessage } from "./connection-guidance.js";
 import { isOrganizationAdministrator } from "./onboarding.js";
@@ -53,6 +56,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
     session,
     snapshotDefinitionsByToolName,
     snapshotRowsByFilter,
+    tables,
   } = base;
   const authorizedSources = async (
     toolName: string,
@@ -200,6 +204,14 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
             ),
             execution.connectionValuesField,
           );
+          const delegation = connectionDelegationIdentity(session);
+          if (delegation) {
+            const table = tables.get(execution.connectionTable);
+            if (!table) throw new HttpError(500,'CONNECTION_CATALOG_INVALID','The connection catalogue is unavailable.');
+            const delegated = await delegatedConnectionRow(trx, session, table);
+            if (!delegated || delegated[execution.connectionProviderRef] !== providerId) throw new HttpError(403,'CONNECTION_CONSENT_REQUIRED','The delegated provider is unavailable.');
+            connectionRows.splice(0, connectionRows.length, ...connectionRows.filter(row => !row.ownerUserId), delegated);
+          }
           const providerAuth = (providerRow.auth ?? null) as Record<
             string,
             unknown
@@ -217,7 +229,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
             try {
               personalCapture = capturePersonalOAuthConnections(
                 connectionRows,
-                actingRelationId(session),
+                delegation?.ownerRelationId ?? actingRelationId(session),
               );
             } catch {
               // No (single) tenant support row: the organization's side is
@@ -237,7 +249,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
               ]
             : connectionRows
                 .filter((row) =>
-                  (allowsPersonal && ownedByActingRelation(row.ownerUserId, session)) ||
+                  (allowsPersonal && (isDelegatedConnection(session, execution.connectionTable, row) || (!delegation && ownedByActingRelation(row.ownerUserId, session)))) ||
                   (allowsTenant &&
                     (row.ownerUserId === null || row.ownerUserId === undefined)),
                 )
@@ -259,7 +271,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
               execution.connectionValuesField
             ] ?? {}) as Record<string, unknown>;
             if (
-              !scopesCovered(requiredScopes, grantedScopesOf(providerAuth, connectionValues))
+              !connectionScopesCovered(requiredScopes, providerAuth, connectionValues)
             ) {
               missingRequiredScopes = true;
               continue;
@@ -288,7 +300,7 @@ export function createInvocationSourceResolution(base: ServerScopeBase) {
               needsReauthorization = true;
               continue;
             }
-            const sourceIsPersonal = ownedByActingRelation(connection.ownerUserId, session);
+            const sourceIsPersonal = isDelegatedConnection(session, execution.connectionTable, connection) || ownedByActingRelation(connection.ownerUserId, session);
             const identity = {
               tenantId,
               actorId: sourceIsPersonal ? session.userId : null,

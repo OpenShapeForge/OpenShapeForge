@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/overlay/dialog";
-import type { Session } from "@/lib/auth";
+import { readSessionContinuation, sessionContinuationRetryAt } from "@/lib/auth/session-continuation";
 import { useAppSession, useSetAppSession } from "./session-provider";
 
 const WARNING_BEFORE_EXPIRY_S = 120;
@@ -28,6 +28,8 @@ const COPY = {
     logout: "Log out",
     continue: "Continue",
     refreshing: "Refreshing...",
+    reconnectTitle: "Reconnecting your session",
+    reconnectDescription: "The sign-in service is temporarily unavailable. We are retrying automatically; your work remains open.",
   },
   nl: {
     title: "Sessie verloopt binnenkort",
@@ -36,6 +38,8 @@ const COPY = {
     logout: "Uitloggen",
     continue: "Doorgaan",
     refreshing: "Bezig...",
+    reconnectTitle: "Sessie opnieuw verbinden",
+    reconnectDescription: "De inlogdienst is tijdelijk niet beschikbaar. We proberen automatisch opnieuw; uw werk blijft open.",
   },
 } as const;
 
@@ -54,9 +58,12 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   const [showDialog, setShowDialog] = useState(false);
   const [countdown, setCountdown] = useState(AUTO_REDIRECT_AFTER_S);
   const [refreshing, setRefreshing] = useState(false);
+  const [retryAt, setRetryAt] = useState<number | null>(null);
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const redirectingRef = useRef(false);
+  const recoveryAttemptRef = useRef(0);
+  const continuingRef = useRef(false);
   const lastActivityRef = useRef(Date.now());
   const handleContinueRef = useRef(() => {});
   const copy = lang === "nl" ? COPY.nl : COPY.en;
@@ -118,26 +125,27 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   }, [clearTimers, logout, setSession]);
 
   const handleContinue = useCallback(async () => {
+    if (continuingRef.current || redirectingRef.current) return;
+    continuingRef.current = true;
     setRefreshing(true);
 
     try {
-      const response = await fetch("/api/auth/session", { cache: "no-store" });
-      if (!response.ok) {
+      const result = await readSessionContinuation(() => fetch("/api/auth/session", { cache: "no-store" }));
+      if (result.state === "unavailable") {
+        if (result.session) setSession?.(result.session);
+        clearTimers();
+        setShowDialog(false);
+        setRetryAt(sessionContinuationRetryAt(Date.now(), recoveryAttemptRef.current++, result.session?.refreshRetryAt));
+        return;
+      }
+      if (result.state === "expired") {
         setSession?.(null);
         logout("session_expired");
         return;
       }
-
-      const refreshedSession = await response.json() as Session;
-      if (
-        refreshedSession?.error === "RefreshTokenError"
-        || !refreshedSession?.accessToken
-      ) {
-        setSession?.(null);
-        logout("session_expired");
-        return;
-      }
-
+      const refreshedSession = result.session;
+      recoveryAttemptRef.current = 0;
+      setRetryAt(null);
       setSession?.(refreshedSession);
       setShowDialog(false);
       setCountdown(AUTO_REDIRECT_AFTER_S);
@@ -175,9 +183,12 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
       setSession?.(null);
       logout("session_expired");
     } catch {
-      setSession?.(null);
-      logout("session_expired");
+      // Unexpected client-side failures must settle the click handler too.
+      clearTimers();
+      setShowDialog(false);
+      setRetryAt(sessionContinuationRetryAt(Date.now(), recoveryAttemptRef.current++));
     } finally {
+      continuingRef.current = false;
       if (!redirectingRef.current) {
         setRefreshing(false);
       }
@@ -186,7 +197,21 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
 
   handleContinueRef.current = handleContinue;
 
-  const monitorExpiry = session?.refreshExpiresAt ?? session?.expiresAt;
+  useEffect(() => {
+    if (retryAt === null || redirectingRef.current) return;
+    const timer = setTimeout(() => handleContinueRef.current(), Math.max(0, retryAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [retryAt]);
+
+  useEffect(() => {
+    if (session?.error === "RefreshTokenUnavailable") {
+      setRetryAt((current) => Math.max(current ?? 0, sessionContinuationRetryAt(Date.now(), Math.max(0, recoveryAttemptRef.current - 1), session.refreshRetryAt)));
+    }
+  }, [session?.error, session?.refreshRetryAt]);
+
+  const reconnecting = retryAt !== null || session?.error === "RefreshTokenUnavailable";
+  const monitorExpiry = session?.error === "RefreshTokenUnavailable"
+    ? session.refreshExpiresAt : session?.refreshExpiresAt ?? session?.expiresAt;
 
   useEffect(() => {
     if (session?.error === "RefreshTokenError") {
@@ -255,40 +280,41 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   }, [showDialog]);
 
   useEffect(() => {
-    if (!showDialog || countdown > 0) {
+    if (reconnecting || !showDialog || countdown > 0) {
       return;
     }
 
     setSession?.(null);
     logout("session_expired");
-  }, [countdown, logout, setSession, showDialog]);
+  }, [countdown, logout, reconnecting, setSession, showDialog]);
 
-  if (!showDialog) {
+  if (!showDialog && !reconnecting) {
     return null;
   }
 
   return (
-    <Dialog open={showDialog} onOpenChange={() => {}}>
+    <Dialog open={showDialog || reconnecting} onOpenChange={() => {}}>
       <DialogContent
-        className="sm:max-w-md [&>.absolute]:hidden"
+        className="sm:max-w-md"
+        showCloseButton={false}
         onPointerDownOutside={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle>{copy.title}</DialogTitle>
+          <DialogTitle>{reconnecting ? copy.reconnectTitle : copy.title}</DialogTitle>
           <DialogDescription>
-            {copy.description}{" "}
+            {reconnecting ? copy.reconnectDescription : <>{copy.description}{" "}
             <span className="font-semibold tabular-nums">{countdown}</span>{" "}
-            {copy.suffix}
+            {copy.suffix}</>}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => logout()}>
             {copy.logout}
           </Button>
-          <Button onClick={handleContinue} disabled={refreshing}>
-            {refreshing ? copy.refreshing : copy.continue}
+          <Button onClick={handleContinue} disabled={refreshing || reconnecting}>
+            {refreshing || reconnecting ? copy.refreshing : copy.continue}
           </Button>
         </DialogFooter>
       </DialogContent>

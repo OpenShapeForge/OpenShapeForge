@@ -36,8 +36,14 @@ class RedisFixture {
     return value;
   }
   async del(key: string) { return records.delete(key) ? 1 : 0; }
-  async eval(_script: string, _count: number, key: string, owner: string) {
-    return records.get(key) === owner ? this.del(key) : 0;
+  async eval(_script: string, count: number, key: string, ...args: Array<string | number>) {
+    if (count === 2) {
+      const [lockKey, owner, value, ttl] = args as [string, string, string, number];
+      if (records.get(lockKey) !== owner || !records.has(key)) return 0;
+      await this.set(key, value, "EX", ttl);
+      return 1;
+    }
+    return records.get(key) === args[0] ? this.del(key) : 0;
   }
 }
 mock.module("ioredis", () => ({ Redis: RedisFixture, Cluster: RedisFixture }));
@@ -144,6 +150,16 @@ test("initial sign-in creation remains separate from ordinary existing-session u
   expect(commands.at(-1)?.args[2]).toBe("XX");
 });
 
+test("sign-in stores the provider subject rather than Auth.js's generated user id", async () => {
+  const h = harness();
+  const token = await config.callbacks!.jwt!({ token: { sub: "authjs-internal-user" },
+    account: { provider: "keycloak", type: "oidc", providerAccountId: "person", access_token: stored().accessToken,
+      expires_at: now() + 300, refresh_token: "synthetic" },
+    profile: { sub: "person", name: "Provider Person" },
+  } as Parameters<NonNullable<NonNullable<NextAuthConfig["callbacks"]>["jwt"]>>[0]) as JWT;
+  expect((await h.store.getSession(token.sessionId as string))?.sub).toBe("person");
+});
+
 test("conditional update refuses a removed sid and keeps the normal TTL policy", async () => {
   const h = harness();
   expect(await h.store.updateSession("s1", stored())).toBe(false);
@@ -153,4 +169,33 @@ test("conditional update refuses a removed sid and keeps the normal TTL policy",
   expect(commands.at(-1)?.args).toEqual(["EX", 60, "XX"]);
   expect(await h.store.updateSession("s1", { sub: "person" })).toBe(true);
   expect(commands.at(-1)?.args).toEqual(["EX", 1800, "XX"]);
+});
+
+test("refresh commits require the current lease and cannot recreate a logged-out session", async () => {
+  const h = harness();
+  await h.store.setSession("s1", stored());
+  const oldOwner = (await h.store.acquireRefreshLock("s1"))!;
+  await h.store.releaseRefreshLock("s1", oldOwner);
+  const currentOwner = (await h.store.acquireRefreshLock("s1"))!;
+  const next = { ...stored(), refreshToken: "new-token" };
+  expect(await h.store.updateSession("s1", next, oldOwner)).toBe(false);
+  expect(await h.store.updateSession("s1", next, currentOwner)).toBe(true);
+  await h.store.deleteSession("s1");
+  expect(await h.store.updateSession("s1", next, currentOwner)).toBe(false);
+});
+
+test("temporary refresh failure preserves the cookie and withholds expired authority", async () => {
+  const h = harness();
+  await h.store.setSession("s1", { ...stored(), expiresAt: now() - 1, refreshToken: "recoverable",
+    error: "RefreshTokenUnavailable", refreshRetryAt: Date.now() + 60_000 });
+  const token = await config.callbacks!.jwt!({ token: { sessionId: "s1" }, user: {} } as Parameters<NonNullable<NonNullable<NextAuthConfig["callbacks"]>["jwt"]>>[0]) as JWT;
+  expect(token).toEqual({ sessionId: "s1" });
+  const unavailable = await h.hydrate();
+  expect(unavailable.error).toBe("RefreshTokenUnavailable");
+  expect(unavailable.accessToken).toBe("");
+  expect(unavailable.roles).toEqual([]);
+  expect((await h.store.getSession("s1"))?.refreshToken).toBe("recoverable");
+  await h.store.setSession("s1", stored());
+  expect((await h.hydrate()).error).toBeUndefined();
+  expect((await h.hydrate()).accessToken).not.toBe("");
 });

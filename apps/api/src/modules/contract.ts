@@ -63,6 +63,7 @@ import type {
   RuntimeArtifactServices,
   RuntimeArtifactStorageContribution,
   RuntimeCapabilityGrantServices,
+  RuntimeConnectionUseGrantServices,
   RuntimeWebhookSecretServices,
   RuntimeInboundEndpointServices,
   RuntimeReadProgressServices,
@@ -331,6 +332,7 @@ export type ModulePlatformServices = {
     ): Promise<void>;
   };
   grants: RuntimeCapabilityGrantServices<TrustedSessionContext>;
+  readonly connectionUseGrants?: RuntimeConnectionUseGrantServices<TrustedSessionContext>;
   errors: {
     classifyDatabase(cause: unknown): OperationError | undefined;
   };

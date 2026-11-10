@@ -1,35 +1,17 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Protocol notes and public contracts: ./keycloak-organization-admin-types.ts
-import {
-  createServiceAccountTokenProvider,
-  createKeycloakFetch,
-  describeError,
-  readJson,
-  REQUEST_TIMEOUT_MS,
-  type KeycloakServiceAccountConfig,
-} from "./keycloak-service-account.js";
+import type { KeycloakServiceAccountConfig } from "./keycloak-service-account.js";
+import { createKeycloakAdminRequest } from "./keycloak-admin-request.js";
 
-import { type KeycloakAdminErrorCode, type KeycloakAdminOperation, KeycloakAdminError, type KeycloakOrganizationState, ORGANIZATION_ATTRIBUTE_KEYS, type KeycloakOrganizationSnapshot, type ListOrganizationsResult, type OrganizationIdentityProvider, type KeycloakOrganizationAdminClient, type KeycloakOrganizationAdminOptions } from "./keycloak-organization-admin-types.js";
+import { type KeycloakAdminOperation, KeycloakAdminError, type KeycloakOrganizationState, ORGANIZATION_ATTRIBUTE_KEYS, type KeycloakOrganizationSnapshot, type ListOrganizationsResult, type OrganizationIdentityProvider, type KeycloakOrganizationAdminClient, type KeycloakOrganizationAdminOptions } from "./keycloak-organization-admin-types.js";
 export * from "./keycloak-organization-admin-types.js";
 
 export function createKeycloakOrganizationAdminClient(
   config: KeycloakServiceAccountConfig,
   options: KeycloakOrganizationAdminOptions = {},
 ): KeycloakOrganizationAdminClient {
-  const doFetch = createKeycloakFetch(config, options.fetch ?? globalThis.fetch);
-  const now = options.now ?? (() => Date.now());
+  const runRequest = createKeycloakAdminRequest(config, options);
   const adminBase = `${config.baseUrl}/admin/realms/${encodeURIComponent(config.tenantRealm)}/organizations`;
-
-  const tokens =
-    options.tokens ??
-    createServiceAccountTokenProvider(config, {
-      ...(options.fetch ? { fetch: options.fetch } : {}),
-      ...(options.now ? { now: options.now } : {}),
-      unauthorized: (message, status) =>
-        new KeycloakAdminError("KEYCLOAK_ADMIN_UNAUTHORIZED", message, status),
-      unavailable: (message, status) =>
-        new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", message, status),
-    });
 
   /**
    * The organization id is percent-encoded even though #294 fixed the SPI's
@@ -42,89 +24,10 @@ export function createKeycloakOrganizationAdminClient(
     return `${adminBase}/${encodeURIComponent(organizationId)}`;
   }
 
-  async function request(
-    url: string,
-    init: RequestInit,
-    operation: KeycloakAdminOperation,
-    contentType: string = "application/json",
-  ): Promise<{ status: number; body: unknown }> {
-    const tokenStartedAt = now();
-    let token: string;
-    try {
-      token = await tokens.get();
-    } catch (error) {
-      if (error instanceof KeycloakAdminError && error.operation === undefined) {
-        throw new KeycloakAdminError(error.code, error.message, error.status, {
-          operation: "service_account_token",
-          durationMs: Math.max(0, now() - tokenStartedAt),
-        });
-      }
-      throw error;
-    }
-    const requestStartedAt = now();
-    let response: Response;
-    try {
-      response = await doFetch(url, {
-        ...init,
-        headers: {
-          authorization: `Bearer ${token}`,
-          ...(init.body === undefined ? {} : { "content-type": contentType }),
-          ...init.headers,
-        },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-    } catch (error) {
-      throw new KeycloakAdminError(
-        "KEYCLOAK_ADMIN_UNAVAILABLE",
-        `Could not reach the Keycloak admin API at ${url}: ` +
-          (error instanceof Error ? error.message : String(error)),
-        undefined,
-        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
-      );
-    }
-
-    const body = await readJson(response);
-    if (response.ok) return { status: response.status, body };
-
-    if (response.status === 401 || response.status === 403) {
-      // Same reasoning as the SPI client: drop the cached token so a rotated
-      // credential is picked up without a restart, and do NOT present this as
-      // the operator's 403 — the operator is authorized, the platform's own
-      // service account is not.
-      tokens.invalidate();
-      throw new KeycloakAdminError(
-        "KEYCLOAK_ADMIN_UNAUTHORIZED",
-        `The Keycloak admin API refused "${config.clientId}": ` +
-          `${describeError(body, response.statusText)}. The service account must hold ` +
-          "realm-management manage-realm.",
-        response.status,
-        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
-      );
-    }
-    if (response.status === 404) {
-      throw new KeycloakAdminError(
-        "KEYCLOAK_ADMIN_ORGANIZATION_NOT_FOUND",
-        "The Keycloak organization this tenant is linked to no longer exists. " +
-          "Replay the tenant's provisioning create to recreate and relink it.",
-        response.status,
-        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
-      );
-    }
-    if (response.status === 400) {
-      throw new KeycloakAdminError(
-        "KEYCLOAK_ADMIN_REJECTED",
-        describeError(body, "The Keycloak admin API rejected the request."),
-        response.status,
-        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
-      );
-    }
-    throw new KeycloakAdminError(
-      "KEYCLOAK_ADMIN_UNAVAILABLE",
-      `The Keycloak admin API answered ${response.status}: ` +
-        describeError(body, response.statusText),
-      response.status,
-      { operation, durationMs: Math.max(0, now() - requestStartedAt) },
-    );
+  function request(url: string, init: RequestInit, operation: KeycloakAdminOperation, contentType = "application/json") {
+    return runRequest(url, init, operation, { contentType,
+      notFoundMessage: "The Keycloak organization this tenant is linked to no longer exists. Replay the tenant's provisioning create to recreate and relink it.",
+    });
   }
 
   function toState(body: unknown, fallbackId: string): KeycloakOrganizationState {

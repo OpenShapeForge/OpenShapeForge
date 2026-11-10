@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import {
+  schemaRegExp,
   valueInvariantKeywords,
   operationChoiceKeyword,
   operationCollectionKeyword,
@@ -27,7 +28,7 @@ function invalidDefinition(): RuntimeSchemaValidationResult {
 }
 
 function createJsonSchemaCompiler() {
-  const ajv = new Ajv2020.default({ allErrors: true, strict: false, strictSchema: true, allowUnionTypes: true });
+  const ajv = new Ajv2020.default({ allErrors: true, strict: false, strictSchema: true, allowUnionTypes: true, code: { regExp: schemaRegExp } });
   addFormats.default(ajv);
   ajv.addKeyword(operationExactNumericKeyword);
   ajv.addKeyword(operationI18nKeyword);
@@ -159,7 +160,7 @@ export function createRuntimeFieldSchemaCompiler(
   registry: GeneratedRuntimeFieldSchemaRegistry,
 ): RuntimeFieldSchemaCompiler {
   assertRegistry(registry);
-  const ajv = new Ajv2020.default({ allErrors: true, strict: false, allowUnionTypes: true });
+  const ajv = new Ajv2020.default({ allErrors: true, strict: false, allowUnionTypes: true, code: { regExp: schemaRegExp } });
   addFormats.default(ajv);
   const validate = ajv.compile(registry.fieldDefinitionSchema);
   const compiler: RuntimeFieldSchemaCompiler = {

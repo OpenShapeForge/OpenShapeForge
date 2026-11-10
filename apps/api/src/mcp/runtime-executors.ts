@@ -1,5 +1,16 @@
 // SPDX-License-Identifier: BUSL-1.1
+/**
+ * Host adapters around the one declarative engine, for the Operation
+ * runtime: a declarative Service request and a host Operation each get a
+ * server object that only scopes the core catalogue and execution closure to
+ * the caller's live Operation session, which stays the authority for
+ * database, OAuth, egress and nested Operations. Split out of
+ * generated-mcp-server.ts, verbatim.
+ */
+import { delegatedProviderFailure } from "./connection-delegation.js";
+import { withStoredConnectionGrant } from "../modules/connection-use-grants.js";
 import { randomUUID } from "node:crypto";
+import { DECLARATIVE_PROVIDER_FAILURE } from "@openshapeforge/plugin-runtime";
 import type {
   RuntimeDeclarativeServiceExecutionResult,
   RuntimeDeclarativeServiceRequest,
@@ -21,15 +32,6 @@ import {
   runtimeHostOperationExecutors,
 } from "./tool-results.js";
 import { buildServer } from "./generated-mcp-server.js";
-
-/**
- * Host adapters around the one declarative engine, for the Operation
- * runtime: a declarative Service request and a host Operation each get a
- * server object that only scopes the core catalogue and execution closure to
- * the caller's live Operation session, which stays the authority for
- * database, OAuth, egress and nested Operations. Split out of
- * generated-mcp-server.ts, verbatim.
- */
 
 /**
  * Host adapter around the one declarative engine. It creates no protocol
@@ -68,7 +70,11 @@ export function createRuntimeDeclarativeServiceExecutor(input: {
       throw new Error("The core declarative Service executor did not initialise.");
     }
     try {
-      return await execute(request, randomUUID(), undefined, options?.signal);
+      return await withStoredConnectionGrant(input.db, session, request, subject => input.modulePlatform.services.records.assertAccess(session,subject), async () => {
+        const result=await execute(request,randomUUID(),undefined,options?.signal);
+        const failure=delegatedProviderFailure(session);
+        return 'error' in result && failure ? {...result,[DECLARATIVE_PROVIDER_FAILURE]:failure} : result;
+      });
     } finally {
       input.modulePlatform.unregisterServer(server);
       runtimeDeclarativeServiceExecutors.delete(server);

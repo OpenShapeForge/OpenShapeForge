@@ -12,6 +12,7 @@ import {
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import { HttpError } from "../rest/http-error.js";
+import { schemaRegExp } from "@openshapeforge/operations";
 
 // The advertised JSON Schema IS the contract: what tools/list promises,
 // tools/call enforces. The edge holds the argument envelope and the derived
@@ -19,7 +20,7 @@ import { HttpError } from "../rest/http-error.js";
 // executeEntityOperation, the one validator every interface shares
 // (operations/entity/input-validation.ts), so `status: "banana"` comes back
 // as VALIDATION with a per-field violation here as it does over REST.
-export const ajv = new Ajv({ allErrors: true, strict: false, coerceTypes: false });
+export const ajv = new Ajv({ allErrors: true, strict: false, coerceTypes: false, code: { regExp: schemaRegExp } });
 // ajv-formats is CJS; under NodeNext the default import is typed as the
 // module namespace rather than the callable it is at runtime.
 (addFormats as unknown as (instance: Ajv) => unknown)(ajv);

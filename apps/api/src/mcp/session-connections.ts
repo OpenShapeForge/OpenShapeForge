@@ -23,12 +23,7 @@ import { isOrganizationAdministrator } from "./onboarding.js";
 import { catalog, entityForTable, type GeneratedTable } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
 import type { OAuthClientAuthentication } from "./entity-oauth-profile.js";
-import {
-  ENTITY_CONFIGURATION_PATH,
-  ENTITY_OAUTH_CALLBACK_PATH,
-  callbackOrigin,
-  elicitedKeyring,
-} from "./handoff-config.js";
+import { ENTITY_CONFIGURATION_PATH, callbackOrigin, elicitedKeyring, oauthCallbackUrl } from "./handoff-config.js";
 
 export function looksLikeStoredSecret(value: unknown): value is StoredSecret {
   return (
@@ -212,7 +207,7 @@ export async function organizationConnectionProblem(input: {
       const messagePrefix =
         sourceAuth?.profile === "oauth2AuthorizationCode"
           ? `Before entering these values, register this exact redirect URL on the ` +
-            `provider's OAuth client: ${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`
+            `provider's OAuth client: ${oauthCallbackUrl()}`
           : undefined;
       const minted = await mintConfiguration({
         db: input.db,

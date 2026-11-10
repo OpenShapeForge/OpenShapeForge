@@ -50,13 +50,11 @@ function freeze<T>(value: T): T {
 }
 
 /**
- * Whether an earlier attempt may have reached the Operation. With persisted
- * dispatch facts that is exactly what the resolver reports; without them any
- * reclaim (`attempt > 1`) is treated as uncertain, as before (#885).
+ * Persisted dispatch facts cover both a reclaimed command and a second
+ * execution of the same claim, including after a broker/process restart.
  */
-function priorDispatch(work: RuntimeResolvedOperationWork, reference: RuntimeDurableWorkReference): boolean {
-  if (work.dispatch?.tracked !== true) return reference.attempt > 1;
-  return work.dispatch.attempt !== undefined && work.dispatch.attempt !== reference.attempt;
+function priorDispatch(work: RuntimeResolvedOperationWork): boolean {
+  return work.dispatch?.attempt !== undefined;
 }
 
 function safeToRepeat(definition: RuntimeOperationDefinition): boolean {
@@ -99,7 +97,7 @@ export type DurableWorkerBrokerOptions = {
   resolveWork(reference: RuntimeDurableWorkReference): Promise<RuntimeResolvedOperationWork | undefined>;
   /** Bound to the same module; atomically pins under the exact live claim. */
   pinOperationContract(reference: RuntimeDurableWorkReference, fingerprint: string): Promise<void>;
-  /** Optional dispatch facts (plugin-runtime `markOperationDispatch`); see priorDispatch(). */
+  /** Atomically acquire the dispatch mark; required for non-repeatable writes. */
   markDispatch?(reference: RuntimeDurableWorkReference, state: "started" | "not-dispatched"): Promise<void>;
   identities: readonly OrganizationServiceIdentity[];
   apiUrl: string;
@@ -136,8 +134,11 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
     reference: RuntimeDurableWorkReference; workHash: string; requestHash: string;
     contractFingerprint: string; expiresAt: number;
   }>();
-  // A second dispatch within the SAME live claim is also an uncertain retry.
-  const dispatchedUnsafeClaims = new Set<string>();
+  function assertDispatchTracking(work: RuntimeResolvedOperationWork, definition: RuntimeOperationDefinition) {
+    if (!safeToRepeat(definition) && (work.dispatch?.tracked !== true || !options.markDispatch)) {
+      throw new DurableAuthorityError("DURABLE_DISPATCH_UNRECORDED", "Deze schrijfactie vereist duurzame registratie van de uitvoering; er is niets uitgevoerd.");
+    }
+  }
 
   async function resolved(reference: RuntimeDurableWorkReference) {
     if (!reference || typeof reference.workId !== "string" || !reference.workId ||
@@ -209,7 +210,8 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
         // A write reclaimed without a persisted pin may already have run under
         // another contract. Even a currently keyed definition cannot prove
         // what the previous attempt actually executed.
-        if (!work.operationContractFingerprint && priorDispatch(work, reference) && hasWriteEffects(definition)) {
+        const mayHaveDispatched = work.dispatch?.tracked === true ? priorDispatch(work) : reference.attempt > 1;
+        if (!work.operationContractFingerprint && mayHaveDispatched && hasWriteEffects(definition)) {
           throw new DurableAuthorityError(
             "OPERATION_OUTCOME_UNKNOWN",
             "Deze schrijfactie kan al uitgevoerd zijn. Controleer het resultaat voordat de workflow doorgaat.",
@@ -242,7 +244,8 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
             "De betekenis van deze operatie is gewijzigd nadat de workflowstap werd vastgelegd.",
           );
         }
-        if (!safeToRepeat(definition) && (priorDispatch(pinned.work, reference) || dispatchedUnsafeClaims.has(fingerprint(reference)))) {
+        assertDispatchTracking(pinned.work, definition);
+        if (!safeToRepeat(definition) && priorDispatch(pinned.work)) {
           throw new DurableAuthorityError("OPERATION_OUTCOME_UNKNOWN", "Deze schrijfactie kan al uitgevoerd zijn. Controleer het resultaat voordat de workflow doorgaat.");
         }
         const capability = Object.freeze({}) as RuntimeDelegatedOperationCapability;
@@ -298,8 +301,8 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
         // Only waiting for transient answers can have used up the capability: nothing ran yet.
         if (now() >= minted.expiresAt) throw expired();
         repeatable = safeToRepeat(definition);
-        const claimKey = fingerprint(minted.reference);
-        if (!repeatable && (priorDispatch(latest.work, minted.reference) || dispatchedUnsafeClaims.has(claimKey))) {
+        assertDispatchTracking(latest.work, definition);
+        if (!repeatable && priorDispatch(latest.work)) {
           return failure("OPERATION_OUTCOME_UNKNOWN", "Deze schrijfactie kan al uitgevoerd zijn. Controleer het resultaat voordat de workflow doorgaat.");
         }
         if (latest.work.dispatch?.tracked === true && options.markDispatch) {
@@ -311,7 +314,6 @@ export function createDurableWorkerBroker(options: DurableWorkerBrokerOptions): 
           }
           marked = true;
         }
-        if (!repeatable) dispatchedUnsafeClaims.add(claimKey);
         executionOptions?.signal?.throwIfAborted();
         const signal = executionOptions?.signal
           ? AbortSignal.any([executionOptions.signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000);

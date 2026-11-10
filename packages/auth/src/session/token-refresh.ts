@@ -11,6 +11,7 @@ import { REFRESH_LOCK_TTL_MS, type SessionStore, type StoredSession } from "./st
 
 const MAX_RETRIES = 3;
 const BASE_DELAY = 1000;
+const MAX_RECOVERY_DELAY_MS = 30_000;
 const REFRESH_ATTEMPT_BUDGET_MS = Math.max(1000, REFRESH_LOCK_TTL_MS - 1000);
 const REFRESH_MIN_FETCH_TIMEOUT_MS = 1000;
 const REFRESH_FETCH_TIMEOUT_MS = Math.max(
@@ -70,14 +71,37 @@ async function fetchWithRefreshTimeout(
   url: string,
   init: RequestInit,
   timeoutMs: number,
-): Promise<Response> {
+): Promise<{ response: Response; body: unknown }> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await Promise.race([
+      (async () => {
+        const response = await fetch(url, { ...init, signal: controller.signal });
+        const text = await response.text();
+        let body: unknown;
+        // Error responses need not be JSON (a reverse proxy may answer HTML).
+        try { body = JSON.parse(text); } catch { body = undefined; }
+        return { response, body };
+      })(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          reject(new Error("Token refresh response timed out"));
+        }, timeoutMs);
+      }),
+    ]);
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function temporarilyUnavailable<Extra extends object>(stored: StoredSession<Extra>, retryAfter: string | null = null): StoredSession<Extra> {
+  const parsed = retryAfter === null ? NaN : /^\d+$/.test(retryAfter)
+    ? Date.now() + Number(retryAfter) * 1000 : Date.parse(retryAfter);
+  const now = Date.now();
+  const refreshRetryAt = Number.isFinite(parsed) ? Math.min(now + MAX_RECOVERY_DELAY_MS, Math.max(now + 1000, parsed)) : now + 5000;
+  return { ...stored, error: "RefreshTokenUnavailable", refreshRetryAt };
 }
 
 function nextRefreshAttemptAllowed(input: {
@@ -188,10 +212,10 @@ export function createTokenRefresh<Extra extends object>(
       const remainingBudgetMs = deadlineMs - Date.now();
       if (remainingBudgetMs < REFRESH_MIN_FETCH_TIMEOUT_MS) {
         console.error(`${log} Token refresh skipped: lock budget exhausted`);
-        return { ...stored, error: "RefreshTokenError" };
+        return temporarilyUnavailable(stored);
       }
 
-      const response = await fetchWithRefreshTimeout(tokenUrl, {
+      const { response, body } = await fetchWithRefreshTimeout(tokenUrl, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -203,7 +227,11 @@ export function createTokenRefresh<Extra extends object>(
       }, Math.min(REFRESH_FETCH_TIMEOUT_MS, remainingBudgetMs));
 
       if (!response.ok) {
-        // Retry on 5xx (transient server errors), fail fast on 4xx
+        // Only a definitive grant rejection invalidates the session. Rate
+        // limits, provider downtime and client configuration failures recover.
+        if (response.status === 400 && body && typeof body === "object" && "error" in body && body.error === "invalid_grant") {
+          return { ...stored, error: "RefreshTokenError", refreshRetryAt: undefined };
+        }
         const delay = BASE_DELAY * Math.pow(2, attempt - 1);
         if (
           response.status >= 500 &&
@@ -215,11 +243,15 @@ export function createTokenRefresh<Extra extends object>(
         }
 
         console.error(`${log} Token refresh failed:`, response.status);
-        return { ...stored, error: "RefreshTokenError" };
+        return temporarilyUnavailable(stored, response.headers.get("retry-after"));
       }
 
+      // A complete HTML/empty success from a proxy is a transport fault, not
+      // a definitive rejection of the retained refresh credential.
+      if (body === undefined) return temporarilyUnavailable(stored);
+
       const nowS = Math.floor(Date.now() / 1000);
-      const parsed = validateRefreshPayload(await response.json(), stored, options.refreshInvariant, nowS);
+      const parsed = validateRefreshPayload(body, stored, options.refreshInvariant, nowS);
       if (!parsed.ok) {
         // The reason is logged, not swallowed: "authority revoked" and
         // "Keycloak returned nonsense" both end the session, and a user asking
@@ -254,6 +286,7 @@ export function createTokenRefresh<Extra extends object>(
           ? nowS + (data.refresh_expires_in as number)
           : stored.refreshExpiresAt,
         error: undefined,
+        refreshRetryAt: undefined,
       }, refreshedProfile);
     } catch (error) {
       // Network errors - retry with backoff
@@ -265,7 +298,7 @@ export function createTokenRefresh<Extra extends object>(
       }
 
       console.error(`${log} Token refresh failed after retries:`, error instanceof Error ? error.message : String(error));
-      return { ...stored, error: "RefreshTokenError" };
+      return temporarilyUnavailable(stored);
     }
   }
 
@@ -279,12 +312,14 @@ export function createTokenRefresh<Extra extends object>(
 
     const promise = (async () => {
       // Layer 2: distributed lock via Redis SET NX
+      let lockStartedAt = Date.now();
       let lockOwnerToken = await store.acquireRefreshLock(sessionId);
       if (!lockOwnerToken) {
         await new Promise((resolve) => setTimeout(resolve, 2000));
         const updated = await store.getSession(sessionId);
         if (updated && !updated.error && hasUsableAccessWindow(updated)) return updated;
 
+        lockStartedAt = Date.now();
         lockOwnerToken = await store.acquireRefreshLock(sessionId);
         if (!lockOwnerToken) {
           // Another pod is still refreshing. Its result, good or bad, lands in
@@ -302,11 +337,17 @@ export function createTokenRefresh<Extra extends object>(
         // Gone from Redis (signed out elsewhere, or expired) is not a refresh;
         // writing the snapshot back would resurrect a session that ended.
         if (!current) return { ...stored, error: "RefreshTokenError" };
-        if (current.error) return current;
-        if (hasUsableAccessWindow(current)) return current;
-        const refreshed = await doRefreshAccessToken(current);
-        if (!await store.updateSession(sessionId, refreshed)) {
-          return { ...current, error: "RefreshTokenError" };
+        if (current.error === "RefreshTokenError") return current;
+        // Only a bounded server hint may postpone refresh. An out-of-policy
+        // persisted hint must not keep an otherwise recoverable session frozen.
+        const retryDelay = (current.refreshRetryAt ?? 0) - Date.now();
+        if (retryDelay > 0 && retryDelay <= MAX_RECOVERY_DELAY_MS) return current;
+        if (!current.error && hasUsableAccessWindow(current)) return current;
+        const refreshed = await doRefreshAccessToken(current, 1, lockStartedAt + REFRESH_ATTEMPT_BUDGET_MS);
+        if (!await store.updateSession(sessionId, refreshed, lockOwnerToken)) {
+          // A newer holder may have rotated the token. Do not overwrite its
+          // result or stamp a permanent error from our stale snapshot.
+          return await store.getSession(sessionId) ?? { ...current, error: "RefreshTokenError" };
         }
         return refreshed;
       } finally {

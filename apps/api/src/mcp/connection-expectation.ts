@@ -84,6 +84,7 @@
  * both pass; two that name different rows leave no row able to pass, which is
  * the fail-closed answer rather than a choice between them.
  */
+import { isDelegatedConnection } from "./connection-delegation.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ownedByActingRelation } from "../db/acting-relation.js";
 import { HttpError } from "../rest/http-error.js";
@@ -324,7 +325,7 @@ function connectionSourceReference(input: ConnectionInContext): string | undefin
   ) {
     return undefined;
   }
-  const personal = ownedByActingRelation(connection?.ownerUserId, session);
+  const personal = isDelegatedConnection(session, input.connectionTable, connection) || ownedByActingRelation(connection?.ownerUserId, session);
   if (personal && !session.userId) return undefined;
   try {
     return mintInvocationSourceReference({

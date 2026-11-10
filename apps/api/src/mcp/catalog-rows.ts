@@ -23,7 +23,7 @@ import {
   type ProjectedRuntimeOperationTool,
   catalog,
 } from "./catalog.js";
-import { ENTITY_OAUTH_CALLBACK_PATH, callbackOrigin } from "./handoff-config.js";
+import { oauthCallbackUrl } from "./handoff-config.js";
 export function entityMutationControls(args: Record<string, unknown>) {
   return {
     ...(typeof args.blueprintId === "string" ? { blueprintId: args.blueprintId } : {}),
@@ -110,7 +110,7 @@ export function serializeRowForEntity(
     typeof auth === "object" &&
     auth.profile === "oauth2AuthorizationCode"
   ) {
-    serialized.oauthRedirectUrl = `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`;
+    serialized.oauthRedirectUrl = oauthCallbackUrl();
   }
   return serialized;
 }

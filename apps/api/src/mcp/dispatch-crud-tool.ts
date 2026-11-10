@@ -34,14 +34,7 @@ import { assertDeclaredProperties, assertOperationWrittenFields } from "./entity
 import { invokeTool } from "./entity-tool-invocation.js";
 import { assertPublicTypedValueArguments } from "./typed-value-write-guard.js";
 import { withoutEntitySelector } from "./generic-tool-projection.js";
-import {
-  ENTITY_OAUTH_CALLBACK_PATH,
-  callbackOrigin,
-  configurationFallbackLead,
-  elicitationFallback,
-  publicOriginIsHttps,
-  supportsMcpApp,
-} from "./handoff-config.js";
+import { configurationFallbackLead, elicitationFallback, publicOriginIsHttps, supportsMcpApp, oauthCallbackUrl } from "./handoff-config.js";
 import { configurationAppResult, configurationHandoffResult } from "./handoff-results.js";
 import { failed } from "./tool-results.js";
 import { withoutEnvelopeKeys, assertSchemaValid, envelopeSchema } from "./tool-schema.js";
@@ -172,7 +165,7 @@ export async function crudToolCall(
       const messagePrefix =
         sourceAuth?.profile === "oauth2AuthorizationCode"
           ? `Before entering these values, register this exact redirect URL on the ` +
-            `provider's OAuth client: ${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`
+            `provider's OAuth client: ${oauthCallbackUrl()}`
           : undefined;
       try {
         callArguments = await collectElicitedValues({

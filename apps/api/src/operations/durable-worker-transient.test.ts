@@ -101,7 +101,7 @@ test("contract and authorization answers are permanent and not retried", async (
 });
 
 test("the limiter's 429 on execute is re-sent within the claim, even for a non-keyed write", async () => {
-  const f = fixture({ execute: [limiter({ "retry-after": "1" })] }, "none");
+  const f = fixture({ execute: [limiter({ "retry-after": "1" })] }, "none", { tracked: true });
   const request = await f.broker.authorize(reference);
   expect(await f.broker.execute(request)).toEqual({ data: { id: "created" }, operations: [] });
   expect(f.calls.execute).toBe(2);
@@ -118,10 +118,10 @@ test("a limiter that keeps refusing a non-keyed write: retryable, recorded as no
   expect(await f.broker.execute(await f.broker.authorize(retried))).toEqual({ data: { id: "created" }, operations: [] });
 });
 
-test("without persisted dispatch facts a reclaimed non-keyed write stays refused (the conservative default)", async () => {
-  const f = fixture({ execute: [limiter(), limiter(), limiter()] }, "none");
-  expect(await f.broker.execute(await f.broker.authorize(reference))).toMatchObject({ error: { code: "OPERATION_TEMPORARILY_UNAVAILABLE", retryable: true } });
-  expect(await refusal(f.broker.authorize({ ...reference, attempt: 2 }))).toMatchObject({ code: "OPERATION_OUTCOME_UNKNOWN" });
+test("non-repeatable writes require persisted dispatch tracking before their first attempt", async () => {
+  const f = fixture({}, "none");
+  expect(await refusal(f.broker.authorize(reference))).toMatchObject({ code: "DURABLE_DISPATCH_UNRECORDED" });
+  expect(f.calls.execute).toBe(0);
 });
 
 test("a transient catalog failure before the pin does not make the next attempt an uncertain write", async () => {
@@ -164,10 +164,10 @@ test("a Retry-After beyond the in-claim budget is handed back, not slept through
 
 test("a canonical 429 from the Operation and a write's 5xx are never re-sent", async () => {
   const canonical = { error: { code: "LOCKED", message: "Bezet.", retryable: true } };
-  const own = fixture({ execute: [Response.json(canonical, { status: 429 })] }, "none");
+  const own = fixture({ execute: [Response.json(canonical, { status: 429 })] }, "none", { tracked: true });
   expect(await own.broker.execute(await own.broker.authorize(reference))).toEqual(canonical);
   expect(own.calls.execute).toBe(1);
-  const fault = fixture({ execute: [Response.json({ error: { code: "INTERNAL" } }, { status: 503 })] }, "none");
+  const fault = fixture({ execute: [Response.json({ error: { code: "INTERNAL" } }, { status: 503 })] }, "none", { tracked: true });
   expect(await fault.broker.execute(await fault.broker.authorize(reference))).toMatchObject({ error: { code: "OPERATION_OUTCOME_UNKNOWN" } });
   expect(fault.calls.execute).toBe(1);
 });

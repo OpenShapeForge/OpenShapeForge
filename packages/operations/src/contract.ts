@@ -191,19 +191,24 @@ export type OperationResourceReference = {
   mimeType?: string;
 };
 
+/** A durable execution owned by a registered runtime provider, independent of its transport. */
+export type OperationExecutionReference = { kind: string; ref: string };
+
 /** The canonical success envelope projected unchanged by every interface. */
 export type OperationEnvelope<TData, TIntent extends string = string> = {
   data: TData;
   operations: readonly OperationOffer<TIntent>[];
   /** Optional bounded resources; adapters decide only how to render the links. */
   resources?: readonly OperationResourceReference[];
+  /** Follow this accepted execution to obtain the eventual envelope. */
+  execution?: OperationExecutionReference;
 };
 
 /**
  * Who took an Operation over: the owner's kind (for example `workflow`) and
  * its own reference to the work it started (for example a run id).
  */
-export type OperationAcceptedBy = { kind: string; ref: string };
+export type OperationAcceptedBy = OperationExecutionReference;
 
 /**
  * The Operation was taken over by another owner (an operation override) and

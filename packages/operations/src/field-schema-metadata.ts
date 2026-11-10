@@ -15,6 +15,7 @@ import type {
 } from "./field-schema-types.js";
 import { localizedText, numericRule, stringRule } from "./field-resolution.js";
 import { DECIMAL_PATTERN, INTEGER_TEXT_PATTERN } from "./scalar-projection.js";
+import { schemaRegExp } from "./schema-regexp.js";
 
 /**
  * A numeric value is accepted in both of its forms: the JSON number a form
@@ -79,7 +80,10 @@ export function constrainedType(
     if (typeof maximum === "number") schema.maximum = maximum;
     // A numeric field's own `pattern` would otherwise overwrite the decimal
     // spelling its text form is admitted by; authored patterns belong to text.
-    if (pattern !== undefined && !numeric) schema.pattern = pattern;
+    if (pattern !== undefined && !numeric) {
+      schemaRegExp(pattern); // Reject unsupported patterns when defining the field, before its first write.
+      schema.pattern = pattern;
+    }
     // `format: uuid` is both a JSON Schema format and the signal the storage
     // layer uses to pick a uuid column, so it carries through unchanged.
     if (validation.format !== undefined) schema.format = validation.format;

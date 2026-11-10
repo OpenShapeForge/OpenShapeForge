@@ -1,9 +1,10 @@
+// SPDX-License-Identifier: BUSL-1.1
+import { withConnectionDelegationOrigin, withConnectionGrantSubject } from "../mcp/connection-delegation.js";
 import { assertCurrentAccountAuthority } from "../accounts/account-current-authority.js";
 import { nativeCollectionOptionsHandler } from "./collection-options.js";
 import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
 import { resolveAuthorizationProfileAccess } from "../auth/authorization-profile-session.js";
 import { nativeApplicationSearchHandler } from "./application-search.js";
-// SPDX-License-Identifier: BUSL-1.1
 import { withAuditContext } from "../platform/audit-context.js";
 import { liveMaintenanceRunner } from "../modules/maintenance.js";
 import { blueprintOperationHandler } from "./entity/blueprints.js";
@@ -1767,7 +1768,7 @@ export async function invokeOperation(
     });
   };
 
-  return withAuditContext(bound.operation.key, context.session?.credential, () => withModuleOperationSession(
+  return withConnectionGrantSubject(ownedTarget ? {entity:ownedTarget.target.entityName,id:ownedTarget.id} : undefined, () => withAuditContext(bound.operation.key, context.session?.credential, () => withModuleOperationSession(
     context.platform,
     context.session,
     (session) => {
@@ -1794,15 +1795,15 @@ export async function invokeOperation(
         options,
       ),
       invokeDeclarativeService: (request, options) =>
-        invokeModuleDeclarativeService(
+        withConnectionDelegationOrigin(bound.operation.key, () => invokeModuleDeclarativeService(
           context.platform,
           session,
           request,
           options,
-        ),
+        )),
     });
     },
-  ), context.session?.principalKind);
+  ), context.session?.principalKind));
 }
 
 function applyErrorResponseMetadata(
@@ -1955,7 +1956,22 @@ function operationRestInputFromParts(
   // Server-supplied input (a capability grant's subject) joins before the
   // query is validated: a GET whose record target the grant names must not be
   // refused for leaving out the field the caller may not choose.
-  const input = bind(readsInputFromQuery ? { ...query, ...params } : { ...body, ...params });
+  // URL path components always arrive as strings, including on POST/PATCH.
+  // Only convert a canonical integer when the Operation declares that exact
+  // type; malformed and unsafe numbers stay strings and fail validation.
+  const typedParams = { ...params };
+  const properties = operation.inputSchema.properties && typeof operation.inputSchema.properties === "object"
+    ? operation.inputSchema.properties as Record<string, unknown> : {};
+  for (const name of pathParameters) {
+    const schema = properties[name];
+    const value = params[name];
+    if (!schema || typeof schema !== "object" || Array.isArray(schema) || (schema as Record<string,unknown>).type!=="integer" || typeof value!=="string")continue;
+    const canonical=/^(?:0|-?[1-9]\d*)$/.test(value) && Number.isSafeInteger(Number(value));
+    if(canonical)typedParams[name]=Number(value);
+    // Query coercion must not turn a rejected path spelling into a valid int.
+    else if(readsInputFromQuery)throw new HttpError(400,"BAD_USER_INPUT","Operation integer path input must use a canonical safe integer.");
+  }
+  const input = bind(readsInputFromQuery ? { ...query, ...typedParams } : { ...body, ...typedParams });
   if (operation.idempotency.mode === "idempotency-key") {
     const field = operation.idempotency.inputField!;
     if (field in input) {

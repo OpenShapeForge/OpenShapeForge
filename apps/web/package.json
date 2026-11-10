@@ -12,6 +12,7 @@
     "start": "node .next/standalone/apps/web/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:browser": "playwright test",
+    "test:browser:recovery": "playwright test --config auth-recovery.config.ts",
     "test:browser:invitations": "playwright test --config keycloak-invitations.config.ts"
   },
   "dependencies": {

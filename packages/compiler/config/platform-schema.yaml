@@ -999,6 +999,40 @@ tables:
       - name: capability_grants_expires_idx
         columns: [expires_at]
 
+  # Owner-issued authority for one canonical Operation to use one personal
+  # Connection. This is internal authorization state, never generated CRUD.
+  - schema: platform
+    name: connection_use_grants
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: connection_table, type: text, required: true }
+      - { name: values_column, type: text, required: true }
+      - { name: connection_id, type: uuid, required: true }
+      - { name: owner_relation_id, type: uuid, required: true }
+      - { name: consumer_operation, type: text, required: true }
+      - { name: subject_entity, type: text, required: true }
+      - { name: subject_id, type: uuid, required: true }
+      - { name: service_definition, type: jsonb, required: true }
+      - { name: definition_fingerprint, type: text, required: true }
+      - { name: input_schema, type: jsonb, required: true }
+      - { name: issued_by, type: uuid, required: true }
+      - { name: issued_identity_id, type: uuid, required: true, references: { schema: platform, table: identities, column: id, onDelete: CASCADE } }
+      - { name: issued_at, type: timestamptz, required: true, default: now() }
+      - { name: expires_at, type: timestamptz }
+      - { name: revoked_at, type: timestamptz }
+    indexes:
+      - name: connection_use_grants_subject_idx
+        columns: [tenant_id, subject_entity, subject_id]
+      - name: connection_use_grants_connection_idx
+        columns: [tenant_id, connection_id]
+      - name: connection_use_grants_issued_identity_idx
+        columns: [tenant_id, issued_identity_id]
+        where: revoked_at IS NULL
+
   # ---------------------------------------------------------------------------
   # Runtime bookkeeping
   #
@@ -1729,3 +1763,22 @@ tables:
       - { name: grantable, type: boolean, required: true }
       - { name: fields, type: jsonb, required: true }
       - { name: checksum, type: text, required: true }
+
+  # Durable MCP handles only. Domain state/results stay with the execution owner.
+  - schema: platform
+    name: mcp_tasks
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: tenant_id, type: uuid, required: true, references: { schema: platform, table: tenants, column: id, onDelete: CASCADE } }
+      - { name: id, type: uuid, primaryKey: true }
+      - { name: actor_id, type: uuid, required: true }
+      - { name: authority_hash, type: text, required: true }
+      - { name: owner_kind, type: text, required: true }
+      - { name: owner_ref, type: text, required: true }
+      - { name: created_at, type: timestamptz, required: true, default: clock_timestamp() }
+      - { name: expires_at, type: timestamptz, required: true }
+    indexes:
+      - { name: mcp_tasks_execution_uidx, columns: [tenant_id, actor_id, authority_hash, owner_kind, owner_ref], unique: true }
+      - { name: mcp_tasks_expiry_idx, columns: [expires_at] }

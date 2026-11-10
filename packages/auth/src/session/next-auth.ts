@@ -103,12 +103,15 @@ export function createSessionAuth<Extra extends object>(
 
       async jwt({ token, account, profile }) {
         if (account) {
+          // Auth.js may mint a local user.id (and token.sub). The verified
+          // provider account id is the OIDC subject refresh tokens continue.
+          const subject = account.providerAccountId;
           const prof = profile as JwtClaims | undefined;
           const accessTokenClaims = readJwtClaims(account.access_token as string | undefined);
           const idTokenClaims = readJwtClaims(account.id_token as string | undefined);
           const claims: SignInClaims = { profile: prof, accessTokenClaims, idTokenClaims };
           const storedUserProfile = parseUserProfile({
-            sub: token.sub,
+            sub: subject,
             profile: prof,
             idTokenClaims,
             accessTokenClaims,
@@ -126,7 +129,7 @@ export function createSessionAuth<Extra extends object>(
 
           const stored: StoredSession<Extra> = {
             ...options.initialFields(claims),
-            sub: token.sub,
+            sub: subject,
             name: storedUserProfile.name,
             givenName: storedUserProfile.givenName,
             familyName: storedUserProfile.familyName,
@@ -194,6 +197,20 @@ export function createSessionAuth<Extra extends object>(
         let stored = await store.getSession(sessionId);
         if (!stored || stored.error === "RefreshTokenError") {
           session.error = "RefreshTokenError";
+          return session;
+        }
+
+        // Keep the cookie and Redis session recoverable, but never project
+        // expired authority while the provider is temporarily unavailable.
+        if (!stored.expiresAt || stored.expiresAt <= Math.floor(Date.now() / 1000)) {
+          session.error = "RefreshTokenUnavailable";
+          session.accessToken = "";
+          session.idToken = "";
+          session.roles = [];
+          session.sub = "";
+          session.expiresAt = stored.expiresAt;
+          session.refreshExpiresAt = stored.refreshExpiresAt;
+          session.refreshRetryAt = stored.refreshRetryAt;
           return session;
         }
 

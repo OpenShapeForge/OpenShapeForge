@@ -2,6 +2,7 @@
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import {
+  schemaRegExp,
   valueInvariantKeywords,
   operationChoiceKeyword,
   operationCollectionKeyword,
@@ -26,7 +27,7 @@ export function createOperationAjv(coerceTypes = false): OperationAjv {
   // A numeric property publishes both of its forms — the JSON number and the
   // exact decimal text every transport projects it as — so a compiled schema
   // legitimately carries a union type.
-  const instance = new Ajv2020.default({ strict: true, allErrors: true, allowUnionTypes: true, coerceTypes });
+  const instance = new Ajv2020.default({ strict: true, allErrors: true, allowUnionTypes: true, coerceTypes, code: { regExp: schemaRegExp } });
   // ajv-formats is CJS; under NodeNext the default import is typed as the
   // module namespace rather than the callable it is at runtime.
   (addFormats as unknown as (target: OperationAjv) => unknown)(instance);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import type { CompiledEntityInfo } from "../plugins.js";
 import { expect, test } from "bun:test";
 import { missingSchemaUiTranslations } from "@openshapeforge/interface-web";
 import { join } from "node:path";
@@ -12,7 +13,7 @@ import { compile as compileEntity } from "./compiler/index.js";
 import { collectAuthoredEntityPluginOperations, collectPluginOperations, assertOperationRuntimeModules, buildStaticOperationCatalog } from "../generate-operations.js";
 import type { CoreEntity } from "./types.js";
 import type { FieldDefinitionInverseCollection } from "./types/field-definition.js";
-import type { CompiledEntityInfo, PluginOperationContract } from "../plugins.js";
+import type { PluginOperationContract } from "../plugins.js";
 import { buildMcpCatalog } from "../generate-mcp.js";
 import { entityOperationJsonSchemas } from "../entity-operation-json-schema.js";
 

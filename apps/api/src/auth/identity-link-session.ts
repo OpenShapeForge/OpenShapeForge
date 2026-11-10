@@ -16,8 +16,8 @@
  * session — and an administrator's `link_identity` or an invitation claims
  * that row.
  *
- * One cache, keyed (issuer, subject, tenant), TTL a minute, versioned: every
- * write and every invalidation bumps the key's generation, and a read stores
+ * One cache, keyed (issuer, subject, tenant), TTL a minute, bounded and versioned: every
+ * write and invalidation retires the key's generation, and a read stores
  * only under the generation it snapshotted first — a stale state can neither
  * land after an invalidation nor overwrite what the other path just wrote.
  */
@@ -32,45 +32,62 @@ export type SessionInput = DbSessionInput & { tenantId: string; userId: string }
 export type SessionIdentity = { issuer: string; subject: string };
 
 const LINK_CACHE_TTL_MS = 60_000;
-const cache = new Map<string, { state: IdentityLinkState | null; expiresAtMs: number }>();
-const generations = new Map<string, number>();
+const LINK_CACHE_MAX_ENTRIES = 5000;
+type LinkCacheEntry = {
+  generation: symbol;
+  expiresAtMs: number;
+  value?: { state: IdentityLinkState | null };
+};
+// One bounded map owns both values and in-flight generations. Symbols cannot
+// repeat after eviction, invalidation or expiry, so an old read cannot revive
+// an evicted entry or overwrite a newer result. No tombstone map is needed.
+const cache = new Map<string, LinkCacheEntry>();
 
 export function linkCacheKey(issuer: string, subject: string, tenantId: string): string {
   return `${issuer}\n${subject}\n${tenantId}`;
 }
 
-export function linkGeneration(key: string): number {
-  return generations.get(key) ?? 0;
+function freshEntry(key: string): LinkCacheEntry | undefined {
+  const entry = cache.get(key);
+  if (entry && entry.expiresAtMs <= Date.now()) {
+    cache.delete(key);
+    return undefined;
+  }
+  return entry;
 }
 
-function bump(key: string): number {
-  const next = linkGeneration(key) + 1;
-  generations.set(key, next);
-  return next;
+function remember(key: string, entry: LinkCacheEntry): void {
+  cache.delete(key);
+  cache.set(key, entry);
+  while (cache.size > LINK_CACHE_MAX_ENTRIES) cache.delete(cache.keys().next().value!);
 }
 
-/** The cached state for a key, when one is fresh. `undefined` is a miss; a cached `null` is a hit that says "no row". */
+export function linkGeneration(key: string): symbol {
+  const entry = freshEntry(key) ?? { generation: Symbol(), expiresAtMs: Date.now() + LINK_CACHE_TTL_MS };
+  remember(key, entry);
+  return entry.generation;
+}
+
+/** `undefined` is a miss; a cached `null` says the identity has no link. */
 export function cachedLinkState(key: string): { state: IdentityLinkState | null } | undefined {
-  const cached = cache.get(key);
-  return cached && cached.expiresAtMs > Date.now() ? { state: cached.state } : undefined;
+  const entry = freshEntry(key);
+  if (entry) remember(key, entry);
+  return entry?.value;
 }
 
-/** Store a state read or written under `generation`; a newer generation wins and the store is skipped. */
-export function storeLinkState(key: string, generation: number, state: IdentityLinkState | null): void {
-  if (linkGeneration(key) !== generation) return;
-  cache.set(key, { state, expiresAtMs: Date.now() + LINK_CACHE_TTL_MS });
+/** A result is stored only while its original read generation still owns the entry. */
+export function storeLinkState(key: string, generation: symbol, state: IdentityLinkState | null): void {
+  if (freshEntry(key)?.generation !== generation) return;
+  remember(key, { generation: Symbol(), value: { state }, expiresAtMs: Date.now() + LINK_CACHE_TTL_MS });
 }
 
 export function invalidateIdentityLink(issuer: string, subject: string, tenantId: string): void {
-  const key = linkCacheKey(issuer, subject, tenantId);
-  cache.delete(key);
-  bump(key);
+  cache.delete(linkCacheKey(issuer, subject, tenantId));
 }
 
 /** Test-only. */
 export function __resetIdentityLinkCacheForTests(): void {
   cache.clear();
-  generations.clear();
 }
 
 /** A tenant or user that is not a uuid can hold no link: the tables key on uuids. */

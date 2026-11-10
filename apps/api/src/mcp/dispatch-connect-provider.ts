@@ -24,7 +24,7 @@ import { missingRequiredConnectionValues } from "./connection-guidance.js";
 import { isOrganizationAdministrator } from "./onboarding.js";
 import { connectionScopeOf } from "./catalog-rows.js";
 import { entityForTable } from "./catalog.js";
-import { ENTITY_OAUTH_CALLBACK_PATH, callbackOrigin, elicitedKeyring } from "./handoff-config.js";
+import { elicitedKeyring, oauthCallbackUrl } from "./handoff-config.js";
 import {
   looksLikeStoredSecret,
   normalizeConnectionValueRows,
@@ -113,7 +113,7 @@ export async function connectProviderStep(
     }
     automatic = await preparePublicMcpOAuth({ db, session, providerTable: execution.providerTable,
       providerId: providerRowId, providerUpdatedAt: providerRow.updatedAt, resource: auth.resource,
-      redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`, clientName: productName(), auth, egress,
+      redirectUri: oauthCallbackUrl(), clientName: productName(), auth, egress,
       owner: scope.egressOwner, ...(scope.signal ? { signal: scope.signal } : {}) });
   }
   const authorizationUrl = automatic?.authorizationUrl ?? auth.authorizationUrl;
@@ -311,7 +311,7 @@ export async function connectProviderStep(
     profile: oauthProfile,
     egress,
     scopes,
-    redirectUri: `${callbackOrigin()}${ENTITY_OAUTH_CALLBACK_PATH}`,
+    redirectUri: oauthCallbackUrl(),
     providerName: String(providerRow.name ?? providerRowId),
     connectionScope: scope_,
     authorizationUrl: resolvedAuthorizationUrl,

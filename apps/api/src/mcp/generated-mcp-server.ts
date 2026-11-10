@@ -65,6 +65,7 @@
  *                                       external catalogs it is shown
  *   *-routes.ts, route-context.ts       the browser-facing routes
  */
+import { tasksForScope, taskAwareToolParams } from "./tasks.js";
 import { primeSessionExtensions } from "./extension-schemas.js";
 import { createMcpSessionAdmission } from "./session-admission.js";
 import { createExternalDiscovery, currentLiveRequestSignal } from "./external-discovery.js";
@@ -186,6 +187,8 @@ export function buildServer(
   const surface = createSessionSurface(scope);
 
   const dispatchTool = createDispatchTool(scope, surface);
+  const tasks = tasksForScope(scope);
+  tasks?.register(server);
 
   // Discovery of external catalogs, for the live requests that may run it.
   // Registered on the server so the stateful transport can run it inside its
@@ -196,7 +199,8 @@ export function buildServer(
     modulePlatform,
   });
 
-  server.setRequestHandler('tools/call', async (request, ctx) => {
+  server.setRequestHandler('tools/call', { params: taskAwareToolParams }, async (params, ctx) => {
+    const request = { params };
     // osf_describe and every CRUD call read this tenant's field definitions.
     await primeSessionExtensions(scope.db, scope.session);
     const dispatch = () => dispatchTool(
@@ -225,7 +229,7 @@ export function buildServer(
     const httpSignal = currentLiveRequestSignal();
     await discovery.discover({ signal: httpSignal
       ? AbortSignal.any([ctx.mcpReq.signal, httpSignal]) : ctx.mcpReq.signal });
-    return outcome.result;
+    return tasks ? await tasks.project(outcome.result, ctx.mcpReq.envelope) : outcome.result;
   });
 
   registerSessionExecutors(scope, dispatchTool);

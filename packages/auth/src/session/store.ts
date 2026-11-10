@@ -43,6 +43,8 @@ export interface StoredSessionBase {
   expiresAt?: number | undefined;
   refreshExpiresAt?: number | undefined;
   error?: string | undefined;
+  /** A temporary provider failure retains the session until this retry time. */
+  refreshRetryAt?: number | undefined;
 }
 
 export type StoredSession<Extra extends object = {}> = StoredSessionBase & Extra;
@@ -51,8 +53,8 @@ export type SessionStore<Extra extends object = {}> = {
   getSession(sessionId: string): Promise<StoredSession<Extra> | null>;
   /** Initial creation for a new opaque id; existing sessions use updateSession. */
   setSession(sessionId: string, data: StoredSession<Extra>): Promise<void>;
-  /** Atomically refuses a session removed by logout or expiry. */
-  updateSession(sessionId: string, data: StoredSession<Extra>): Promise<boolean>;
+  /** Atomically refuses logout/expiry and, for refresh writes, a lost lease. */
+  updateSession(sessionId: string, data: StoredSession<Extra>, refreshLockOwner?: string): Promise<boolean>;
   deleteSession(sessionId: string): Promise<void>;
   acquireRefreshLock(sessionId: string): Promise<string | null>;
   releaseRefreshLock(sessionId: string, ownerToken: string): Promise<void>;
@@ -60,7 +62,7 @@ export type SessionStore<Extra extends object = {}> = {
 };
 
 export type SessionStoreOptions = {
-  /** Namespaces every key: `<keyPrefix>:session:` and `<keyPrefix>:refresh-lock:`. */
+  /** Namespaces sessions and their colocated refresh locks. */
   keyPrefix: string;
   /** Log tag: `auth` prefixes lines with `[auth]` and `[auth:redis]`. */
   logTag: string;
@@ -132,7 +134,9 @@ export function createSessionStore<Extra extends object = {}>(
   options: SessionStoreOptions,
 ): SessionStore<Extra> {
   const sessionPrefix = `${options.keyPrefix}:session:`;
-  const refreshLockPrefix = `${options.keyPrefix}:refresh-lock:`;
+  // The full session key is the lock's Redis Cluster hash tag: both keys share
+  // a slot, so the lease and write can be checked atomically on Cluster too.
+  const refreshLockKey = (sessionId: string) => `{${sessionPrefix}${sessionId}}:refresh-lock`;
 
   // Lazy singleton — the connection is created on first use.
   let client: RedisClient | null = null;
@@ -170,8 +174,15 @@ export function createSessionStore<Extra extends object = {}>(
       await withRedis((redis) => redis.set(key, JSON.stringify(data), "EX", sessionTtl(data)));
     },
 
-    async updateSession(sessionId, data) {
+    async updateSession(sessionId, data, refreshLockOwner) {
       const key = `${sessionPrefix}${sessionId}`;
+      if (refreshLockOwner !== undefined) {
+        return await withRedis((redis) => redis.eval(
+          "if redis.call('get', KEYS[2]) ~= ARGV[1] or redis.call('exists', KEYS[1]) == 0 then return 0 end "
+            + "redis.call('set', KEYS[1], ARGV[2], 'EX', ARGV[3]); return 1",
+          2, key, refreshLockKey(sessionId), refreshLockOwner, JSON.stringify(data), sessionTtl(data),
+        )) === 1;
+      }
       const result = await withRedis((redis) =>
         redis.set(key, JSON.stringify(data), "EX", sessionTtl(data), "XX"),
       );
@@ -201,7 +212,7 @@ export function createSessionStore<Extra extends object = {}>(
      * holds it. Each session read observes the previous holder's Redis write.
      */
     async acquireRefreshLock(sessionId) {
-      const key = `${refreshLockPrefix}${sessionId}`;
+      const key = refreshLockKey(sessionId);
       const ownerToken = randomUUID();
       const result = await withRedis((redis) =>
         redis.set(key, ownerToken, "PX", REFRESH_LOCK_TTL_MS, "NX"),
@@ -211,7 +222,7 @@ export function createSessionStore<Extra extends object = {}>(
     },
 
     async releaseRefreshLock(sessionId, ownerToken) {
-      const key = `${refreshLockPrefix}${sessionId}`;
+      const key = refreshLockKey(sessionId);
       await withRedis((redis) =>
         redis.eval(
           "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",

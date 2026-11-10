@@ -46,7 +46,7 @@ const descriptor: RuntimeArtifactDescriptor = {
   byteSize: 3,
 };
 
-type QueryObservation = { connectionId: number; sql: string };
+type QueryObservation = { connectionId: number; sql: string; parameters?: readonly unknown[] };
 
 /** Records every statement and every commit or rollback, per connection. */
 class ResultDriver extends DummyDriver {
@@ -62,7 +62,7 @@ class ResultDriver extends DummyDriver {
     const observations = this.observations;
     const connection: DatabaseConnection = {
       executeQuery: async <R>(query: CompiledQuery) => {
-        observations.push({ connectionId, sql: query.sql });
+        observations.push({ connectionId, sql: query.sql, parameters: query.parameters });
         return { rows: [{ present: 1, tenant_id: tenantId, occurred_at: new Date(0), payload: {} }] as R[] };
       },
       streamQuery: async function* <R>() {
@@ -477,4 +477,83 @@ describe("artifact record authorization transaction scope", () => {
       await db.destroy();
     }
   });
+});
+
+
+test("grant staging schedules only provider-owned cleanup atomically, without replaying recipient authority", async () => {
+  const observations: QueryObservation[] = [];
+  const db = database(observations);
+  const platform = new ModulePlatformRuntime(db);
+  const session = { ...trustedSession(userId), credential: "grant", grant: {
+    id: "50000000-0000-4000-8000-000000000001", subject: { entity: "Document", id: documentId },
+    recipient: { kind: "email" }, operations: ["example.sign"], records: [], expiresAt: "2099-01-01T00:00:00Z", maxUses: 1,
+  } } as TrustedSessionContext;
+  let retained: (() => Promise<void>) | undefined;
+  const module = stagingModule(platform, async () => undefined);
+  module.jobHandlers = { "test-artifact-storage.gc": async () => ({ outcome: "done" }) };
+  module.artifactStorage = { ...module.artifactStorage!, expiryJob: { kind: "test-artifact-storage.gc", maxAttempts: 6 } };
+  module.artifactStorage!.stage = async context => {
+    retained = () => context.enqueueExpiry({ artifactId, expiresAt: "2030-01-01T00:00:00Z" });
+    await expect(retained()).rejects.toThrow("staging transaction");
+    return context.withTransaction(async transaction => {
+      await sql`select 1 as stage_row`.execute(transaction);
+      await retained!();
+      await expect(Promise.resolve().then(() => platform.services.jobs.enqueue(context.session, gcJob)))
+        .rejects.toThrow("capability grant session cannot enqueue");
+      return descriptor;
+    });
+  };
+  platform.registerArtifactStorage([module]);
+  try {
+    await withModuleOperationSession(platform.services, session, async active => {
+      await platform.services.artifacts.stage(active!, stageInput());
+      await expect(retained!()).rejects.toThrow("staging transaction");
+    });
+    await expect(retained!()).rejects.toThrow("live verified session");
+    const insert = observations.find(row => row.sql.startsWith('insert into "platform"."jobs"'))!;
+    expect(insert).toBeDefined();
+    expect(insert.connectionId).toBe(observations.find(row => row.sql.includes("stage_row"))!.connectionId);
+    const snapshot = insert.parameters!.map(value => typeof value === "string" && value.startsWith("{") ? JSON.parse(value) : value)
+      .find(value => value && typeof value === "object" && "credential" in value);
+    expect(snapshot).toEqual({ credential: "trusted-context", roles: [], groups: [], relationGroupIds: [], scope: "self" });
+    expect(insert.parameters).toContain(tenantId);
+    expect(insert.parameters).toContain(userId);
+    expect(insert.parameters).toContainEqual({ artifactId });
+    expect(observations.some(row => row.connectionId === insert.connectionId && row.sql === "<commit>")).toBe(true);
+  } finally { await db.destroy(); }
+});
+
+
+test("concurrent stages of the same session cannot use each other's cleanup handle", async () => {
+  const observations: QueryObservation[] = [];
+  const db = database(observations);
+  const platform = new ModulePlatformRuntime(db);
+  const session = trustedSession(userId);
+  let first: (() => Promise<void>) | undefined;
+  let release!: () => void;
+  let entered!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const resume = new Promise<void>(resolve => { release = resolve; });
+  const module = stagingModule(platform, async () => undefined);
+  module.jobHandlers = { "test-artifact-storage.gc": async () => ({ outcome: "done" }) };
+  module.artifactStorage = { ...module.artifactStorage!, expiryJob: { kind: "test-artifact-storage.gc", maxAttempts: 6 } };
+  module.artifactStorage.stage = context => context.withTransaction(async () => {
+    const enqueue = () => context.enqueueExpiry({ artifactId, expiresAt: "2030-01-01T00:00:00Z" });
+    if (!first) { first = enqueue; entered(); await resume; }
+    else {
+      try { await expect(first()).rejects.toThrow("staging transaction"); }
+      finally { release(); }
+    }
+    await enqueue();
+    return descriptor;
+  });
+  platform.registerArtifactStorage([module]);
+  try {
+    await withModuleOperationSession(platform.services, session, async active => {
+      const a = platform.services.artifacts.stage(active!, stageInput());
+      await ready;
+      await Promise.all([a, platform.services.artifacts.stage(active!, stageInput())]);
+    });
+    expect(observations.filter(row => row.sql.startsWith('insert into "platform"."jobs"'))).toHaveLength(2);
+  } finally { release(); await db.destroy(); }
 });

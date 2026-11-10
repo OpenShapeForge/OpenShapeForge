@@ -9,10 +9,12 @@ type Fields = { tenantId?: string | undefined };
 const originalFetch = globalThis.fetch;
 const originalError = console.error;
 const originalWarn = console.warn;
+const originalNow = Date.now;
 afterEach(() => {
   globalThis.fetch = originalFetch;
   console.error = originalError;
   console.warn = originalWarn;
+  Date.now = originalNow;
 });
 
 function jwt(claims: Record<string, unknown>): string {
@@ -31,8 +33,9 @@ function fakeStore(initial: Record<string, StoredSession<Fields>> = {}): Session
     locks,
     async getSession(id) { return records.get(id) ?? null; },
     async setSession(id, data) { records.set(id, data); },
-    async updateSession(id, data) {
+    async updateSession(id, data, owner) {
       if (!records.has(id)) return false;
+      if (owner !== undefined && locks.get(id) !== owner) return false;
       records.set(id, data);
       return true;
     },
@@ -50,7 +53,7 @@ function fakeStore(initial: Record<string, StoredSession<Fields>> = {}): Session
 
 const nowS = () => Math.floor(Date.now() / 1000);
 
-function keycloakResponses(...bodies: Array<{ status: number; body?: unknown }>) {
+function keycloakResponses(...bodies: Array<{ status: number; body?: unknown; headers?: Record<string, string> }>) {
   const calls: Array<{ url: string; body: string }> = [];
   let index = 0;
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -58,7 +61,7 @@ function keycloakResponses(...bodies: Array<{ status: number; body?: unknown }>)
     const next = bodies[Math.min(index++, bodies.length - 1)]!;
     return new Response(next.body === undefined ? "" : JSON.stringify(next.body), {
       status: next.status,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...next.headers },
     });
   }) as typeof fetch;
   return calls;
@@ -299,4 +302,115 @@ describe("refreshSessionInRedis", () => {
     expect(store.records.has("s1")).toBe(false);
     expect(store.locks.get("s1")).toBe("other-pod");
   });
+});
+
+test("a 429 retains the refresh token, respects Retry-After and recovers in the same session", async () => {
+  console.error = () => {};
+  let clock = originalNow(); Date.now = () => clock;
+  const store = fakeStore({ s1: { ...stored } });
+  const refresh = refresher(store);
+  const calls = keycloakResponses(
+    { status: 429, headers: { "retry-after": "1" } },
+    { status: 200, body: { access_token: jwt({ sub: "user-1", tid: "tenant-a", exp: nowS() + 300, realm_access: { roles: ["reader"] } }), expires_in: 300, refresh_token: "rotated" } },
+  );
+  const unavailable = await refresh.refreshSessionInRedis("s1", stored);
+  expect(unavailable.error).toBe("RefreshTokenUnavailable");
+  expect(unavailable.refreshToken).toBe("refresh-1");
+  await refresh.refreshSessionInRedis("s1", unavailable);
+  expect(calls).toHaveLength(1);
+  clock += 1001;
+  const recovered = await refresh.refreshSessionInRedis("s1", unavailable);
+  expect(calls).toHaveLength(2);
+  expect(recovered.error).toBeUndefined();
+  expect(recovered.refreshRetryAt).toBeUndefined();
+  expect(recovered.refreshToken).toBe("rotated");
+});
+
+test("response-body timeout ends refresh before the distributed lease expires", async () => {
+  console.error = () => {}; console.warn = () => {};
+  const store = fakeStore({ s1: { ...stored } });
+  let signal: AbortSignal | null | undefined;
+  globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+    signal = init?.signal;
+    return new Response(new ReadableStream({ start(controller) {
+      signal?.addEventListener("abort", () => controller.error(new Error("aborted")), { once: true });
+    } }));
+  }) as typeof fetch;
+  const started = Date.now();
+  const result = await refresher(store).refreshSessionInRedis("s1", stored);
+  expect(result.error).toBe("RefreshTokenUnavailable");
+  expect(signal?.aborted).toBe(true);
+  expect(Date.now() - started).toBeLessThan(10_000);
+  expect(store.locks.size).toBe(0);
+}, 12_000);
+
+test("a refresh whose lease was replaced cannot overwrite the new holder's tokens", async () => {
+  const store = fakeStore({ s1: { ...stored } });
+  const started = Promise.withResolvers<void>(), response = Promise.withResolvers<Response>();
+  globalThis.fetch = (async () => { started.resolve(); return response.promise; }) as unknown as typeof fetch;
+  const pending = refresher(store).refreshSessionInRedis("s1", stored);
+  await started.promise;
+  store.locks.set("s1", "new-owner");
+  const newer = { ...stored, refreshToken: "new-holder-token", expiresAt: nowS() + 300 };
+  store.records.set("s1", newer);
+  response.resolve(new Response(JSON.stringify({
+    access_token: jwt({ sub: "user-1", tid: "tenant-a", exp: nowS() + 300, realm_access: { roles: [] } }),
+    expires_in: 300, refresh_token: "stale-holder-token",
+  })));
+  expect(await pending).toEqual(newer);
+  expect(store.records.get("s1")).toEqual(newer);
+  expect(store.locks.get("s1")).toBe("new-owner");
+});
+
+test("an excessive Retry-After cannot freeze the retained session after the provider recovers", async () => {
+  console.error = () => {};
+  let clock = originalNow(); Date.now = () => clock;
+  for (const hint of ["3600", new Date(clock + 86_400_000).toUTCString()]) {
+    const store = fakeStore({ s1: { ...stored } });
+    const refresh = refresher(store);
+    const calls = keycloakResponses(
+      { status: 429, headers: { "retry-after": hint } },
+      { status: 200, body: { access_token: jwt({ sub: "user-1", tid: "tenant-a", exp: nowS() + 300, realm_access: { roles: ["reader"] } }), expires_in: 300, refresh_token: "rotated" } },
+    );
+    const unavailable = await refresh.refreshSessionInRedis("s1", stored);
+    expect(unavailable.error).toBe("RefreshTokenUnavailable");
+    expect(unavailable.refreshToken).toBe("refresh-1");
+    clock += 29_999;
+    expect((await refresh.refreshSessionInRedis("s1", unavailable)).error).toBe("RefreshTokenUnavailable");
+    expect(calls).toHaveLength(1);
+    clock += 2;
+    const recovered = await refresh.refreshSessionInRedis("s1", unavailable);
+    expect(calls).toHaveLength(2);
+    expect(recovered.error).toBeUndefined();
+    expect(recovered.refreshToken).toBe("rotated");
+  }
+});
+
+test("a non-JSON proxy success preserves the refresh credential and can recover", async () => {
+  let clock = originalNow(); Date.now = () => clock;
+  const store = fakeStore({ s1: { ...stored } });
+  const refresh = refresher(store);
+  let calls = 0;
+  globalThis.fetch = (async () => ++calls === 1 ? new Response("<html>proxy unavailable</html>") : Response.json({
+    access_token: jwt({ sub: "user-1", tid: "tenant-a", exp: nowS() + 300, realm_access: { roles: ["reader"] } }), expires_in: 300, refresh_token: "rotated",
+  })) as typeof fetch;
+  const unavailable = await refresh.refreshSessionInRedis("s1", stored);
+  expect(unavailable.error).toBe("RefreshTokenUnavailable");
+  expect(unavailable.refreshToken).toBe("refresh-1");
+  clock += 5001;
+  const recovered = await refresh.refreshSessionInRedis("s1", unavailable);
+  expect(recovered.error).toBeUndefined();
+  expect(recovered.refreshToken).toBe("rotated");
+});
+
+test("an already stored excessive retry deadline does not block a recovered provider", async () => {
+  const unavailable = { ...stored, error: "RefreshTokenUnavailable" as const, refreshRetryAt: Date.now() + 3_600_000 };
+  const store = fakeStore({ s1: unavailable });
+  const calls = keycloakResponses({ status: 200, body: {
+    access_token: jwt({ sub: "user-1", tid: "tenant-a", exp: nowS() + 300, realm_access: { roles: ["reader"] } }), expires_in: 300, refresh_token: "rotated",
+  } });
+  const recovered = await refresher(store).refreshSessionInRedis("s1", unavailable);
+  expect(calls).toHaveLength(1);
+  expect(recovered.error).toBeUndefined();
+  expect(recovered.refreshRetryAt).toBeUndefined();
 });

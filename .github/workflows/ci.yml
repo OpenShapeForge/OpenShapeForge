@@ -178,6 +178,7 @@ jobs:
           src/auth/organization-service-identities.test.ts
           src/auth/login-session-binding.test.ts
           src/auth/relation-group-memberships.test.ts
+          src/auth/identity-link-cache.test.ts
           src/auth/identity-link.test.ts
           src/auth/identity.test.ts
           src/auth/principal-class.unit.test.ts
@@ -212,6 +213,8 @@ jobs:
           src/accounts/member-confirmation.test.ts
           src/accounts/source-query.unit.test.ts
           src/mcp/organization-profile-tools.test.ts
+          src/mcp/connection-delegation.test.ts
+          src/modules/connection-grant-fingerprint.test.ts
           src/auth/employee-invitations.unit.test.ts
           src/auth/organization-resource-client.test.ts
           src/jobs/mail/smtp.test.ts
@@ -472,6 +475,7 @@ jobs:
           cd apps/api
           bun test src/db
           bun test src/operations
+          bun test src/mcp/__tests__/task-store.db.test.ts
           bun test src/graphql/available-tenants-db.test.ts
           bun test src/auth/relation-group-memberships-db.test.ts src/platform/entity-change-stream.test.ts src/graphql/context-db.test.ts
           bun test src/auth/api-key/credential-no-store-db.test.ts src/auth/api-key/lifetime-existing-keys-db.test.ts

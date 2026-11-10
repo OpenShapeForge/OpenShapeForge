@@ -83,6 +83,7 @@ export type {
   OperationAccepted,
   OperationAcceptance,
   OperationAcceptedBy,
+  OperationExecutionReference,
   OperationViolation,
 } from "./contract.js";
 export {
@@ -188,3 +189,7 @@ export { operationFieldMetadataKeywords } from "./schema-annotations.js";
 export { valueInvariantKeywords, orderedFieldsKeyword, uniqueByKeyword, timeZoneKeyword, isIanaTimeZone } from "./value-invariants.js";
 
 export * from "./blueprint-presentation.js";
+
+export { operationErrorSchema } from "./error-schema.js";
+export { evaluateFieldCondition } from "./field-condition.js";
+export * from "./schema-regexp.js";

@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Protocol notes and public contracts: ./keycloak-organization-members-types.ts
-import {
-  createServiceAccountTokenProvider,
-  createKeycloakFetch,
-  describeError,
-  readJson,
-  REQUEST_TIMEOUT_MS,
-  type KeycloakServiceAccountConfig,
-} from "./keycloak-service-account.js";
+import type { KeycloakServiceAccountConfig } from "./keycloak-service-account.js";
+import { createKeycloakAdminRequest } from "./keycloak-admin-request.js";
 import {
   KeycloakAdminError,
   type KeycloakAdminOperation,
@@ -32,124 +26,18 @@ export function createKeycloakOrganizationMembersClient(
   config: KeycloakServiceAccountConfig,
   options: KeycloakOrganizationMembersOptions = {},
 ): KeycloakTenantMemberAdminClient & OrganizationBootstrapReads {
-  const doFetch = createKeycloakFetch(config, options.fetch ?? globalThis.fetch);
-  const now = options.now ?? (() => Date.now());
+  const runRequest = createKeycloakAdminRequest(config, options);
   const realmBase = `${config.baseUrl}/admin/realms/${encodeURIComponent(config.tenantRealm)}`;
   const adminBase = `${realmBase}/organizations`;
 
-  const tokens =
-    options.tokens ??
-    createServiceAccountTokenProvider(config, {
-      ...(options.fetch ? { fetch: options.fetch } : {}),
-      ...(options.now ? { now: options.now } : {}),
-      unauthorized: (message, status) =>
-        new KeycloakAdminError("KEYCLOAK_ADMIN_UNAUTHORIZED", message, status),
-      unavailable: (message, status) =>
-        new KeycloakAdminError("KEYCLOAK_ADMIN_UNAVAILABLE", message, status),
-    });
+
 
   function invitationsUrl(organizationId: string): string {
     return `${adminBase}/${encodeURIComponent(organizationId)}/invitations`;
   }
 
-  /**
-   * One request shape for all three calls: the same token, the same timeout,
-   * and the same mapping of Keycloak's status onto {@link KeycloakAdminError}.
-   * `what` is the gerund that names the call in the operator-facing message
-   * ("inviting a member", "listing the pending invitations", …), so a failure
-   * says which of the three failed without three copies of the mapping drifting
-   * apart.
-   *
-   * `notFoundIsAnswer` is the one place they differ. Everywhere else a `404`
-   * means the organization this tenant is linked to is gone — real drift. On
-   * `DELETE .../invitations/{id}` it means the invitation is gone, which is the
-   * outcome the caller wanted, so that status is returned instead of thrown.
-   */
-  async function request(
-    url: string,
-    init: RequestInit,
-    what: string,
-    operation: KeycloakAdminOperation,
-    notFoundIsAnswer = false,
-  ): Promise<{ status: number; body: unknown }> {
-    const tokenStartedAt = now();
-    let token: string;
-    try {
-      token = await tokens.get();
-    } catch (error) {
-      if (error instanceof KeycloakAdminError && error.operation === undefined) {
-        throw new KeycloakAdminError(error.code, error.message, error.status, {
-          operation: "service_account_token",
-          durationMs: Math.max(0, now() - tokenStartedAt),
-        });
-      }
-      throw error;
-    }
-    const requestStartedAt = now();
-    let response: Response;
-    try {
-      response = await doFetch(url, {
-        ...init,
-        headers: {
-          authorization: `Bearer ${token}`,
-          ...init.headers,
-        },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
-    } catch (error) {
-      throw new KeycloakAdminError(
-        "KEYCLOAK_ADMIN_UNAVAILABLE",
-        `Could not reach the Keycloak admin API at ${url}: ` +
-          (error instanceof Error ? error.message : String(error)),
-        undefined,
-        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
-      );
-    }
-
-    const body = await readJson(response);
-    if (response.ok) return { status: response.status, body };
-
-    if (response.status === 401 || response.status === 403) {
-      tokens.invalidate();
-      throw new KeycloakAdminError(
-        "KEYCLOAK_ADMIN_UNAUTHORIZED",
-        `The Keycloak admin API refused "${config.clientId}" ${what}: ` +
-          `${describeError(body, response.statusText)}. The service account must hold ` +
-          "realm-management manage-realm.",
-        response.status,
-        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
-      );
-    }
-    if (response.status === 404) {
-      if (notFoundIsAnswer) return { status: response.status, body };
-      throw new KeycloakAdminError(
-        "KEYCLOAK_ADMIN_ORGANIZATION_NOT_FOUND",
-        "The Keycloak organization this tenant is linked to no longer exists.",
-        response.status,
-        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
-      );
-    }
-    if (response.status === 400 || response.status === 409) {
-      throw new KeycloakAdminError(
-        "KEYCLOAK_ADMIN_REJECTED",
-        `The Keycloak admin API rejected the request while ${what}: ` +
-          describeError(body, response.statusText),
-        response.status,
-        { operation, durationMs: Math.max(0, now() - requestStartedAt) },
-      );
-    }
-    // Includes the realm's own 500 "Failed to send invite email" — a
-    // deployment fault (SMTP is not configured on this realm), not something
-    // the caller's input can fix, so it is classified the same way an
-    // unreachable Keycloak would be, with the realm's own message carried
-    // through rather than redacted.
-    throw new KeycloakAdminError(
-      "KEYCLOAK_ADMIN_UNAVAILABLE",
-      `The Keycloak admin API answered ${response.status} while ${what}: ` +
-        describeError(body, response.statusText),
-      response.status,
-      { operation, durationMs: Math.max(0, now() - requestStartedAt) },
-    );
+  function request(url: string, init: RequestInit, what: string, operation: KeycloakAdminOperation, notFoundIsAnswer = false) {
+    return runRequest(url, init, operation, { what, notFoundIsAnswer, rejectedStatuses: [400, 409] });
   }
 
   /**

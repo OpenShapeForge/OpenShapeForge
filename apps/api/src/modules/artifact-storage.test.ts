@@ -394,3 +394,13 @@ test("artifact descriptors above the upload ceiling are refused", async () => {
   h.runtime.configure([{name:'storage',artifactStorage:provider({stage:async()=>({...descriptor,byteSize:64*1024*1024+1})})}],[providerId]);
   await expectFailure(h.runtime.services.stage(session,stageInput),'HANDLER_CONTRACT_VIOLATION');
 });
+
+
+test("an expiry registration cannot select another module's job or an unregistered handler", () => {
+  for (const kind of ["mail.deliver", "storage.missing"]) {
+    const h = harness();
+    expect(() => h.runtime.configure([{ name: "storage", jobHandlers: { "mail.deliver": async () => {} },
+      artifactStorage: provider({ expiryJob: { kind, maxAttempts: 6 } }),
+    }], [providerId])).toThrow("owned by the storage module");
+  }
+});

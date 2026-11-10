@@ -943,3 +943,84 @@ contributions continue to list zero prompts.
 - [api.md](api.md) — the CRUD engine, RLS, auth, and the REST surface
 - [authoring.md](authoring.md) — entity YAML anatomy and field definitions
 - [architecture.md](architecture.md) — where this sits in the pipeline
+
+### Provider-specific local callback origins
+
+`OPENSHAPEFORGE_OAUTH_CALLBACK_ORIGIN` optionally selects a fixed origin for
+outbound provider OAuth callbacks, such as `http://localhost:3121` when a
+provider disallows development subdomains. Core always appends
+`/api/entity-oauth/callback`; the value must be an HTTPS or loopback origin
+without credentials, a path, query or fragment. Configuration handoffs and
+application URLs continue to use `OPENSHAPEFORGE_PUBLIC_ORIGIN`. Provider
+registration instructions, authorization-code exchange and refresh all use
+the same callback. Register that exact URL in the provider's client settings.
+
+## Durable executions through MCP Tasks
+
+The `io.modelcontextprotocol/tasks` extension uses the 2026-07-28 protocol.
+Its normative contract is the [2026-07-28 Tasks extension specification](https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks).
+It is advertised only when a module contributes an execution provider and
+an authenticated tenant execution context exists. A `tools/call` may return
+`resultType: "task"` only if that exact request declares the extension.
+Legacy clients and modern clients without the capability receive the ordinary
+Operation envelope, including its execution reference and existing offers.
+There is no Claude-specific branch and no implementation of the older
+2025-11-25 task augmentation contract.
+
+An owner opts a start result into following by returning an interface-neutral
+`execution: { kind, ref }` on its canonical success envelope. This is a
+foundation extension to `OperationEnvelope`, not an authored YAML key. Its
+`RuntimeExecutionProvider` reads the durable execution through current
+canonical Operations and optionally invokes an existing cancellation Operation.
+The workflow plugin contributes the first provider. The MCP adapter owns no
+worker: it persists a handle in `platform.mcp_tasks`, bound to the verified
+tenant, actor, issuer, credential, OAuth authorized party and normalized token
+scopes, before returning
+it. Polls on a new connection/process read the same owner state. Repeated
+starts with the owner's idempotency key reuse the execution and handle.
+Follow permission is checked before any handle is retained. A record-action
+start does not grant workflow-read permission: callers without the existing
+follow/read rights keep the ordinary accepted envelope and its canonical
+interaction offers. No broad workflow role is granted by Tasks.
+If retaining or authorizing the initial handle fails after a successful start,
+the client receives the ordinary accepted envelope with an explicit tracking
+unavailable message and a sanitized diagnostic code is logged. The committed
+process is never reported as a failed start. An already-terminal execution keeps
+the original start result and its offers, including on a fast business failure.
+Bearer tokens without a verified OAuth authorized party do not enable Tasks.
+API-key authority is bound to the stable integration, not a rotating key id;
+current key validity and read permission are still checked on every request.
+Self-described client names and upstream MCP JSON cannot mint execution
+references or grant authority.
+
+`tasks/get` returns status and, on completion, the current authorized final
+Operation envelope as a tool result. Business failure is a completed tool
+result with `isError: true`; refusal to read is a request error, never a saved
+success or an automatic retry of the process. Every poll, including a terminal
+poll, rechecks access. The adapter stores no result snapshot or token.
+`tasks/cancel` requests the owner's canonical cancellation with its ordinary
+permission checks. Sending `tasks/cancel` is the caller's explicit cancellation
+acknowledgement, translated to `confirmed: true` on that Operation. Terminal
+executions and owners without a cancellation Operation acknowledge without a
+new effect; cancellation never promises rollback of completed effects.
+The seven-day handle TTL is retention, not an execution timeout. As specified
+by the extension, `ttlMs` is the duration from `createdAt` (`expires_at` minus
+`created_at`), not the remaining duration at each poll. Reading or reusing a
+handle does not extend its expiry. Expired handles
+are unavailable; the underlying workflow remains governed by its own lifecycle.
+Expired handles of a caller and matching authority are removed when that caller creates another handle;
+there is no deployment-wide expiry sweeper in this increment.
+
+Human-input waits continue to use existing authorized workflow interaction
+Operations. Waiting for a colleague is `working`, not an elicitation directed
+at the caller. This increment issues no task `inputRequests`; `tasks/update`
+acknowledges an empty update and refuses unissued input. Subscriptions, task
+enumeration and arbitrary background execution of synchronous tools are not
+part of this extension implementation.
+
+The 2026-07-28 Tasks extension defines `tasks/cancel` and `tasks/update` replies
+as empty acknowledgements with `resultType: "complete"` (protocol metadata may
+be present), rather than Task objects. Read the execution status with
+`tasks/get`; cancellation is cooperative and the acknowledgement does not promise
+a terminal cancelled state. See the normative [update and cancellation
+responses](https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks#task-cancellation).

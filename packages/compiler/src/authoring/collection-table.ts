@@ -80,7 +80,7 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     if (section.scope === "recordAndTreeParent" && record !== source) throw new Error(`${name}: combined scope requires the same entity for parent and record.`);
     if (!panel?.summaryColumns || !target || relation?.kind !== "hasMany") throw new Error(`${name}: invalid summary relationship ${section.relationship}.`);
     for (const key of Object.keys(section.where ?? {})) path(target, key, undefined);
-    return { ...section, ...(section.groupBy ? { groupBy: path(target, section.groupBy, undefined) } : {}), title: local(section.title), label: value(target, section.label), description: section.description && value(target, section.description), values: section.values.map(item => value(target, item)) };
+    return { ...section, ...(section.groupBy ? { groupBy: path(target, section.groupBy, undefined) } : {}), title: local(section.title), label: value(target, section.label), description: section.description && value(target, section.description), details: section.details?.map(item => value(target, item)), values: section.values.map(item => value(target, item)) };
   });
   if (authored.recordPanel?.binding) {
     const panel = authored.recordPanel, binding = bindings?.[panel.binding!];

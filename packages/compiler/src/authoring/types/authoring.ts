@@ -475,6 +475,7 @@ export type CollectionTableDefinition = {
       where?: Record<string, string>;
       label: CollectionTableValueDefinition;
       description?: CollectionTableValueDefinition;
+      details?: CollectionTableValueDefinition[];
       values: CollectionTableValueDefinition[];
     }>;
     title: LocalizedText; binding?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };

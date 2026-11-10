@@ -1939,9 +1939,89 @@
             }
           },
           "properties": {
-            "primaryMembership": {"type":"object","additionalProperties":false,"required":["field","equals"],"properties":{"field":{"type":"string","minLength":1},"equals":{"type":"string"}}},
-            "summaryColumns": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
-            "sections": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["title", "relationship", "label", "values"], "properties": {"title": {"$ref": "#/$defs/localizedText"}, "scope": {"enum": ["treeParent", "recordAndTreeParent"]}, "groupBy": {"type":"string","minLength":1}, "relationship": {"type": "string", "minLength": 1}, "where": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}}, "label": {"$ref": "#/$defs/webCollectionTableValue"}, "description": {"$ref": "#/$defs/webCollectionTableValue"}, "values": {"type": "array", "items": {"$ref": "#/$defs/webCollectionTableValue"}}}}},
+            "primaryMembership": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "field",
+                "equals"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "equals": {
+                  "type": "string"
+                }
+              }
+            },
+            "summaryColumns": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "sections": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "title",
+                  "relationship",
+                  "label",
+                  "values"
+                ],
+                "properties": {
+                  "title": {
+                    "$ref": "#/$defs/localizedText"
+                  },
+                  "scope": {
+                    "enum": [
+                      "treeParent",
+                      "recordAndTreeParent"
+                    ]
+                  },
+                  "groupBy": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "relationship": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "where": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "label": {
+                    "$ref": "#/$defs/webCollectionTableValue"
+                  },
+                  "description": {
+                    "$ref": "#/$defs/webCollectionTableValue"
+                  },
+                  "details": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/webCollectionTableValue"
+                    }
+                  },
+                  "values": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/webCollectionTableValue"
+                    }
+                  }
+                }
+              }
+            },
             "currency": { "type": "string", "minLength": 1, "x-osf-i18n": {"title": {"en": "Currency field", "nl": "Valutaveld"}} },
             "title": {
               "$ref": "#/$defs/localizedText",

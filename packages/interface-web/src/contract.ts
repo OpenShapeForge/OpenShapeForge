@@ -275,6 +275,7 @@ export type WebCollectionTable = {
       where?: Record<string, string>;
       label: WebCollectionTableValue;
       description?: WebCollectionTableValue;
+      details?: WebCollectionTableValue[];
       values: WebCollectionTableValue[];
     }>;
     title: LocalizedText; binding?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };

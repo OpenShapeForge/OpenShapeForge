@@ -443,7 +443,7 @@ export interface EntityWebRecordLayout {
 export type EntityWebNamedViewDefinition =
     | { kind: "record"; title?: string; fields: string[] }
     | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
-    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | LocalizedText; title?: LocalizedText; filter?: Record<string, unknown>; tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
+    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | LocalizedText; title?: LocalizedText; filter?: Record<string, unknown>; tree?: { children: string; parent?: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
     | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 
@@ -506,7 +506,7 @@ export interface EntityWebViewDefinition {
      * record groups the records its `children` collection holds.
      */
     table?: CollectionTableDefinition;
-    tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
+    tree?: { children: string; parent?: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
     /** Optional grouped board presentation of this same collection. */
     board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: string; currency: string }; card: { title: string | string[]; timestamp?: string; indicator?: string; subtitle?: string[]; amount?: { value: string; currency: string }; body?: string[] } };
     /** Opaque host renderer-registry key; omission uses the generic collection renderer. */

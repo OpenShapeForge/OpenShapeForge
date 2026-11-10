@@ -303,7 +303,7 @@ export type WebCollectionView = {
    * depth limit. `label` and `count` name fields of the entity shown on the
    * group heading; without `count` the renderer counts the children.
    */
-  tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
+  tree?: { children: string; parent?: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
   board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: WebValuePath; currency: WebValuePath }; card: { title: WebValuePath[]; timestamp?: WebValuePath; indicator?: string; subtitle?: WebValuePath[]; amount?: { value: WebValuePath; currency: WebValuePath }; body: WebValuePath[] } };
   presentation?: WebTimelinePresentation;
   id: string;

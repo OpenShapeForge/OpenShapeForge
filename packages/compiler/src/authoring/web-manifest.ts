@@ -912,13 +912,13 @@ function collectionTree(contract: CompiledEntityContract): WebCollectionView["tr
   if (!children || children.kind !== "hasMany" || children.provider) {
     throw new Error(`${entityName}: collection tree children ${tree.children} must be a stored collection relationship of ${entityName}.`);
   }
-  for (const key of ["label", "count"] as const) {
+  for (const key of ["label", "count", "parent"] as const) {
     const field = tree[key];
     if (field !== undefined && !contract.model.fields.some((candidate) => candidate.key === field)) {
       throw new Error(`${entityName}: collection tree ${key} ${field} is not a field of ${entityName}.`);
     }
   }
-  return { children: tree.children, ...(tree.label ? { label: tree.label } : {}), ...(tree.count ? { count: tree.count } : {}), ...(tree.through ? { through: tree.through } : {}) };
+  return { children: tree.children, ...(tree.parent ? {parent:tree.parent}:{}), ...(tree.label ? { label: tree.label } : {}), ...(tree.count ? { count: tree.count } : {}), ...(tree.through ? { through: tree.through } : {}) };
 }
 
 function projectEntity(

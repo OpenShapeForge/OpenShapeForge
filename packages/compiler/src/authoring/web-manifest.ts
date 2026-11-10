@@ -2171,7 +2171,7 @@ export function buildWebManifest(
     for (const field of Object.values(entity.fields)) {
       if (field.optionSource?.type === "referentiedata" && !field.options?.length) {
         const options = referentiedata[field.optionSource.group];
-        if (options?.length) field.options = options.map(item => ({ value: item.value, label: { ...item.label } }));
+        if (options?.length) field.options = options.map(item => ({ ...item, label: { ...item.label } }));
       }
     }
   }

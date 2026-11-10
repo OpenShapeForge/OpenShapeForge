@@ -1,0 +1,81 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ReferenceValueAppearance
+title: Reference value appearance
+description: Tenant override for the catalog color and icon of one reference value. Delete the override to restore catalog defaults.
+language: en
+labels: { en: Reference value appearance, nl: Weergave referentiewaarde }
+pluralLabels: { en: Reference value appearances, nl: Weergaven referentiewaarden }
+domains: [core]
+displayTemplate: "{{groupKey}} / {{code}}"
+filterField: code
+authorization:
+  roles:
+    read: [General.All.Read, General.All.ReadWrite, Organization.All.Read, Organization.All.ReadWrite]
+    create: [Organization.All.ReadWrite]
+    update: [Organization.All.ReadWrite]
+    delete: [Organization.All.ReadWrite]
+indexes:
+  - { name: reference_value_appearances_tenant_group_code_uidx, fields: [tenantId, groupKey, code], unique: true }
+fields:
+  - key: groupKey
+    osfType: string
+    required: true
+    immutable: true
+    label: { en: Catalog group, nl: Catalogusgroep }
+    validation: { minLength: 1, maxLength: 128 }
+    persisted: { column: group_key, storageClass: core }
+  - key: code
+    osfType: string
+    required: true
+    immutable: true
+    label: { en: Value code, nl: Waardecode }
+    validation: { minLength: 1, maxLength: 256 }
+    persisted: { column: code, storageClass: core }
+operations:
+  list:
+    name: List reference value appearance
+    description: Read accessible reference value appearance records.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: Read reference value appearance
+    description: Read one accessible reference value appearance record.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: Create reference value appearance
+    description: Create a reference value appearance record.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: Update reference value appearance
+    description: Update a reference value appearance.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  delete:
+    name: { en: Delete, nl: Verwijderen }
+    description: Delete a reference value appearance record.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }
+  web:
+    views:
+      collection:
+        title: { en: Reference value appearances, nl: Weergaven referentiewaarden }
+        route: { en: /reference-value-appearances, nl: /reference-value-appearances }
+        columns: [{ key: groupKey }, { key: code }]

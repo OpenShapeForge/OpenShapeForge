@@ -3,6 +3,13 @@ kind: osfTypeCatalog
 
 # Core semantic types — always available
 types:
+  icon:
+    label: { en: Icon, nl: Icoon }
+    baseType: string
+    validation:
+      pattern: "^[a-z][a-z0-9-]{0,63}$"
+      maxLength: 64
+
   color:
     label: { en: Color, nl: Kleur }
     baseType: string

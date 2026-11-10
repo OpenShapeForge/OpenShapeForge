@@ -134,6 +134,7 @@ export type WebFieldSuggestions = {
 };
 
 export type WebFieldOption = {
+  color?: string;
   value: string;
   label: LocalizedText;
   /** Icon key, e.g. for a choice tile. The host resolves it; an unknown key renders no icon. */

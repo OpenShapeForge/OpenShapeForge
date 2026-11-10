@@ -2396,3 +2396,15 @@ describe('declarative collection tables', () => {
   });
 
 });
+
+
+test('default collection filters survive authoring compilation and remain local to that view', () => {
+ const artifacts=loadEntity(authoringDir,'chip');
+ const filter={id:{eq:'00000000-0000-0000-0000-000000000001'}};
+ artifacts.coreEntity.interfaces={...artifacts.coreEntity.interfaces,web:{...artifacts.coreEntity.interfaces?.web,views:{collection:{route:'/chips',columns:[{key:'id'}],filter},unfiltered:{kind:'collection',collectionLayout:'table',route:'/chips/all'}}}};
+ const contract=compile(artifacts);
+ expect(contract.interfaces?.web?.collectionFilter).toEqual(filter);
+ const manifest=buildWebManifest([{slug:'chip',contract}]);
+ expect(manifest.entities.Chip!.views.collection.filter).toEqual(filter);
+ expect(matchWebRoute(manifest,'/chips/all')?.entity.views.collection.filter).toBeUndefined();
+});

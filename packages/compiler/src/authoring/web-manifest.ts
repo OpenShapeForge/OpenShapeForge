@@ -1338,7 +1338,7 @@ function projectEntity(
       if (definition.collectionLayout !== "table") throw new Error(`${entityName}.${name}: a routed collection requires table layout.`);
       const route = projectedRoute(definition.route, source.routeLocale ?? "en", source.route);
       if (route === source.route) throw new Error(`${entityName}.${name}: a named collection route must differ from the default route.`);
-      const { namedViews: _named, collectionTree: _tree, collectionTable: _table, ...web } = contract.interfaces!.web!;
+      const { namedViews: _named, collectionTree: _tree, collectionTable: _table, collectionFilter: _filter, ...web } = contract.interfaces!.web!;
       const projected = projectEntity({ ...source, route,
         collection: { ...source.collection, route, title: localized(definition.title, source.collection.title.en) },
         contract: { ...contract, interfaces: { ...contract.interfaces, web: { ...web, ...(definition.tree ? { collectionTree: definition.tree } : {}), ...(definition.table ? { collectionTable: definition.table } : {}) } } },
@@ -1416,7 +1416,7 @@ function projectEntity(
       message: "Generic create requires an atomic collection Operation and is currently unsupported.",
     } } } : {}),
     views: {
-      collection: { ...source.collection, ...(tree ? { tree } : {}), ...(table ? { table } : {}), ...(board ? { board } : {}), ...(createUnsupported ? { operations: withoutCreate(source.collection.operations) } : {}) },
+      collection: { ...source.collection, ...(contract.interfaces?.web?.collectionFilter ? { filter: contract.interfaces.web.collectionFilter } : {}), ...(tree ? { tree } : {}), ...(table ? { table } : {}), ...(board ? { board } : {}), ...(createUnsupported ? { operations: withoutCreate(source.collection.operations) } : {}) },
       ...(record ? { record } : {}),
       ...(Object.keys(named).length ? { named } : {}),
     },

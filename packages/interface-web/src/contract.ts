@@ -264,7 +264,21 @@ export type WebCollectionTable = {
   membershipDescription?: WebValuePath;
   groupRows?: "plain" | "bundle";
   viewSwitch?: boolean;
-  recordPanel?: { title: LocalizedText; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+  recordPanel?: {
+    primaryMembership?: { field: string; equals: string };
+    summaryColumns?: string[];
+    sections?: Array<{
+      title: LocalizedText;
+      scope?: "treeParent" | "recordAndTreeParent";
+      relationship: string;
+      groupBy?: WebValuePath;
+      where?: Record<string, string>;
+      label: WebCollectionTableValue;
+      description?: WebCollectionTableValue;
+      details?: WebCollectionTableValue[];
+      values: WebCollectionTableValue[];
+    }>;
+    title: LocalizedText; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;

@@ -2325,6 +2325,17 @@ describe('declarative collection tables', () => {
     product.contract.interfaces!.web!.collectionTable = { heading: { title: text('Catalogue') }, views: { tree: text('Grouped'), flat: text('All') }, label: text('Product'), groupBy: 'category', columns: [{ key: 'role', label: text('Role'), values: [{ text: text('Standalone') }], membershipValues: [{ path: 'role' }] }] };
     return { product, member, build: () => buildWebManifest([product, member]) };
   };
+  test('validates authored summary ordering and presentation while preserving an empty action list', () => {
+    const { product, build } = fixture();
+    const table = product.contract.interfaces!.web!.collectionTable!;
+    table.recordPanel = { title: text('Details'), heading: 'displayName', summaryColumns: ['role'], actions: [], sections: [{ title: text('Options'), scope: 'treeParent', relationship: 'parts', orderBy: 'position', presentation: 'options', groupBy: 'role', label: { path: 'role' }, values: [{ path: 'amount', currency: 'currency', format: 'money' }] }] };
+    const panel = build().entities.Product!.views.collection.table!.recordPanel!;
+    expect(panel.actions).toEqual([]);
+    expect(panel.sections![0]!.orderBy).toBe('position');
+    expect(panel.sections![0]!.presentation).toBe('options');
+    table.recordPanel.sections![0]!.orderBy = 'missing';
+    expect(build).toThrow('summary orderBy');
+  });
   test('compiles a flat table and refuses membership-only values without a tree', () => {
     const { product, build } = fixture(); delete product.contract.interfaces!.web!.collectionTree;
     const table = product.contract.interfaces!.web!.collectionTable!;

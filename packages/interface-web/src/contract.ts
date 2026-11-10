@@ -265,12 +265,15 @@ export type WebCollectionTable = {
   groupRows?: "plain" | "bundle";
   viewSwitch?: boolean;
   recordPanel?: {
+    actions?: Array<"edit" | "openFull">;
     primaryMembership?: { field: string; equals: string };
     summaryColumns?: string[];
     sections?: Array<{
       title: LocalizedText;
       scope?: "treeParent" | "recordAndTreeParent";
       relationship: string;
+      orderBy?: string;
+      presentation?: "options" | "rows";
       groupBy?: WebValuePath;
       where?: Record<string, string>;
       label: WebCollectionTableValue;

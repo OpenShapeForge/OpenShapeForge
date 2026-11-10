@@ -64,6 +64,7 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     return { key: column.key, label: local(column.label), values: column.values.map(item => value(record, item)), ...(column.membershipValues ? { membershipValues: column.membershipValues.map(item => value(membership!, item)) } : {}) };
   });
   const panel = authored.recordPanel;
+  if (panel?.actions?.some(action => !["edit", "openFull"].includes(action))) throw new Error(`${name}: invalid summary action.`);
   if (panel?.summaryColumns) {
     if (panel.binding || !panel.heading || panel.summaryColumns.some(key => !keys.has(key))) throw new Error(`${name}: record summaries require a heading and known table columns.`);
     for (const key of [panel.heading, panel.subtitle].filter(Boolean)) path(record, key!, undefined);
@@ -79,6 +80,11 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     if (section.scope && !tree) throw new Error(`${name}: section scope requires a collection tree.`);
     if (section.scope === "recordAndTreeParent" && record !== source) throw new Error(`${name}: combined scope requires the same entity for parent and record.`);
     if (!panel?.summaryColumns || !target || relation?.kind !== "hasMany") throw new Error(`${name}: invalid summary relationship ${section.relationship}.`);
+    if (section.orderBy) {
+      if (!target.contract.model.fields.some(field => field.key === section.orderBy && field.cardinality !== "collection" && ["string", "number", "integer"].includes(field.baseType))) throw new Error(`${name}: summary orderBy requires a direct field.`);
+      path(target, section.orderBy, undefined);
+    }
+    if (section.presentation && !["options", "rows"].includes(section.presentation)) throw new Error(`${name}: invalid summary presentation.`);
     for (const key of Object.keys(section.where ?? {})) path(target, key, undefined);
     return { ...section, ...(section.groupBy ? { groupBy: path(target, section.groupBy, undefined) } : {}), title: local(section.title), label: value(target, section.label), description: section.description && value(target, section.description), details: section.details?.map(item => value(target, item)), values: section.values.map(item => value(target, item)) };
   });

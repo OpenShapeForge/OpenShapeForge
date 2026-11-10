@@ -22,6 +22,7 @@
  */
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import type {VersionedMigration} from "./versioned-runner.js";
 import { sql, type Kysely } from "kysely";
 import { ensureCheckConstraint } from "./sql-invariants.js";
 import { APP_ROLE } from "./app-role.js";
@@ -29,11 +30,12 @@ import { APP_ROLE } from "./app-role.js";
 export type GeneratedPluginMigration = {
   plugin: string;
   version: string;
+  phase?: "beforeGenerated";
   sql: string;
 };
 
 type GeneratedPluginMigrationRegistry = {
-  version: 1;
+  version: 1 | 2;
   migrations: GeneratedPluginMigration[];
 };
 
@@ -98,7 +100,7 @@ export function pluginMigrationIdentity(
 
 function validateRegistry(value: unknown): GeneratedPluginMigration[] {
   const registry = value as Partial<GeneratedPluginMigrationRegistry> | null;
-  if (registry?.version !== 1 || !Array.isArray(registry.migrations)) {
+  if ((registry?.version !== 1 && registry?.version !== 2) || !Array.isArray(registry.migrations)) {
     throw new Error("Generated plugin migration registry has an unsupported shape.");
   }
   const seen = new Set<string>();
@@ -108,6 +110,7 @@ function validateRegistry(value: unknown): GeneratedPluginMigration[] {
       !migration ||
       !pluginNamePattern.test(migration.plugin) ||
       !migrationVersionPattern.test(migration.version) ||
+      (migration.phase !== undefined && (registry.version !== 2 || migration.phase !== "beforeGenerated")) ||
       typeof migration.sql !== "string" ||
       migration.sql.trim().length === 0
     ) {
@@ -162,6 +165,7 @@ export async function applyGeneratedPluginMigrations(
   const applied: string[] = [];
   const rendered = new Set<string>();
   for (const migration of migrations) {
+    if (migration.phase === "beforeGenerated") continue;
     const identity = pluginMigrationIdentity(migration);
     const owned = parseCompilerConstraint(migration.sql);
     await sql`begin`.execute(db);
@@ -229,4 +233,9 @@ async function dropUnrenderedConstraints(
     throw error;
   }
   return stale.map((row) => `${row.table}.${row.name}`);
+}
+
+/** Trusted compiled plugin transformations reuse the canonical ledger, checksum and atomic runner. */
+export function pluginSchemaTransitions(migrations:readonly GeneratedPluginMigration[]):VersionedMigration[] {
+ return migrations.filter(m=>m.phase==="beforeGenerated").map(m=>({version:m.version,namespace:m.plugin,fileUrl:import.meta.url,sourceSql:m.sql,up:async db=>{await sql.raw(m.sql).execute(db);}}));
 }

@@ -2383,13 +2383,13 @@ describe('declarative collection tables', () => {
     const employee = entity('Employee', 'employees', [field('fte', { baseType: 'number' }), field('person')], coreView(), [{ key: 'person', fieldKey: 'person', kind: 'belongsTo', target: 'Person', foreignKey: 'person_id' }]);
     member.contract.model.relationships.find(item => item.key === 'item')!.target = 'Employee';
     const table = product.contract.interfaces!.web!.collectionTable!;
-    table.rowLabel = 'person'; table.membershipDescription = 'role'; table.groupRows = 'plain'; table.viewSwitch = false;
+    table.rowLabel = 'person'; table.membershipDescription = 'role'; table.groupRows = 'plain'; table.viewSwitch = false; table.toolbar = { search: false, create: false };
     table.columns = [{ key: 'fte', label: text('FTE'), values: [{ path: 'fte' }] }];
     const projected = buildWebManifest([product, member, employee, person]).entities.Product!.views.collection.table!;
     expect(projected.columns[0]!.values[0]!.path?.targetEntityId).toBe('Employee');
     expect(projected.rowLabel?.targetEntityId).toBe('Person');
     expect(projected.membershipDescription?.targetEntityId).toBe('Membership');
-    expect(projected.groupRows).toBe('plain'); expect(projected.viewSwitch).toBe(false);
+    expect(projected.groupRows).toBe('plain'); expect(projected.viewSwitch).toBe(false); expect(projected.toolbar).toEqual({ search: false, create: false });
     table.rowLabel = 'missing';
     expect(() => buildWebManifest([product, member, employee, person])).toThrow('missing');
   });

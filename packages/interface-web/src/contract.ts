@@ -265,6 +265,8 @@ export type WebCollectionTable = {
   membershipDescription?: WebValuePath;
   groupRows?: "plain" | "bundle";
   viewSwitch?: boolean;
+  /** Collection controls the web table offers; `false` hides one. Other channels keep their Operations. */
+  toolbar?: { search?: boolean; create?: boolean };
   recordPanel?: {
     actions?: Array<"edit" | "openFull">;
     primaryMembership?: { field: string; equals: string };

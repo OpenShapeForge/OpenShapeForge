@@ -464,7 +464,7 @@ export type CollectionTableDefinition = {
   membershipDescription?: string;
   groupRows?: "plain" | "bundle";
   viewSwitch?: boolean;
-  recordPanel?: { title: LocalizedText; binding?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+  recordPanel?: { title: LocalizedText; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;

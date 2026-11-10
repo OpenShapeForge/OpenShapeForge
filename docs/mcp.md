@@ -1017,3 +1017,10 @@ at the caller. This increment issues no task `inputRequests`; `tasks/update`
 acknowledges an empty update and refuses unissued input. Subscriptions, task
 enumeration and arbitrary background execution of synchronous tools are not
 part of this extension implementation.
+
+The 2026-07-28 Tasks extension defines `tasks/cancel` and `tasks/update` replies
+as empty acknowledgements with `resultType: "complete"` (protocol metadata may
+be present), rather than Task objects. Read the execution status with
+`tasks/get`; cancellation is cooperative and the acknowledgement does not promise
+a terminal cancelled state. See the normative [update and cancellation
+responses](https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks#task-cancellation).

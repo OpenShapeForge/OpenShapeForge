@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { SQL } from 'bun';
 import {sql,type Transaction} from 'kysely';
 import type {DB} from '../../generated/db/types.js';
-import {withdrawSupersededConnectionGrants} from '../../modules/connection-use-grants.js';
+import {prepareConnectionUseGrant} from '../../modules/connection-use-grants.js';
 import { createDatabaseRuntime } from '../connection.js';
 import { runMigrationChain } from '../migration-chain.js';
 import { IDENTITY_LINK_ADMIN_ROLE } from '../../auth/organization-roles.js';
@@ -147,7 +147,7 @@ describe('owner-issued connection use grants', () => {
   const fingerprintA='a'.repeat(64),fingerprintB='b'.repeat(64);
   function scope(subjectId: string, fingerprint: string) {
     return {tenantId:tenant,subject:{entity:'Calendar',id:subjectId},connectionId:connection,
-      consumerOperation:'calendar.availability',definitionId:adapter,fingerprint};
+      consumerOperation:'calendar.availability',definitionId:adapter,fingerprint,consent:{inputSchema:{},expiresAt:null,identityId:identity,actorId:actor,ownerRelationId:owner}};
   }
   async function insert(trx: Transaction<DB>, id: string, subjectId: string, fingerprint: string, expiresAt: string | null = null) {
     await sql`insert into platform.connection_use_grants
@@ -158,29 +158,40 @@ describe('owner-issued connection use grants', () => {
   test('explicit new consent atomically replaces a stale Service snapshot and survives concurrent retries', async()=>{
     const subjectId=crypto.randomUUID(),oldId=crypto.randomUUID();
     await transaction(owner,tenant,trx=>insert(trx,oldId,subjectId,fingerprintA));
-    const attempts=await Promise.allSettled([1,2].map(()=>transaction(owner,tenant,async trx=>{
-      await withdrawSupersededConnectionGrants(trx,scope(subjectId,fingerprintB));
-      await insert(trx,crypto.randomUUID(),subjectId,fingerprintB);
+    const attempts=await Promise.all([1,2].map(()=>transaction(owner,tenant,async trx=>{
+      const matching=await prepareConnectionUseGrant(trx,scope(subjectId,fingerprintB));
+      if(matching)return matching;
+      const id=crypto.randomUUID();await insert(trx,id,subjectId,fingerprintB);return id;
     })));
-    expect(attempts.filter(x=>x.status==='fulfilled')).toHaveLength(1);
-    expect(attempts.filter(x=>x.status==='rejected')).toHaveLength(1);
+    expect(attempts[0]).toBe(attempts[1]);
     const rows: {id:string;revoked_at:Date|null;definition_fingerprint:string}[]=await db`select id,revoked_at,definition_fingerprint from platform.connection_use_grants where subject_id=${subjectId}::uuid`;
     expect(rows).toHaveLength(2);
     expect(rows.find(row=>row.id===oldId)!.revoked_at).not.toBeNull();
     expect(rows.filter(row=>row.revoked_at===null)).toHaveLength(1);
     expect(rows.find(row=>row.revoked_at===null)!.definition_fingerprint).toBe(fingerprintB);
   });
+  test('repeat consent retains only the identical owner, issuer, lifetime and input limits',async()=>{
+    const subjectId=crypto.randomUUID(),id=crypto.randomUUID();
+    await transaction(owner,tenant,trx=>insert(trx,id,subjectId,fingerprintA));
+    expect(await transaction(owner,tenant,trx=>prepareConnectionUseGrant(trx,scope(subjectId,fingerprintA)))).toBe(id);
+    const changed=scope(subjectId,fingerprintA);changed.consent.inputSchema={type:'object',additionalProperties:false};
+    await transaction(owner,tenant,async trx=>{
+      expect(await prepareConnectionUseGrant(trx,changed)).toBeUndefined();
+      throw Error('rollback explicit changed limits');
+    }).catch(error=>expect(error.message).toBe('rollback explicit changed limits'));
+    expect((await db`select revoked_at from platform.connection_use_grants where id=${id}::uuid`)[0].revoked_at).toBeNull();
+  });
   test('a failed replacement and foreign or non-owner calls cannot withdraw existing consent', async()=>{
     const subjectId=crypto.randomUUID(),oldId=crypto.randomUUID(),replacementId=crypto.randomUUID();
     await transaction(owner,tenant,trx=>insert(trx,oldId,subjectId,fingerprintA));
     await expect(transaction(owner,tenant,async trx=>{
-      await withdrawSupersededConnectionGrants(trx,scope(subjectId,fingerprintB));
+      await prepareConnectionUseGrant(trx,scope(subjectId,fingerprintB));
       await insert(trx,replacementId,subjectId,fingerprintB);
       throw Error('owning consent transaction rolled back');
     })).rejects.toThrow('owning consent transaction rolled back');
     for(const [person,organization] of [[service,tenant],[owner,foreignTenant]]) {
       await expect(transaction(person!,organization!,async trx=>{
-        await withdrawSupersededConnectionGrants(trx,scope(subjectId,fingerprintB));
+        await prepareConnectionUseGrant(trx,scope(subjectId,fingerprintB));
         await insert(trx,crypto.randomUUID(),subjectId,fingerprintB);
       })).rejects.toThrow('row-level security');
     }
@@ -191,7 +202,7 @@ describe('owner-issued connection use grants', () => {
     const subjectId=crypto.randomUUID(),oldId=crypto.randomUUID();
     await transaction(owner,tenant,trx=>insert(trx,oldId,subjectId,fingerprintA,new Date(Date.now()-1000).toISOString()));
     await transaction(owner,tenant,async trx=>{
-      await withdrawSupersededConnectionGrants(trx,scope(subjectId,fingerprintA));
+      await prepareConnectionUseGrant(trx,scope(subjectId,fingerprintA));
       await insert(trx,crypto.randomUUID(),subjectId,fingerprintA);
     });
     expect((await db`select revoked_at from platform.connection_use_grants where id=${oldId}::uuid`)[0].revoked_at).not.toBeNull();

@@ -2293,6 +2293,15 @@ test("REST binds integer path parameters for write operations without coercing t
   expect(operationRestInput(request("-0"), operation)).toEqual({ code: "001", version: "-0" });
 });
 
+test("REST read/delete integer paths cannot regain noncanonical values through query coercion",()=>{
+ for(const method of ['GET','DELETE']){
+  const operation={inputSchema:{type:'object',properties:{version:{type:'integer'},enabled:{type:'boolean'}},additionalProperties:false},idempotency:{mode:'none'},transports:{rest:{method,path:'/api/versions/:version'}}} as unknown as OperationContract;
+  const request=(version:string)=>({query:{enabled:'true'},params:{version},headers:{}}) as never;
+  expect(operationRestInput(request('12'),operation)).toEqual({version:12,enabled:true});
+  for(const invalid of ['-0','01','9007199254740992'])expect(()=>operationRestInput(request(invalid),operation)).toThrow('canonical safe integer');
+ }
+});
+
 test("REST binds server-supplied input (a grant's record target) before a GET query is validated", () => {
   const operation = {
     key: "demo.signing.status",

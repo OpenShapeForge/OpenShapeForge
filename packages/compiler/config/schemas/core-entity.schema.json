@@ -2356,6 +2356,7 @@
               },
               "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } }
             },
+            "filter": { "type": "object", "additionalProperties": true, "x-osf-i18n": { "title": { "en": "Canonical record filter", "nl": "Canoniek recordfilter" } } },
             "emptyState": {"type": "object", "additionalProperties": false, "required": ["title"], "properties": {"title": {"$ref": "#/$defs/localizedText"}, "description": {"$ref": "#/$defs/localizedText"}, "illustration": {"const": "empty-collection", "x-osf-i18n": { "title": { "en": "Illustration", "nl": "Illustratie" } }}, "primaryAction": {"const": "create", "x-osf-i18n": { "title": { "en": "Primary action", "nl": "Primaire actie" } }}}, "x-osf-i18n": { "title": { "en": "Empty state", "nl": "Lege toestand" } }},
             "columns": {
               "type": "array",

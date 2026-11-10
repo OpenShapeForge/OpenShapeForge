@@ -819,6 +819,7 @@ export interface CompiledEntityContract {
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];
+      collectionFilter?: Record<string, unknown>;
       collectionEmptyState?: { title: LocalizedText; description?: LocalizedText; illustration?: "empty-collection"; primaryAction?: "create" };
       /** Authored collapsible tree presentation; `children` names a collection relationship of this entity. */
       collectionTable?: import("./authoring.js").CollectionTableDefinition;

@@ -495,6 +495,8 @@ export interface EntityWebViewDefinition {
   /** Authoring shorthand: every non-reserved key is a target-owned named view. */
   [name: string]: unknown;
   collection: {
+    /** Server query constraint for the default Web collection, as for a routed named view. */
+    filter?: Record<string, unknown>;
     /**
      * Optional collapsible tree presentation of this same collection: each
      * record groups the records its `children` collection holds.

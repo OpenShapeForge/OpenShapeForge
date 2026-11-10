@@ -258,7 +258,7 @@ export type WebCollectionTableValue = {
   defaultValue?: string | number;
 };
 export type WebCollectionTable = {
-  bindings?: Record<string, { entityId: string; operation: WebCustomOperationRef; schema: Readonly<Record<string, unknown>>; parameters?: Record<string, string | number | boolean> }>;
+  bindings?: Record<string, { entityId: string; operation: WebCustomOperationRef; schema: Readonly<Record<string, unknown>>; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;
   navigation?: Array<{ route: string; label: LocalizedText }>;
   rowLabel?: WebValuePath;
   membershipDescription?: WebValuePath;
@@ -278,7 +278,7 @@ export type WebCollectionTable = {
       details?: WebCollectionTableValue[];
       values: WebCollectionTableValue[];
     }>;
-    title: LocalizedText; binding?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+    title: LocalizedText; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;

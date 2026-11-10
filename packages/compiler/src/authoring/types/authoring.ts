@@ -458,7 +458,7 @@ export type CollectionTableValueDefinition = {
   defaultValue?: string | number;
 };
 export type CollectionTableDefinition = {
-  bindings?: Record<string, { entity: string; operation: string; parameters?: Record<string, string | number | boolean> }>;
+  bindings?: Record<string, { entity: string; operation: string; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;
   navigation?: Array<{ route: string; label: LocalizedText }>;
   rowLabel?: string;
   membershipDescription?: string;
@@ -478,7 +478,7 @@ export type CollectionTableDefinition = {
       details?: CollectionTableValueDefinition[];
       values: CollectionTableValueDefinition[];
     }>;
-    title: LocalizedText; binding?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+    title: LocalizedText; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;

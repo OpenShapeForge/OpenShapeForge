@@ -1939,6 +1939,7 @@
             }
           },
           "properties": {
+            "includeRecord": { "type": "boolean", "description": "Keep the canonical record editor alongside the typed summary.", "x-osf-i18n": { "title": { "en": "Include record", "nl": "Record tonen" } } },
             "primaryMembership": {
               "type": "object",
               "additionalProperties": false,
@@ -2146,6 +2147,7 @@
               "operation"
             ],
             "properties": {
+              "refreshOn": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 }, "x-osf-i18n": { "title": { "en": "Refresh on source changes", "nl": "Verversen bij bronwijzigingen" } } },
               "entity": {
                 "type": "string",
                 "minLength": 1,

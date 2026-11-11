@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import Fastify from "fastify";
-import { Server } from "@modelcontextprotocol/server";
+import { Server, type Tool } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -9,7 +9,7 @@ import { searchableOperationToolDefinitions } from "../../../../../packages/oper
 import { toolWithFailureOutputSchema } from "../tool-output-schema.js";
 
 test("strict legacy client accepts a workflow execution from the advertised generic executor over HTTP", async () => {
-  const tool = toolWithFailureOutputSchema(searchableOperationToolDefinitions({ search: "search", execute: "execute" })[1]!);
+  const tool = toolWithFailureOutputSchema(searchableOperationToolDefinitions({ search: "search", execute: "execute" })[1]! as Tool);
   const envelope = { data: { status: "waiting" }, operations: [], execution: { kind: "workflow", ref: "example-run" } };
   const app = Fastify();
   app.post("/mcp", async (request, reply) => {
@@ -26,7 +26,8 @@ test("strict legacy client accepts a workflow execution from the advertised gene
   const address = await app.listen({ host: "127.0.0.1", port: 0 });
   const client = new Client({ name: "strict-execution-output", version: "1" });
   try {
-    await client.connect(new StreamableHTTPClientTransport(new URL(`${address}/mcp`)));
+    const transport = new StreamableHTTPClientTransport(new URL(`${address}/mcp`));
+    await client.connect(transport as Parameters<Client["connect"]>[0]);
     await client.listTools();
     expect((await client.callTool({ name: "execute", arguments: { operationId: "example.start", input: {} } })).structuredContent).toEqual(envelope);
   } finally { await client.close(); await app.close(); }

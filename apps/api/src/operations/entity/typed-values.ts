@@ -1,3 +1,4 @@
+import { deriveTypedValue } from "./derive-typed-values.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * A value typed by the FieldDefinition stored beside it.
@@ -279,6 +280,13 @@ export async function prepareTypedValueWrite(
         output.set(value, validationCurrent?.[value.name]);
       }
     }
+  }
+  for (const { value, definition } of pairs) {
+    const stored = output.has(definition) ? output.get(definition) : current?.[definition.name];
+    if (!output.has(value) || !isRecord(stored)) continue;
+    const schema = generatedRuntimeFieldSchemas.object([stored]);
+    const properties = schema.properties as Record<string, Record<string, unknown>>;
+    output.set(value, deriveTypedValue(properties[fieldNameForColumn(value)]!, output.get(value), validationCurrent?.[value.name]));
   }
   const authored = Object.fromEntries([...output].map(([column, val]) => [fieldNameForColumn(column), val]));
   assertTypedValuesValid(table, authored, validationCurrent);

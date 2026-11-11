@@ -10,7 +10,8 @@ test('tenant palette projects editable named color rows through the shared field
  const colors=schema.properties.value.properties.colors;
  expect(colors).toMatchObject({type:'array',maxItems:100});
  expect(Object.keys(colors.items.properties)).toEqual(['key','name','value','active']);
- expect(colors.items.required).toEqual(['key','name','value','active']);
+ expect(colors.items.required).toEqual(['name','value','active']);
+ expect(colors.items.properties.key['x-osf-derive-on-create']).toEqual({from:'name',transform:'slug',onConflict:'suffix'});
  expect(colors.items.properties.value).toMatchObject({'x-osf-type':'colorValue',pattern:'^#[0-9A-Fa-f]{6}$'});
  expect(colors.items.properties.active.type).toBe('boolean');
 });

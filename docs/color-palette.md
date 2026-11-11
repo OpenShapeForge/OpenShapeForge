@@ -23,3 +23,9 @@ Migration 0025 converts stored literal colors to standard references where exact
 values match, otherwise to named tenant colors, preserving their appearance. It
 also changes document-theme defaults. Provisioning creates the empty typed setting
 for new tenants. No runtime legacy-hex fallback exists.
+
+Palette keys use the existing YAML `deriveOnCreate` rule (`from: name`,
+`transform: slug`, `onConflict: suffix`). The typed-value write boundary derives
+new row keys before validation, keeps persisted keys across renaming/reordering,
+and refuses supplied new identities. Forms omit this server-owned input. Existing
+keys are retained, including imported colors. Duplicate names receive a suffix.

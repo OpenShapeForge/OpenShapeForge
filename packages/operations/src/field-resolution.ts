@@ -192,6 +192,7 @@ export function resolveFields(
     const target = semantic?.kind === "entity" ? semantic.entity : undefined;
     return {
       key: field.key,
+      ...(field.deriveOnCreate ? { deriveOnCreate: { ...field.deriveOnCreate } } : {}),
       ...(field.typedBy ? { typedBy: { ...field.typedBy } } : {}),
       osfType: field.osfType,
       ...(field.document ? { document: structuredClone(field.document) } : {}),

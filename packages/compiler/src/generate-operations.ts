@@ -1509,7 +1509,7 @@ function collectColorPaletteOperation(context: PluginBaseContext, entities: read
   if (!entities.some(({contract}) => contract.entity.name === "TenantSetting")) return [];
   const operation: PluginOperationContract = {
     key: "colors.list", title: "List available colors", description: "Read the standard palette and this tenant's named colors, including archived colors for existing references. No other tenant settings are returned.",
-    handler: "listColors", auth: { mode: "session", roles: [...new Set(entities.flatMap(({contract}) => contract.authorization.roles.read))].sort() }, tenancy: { mode: "required" },
+    handler: "listColors", auth: { mode: "session", anyAuthenticatedSession: true }, tenancy: { mode: "required" },
     idempotency: { mode: "none" }, effects: { data: "read", external: "none" },
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
     outputSchema: { type: "object", required: ["colors"], properties: { colors: { type: "array", items: { type: "object", required: ["reference", "key", "name", "value", "active", "source"], properties: {

@@ -487,7 +487,9 @@ export type CollectionTableDefinition = {
       details?: CollectionTableValueDefinition[];
       values: CollectionTableValueDefinition[];
     }>;
-    title: LocalizedText; layout?: BindingPanelLayout; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+    title: LocalizedText; layout?: BindingPanelLayout; binding?: string; includeRecord?: boolean;
+    /** Named record view of the row's record entity shown as the panel body, with that view's own layout, editing and related records. */
+    view?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;

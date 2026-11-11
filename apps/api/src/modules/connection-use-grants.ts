@@ -15,6 +15,7 @@ import { fieldNameForColumn, serializeRow } from '../mcp/catalog-rows.js';
 import { loadOrderedBindings } from '../mcp/execution-bindings.js';
 import { runtimeJsonSchemas } from './field-schemas.js';
 import { HttpError } from '../rest/http-error.js';
+import {classifyDatabaseError} from '../db/database-refusals.js';
 import { connectionDelegationOrigin, connectionGrantSubject, revalidateConnectionDelegation, withVerifiedConnectionDelegation } from '../mcp/connection-delegation.js';
 
 const refused = () => new HttpError(403, 'CONNECTION_CONSENT_REQUIRED', 'The connection permission is unavailable or no longer valid.');
@@ -52,6 +53,41 @@ async function readGrant(db: OpenShapeForgeDatabase, session: TrustedSessionCont
       and app.connection_grant_owner_live(issued_identity_id,tenant_id,owner_relation_id)
       and (expires_at is null or expires_at>clock_timestamp())`.execute(trx)).rows[0]);
 }
+/** @internal Only called after owner, subject, connection and Service validation.
+ * Serialize the unique consent scope; a replacement and its withdrawal commit
+ * together. Identical current consent returns the existing id; changed input
+ * limits, lifetime or issuer require a new immutable consent row. The database's
+ * tenant/owner policies still apply to both withdrawal and lookup.
+ */
+export async function prepareConnectionUseGrant(trx: Transaction<DB>, input: {
+  tenantId: string; subject: {entity: string; id: string}; connectionId: string;
+  consumerOperation: string; definitionId: string; fingerprint: string;
+  consent:{inputSchema:Record<string,unknown>;expiresAt:string|null;identityId:string;actorId:string;ownerRelationId:string};
+}): Promise<string|undefined> {
+  const key = canonical([input.tenantId, input.subject.entity, input.subject.id,
+    input.connectionId, input.consumerOperation, input.definitionId]);
+  await sql`select pg_advisory_xact_lock(hashtext('osf.connection-use-grant'),hashtext(${key}))`.execute(trx);
+  await sql`update platform.connection_use_grants set revoked_at=clock_timestamp()
+    where tenant_id=${input.tenantId}::uuid and subject_entity=${input.subject.entity}
+      and subject_id=${input.subject.id}::uuid and connection_id=${input.connectionId}::uuid
+      and consumer_operation=${input.consumerOperation} and service_definition->>'id'=${input.definitionId}
+      and revoked_at is null
+      and (definition_fingerprint<>${input.fingerprint} or expires_at<=clock_timestamp()
+        or input_schema<>${JSON.stringify(input.consent.inputSchema)}::text::jsonb
+        or expires_at is distinct from ${input.consent.expiresAt}::timestamptz
+        or issued_identity_id<>${input.consent.identityId}::uuid or issued_by<>${input.consent.actorId}::uuid)`.execute(trx);
+  const {rows:[matching]}=await sql<{id:string}>`select id from platform.connection_use_grants
+    where tenant_id=${input.tenantId}::uuid and subject_entity=${input.subject.entity} and subject_id=${input.subject.id}::uuid
+      and connection_id=${input.connectionId}::uuid and consumer_operation=${input.consumerOperation} and service_definition->>'id'=${input.definitionId}
+      and definition_fingerprint=${input.fingerprint} and input_schema=${JSON.stringify(input.consent.inputSchema)}::text::jsonb
+      and expires_at is not distinct from ${input.consent.expiresAt}::timestamptz
+      and issued_identity_id=${input.consent.identityId}::uuid and issued_by=${input.consent.actorId}::uuid
+      and owner_relation_id=${input.consent.ownerRelationId}::uuid and revoked_at is null
+      and app.connection_grant_owner_live(issued_identity_id,tenant_id,owner_relation_id)
+      and (expires_at is null or expires_at>clock_timestamp())`.execute(trx);
+  return matching?.id;
+}
+
 export function createConnectionUseGrantServices(db: OpenShapeForgeDatabase, accepts: (session: TrustedSessionContext) => boolean, assertSubject: (session: TrustedSessionContext, subject: {entityName:string;id:string;intent:'get'|'update'}) => Promise<void>): RuntimeConnectionUseGrantServices<TrustedSessionContext> {
   const live = (session: TrustedSessionContext) => { if (!accepts(session) || !session.tenantId) throw refused(); };
   const owner = (session: TrustedSessionContext) => {
@@ -76,12 +112,23 @@ export function createConnectionUseGrantServices(db: OpenShapeForgeDatabase, acc
       const connection = await runtimeRowByFilter(db, session, tables(), snapshot.execution.connectionTable, { id: input.connectionId });
       if (!connection || connection.ownerUserId !== relation || connection[snapshot.execution.connectionProviderRef] !== snapshot.providerId) throw refused();
       return withDbSession(db, session, async trx => {
+        const matching=await prepareConnectionUseGrant(trx, {
+          tenantId: session.tenantId!, subject: input.subject, connectionId: input.connectionId,
+          consumerOperation: input.consumerOperation, definitionId: input.definition.id,
+          fingerprint: snapshot.fingerprint,
+          consent:{inputSchema:input.inputSchema,expiresAt:input.expiresAt??null,identityId:session.relation!.identityId!,actorId:session.userId!,ownerRelationId:relation},
+        });
+        if(matching)return {id:matching};
         const id = randomUUID();
         await sql`insert into platform.connection_use_grants
           (id,tenant_id,connection_table,values_column,connection_id,owner_relation_id,consumer_operation,subject_entity,subject_id,service_definition,definition_fingerprint,input_schema,issued_by,issued_identity_id,expires_at)
           values (${id}::uuid,${session.tenantId}::uuid,${snapshot.execution.connectionTable},${snapshot.valuesColumn.name},${input.connectionId}::uuid,${relation}::uuid,
             ${input.consumerOperation},${input.subject.entity},${input.subject.id}::uuid,${JSON.stringify(input.definition)}::text::jsonb,${snapshot.fingerprint},${JSON.stringify(input.inputSchema)}::text::jsonb,${session.userId}::uuid,${session.relation!.identityId}::uuid,${input.expiresAt ?? null}::timestamptz)`.execute(trx);
         return { id };
+      }).catch(cause=>{
+        const refusal=classifyDatabaseError(cause);
+        if(refusal)throw new HttpError(refusal.status,refusal.code,refusal.message);
+        throw cause;
       });
     },
     async revoke(session, subject) {
@@ -92,7 +139,7 @@ export function createConnectionUseGrantServices(db: OpenShapeForgeDatabase, acc
       await assertSubject(session,{entityName:subject.entity,id:subject.id,intent:'get'});
       await withDbSession(db, session, async trx => { await sql`update platform.connection_use_grants set revoked_at=clock_timestamp()
         where tenant_id=${session.tenantId}::uuid and subject_entity=${subject.entity} and subject_id=${subject.id}::uuid
-          and (owner_relation_id=${relation}::uuid or ${admin}::boolean) and revoked_at is null
+          and (owner_relation_id=${relation ?? null}::uuid or ${admin}::boolean) and revoked_at is null
           and (${subject.grantId ?? null}::uuid is null or id=${subject.grantId ?? null}::uuid)`.execute(trx); });
     },
     async list(session, subject) {

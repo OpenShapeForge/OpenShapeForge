@@ -2370,6 +2370,18 @@ describe('declarative collection tables', () => {
     expect(build).toThrow('select: one'); value.select = 'one';
     expect(build().entities.Product!.views.collection.table?.columns[0]?.values[0]?.path?.cardinality).toBe('many');
   });
+
+  test('explicit single-result selection applies to conditional paths without erasing their cardinality', () => {
+    const { product, build } = fixture();
+    const value = { text: text('Primary'), when: { path: 'parts.role', equals: 'main' } } as { text: ReturnType<typeof text>; select?: 'one'; when: { path: string; equals: string } };
+    product.contract.interfaces!.web!.collectionTable!.columns[0]!.values = [value];
+    expect(build).toThrow('select: one');
+    value.select = 'one';
+    const compiled = build().entities.Product!.views.collection.table?.columns[0]?.values[0];
+    expect(compiled?.select).toBe('one');
+    expect(compiled?.when?.path.cardinality).toBe('many');
+    expect(compiled?.when?.path.targetEntityId).toBe('Membership');
+  });
   test('keeps money and currency on the same readable record', () => {
     const { product, build } = fixture();
     product.contract.interfaces!.web!.collectionTable!.columns[0]!.membershipValues = [{ path: 'amount', currency: 'currency', format: 'money' }];

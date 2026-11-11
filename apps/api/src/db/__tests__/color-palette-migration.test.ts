@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import manifest from '../../generated/db/manifest.json' with {type:'json'};
 import type {GeneratedCrudTable} from '../../operations/entity/types.js';
 import {test,expect} from 'bun:test';
@@ -5,7 +6,7 @@ import {SQL} from 'bun';
 import {randomUUID} from 'node:crypto';
 import {sql} from 'kysely';
 import {createDatabaseRuntime} from '../connection.js';
-import migration from '../migrations/versioned/0025_color-palette-references.js';
+import migration from '../migrations/versioned/0026_color-palette-references.js';
 import {readColorPalette} from '../../operations/color-palette.js';
 import {guardColorWrite,colorReferenceTables} from '../../operations/entity/color-references.js';
 import {getGeneratedCrudTables} from '../../operations/entity/table-registry.js';

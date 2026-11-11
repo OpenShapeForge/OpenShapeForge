@@ -67,3 +67,33 @@ test("groups cover more than one page and retain row, tenant and filter boundari
     await expect(readCollectionGroups(restricted!.db,{...session,roles:rootBase.source!.authorization!.roles.read.filter(role=>role.endsWith(".Read"))},root.name)).rejects.toThrow();
   } finally { if(previous)generatedCrudTables.set(root.name,previous);else generatedCrudTables.delete(root.name); }
 });
+
+test('relationship any and none grouping retains the related read declaration required by RLS', async () => {
+  const previousRoot = generatedCrudTables.get(root.name), previousTarget = generatedCrudTables.get(target.name);
+  const relatedRoot: GeneratedCrudTable = { ...root, source: { ...root.source!, graphql: { ...root.source!.graphql!, relationships: [
+    { name: 'contacts', fieldKey: 'contacts', kind: 'hasMany', resolve: 'hasMany', target: target.source!.graphql!.typeName, type: 'ContactDetail', foreignKey: 'relation_id' },
+  ] } } };
+  const relatedTarget: GeneratedCrudTable = { ...target, columns: [...target.columns, column('relation_id', 'uuid', 'relationId'), column('kind', 'text')] };
+  generatedCrudTables.set(root.name, relatedRoot); generatedCrudTables.set(target.name, relatedTarget);
+  try {
+    await sql`alter table erp.contact_details add column relation_id uuid, add column kind text`.execute(privileged!.db);
+    // This restrictive policy reproduces the managed related-entity read fence:
+    // a root Operation may read this table only after declaring its canonical list read.
+    await sql`create policy related_read_fence on erp.contact_details as restrictive for select using (coalesce(nullif(current_setting('app.audit_read_operations',true),''),'[]')::jsonb ? 'ContactDetail.list')`.execute(privileged!.db);
+    const first = randomUUID(), second = randomUUID();
+    await sql`insert into erp.relations(id,tenant_id,viewer,stage) values (${first}::uuid,${tenant}::uuid,${user}::uuid,'related-email'),(${second}::uuid,${tenant}::uuid,${user}::uuid,'related-empty')`.execute(privileged!.db);
+    await sql`insert into erp.contact_details(id,tenant_id,viewer,relation_id,kind) values(gen_random_uuid(),${tenant}::uuid,${user}::uuid,${first}::uuid,'email')`.execute(privileged!.db);
+    for (const quantifier of ['any', 'none']) {
+      const filter = { and: [{ stage: { in: ['related-email', 'related-empty'] } }, { contacts: { [quantifier]: { kind: { eq: 'email' } } } }] };
+      const page = await withAuditContext('Relation.list', undefined, () => listGeneratedEntitiesForTable(restricted!.db, session, relatedRoot, { filter }));
+      const groups = await readCollectionGroups(restricted!.db, session, root.name, filter);
+      expect(page.rows.map(row => row.stage)).toEqual([quantifier === 'any' ? 'related-email' : 'related-empty']);
+      expect(groups).toEqual(page.rows.map(row => ({ value: row.stage as string, count: 1 })));
+    }
+    await expect(readCollectionGroups(restricted!.db, session, root.name, { contacts: { none: 5 } })).rejects.toThrow('contacts.none');
+  } finally {
+    await sql`drop policy if exists related_read_fence on erp.contact_details`.execute(privileged!.db);
+    if (previousRoot) generatedCrudTables.set(root.name, previousRoot); else generatedCrudTables.delete(root.name);
+    if (previousTarget) generatedCrudTables.set(target.name, previousTarget); else generatedCrudTables.delete(target.name);
+  }
+});

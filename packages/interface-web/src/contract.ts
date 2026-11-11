@@ -254,6 +254,8 @@ export type WebCollectionTableValue = {
   text?: LocalizedText;
   format?: "money" | "percentage" | "frequency" | "chip";
   currency?: WebValuePath;
+  /** Every path in this value, including currency and when, must resolve to zero or one result.
+   * Consumers refuse partial, unavailable or multiple results rather than selecting the first. */
   select?: "one";
   when?: { path: WebValuePath; equals: string | number | boolean };
   defaultValue?: string | number;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import {collectAuthoredEntityPluginOperations} from "./generate-operations.js";
 import {test,expect} from 'bun:test';
 import {readFileSync} from 'node:fs';

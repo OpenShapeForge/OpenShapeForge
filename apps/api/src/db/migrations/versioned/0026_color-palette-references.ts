@@ -4,7 +4,7 @@ import { STANDARD_COLORS, parseTenantColors } from '@openshapeforge/operations';
 import type { VersionedMigration } from '../versioned-runner.js';
 import { colorReferenceTables } from '../../../operations/entity/color-references.js';
 const migration: VersionedMigration = {
-  version:'0025_color-palette-references', fileUrl:import.meta.url,
+  version:'0026_color-palette-references', fileUrl:import.meta.url,
   async up(db) {
     await sql`select set_config('app.bypass_rls','true',true)`.execute(db);
     const tenants=await sql<{id:string}>`select id from erp.tenants`.execute(db);

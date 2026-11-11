@@ -449,7 +449,8 @@ Everything that makes the callback safe is the `state` parameter, which is
   row, so a replay finds nothing. Reading, deciding, then marking would leave a
   window where two callbacks both pass.
 - **Expiring** — ten minutes.
-- **Stored as a hash** — a read of the table yields nothing presentable back.
+- **Stored as a hash** — all three components are bound together, so routing
+  cannot be substituted; a read of the table yields nothing presentable back.
 - **Carries its own routing** — so the callback opens a normal tenant-scoped
   session and finds the row under RLS. The alternative was bypassing RLS on the
   one endpoint an unauthenticated stranger can reach, which is a far worse trade
@@ -458,6 +459,11 @@ Everything that makes the callback safe is the `state` parameter, which is
   see. The user id is there because `createDbSessionContext` refuses an
   anonymous session, and carrying the ConnectorAdmin who started the flow is the
   accurate answer rather than inventing a system identity.
+
+When deploying the full-state hash binding, authorization links started before
+the rollout must be restarted. Their previous secret-only hashes are refused
+for the remainder of the ten-minute state window; no compatibility reader
+accepts the weaker binding.
 
 The callback trusts **nothing else** in its own query string. The connector, the
 installation and the redirect URI all come from the claimed row — one that read

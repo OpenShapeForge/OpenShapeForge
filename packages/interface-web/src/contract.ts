@@ -287,7 +287,7 @@ export type WebCollectionTable = {
       details?: WebCollectionTableValue[];
       values: WebCollectionTableValue[];
     }>;
-    title: LocalizedText; layout?: { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: string[] }> }> }; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+    title: LocalizedText; layout?: { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: string[] }> }> }; binding?: string; includeRecord?: boolean; view?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;
@@ -426,7 +426,7 @@ export type WebRecordView = {
     actions?: WebCustomOperationRef[];
   };
   titleTemplate: string;
-  /** Authored form layout retained even when standalone create is unavailable. */
+  /** Authored forms; named editable records project update groups from their own layout, excluding server-owned/read-only fields. */
   formGroups?: { create?: WebFieldGroup[]; update?: WebFieldGroup[] };
   subtitleTemplate?: string;
   badges?: string[];

@@ -1248,6 +1248,16 @@ export type RuntimeAgentSkill = {
   files: Readonly<Record<string, { text: string; mimeType: string }>>;
 };
 
+/** Insert-only ordinary tenant-variable defaults; confidential values must start unset. */
+export type RuntimeTenantSettingDefault = {
+  namespace: string;
+  key: string;
+  /** Canonical stored FieldDefinition, validated by RuntimeFieldSchemaCompiler (including stored-field policy metadata). */
+  definition: Readonly<Record<string, unknown>>;
+  value?: unknown;
+  description?: string;
+};
+
 export type RuntimeModuleContract<
   RuntimeContext,
   OperationHandler,
@@ -1276,6 +1286,7 @@ export type RuntimeModuleContract<
     /** Ordered record fields used for an authorized, localized display label. */
     labelFields?: Readonly<Record<"en" | "nl", readonly string[]>>;
   }[];
+  tenantSettingDefaults?: readonly RuntimeTenantSettingDefault[];
   init?(context: RuntimeContext): Promise<void>;
   readinessChecks?: readonly ModuleReadinessCheck[];
   close?(): Promise<void>;

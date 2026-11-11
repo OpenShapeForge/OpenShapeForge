@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { tenantSettingDefaultsOf } from "./tenant-setting-defaults.js";
+import type { RuntimeTenantSettingDefault } from "@openshapeforge/plugin-runtime";
 /**
  * What the `osf-control` Operations need from the process, assembled once at
  * boot (roles/api.ts) and handed to every handler through the module runtime
@@ -48,6 +50,7 @@ export type ControlPresentation = {
 };
 
 export type ControlRuntime = {
+  tenantSettingDefaults?: readonly RuntimeTenantSettingDefault[] | undefined;
   /**
    * Read once at boot. `ok: false` names every missing variable; every
    * control Operation then answers 503 CONTROL_PLANE_NOT_CONFIGURED with it.
@@ -148,6 +151,7 @@ export function createControlRuntime(options: CreateControlRuntimeOptions = {}):
     config,
     ...(clients ? { clients } : {}),
     provider: platformCatalogProviderOf(options.modules),
+    tenantSettingDefaults: tenantSettingDefaultsOf(options.modules),
     operations: options.operations ?? [],
     ...(options.log ? { log: options.log } : {}),
   };

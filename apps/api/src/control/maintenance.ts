@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Closed managed-process tenant command. No caller token or runtime factory escapes. */
 import { sql } from "kysely";
+import { loadRuntimeModules } from "../modules/registry.js";
+import { tenantSettingDefaultsOf } from "./tenant-setting-defaults.js";
+import type { RuntimeTenantSettingDefault } from "@openshapeforge/plugin-runtime";
 import { isDeepStrictEqual } from "node:util";
 import { usesHostOrganizationContext } from "../config/host-organization.js";
 import { ControlServiceError } from "./errors.js";
@@ -118,6 +121,7 @@ export async function runManagedTenantMaintenance(
   config: Configuration,
   db: OpenShapeForgeDatabase,
   fetchImplementation?: typeof fetch,
+  tenantSettingDefaults?: readonly RuntimeTenantSettingDefault[],
 ): Promise<unknown> {
   if (
     !request.confirmed ||
@@ -175,6 +179,7 @@ export async function runManagedTenantMaintenance(
   };
   const deps = {
     db,
+    tenantSettingDefaults,
     tenantRealm: config.keycloak.tenantRealm,
     operator: {
       subject: claims.sub,
@@ -273,10 +278,14 @@ if (import.meta.main) {
       databaseUrl: readMigrateDatabaseUrl(),
       maxConnections: 1,
     });
+    const modules = request.action === "provision" ? await loadRuntimeModules() : { loaded: [], failures: [] };
+    if (modules.failures.length) throw new ManagedMaintenanceError("MAINTENANCE_MODULES", "Installed tenant-variable owners could not be loaded.");
     const result = await runManagedTenantMaintenance(
       request,
       config,
       runtime.db,
+      undefined,
+      tenantSettingDefaultsOf(modules.loaded),
     );
     console.log(JSON.stringify(result));
   } catch (error) {

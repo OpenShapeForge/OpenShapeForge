@@ -363,6 +363,7 @@ export function buildNamedViews(coreEntity: LoadedArtifacts["coreEntity"], catal
         groups: layout.tabs,
       }, catalog),
       ...(layout.context ? { context: layout.context } : {}),
+      ...("actions" in definition && definition.actions?.length ? { actions: definition.actions } : {}),
     }];
   }));
 }

@@ -154,6 +154,7 @@ function controlDeps(context: ControlHandlerContext): ControlDeps {
   return {
     db: context.db,
     ...runtime.clients.control,
+    tenantSettingDefaults: runtime.tenantSettingDefaults,
     operator: {
       subject: administrator.subject,
       issuer: administrator.issuer,

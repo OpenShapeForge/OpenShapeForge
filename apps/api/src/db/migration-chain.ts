@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { applyPublicColorPaletteMigration } from './migrations/color-palette.js';
+import { backfillTenantSettingDefaults } from "../control/tenant-setting-defaults.js";
 /**
  * The ordered chain that builds a database from the compiled manifest,
  * shared by db:migrate, db:reset and the empty-database bootstrap
@@ -240,6 +241,7 @@ export async function runMigrationChain(
   // Revoke the worker/default function sweep for this API-only public projection.
   await applyPublicColorPaletteMigration(db);
   const pageConfigs = await applyEntityPageConfigsSeed(db);
+  await backfillTenantSettingDefaults(db, options.maintenanceModules);
   const moduleSeeds: Record<string, CatalogSeedResult> = {};
   for (const seed of options.moduleSeeds ?? []) {
     let active = true;

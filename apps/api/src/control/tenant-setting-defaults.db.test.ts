@@ -27,13 +27,16 @@ const rollback = new Error('ROLLBACK_DEFAULTS_FIXTURE');
         await sql`insert into erp.tenants(id,tenant_id,slug,name) values(${id}::uuid,${id}::uuid,${slug},'Defaults test')`.execute(trx);
         expect(await ensureTenantSettingDefaults(trx, id, defaults)).toBe(3);
       }
-      const [first, second] = await Promise.all(ids.map(id => sql<{id:string;value:unknown;updated_at:unknown;namespace:string;key:string}>`select id,value,updated_at,namespace,key from erp.tenant_settings where tenant_id=${id}::uuid order by namespace,key`.execute(trx)));
+      const [first, second] = await Promise.all(ids.map(id => sql<{id:string;definition:Record<string,unknown>;value:unknown;updated_at:unknown;namespace:string;key:string}>`select id,definition,value,updated_at,namespace,key from erp.tenant_settings where tenant_id=${id}::uuid order by namespace,key`.execute(trx)));
       expect(first.rows).toHaveLength(3); expect(second.rows).toHaveLength(3);
+      expect([...first.rows,...second.rows].every(row => row.definition?.key === "value")).toBe(true);
+      expect(first.rows.find(row => row.namespace === "appearance")!.value).toEqual({colors: []});
       expect(first.rows.map(row => row.id).some(id => second.rows.some(row => row.id === id))).toBe(false);
       const key = first.rows.find(row => row.key === 'api-key')!;
       const encrypted = encryptSecret(keyringFromEnv(`test:${Buffer.alloc(32,11).toString('base64')}`)!, `${ids[0]}:erp.tenant_settings:${key.id}`, 'value', 'synthetic-only');
-      await sql`update erp.tenant_settings set value=${JSON.stringify(encrypted)}::jsonb where id=${key.id}::uuid`.execute(trx);
+      await sql`update erp.tenant_settings set value=${JSON.stringify(encrypted)}::text::jsonb where id=${key.id}::uuid`.execute(trx);
       await sql`update erp.tenant_settings set value='{"model":"saved-test-model"}'::jsonb where tenant_id=${ids[0]}::uuid and namespace='example.chat'`.execute(trx);
+      expect((await sql<{value:unknown}>`select value from erp.tenant_settings where id=${key.id}::uuid`.execute(trx)).rows[0]!.value).toEqual(encrypted);
       const before = (await sql`select * from erp.tenant_settings where tenant_id=${ids[0]}::uuid order by namespace,key`.execute(trx)).rows;
       expect(await ensureTenantSettingDefaults(trx, ids[0]!, defaults)).toBe(0);
       expect((await sql`select * from erp.tenant_settings where tenant_id=${ids[0]}::uuid order by namespace,key`.execute(trx)).rows).toEqual(before);

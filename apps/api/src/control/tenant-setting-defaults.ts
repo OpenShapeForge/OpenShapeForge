@@ -48,7 +48,7 @@ export async function ensureTenantSettingDefaults(trx: Transaction<DB>, tenantId
     const result = await sql`
       insert into erp.tenant_settings(id,tenant_id,namespace,key,definition,value,description)
       select gen_random_uuid(),${tenantId}::uuid,${entry.namespace},${entry.key},
-        ${JSON.stringify(entry.definition)}::jsonb,${entry.value == null ? null : JSON.stringify(entry.value)}::jsonb,${entry.description ?? null}
+        ${JSON.stringify(entry.definition)}::text::jsonb,${entry.value == null ? null : JSON.stringify(entry.value)}::text::jsonb,${entry.description ?? null}
       where not exists(select 1 from erp.tenant_settings where tenant_id=${tenantId}::uuid and namespace=${entry.namespace} and key=${entry.key})
       returning id
     `.execute(trx);

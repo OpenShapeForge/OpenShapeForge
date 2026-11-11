@@ -442,7 +442,8 @@ export interface EntityWebRecordLayout {
 
 export type EntityWebNamedViewDefinition =
     | { kind: "record"; title?: string; fields: string[] }
-    | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
+    /** `actions: [update]` makes the fields in this view's own layout editable through the entity's canonical update Operation. */
+    | { kind: "record"; title?: string; layout: EntityWebRecordLayout; actions?: Array<"update"> }
     | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | LocalizedText; title?: LocalizedText; filter?: Record<string, unknown>; tree?: { children: string; parent?: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
     | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 

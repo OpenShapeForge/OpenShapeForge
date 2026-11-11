@@ -1374,8 +1374,14 @@ function projectEntity(
       view: { ...readView, detail: namedDetail },
     }, all, providers);
     if (!projected.views.record?.operations.read) throw new Error(`${entityName}.${name}: a record view requires a read Operation.`);
-    return [name, { ...projected.views.record, id: `${entityName}.${name}`, routes: {},
-      modes: ["read" as const], operations: { read: projected.views.record.operations.read },
+    // An editable named view saves through the default record's canonical update;
+    // without authored form groups the fields of its own layout are the form.
+    const editable = "actions" in definition && definition.actions?.includes("update");
+    const update = editable ? record?.operations.update : undefined;
+    if (editable && !update) throw new Error(`${entityName}.${name}: an editable record view requires the entity's update Operation.`);
+    const { formGroups, ...projectedRecord } = projected.views.record;
+    return [name, { ...projectedRecord, ...(update ? {} : { formGroups }), id: `${entityName}.${name}`, routes: {},
+      modes: update ? ["read" as const, "update" as const] : ["read" as const], operations: { read: projected.views.record.operations.read, ...(update ? { update } : {}) },
       relationships: projected.relationships,
     }];
   }));

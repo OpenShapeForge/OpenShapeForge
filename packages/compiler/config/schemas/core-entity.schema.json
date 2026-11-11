@@ -1293,6 +1293,7 @@
               "required": [
                 "fields"
               ],
+              "not": { "required": ["actions"] },
               "x-osf-i18n": {
                 "title": {
                   "en": "Fields",

@@ -926,6 +926,7 @@ function projectEntity(
   source: ProjectableEntity,
   all: ReadonlyMap<string, ProjectableEntity>,
   providers: ReadonlyMap<string, WebEntityInterface> = new Map(),
+  updateLayout?: readonly CompiledViewGroup[],
 ): WebEntityInterface {
   const { contract, view, customOperations } = source;
   const createUnsupported = unsupportedGenericCreate(source, all);
@@ -936,7 +937,8 @@ function projectEntity(
   const serverOwnedFields = serverOwnedFieldKeys(source, all);
   const createGroups = createUnsupported ? [] : formGroups(createVariant, undefined, serverOwnedFields);
   const authoredCreateGroups = formGroups(createVariant, undefined, serverOwnedFields);
-  const updateGroups = formGroups(updateVariant, createVariant, serverOwnedFields);
+  const updateExcluded = new Set([...serverOwnedFields, ...contract.model.fields.filter(field => field.readOnly || field.immutable).map(field => field.key)]);
+  const updateGroups = updateLayout ? projectGroups(updateLayout, updateExcluded) : formGroups(updateVariant, createVariant, serverOwnedFields);
   const createFields = createWritableFieldKeys(source, all);
   const updateFields = new Set(updateGroups.flatMap(({ fields }) => fields));
   // A provider-backed reference is only a relationship: it has no value of its
@@ -1367,21 +1369,24 @@ function projectEntity(
         title: definition.title ?? view?.detail?.header.title ?? "{{id}}" },
       groups: { render: view?.detail?.groups.render ?? view!.page, items: definition.layout.tabs },
     };
+    const editable = "actions" in definition && definition.actions?.includes("update");
+    const update = editable ? record?.operations.update : undefined;
+    if (editable && !update) throw new Error(`${entityName}.${name}: an editable record view requires the entity's update Operation.`);
     const projected = projectEntity({
       ...source,
       contract: { ...contract, interfaces: { ...contract.interfaces, web: {
         ...web, ...("context" in definition && definition.context ? { recordContext: definition.context } : {}),
       } } },
       view: { ...readView, detail: namedDetail },
-    }, all, providers);
+    }, all, providers, update ? namedDetail.groups.items : undefined);
     if (!projected.views.record?.operations.read) throw new Error(`${entityName}.${name}: a record view requires a read Operation.`);
-    // An editable named view saves through the default record's canonical update;
-    // without authored form groups the fields of its own layout are the form.
-    const editable = "actions" in definition && definition.actions?.includes("update");
-    const update = editable ? record?.operations.update : undefined;
-    if (editable && !update) throw new Error(`${entityName}.${name}: an editable record view requires the entity's update Operation.`);
-    const { formGroups, ...projectedRecord } = projected.views.record;
-    return [name, { ...projectedRecord, ...(update ? {} : { formGroups }), id: `${entityName}.${name}`, routes: {},
+    // Named edits use their own layout, with canonical server-owned/read-only fields excluded.
+    const updateGroups = projected.views.record.formGroups?.update ?? [];
+    if (update && !updateGroups.some(group => group.fields.length)) throw new Error(`${entityName}.${name}: an editable record view requires writable layout fields.`);
+    if (update) for (const group of updateGroups) for (const key of group.fields) {
+      if (fields[key] && projected.fields[key]?.supports.update) fields[key].supports.update = true;
+    }
+    return [name, { ...projected.views.record, id: `${entityName}.${name}`, routes: {},
       modes: update ? ["read" as const, "update" as const] : ["read" as const], operations: { read: projected.views.record.operations.read, ...(update ? { update } : {}) },
       relationships: projected.relationships,
     }];

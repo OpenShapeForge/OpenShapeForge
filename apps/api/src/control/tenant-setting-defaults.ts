@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql, type Transaction } from "kysely";
+import { COLOR_SETTINGS_NAMESPACE, COLOR_SETTINGS_KEY } from "@openshapeforge/operations";
 import type { RuntimeTenantSettingDefault } from "@openshapeforge/plugin-runtime";
 import type { RuntimeModule } from "../modules/contract.js";
 import type { DB } from "../generated/db/types.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withSystemSession, SYSTEM_BYPASS_ROLE } from "../db/session.js";
 import { generatedRuntimeFieldSchemas } from "../modules/field-schemas.js";
+import { assertTypedDefinitionSupported } from "../operations/entity/typed-values.js";
+import manifest from "../generated/db/manifest.json" with { type: "json" };
+import type { GeneratedCrudTable } from "../operations/entity/types.js";
 
 function hasConfidentialDefinition(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
@@ -16,13 +20,15 @@ function hasConfidentialDefinition(value: unknown): boolean {
 }
 
 export const paletteSettingDefault: RuntimeTenantSettingDefault = {
-  namespace: "appearance", key: "colors",
+  namespace: COLOR_SETTINGS_NAMESPACE, key: COLOR_SETTINGS_KEY,
   definition: { key: "value", osfType: "colorPalette", label: { en: "Custom colors", nl: "Eigen kleuren" } },
   value: { colors: [] }, description: "Eigen kleuren / Custom colors",
 };
 
 /** Validate through the same typed-value contract as ordinary TenantSetting CRUD. */
 export function tenantSettingDefaultsOf(modules: readonly Pick<RuntimeModule, "tenantSettingDefaults">[] = []): readonly RuntimeTenantSettingDefault[] {
+  const policy = (manifest.tables as GeneratedCrudTable[]).find(table => table.source?.authoringEntityName === "TenantSetting")?.columns.find(column => column.name === "value")?.typedBy;
+  if (!policy) throw new Error("Canonical TenantSetting typed-value policy is required.");
   const defaults = [paletteSettingDefault, ...modules.flatMap(module => module.tenantSettingDefaults ?? [])];
   const slots = new Set<string>();
   for (const entry of defaults) {
@@ -35,6 +41,8 @@ export function tenantSettingDefaultsOf(modules: readonly Pick<RuntimeModule, "t
       throw new Error("Confidential tenant-variable defaults must be unset.");
     if (entry.definition?.key !== "value" || !generatedRuntimeFieldSchemas.validateObject([entry.definition], entry.value == null ? {} : { value: entry.value }).valid)
       throw new Error(`Invalid typed default for ${entry.namespace}/${entry.key}.`);
+    try { assertTypedDefinitionSupported(entry.definition, "value", "submitted", policy); }
+    catch (cause) { throw new Error(`Invalid typed default for ${entry.namespace}/${entry.key}.`, { cause }); }
   }
   return defaults;
 }

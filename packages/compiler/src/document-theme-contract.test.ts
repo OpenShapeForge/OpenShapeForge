@@ -80,6 +80,7 @@ test("document themes are tenant-owned, selected on templates, and projected gen
   expect(block.model.fields.some((field) => field.key !== "color" && /theme|color|font|css/i.test(field.key))).toBe(false);
 
   const web = buildWebManifest(compile.entities, {}, corpusWebOperations(resolveActiveAuthoringDir(root)));
+  expect(web.entities.DocumentTheme?.fields.accentColor?.presentation?.component).toBe("FieldColorIcon");
   expect(web.entities.DocumentTheme?.views.collection.route).toBe("/document-themes");
   expect(web.entities.DocumentTheme?.views.record?.routes.create).toBe("/document-themes/new");
   expect(web.entities.DocumentTheme?.operations.setDefault).toMatchObject({ target: { scope: "record" } });

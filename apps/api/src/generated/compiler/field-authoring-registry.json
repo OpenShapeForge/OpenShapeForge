@@ -151,6 +151,10 @@
       "validation": {
         "pattern": "^(standard|tenant):[a-z][a-z0-9-]{0,63}$",
         "maxLength": 73
+      },
+      "render": {
+        "display": "FieldColorIcon",
+        "input": "FieldColorIcon"
       }
     },
     "colorValue": {

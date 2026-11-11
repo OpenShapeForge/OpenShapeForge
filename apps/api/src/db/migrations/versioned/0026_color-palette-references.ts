@@ -30,7 +30,9 @@ const migration: VersionedMigration = {
           await sql`update ${sql.id(table.schema,table.table)} set ${sql.id(column.name)}=${reference} where tenant_id=${tenant.id}::uuid and ${sql.id(column.name)}=${value}`.execute(db);
         }
       }
-      const value=JSON.stringify({colors});
+      let value:string;
+      try { value=JSON.stringify({colors:parseTenantColors({colors})}); }
+      catch(error) { throw new Error(`Color palette migration cannot preserve the legacy colors in a valid palette: ${error instanceof Error?error.message:'Invalid palette.'} Resolve legacy color usage before retrying.`); }
       if(rows.rows[0])await sql`update erp.tenant_settings set value=${value}::text::jsonb where id=${rows.rows[0].id}::uuid and tenant_id=${tenant.id}::uuid`.execute(db);
       else await sql`insert into erp.tenant_settings(id,tenant_id,namespace,key,definition,value,description) values(gen_random_uuid(),${tenant.id}::uuid,'appearance','colors','{"key":"value","osfType":"colorPalette","label":{"en":"Custom colors","nl":"Eigen kleuren"}}'::jsonb,${value}::text::jsonb,'Eigen kleuren / Custom colors')`.execute(db);
     }

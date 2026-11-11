@@ -25,3 +25,10 @@ test('palette discovery requires tenant authentication but no administrative rol
  expect(palette.tenancy).toEqual({mode:'required'});
  expect(palette.effects).toEqual({data:'read',external:'none'});
 });
+
+test('color and icon patterns retain database-check compatibility', async () => {
+ const {isPosixSafePattern}=await import('./authoring/field-value-checks.js');
+ const types=parse(readFileSync(new URL('../config/authoring/catalogs/osf-types.yaml',import.meta.url),'utf8')).types;
+ expect(isPosixSafePattern(types.color.validation.pattern)).toBe(true);
+ expect(isPosixSafePattern(types.icon.validation.pattern)).toBe(true);
+});

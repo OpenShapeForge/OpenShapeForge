@@ -2313,6 +2313,8 @@ test("a collection tree names a stored collection of the entity and fields for i
   expect(build().entities.BundleItem!.views.collection.tree).toBeUndefined();
   product.contract.interfaces!.web!.collectionTree = { children: "displayName" };
   expect(build).toThrow("Product: collection tree children displayName must be a stored collection relationship of Product.");
+  product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", parent: "displayName" };
+  expect(build).toThrow("must be a stored belongsTo relationship");
   product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", count: "missing" };
   expect(build).toThrow("Product: collection tree count missing is not a field of Product.");
 });

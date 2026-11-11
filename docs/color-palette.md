@@ -19,7 +19,7 @@ columns still reference it, including entities without a published CRUD interfac
 Names and values can change without changing identities. Clearing optional record
 colors remains a normal null field update.
 
-Migration 0025 converts stored literal colors to standard references where exact
+Migration 0026 converts stored literal colors to standard references where exact
 values match, otherwise to named tenant colors, preserving their appearance. It
 also changes document-theme defaults. Provisioning creates the empty typed setting
 for new tenants. No runtime legacy-hex fallback exists.

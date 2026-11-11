@@ -54,9 +54,9 @@ describe("the generic osf_* listing", () => {
     expect(create).toBeDefined();
     const schema = create.inputSchema as Record<string, any>;
     expect(schema.anyOf).toBeUndefined();
-    expect(schema.properties.entity.enum).toEqual(["Address"]);
+    expect(schema.properties.entity.enum).toEqual(["Address", "Relation"]);
     expect(create.description).toContain('osf_describe { entity, operation: "create" }');
-    // Bounded: a single-entity session sees one entity, and the whole
+    // Bounded: a session sees its permitted generic entities, and the whole
     // generic surface stays small however many entities the catalogue has.
     const bytes = tools
       .filter((tool) => tool.name.startsWith("osf_"))
@@ -67,7 +67,7 @@ describe("the generic osf_* listing", () => {
   it.skipIf(generic.length === 0)("lists osf_describe exactly when the session can address a generic entity", () => {
     const withGeneric = crudToolsForSession(session(RELATIONS), tables as never, english);
     const describe = withGeneric.find((tool) => tool.name === "osf_describe")!;
-    expect((describe.inputSchema as any).properties.entity.enum).toEqual(["Address"]);
+    expect((describe.inputSchema as any).properties.entity.enum).toEqual(["Address", "Relation"]);
     const without = crudToolsForSession(session("Nobody.Role"), tables as never, english);
     expect(without.find((tool) => tool.name === "osf_describe")).toBeUndefined();
   });
@@ -113,7 +113,7 @@ describe("the generic osf_* listing", () => {
 
   it.skipIf(generic.length === 0)("refuses an entity the session cannot address, naming only what it can", () => {
     expect(() => describeGenericEntity("Quote", undefined, session(RELATIONS), tables as never, english))
-      .toThrow(/"Quote" is not one of the entities .* Address\./);
+      .toThrow(/"Quote" is not one of the entities .* Address, Relation\./);
     expect(() => describeGenericEntity(undefined, undefined, session(RELATIONS), tables as never, english))
       .toThrow(/needs an "entity" argument/);
     expect(() => describeGenericEntity("Address", "purge", session(RELATIONS), tables as never, english))

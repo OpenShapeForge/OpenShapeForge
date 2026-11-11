@@ -138,6 +138,7 @@ export function foreignKeyTargets(table: GeneratedTable): Map<string, string> {
 }
 
 export function sampleValue(column: Column, marker: string): unknown {
+  if (column.colorReference) return "standard:blue";
   switch (column.type) {
     case "text":
       return `e2e-${marker}-${fieldName(column)}`;
@@ -253,6 +254,7 @@ export function schemaSample(
       `e2e${marker.replace(/[^a-zA-Z0-9]/g, "")}${fieldName(column)}`,
       digest,
       `#${digest.slice(0, 6)}`,
+      "standard:blue",
     ];
     const fitting = candidates.find((candidate) => new RegExp(schema.pattern!).test(candidate));
     if (fitting === undefined) {
@@ -666,13 +668,11 @@ export function textColumnFor(
  * schema directly.
  */
 export function redactableColumnFor(table: GeneratedTable): Column | undefined {
-  return table.columns.find(
-    (column) =>
-      isMutableColumn(column, "update") &&
-      column.type === "text" &&
-      !column.required &&
-      isCreatableField(table, fieldName(column)),
-  );
+  return table.columns.find(column => {
+    const schema = createFieldSchema(table, fieldName(column));
+    return isMutableColumn(column, "update") && column.type === "text" && !column.required &&
+      isCreatableField(table, fieldName(column)) && !schema?.enum && !schema?.pattern && (schema?.maxLength ?? Infinity) >= 80;
+  });
 }
 
 /**

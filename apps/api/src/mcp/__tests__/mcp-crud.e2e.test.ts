@@ -249,7 +249,8 @@ describe("generated MCP server", () => {
   });
 
   test("returns invalid expectedVersion as a canonical field validation error", async () => {
-    const refused = await callTool(tenantA, "relation_update", {
+    const refused = await callTool(tenantA, "osf_update", {
+      entity: "Relation",
       id: randomUUID(),
       values: {},
       expectedVersion: "2026-02-30T12:00:00.000Z",
@@ -269,7 +270,8 @@ describe("generated MCP server", () => {
   });
 
   test("returns invalid mutation control types as canonical field validation errors", async () => {
-    const refused = await callTool(tenantA, "relation_delete", {
+    const refused = await callTool(tenantA, "osf_delete", {
+      entity: "Relation",
       id: randomUUID(),
       expectedVersion: new Date().toISOString(),
       leaseToken: "not-used-because-control-validation-runs-first",
@@ -294,8 +296,8 @@ describe("generated MCP server", () => {
     )!;
     const created = await callTool(
       tenantA,
-      "relation_create",
-      await buildCreateArgs(relation, tenantA),
+      "osf_create",
+      {entity:"Relation", ...await buildCreateArgs(relation, tenantA)},
     );
     expect(toolError(created.body)).toBeUndefined();
     const envelope = toolEnvelope(created.body);
@@ -471,7 +473,7 @@ describe("generated MCP server", () => {
   });
 
   test("refuses a tool the session may not invoke", async () => {
-    const { body } = await callTool(readOnly, "relation_create", { displayName: "nope" });
+    const { body } = await callTool(readOnly, "osf_create", { entity:"Relation", displayName: "nope" });
     expect(toolError(body)).toMatch(/NOT_FOUND/);
   });
 

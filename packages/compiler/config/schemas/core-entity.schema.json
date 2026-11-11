@@ -1782,6 +1782,7 @@
             }
           },
           "properties": {
+            "visible": {"type": "boolean", "x-osf-i18n": {"title": {"en": "Show toolbar", "nl": "Werkbalk tonen"}}},
             "search": {
               "type": "boolean",
               "x-osf-i18n": {

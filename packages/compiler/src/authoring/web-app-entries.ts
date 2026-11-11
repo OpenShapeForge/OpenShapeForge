@@ -28,15 +28,15 @@ export type WebAppEntryOptions = {
 export type WebAppEntryProjection = {
   entries: WebAppEntriesV1;
   /** Authored items that produced no entry, with the reason; nothing is dropped silently. */
-  omitted: Array<{ id: string; reason: "projected-elsewhere" | "disabled" }>;
+  omitted: Array<{ id: string; reason: "projected-elsewhere" | "disabled" | "no-target" }>;
 };
 
 function segments(route: string): string[] {
   return route.split("?")[0]!.split("/").filter(Boolean);
 }
 
-function literalRoute(item: AppShellNavItem): string | undefined {
-  return typeof item.route === "string" ? item.route : item.route?.en;
+function literalRoute(item: AppShellNavItem, locale: "en" | "nl"): string | undefined {
+  return typeof item.route === "string" ? item.route : item.route?.[locale] ?? item.route?.en;
 }
 
 /** A named view with its own route: the compiled collection contract, not a relationship layout. */
@@ -105,7 +105,7 @@ export function projectWebAppEntries(
 
   const project = (item: AppShellNavItem): WebAppEntry | undefined => {
     if (item.disabled) { omitted.push({ id: item.key, reason: "disabled" }); return; }
-    const targets = [item.entity, item.page, literalRoute(item)].filter((target) => target !== undefined && target !== null);
+    const targets = [item.entity, item.page, literalRoute(item, manifest.locale)].filter((target) => target !== undefined && target !== null);
     if (targets.length !== 1) throw new Error(`Menu item ${item.key} must name exactly one of entity, page or route.`);
     const base = { id: item.key, ...(item.icon ? { icon: item.icon } : {}) };
     const mcp: WebAppEntry["mcp"] = item.mcp === false ? { exposed: false, reason: "authored" } : { exposed: true };
@@ -141,7 +141,7 @@ export function projectWebAppEntries(
         mcp,
       };
     }
-    const route = literalRoute(item)!;
+    const route = literalRoute(item, manifest.locale)!;
     if (!route.startsWith("/") || route.startsWith("//") || /[?#]/.test(route)) {
       throw new Error(`Menu item ${item.key} has an invalid local route.`);
     }
@@ -155,7 +155,9 @@ export function projectWebAppEntries(
   };
 
   for (const group of shell.navigation?.sidebarItems ?? []) {
-    const items = group.children ?? (group.entity || group.page || literalRoute(group) ? [group] : []);
+    if (group.children?.some(item => item.children?.length)) throw new Error(`Menu group ${group.key} supports one level of children.`);
+    if (!group.children && !group.entity && !group.page && !literalRoute(group, manifest.locale)) { omitted.push({ id: group.key, reason: "no-target" }); continue; }
+    const items = group.children ?? (group.entity || group.page || literalRoute(group, manifest.locale) ? [group] : []);
     const ids: string[] = [];
     for (const item of items) {
       const entry = project(item);

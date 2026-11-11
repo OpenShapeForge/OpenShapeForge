@@ -1,3 +1,4 @@
+import { resolveColor, type ResolvedColor } from "@openshapeforge/operations";
 // SPDX-License-Identifier: BUSL-1.1
 import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
@@ -5,7 +6,6 @@ import {
   DOCUMENT_COLOR_ROLES,
   DOCUMENT_FONT_FAMILIES,
   DOCUMENT_FONT_WEIGHTS,
-  DOCUMENT_THEME_COLOR,
   type DocumentColorRole,
   type DocumentFontFamily,
   type DocumentTextStyle,
@@ -94,21 +94,21 @@ function typography(value: unknown): DocumentTypography {
   };
 }
 
-function hexColor(value: unknown): string {
-  if (typeof value !== "string" || !DOCUMENT_THEME_COLOR.test(value)) refuse("INVALID_STATE", "Stored document theme has an invalid color.");
-  return value;
-}
-
-function projectTheme(row: ThemeRow): ResolvedDocumentTheme {
+function projectTheme(row: ThemeRow, palette: readonly ResolvedColor[]): ResolvedDocumentTheme {
+  const color = (reference: unknown) => {
+    const resolved = resolveColor(reference, palette);
+    if (!resolved) refuse("INVALID_STATE", "Stored document theme refers to an unavailable color.");
+    return resolved.value;
+  };
   const family = fontFamily(row.fontFamily);
   return {
     id: row.id,
     key: row.key,
     name: row.name,
     isDefault: row.isDefault === true,
-    surfaceColor: hexColor(row.surfaceColor),
-    textColor: hexColor(row.textColor),
-    accentColor: hexColor(row.accentColor),
+    surfaceColor: color(row.surfaceColor),
+    textColor: color(row.textColor),
+    accentColor: color(row.accentColor),
     fontFamily: family,
     typography: typography(row.typography),
     updatedAt: row.updatedAt,
@@ -127,6 +127,9 @@ export const resolveDocumentTheme: ModuleOperationHandler = async (input, contex
   const sourceId = uuid(input[field], field);
   const entityName = field === "documentId" ? "Document" : field === "templateId" ? "Template" : "TemplateVersion";
   await platform.records.assertAccess(session, { entityName, id: sourceId, intent: "get" });
+  const paletteResult = await platform.operations.execute(session, { operation: { id: "colors.list", intent: "invoke" }, input: {} });
+  if ("error" in paletteResult) refuse("INVALID_STATE", "The document color palette is unavailable.");
+  const palette = (paletteResult.data as { colors: ResolvedColor[] }).colors;
   const resolved = await platform.db.withSession(session, async (trx) => {
     let storedThemeId: string | null = null;
     let kind: DocumentThemeResolutionKind = field === "documentId" ? "document" : field === "templateId" ? "template" : "template-version";
@@ -157,7 +160,7 @@ export const resolveDocumentTheme: ModuleOperationHandler = async (input, contex
     if (storedThemeId && !theme) refuse("NOT_FOUND", "The selected document theme no longer exists.");
     if (!theme) kind = "none";
     return {
-      theme: theme ? projectTheme(theme) : null,
+      theme: theme ? projectTheme(theme, palette) : null,
       resolution: { kind, sourceId, themeId: theme?.id ?? null },
     };
   });

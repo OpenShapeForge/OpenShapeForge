@@ -1,3 +1,4 @@
+import m0025ColorPaletteReferences from "./0025_color-palette-references.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Explicit, ordered registry of versioned migrations.
@@ -47,5 +48,6 @@ export const versionedMigrations: VersionedMigration[] = [
   m0022MembershipRelationNullability,
   m0023UniqueConfigurationCodes,
   m0024RemoveTaskForm,
+  m0025ColorPaletteReferences,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

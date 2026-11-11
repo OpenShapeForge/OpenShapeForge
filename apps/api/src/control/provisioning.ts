@@ -189,6 +189,11 @@ export async function provisionTenant(
         values (${result.rows[0].id}, ${result.rows[0].id}, ${slug}, ${name})
         on conflict (id) do update set name = excluded.name
       `.execute(trx);
+      await sql`insert into erp.tenant_settings(id,tenant_id,namespace,key,definition,value,description)
+        select gen_random_uuid(),${result.rows[0].id},'appearance','colors',
+          '{"key":"value","osfType":"colorPalette","label":{"en":"Custom colors","nl":"Eigen kleuren"}}'::jsonb,
+          '{"colors":[]}'::jsonb,'Eigen kleuren / Custom colors'
+        where not exists(select 1 from erp.tenant_settings where tenant_id=${result.rows[0].id} and namespace='appearance' and key='colors')`.execute(trx);
       const { seedStarterGroups } = await import('../accounts/starter-groups.js');
       await seedStarterGroups(trx, result.rows[0].id);
       await ensureTenantOwnRelation(trx, result.rows[0].id);

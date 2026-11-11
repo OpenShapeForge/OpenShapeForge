@@ -1,3 +1,4 @@
+import { nativeColorPaletteHandler } from "./color-palette.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { withConnectionDelegationOrigin, withConnectionGrantSubject } from "../mcp/connection-delegation.js";
 import { assertCurrentAccountAuthority } from "../accounts/account-current-authority.js";
@@ -126,6 +127,7 @@ export type OperationContract = {
     | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" }
     | { type: "collection-options"; sources: Array<{entity:string;labels?:{en?:string;nl?:string};list:string;get?:string;labelField?:string;fields:Record<string,{type:string;many:boolean}>}> }
     | { type: "application-search"; sources: Array<{entity:string;labels:Record<string,string>;description:string|Record<string,string>;list:string;get?:string;field?:string;descriptionField?:string}> }
+    | { type: "color-palette" }
     | { type: "entity-type-list"; labels: Record<string, { en: string; nl: string }> }
     | { type: "constrained-reference-create"; targetEntityName: string; collectionEntityName?: string; parentField?: string; targetValues: Record<string, string | number | boolean>; childValues?: Record<string, string | number | boolean> };
   /** Static Operations default to invoke; Entity-backed handlers retain CRUD intent. */
@@ -736,6 +738,10 @@ export function bindOperationHandlers(
     }
     if (operation.implementation?.type === "application-search") {
       bound.set(operation.key, { operation, handler: nativeApplicationSearchHandler(operation) });
+      continue;
+    }
+    if (operation.implementation?.type === "color-palette") {
+      bound.set(operation.key, { operation, handler: nativeColorPaletteHandler(operation) });
       continue;
     }
     if (operation.implementation?.type === "entity-type-list") {

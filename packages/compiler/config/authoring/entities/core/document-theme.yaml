@@ -48,19 +48,19 @@ fields:
   - key: surfaceColor
     osfType: color
     required: true
-    defaultValue: "#ffffff"
+    defaultValue: "standard:white"
     label: { en: Surface, nl: Oppervlak }
     persisted: { column: surface_color, storageClass: core }
   - key: textColor
     osfType: color
     required: true
-    defaultValue: "#111827"
+    defaultValue: "standard:ink"
     label: { en: Text, nl: Tekst }
     persisted: { column: text_color, storageClass: core }
   - key: accentColor
     osfType: color
     required: true
-    defaultValue: "#2563eb"
+    defaultValue: "standard:cobalt"
     label: { en: Accent, nl: Accent }
     persisted: { column: accent_color, storageClass: core }
   - key: fontFamily

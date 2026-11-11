@@ -10,6 +10,10 @@ import { describe, expect, it } from "bun:test";
 import { testElicitedRow } from "../connection-test.js";
 import type { ElicitOnCreateEntry } from "../elicitation.js";
 import { connectionTokenSecretScope, encryptSecret, keyringFromEnv } from "../../connectors/secrets.js";
+import { __setOutboundAddressResolverForTests } from "../../modules/egress.js";
+
+// Test hosts are not in DNS; core resolves every owner-bound request.
+__setOutboundAddressResolverForTests(async () => ["93.184.216.34"]);
 
 const KEYRING = keyringFromEnv(`test:${Buffer.alloc(32, 7).toString("base64")}`)!;
 const TABLE = "core.connections";
@@ -183,6 +187,7 @@ describe("testElicitedRow", () => {
           kind: "query",
         },
         owner: {
+          pinsResolvedAddresses: true as const,
           fetch: async (request) => {
             requests.push(request);
             return Response.json({

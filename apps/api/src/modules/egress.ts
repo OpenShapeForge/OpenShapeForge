@@ -2,6 +2,11 @@
 import { hostAllowed } from "@openshapeforge/plugin-runtime";
 export { hostAllowed } from "@openshapeforge/plugin-runtime";
 import { assertOutboundTls } from "./outbound-response.js";
+import {
+  OutboundAddressError,
+  verifiedPublicAddresses,
+  type AddressResolver,
+} from "./outbound-addresses.js";
 import { HttpError } from "../rest/http-error.js";
 /** Canonical protocol/allowlist gate and optional runtime-module egress owner. */
 import { withRuntimeSpan } from "@openshapeforge/observability";
@@ -13,7 +18,12 @@ import type {
 
 /** Startup diagnostic without blocking installations that intentionally make no outbound requests. */
 export function missingEgressOwnerDiagnostic(environment: string | undefined, owner: unknown): { code: string; message: string } | undefined {
-  return environment === "production" && !owner
+  if (owner) {
+    return (owner as { pinsResolvedAddresses?: unknown }).pinsResolvedAddresses === true
+      ? undefined
+      : { code: "EGRESS_OWNER_REQUIRED", message: "The configured egress owner does not declare pinsResolvedAddresses. Outbound requests will be refused until it dials only the addresses core resolved." };
+  }
+  return environment === "production"
     ? { code: "EGRESS_OWNER_REQUIRED", message: "No outbound egress owner is configured. Production outbound requests will be refused until one is installed." }
     : undefined;
 }
@@ -222,15 +232,73 @@ export function boundedAbortSignal(
 
 
 
+let addressResolverForTests: AddressResolver | undefined;
+
+/**
+ * Test seam only: suites that drive an egress owner through layers that cannot
+ * carry a resolver replace the lookup here. Returns the restore function.
+ */
+export function __setOutboundAddressResolverForTests(
+  resolve: AddressResolver | undefined,
+): () => void {
+  const previous = addressResolverForTests;
+  addressResolverForTests = resolve;
+  return () => { addressResolverForTests = previous; };
+}
+
+/**
+ * The addresses the owner must dial. A caller that already resolved them (a
+ * Connection request) passes them in; for every other caller core resolves
+ * here, so no path reaches an owner with only a hostname to go on.
+ */
+async function addressesForOwner(
+  url: URL,
+  supplied: readonly string[] | undefined,
+  resolve: AddressResolver | undefined,
+  signal: AbortSignal | undefined,
+  denied: (url: URL, reason: "address") => Error,
+): Promise<readonly string[]> {
+  if (supplied) return supplied;
+  const work = verifiedPublicAddresses(url.hostname, resolve ?? addressResolverForTests);
+  let onAbort: (() => void) | undefined;
+  try {
+    return await (signal
+      ? Promise.race([
+          work,
+          new Promise<never>((_, reject) => {
+            onAbort = () => reject(signal.reason);
+            signal.addEventListener("abort", onAbort, { once: true });
+          }),
+        ])
+      : work);
+  } catch (error) {
+    throwIfAborted(signal);
+    if (error instanceof OutboundAddressError && error.reason === "non_public") {
+      throw denied(url, "address");
+    }
+    throw new HttpError(502, "PROVIDER_ERROR", "The provider could not be reached.");
+  } finally {
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+    // A lookup that loses the race must not surface as an unhandled rejection.
+    work.catch(() => {});
+  }
+}
+
 export async function fetchValidatedOutbound(input: {
   target: string | URL | Request;
   init: RequestInit;
   allowlist: readonly string[];
   fallback: (target: string | URL | Request, init: RequestInit) => Promise<Response>;
   dispatch?: ModuleEgressDispatch | undefined;
-  /** Core-verified public addresses the owner must dial; see `ModuleEgressRequest`. */
+  /**
+   * Core-verified public addresses the owner must dial; see `ModuleEgressRequest`.
+   * Omitted, core resolves and verifies them here before the owner is called.
+   */
   resolvedAddresses?: readonly string[] | undefined;
-  denied(url: URL, reason: "protocol" | "host"): Error;
+  /** Injectable for tests; answers every address a name resolves to. */
+  resolve?: AddressResolver | undefined;
+  /** "address": the host is allow-listed but does not resolve to a public address. */
+  denied(url: URL, reason: "protocol" | "host" | "address"): Error;
 }): Promise<Response> {
   const url = new URL(
     typeof input.target === "string"
@@ -258,6 +326,17 @@ export async function fetchValidatedOutbound(input: {
     return withRuntimeSpan("external.headers", () => input.fallback(input.target, input.init), { ...(provider ? { provider } : {}) });
   }
 
+  // An owner that calls `fetch` on the URL connects wherever the allow-listed
+  // name points. Core cannot see inside the owner, so it only hands requests to
+  // one that promised to dial the addresses core checked.
+  if (owner.pinsResolvedAddresses !== true) {
+    throw new HttpError(
+      503,
+      "EGRESS_OWNER_REQUIRED",
+      "Outbound requests require an egress owner that pins resolved addresses.",
+    );
+  }
+
   const dispatch = input.dispatch;
   const allowlist = Object.freeze([...input.allowlist]);
   const scope = Object.freeze({ ...dispatch.scope });
@@ -283,6 +362,13 @@ export async function fetchValidatedOutbound(input: {
     input.target instanceof Request || normalizedInit.signal != null;
   const callerSignal = hasCallerSignal ? normalized.signal : undefined;
   throwIfAborted(callerSignal);
+  const resolvedAddresses = await addressesForOwner(
+    url,
+    input.resolvedAddresses,
+    input.resolve,
+    callerSignal,
+    input.denied,
+  );
   const ownerSignal = callerSignal
     ? sanitizeAbortSignal(callerSignal)
     : undefined;
@@ -314,9 +400,7 @@ export async function fetchValidatedOutbound(input: {
       purpose: dispatch.purpose,
       scope,
       ...(source ? { source } : {}),
-      ...(input.resolvedAddresses
-        ? { resolvedAddresses: Object.freeze([...input.resolvedAddresses]) }
-        : {}),
+      resolvedAddresses: Object.freeze([...resolvedAddresses]),
       ...(ownerSignal ? { signal: ownerSignal } : {}),
       createFailure,
     }), { ...(provider ? { provider } : {}) });

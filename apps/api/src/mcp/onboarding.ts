@@ -331,7 +331,7 @@ function stepOrganizationConnections(facts: OnboardingFacts): OnboardingStep {
     howTo:
       missing.map(describeOrganizationConnection).join(" ") +
       " Never ask for the values in chat: a capable client shows a secure form, any other " +
-      "client receives a configurationUrl to open in a browser.",
+      "client receives a configurationUrl to open in a browser and sign in.",
   };
 }
 

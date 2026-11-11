@@ -243,7 +243,8 @@ export async function crudToolCall(
           "nothing has appeared after about three minutes, ask the person to tell " +
           "you when they are done.";
         // The private MCP App only where its iframe can render (https
-        // origin); every other client gets the URL in the open.
+        // origin); every other client gets the signed-in web form's URL,
+        // which carries no token.
         if (supportsMcpApp(server) && publicOriginIsHttps()) {
           return configurationAppResult(
             {
@@ -262,7 +263,7 @@ export async function crudToolCall(
 
         return configurationHandoffResult({
           continuation,
-          token: minted.token,
+          configurationId: minted.id,
           expiresInSeconds: minted.expiresInSeconds,
           definitions,
           instructions:

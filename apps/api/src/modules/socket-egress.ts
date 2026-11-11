@@ -32,7 +32,7 @@
 import { connect as netConnect, isIP, type Socket } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import { isPublicAddress, resolveAddresses } from "./connection-http-egress.js";
+import { isPublicAddress, resolveAddresses } from "./outbound-addresses.js";
 import { hostAllowed } from "./egress.js";
 import type { ModuleSocketGrant, ModuleSocketRequest } from "./contract.js";
 

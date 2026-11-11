@@ -66,12 +66,28 @@ export function configurationFallbackLead(
   }
   return (
     prefix +
-    "Give the person configurationUrl: open this link in a browser and enter " +
-    "the values there; they never pass through the chat."
+    "Give the person configurationUrl: open this link in a browser, sign in as " +
+    "the same person in the same organization and enter the values there; they " +
+    "never pass through the chat."
   );
 }
 
 export const __configurationFallbackLeadForTests = configurationFallbackLead;
+
+/**
+ * The link a model may see for one pending configuration: the signed-in web
+ * form, addressed by the form's public id. It carries no bearer. Whoever opens
+ * it still has to sign in as the form's owner, so reading a tool result is not
+ * enough to use it. Undefined when no web origin is deployed.
+ */
+export function signedInConfigurationUrl(
+  configurationId: string | undefined,
+): string | undefined {
+  const webUrl = configurationWebUrl();
+  return webUrl && configurationId
+    ? `${webUrl}?formId=${encodeURIComponent(configurationId)}`
+    : undefined;
+}
 
 export function elicitedKeyring() {
   return keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);

@@ -21,7 +21,6 @@ import {
 import { operationMayInvoke } from "./entity-tool-invocation.js";
 import {
   callbackOrigin,
-  modelVisibleUploadLinkAllowed,
   elicitedKeyring,
   publicOriginIsHttps,
   supportsMcpApp,
@@ -92,10 +91,9 @@ export async function staticToolCall(
           "Secure upload handoffs are not configured.",
         );
       }
-      return await artifactUploadToolResult({
+      return artifactUploadToolResult({
         privatePicker: supportsMcpApp(server) && publicOriginIsHttps(),
-        modelVisibleLinkAllowed: modelVisibleUploadLinkAllowed(),
-        mint: () => mintArtifactUpload({
+        minted: await mintArtifactUpload({
           db,
           keyring,
           session,

@@ -10,7 +10,7 @@ export function uploadToolDefinition(productName: string): McpToolShape {
     name: ARTIFACT_UPLOAD_TOOL_NAME,
     title: "Upload document file",
     description:
-      `Open a private file picker so the person can upload document bytes directly to ${productName}. Use the returned artifactId in the requested create operation.`,
+      `Open a private file picker so the person can upload document bytes directly to ${productName}. A client that cannot show the picker receives a one-time upload link instead, which the person can open or an agent that can read the file can POST the bytes to. Use the returned artifactId in the requested create operation.`,
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: {
       readOnlyHint: false,

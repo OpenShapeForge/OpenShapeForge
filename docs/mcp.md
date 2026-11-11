@@ -116,12 +116,32 @@ this UX order:
    origin has no such form: the create tool then fails with 503
    `CONFIGURATION_UNAVAILABLE` instead of exposing a bearer link.
 
-The document upload tool follows the same rule. Its upload link is a bearer
-that stages a file as the person, so it travels only in the private picker's
-tool-result metadata. A client that cannot show the picker is refused with 409
-`PRIVATE_UPLOAD_UNAVAILABLE` and nothing is minted, unless the deployment sets
-`OPENSHAPEFORGE_MODEL_VISIBLE_UPLOAD_LINK=1` and accepts that anyone who can
-read the tool result can use the link until it expires or is consumed.
+The document upload tool (`upload_document_file`) has no signed-in web page to
+point to, so a client that cannot show the private picker receives the upload
+link itself in tool text and `structuredContent`; the picker path keeps it in
+tool-result metadata. Because that link is then model-visible, it is built to be
+worth little to anyone who reads it:
+
+- it accepts one file, once, within ten minutes, up to the upload size limit;
+- it carries the tenant and the person and no roles, groups or scope, so the
+  session it produces can stage a file and nothing else;
+- the bytes land in temporary storage that expires, and nothing can be read
+  back through the link;
+- the file reaches a record only when that person's own authenticated
+  Operation binds the returned `artifactId`.
+
+The person can open the link and choose a file, or an agent that can read the
+file can send it directly:
+
+```sh
+curl -X POST --data-binary @offer.pdf \
+  -H 'content-type: application/octet-stream' \
+  -H 'x-file-name: offer.pdf' \
+  'https://api.example.com/api/artifact-upload/<token>'
+```
+
+The response carries `artifactId`, `fileName`, `byteSize` and `sha256`, which
+the assistant confirms with the person before using the `artifactId`.
 
 Secret and confidential values post directly to the runtime and are encrypted
 at rest with `OPENSHAPEFORGE_ELICITED_SECRET_KEYS`.

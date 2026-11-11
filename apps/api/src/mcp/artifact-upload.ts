@@ -8,19 +8,16 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { createHandoff, readHandoff } from "./handoff-store.js";
 import { escapeHtml } from "./browser-pages.js";
 import { productName } from "../config/product-name.js";
-import { HttpError } from "../rest/http-error.js";
 
 export const ARTIFACT_UPLOAD_APP_URI = "ui://openshapeforge/artifact-upload";
 export const ARTIFACT_UPLOAD_PATH = "/api/artifact-upload";
 export { ARTIFACT_UPLOAD_TOOL_NAME } from "@openshapeforge/operations";
 export const ARTIFACT_UPLOAD_TTL_SECONDS = 10 * 60;
 
+/** Identity only: the token names who the file is for and grants nothing they may do. */
 export type PendingArtifactUpload = {
   tenantId: string;
   userId: string;
-  roles: string[];
-  groups: string[];
-  scope: "tenant" | "group" | "self";
   credential: "bearer" | "api-key" | "trusted-context";
 };
 
@@ -48,9 +45,6 @@ export async function mintArtifactUpload(input: {
     payload: {
       tenantId: input.session.tenantId,
       userId: input.session.userId,
-      roles: [...(input.session.roles ?? [])],
-      groups: [...(input.session.groups ?? [])],
-      scope: input.session.scope ?? "self",
       credential:
         input.session.credential === "api-key" ||
         input.session.credential === "trusted-context"
@@ -66,50 +60,65 @@ export async function mintArtifactUpload(input: {
 }
 
 /**
- * What the upload tool answers. The upload link is a bearer carrying the
- * person's roles, so where it goes decides who can use it:
- *
- *   private picker   the link travels in `_meta`, which the model never sees.
- *   any other client the link would sit in model-visible text, usable by
- *                    anyone who reads the tool result until it expires. Nothing
- *                    is minted and the tool refuses — unless the deployment
- *                    explicitly accepted a model-visible link.
+ * The only session an upload link can produce. The link is a bearer, and in a
+ * client without the private picker it sits in model-visible text, so it is
+ * built to be worth little: it carries who the file is for and nothing they
+ * may do. Staging needs exactly that — storage records the tenant and the
+ * person, the bytes land in temporary storage that expires, and nothing can be
+ * read back through this session. The file reaches a record only when that
+ * person's own authenticated Operation binds the artifact id.
  */
-export async function artifactUploadToolResult(input: {
+export function artifactUploadSession(pending: PendingArtifactUpload): TrustedSessionContext {
+  return {
+    tenantId: pending.tenantId,
+    userId: pending.userId,
+    roles: [],
+    groups: [],
+    scope: "self",
+    credential: pending.credential,
+  };
+}
+
+/**
+ * What the upload tool answers. Where the picker can render, the link travels
+ * in `_meta`, which the model never sees. Every other client gets the link in
+ * the open, with what an agent that can reach the file itself needs to send it.
+ */
+export function artifactUploadToolResult(input: {
   privatePicker: boolean;
-  modelVisibleLinkAllowed: boolean;
-  mint: () => Promise<{ uploadUrl: string; expiresAt: string }>;
-}): Promise<{
+  minted: { uploadUrl: string; expiresAt: string };
+}): {
   content: { type: "text"; text: string }[];
   _meta?: Record<string, unknown>;
   structuredContent?: Record<string, unknown>;
-}> {
+} {
+  const { uploadUrl, expiresAt } = input.minted;
   if (input.privatePicker) {
-    const minted = await input.mint();
     return {
       content: [{ type: "text", text: "A private document upload control is ready." }],
-      _meta: { uploadUrl: minted.uploadUrl, expiresAt: minted.expiresAt },
+      _meta: { uploadUrl, expiresAt },
     };
   }
-  if (!input.modelVisibleLinkAllowed) {
-    throw new HttpError(
-      409,
-      "PRIVATE_UPLOAD_UNAVAILABLE",
-      "This MCP client cannot show the private file picker, and the upload link is not shared in chat. " +
-        "Ask the person to upload the document from a client that shows the picker, or in the web application.",
-    );
-  }
-  const minted = await input.mint();
+  const upload = {
+    method: "POST",
+    headers: {
+      "content-type": "application/octet-stream",
+      "x-file-name": "<URL-encoded file name>",
+    },
+    body: "the raw file bytes",
+  };
   return {
     content: [{
       type: "text",
-      text: `This MCP client cannot show the private file picker. Ask the person to open ${minted.uploadUrl}; the one-time link expires at ${minted.expiresAt}.`,
+      text:
+        `This MCP client cannot show the private file picker. Either ask the person to open ${uploadUrl} ` +
+        "and choose the file, or, if you can read the file yourself, POST its raw bytes to that URL with " +
+        "content-type application/octet-stream and an x-file-name header holding the URL-encoded file name. " +
+        `The link accepts one file, once, until ${expiresAt}; it cannot read or change anything else. ` +
+        "The response carries artifactId, fileName, byteSize and sha256: confirm the file name and size with " +
+        "the person, then use artifactId in the requested create operation.",
     }],
-    structuredContent: {
-      pending: true,
-      uploadUrl: minted.uploadUrl,
-      expiresAt: minted.expiresAt,
-    },
+    structuredContent: { pending: true, uploadUrl, expiresAt, upload },
   };
 }
 
@@ -181,6 +190,6 @@ export function renderArtifactUploadPage(uploadUrl: string): string {
 <input id="file" type="file"><progress id="progress" hidden style="width:100%"></progress>
 <script>
 const url=${jsonForHtml(uploadUrl)}, file=document.getElementById('file'), message=document.getElementById('message'), progress=document.getElementById('progress');
-file.addEventListener('change',async()=>{const selected=file.files&&file.files[0];if(!selected)return;file.disabled=true;progress.hidden=false;progress.removeAttribute('value');message.textContent='Uploading…';try{const response=await fetch(url,{method:'POST',headers:{'content-type':'application/octet-stream','x-file-name':encodeURIComponent(selected.name)},body:selected});const body=await response.json();if(!response.ok)throw new Error(body?.error?.message||'Upload failed.');message.textContent='Uploaded. Return to the assistant and continue with artifactId '+body.data.artifactId+'.';progress.value=1;progress.max=1;}catch(error){message.textContent=error instanceof Error?error.message:'Upload failed.';file.disabled=false;progress.hidden=true;}});
+file.addEventListener('change',async()=>{const selected=file.files&&file.files[0];if(!selected)return;file.disabled=true;progress.hidden=false;progress.removeAttribute('value');message.textContent='Uploading…';try{const response=await fetch(url,{method:'POST',headers:{'content-type':'application/octet-stream','x-file-name':encodeURIComponent(selected.name)},body:selected});const body=await response.json();if(!response.ok)throw new Error(body?.error?.message||'Upload failed.');message.textContent='Uploaded '+body.data.fileName+' ('+body.data.byteSize+' bytes). Return to the assistant and continue with artifactId '+body.data.artifactId+'.';progress.value=1;progress.max=1;}catch(error){message.textContent=error instanceof Error?error.message:'Upload failed.';file.disabled=false;progress.hidden=true;}});
 </script></body>`;
 }

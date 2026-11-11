@@ -94,6 +94,7 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     const panel = authored.recordPanel, binding = bindings?.[panel.binding!];
     if (!binding) throw new Error(`${name}: record panel binding is unknown.`);
     if (panel.avatar) bindingField(binding.schema, panel.avatar);
+    for (const tab of panel.layout?.tabs ?? []) for (const group of tab.groups) for (const field of group.fields) bindingField(binding.schema, field);
     for (const field of [...panel.fields ?? [], ...panel.heading ? [panel.heading] : [], ...panel.subtitle ? [panel.subtitle] : []]) bindingField(binding.schema, field);
     if (panel.collection) {
       const schema = bindingField(binding.schema, panel.collection.field);

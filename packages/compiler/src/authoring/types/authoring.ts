@@ -457,6 +457,9 @@ export type CollectionTableValueDefinition = {
   when?: { path: string; equals: string | number | boolean };
   defaultValue?: string | number;
 };
+/** Binding-backed record panel body: the same tabs -> groups -> fields shape as a record view layout, resolved against the binding schema. */
+export type BindingPanelLayout = { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: string[] }> }> };
+
 export type CollectionTableDefinition = {
   bindings?: Record<string, { entity: string; operation: string; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;
   navigation?: Array<{ route: string; label: LocalizedText }>;
@@ -484,7 +487,7 @@ export type CollectionTableDefinition = {
       details?: CollectionTableValueDefinition[];
       values: CollectionTableValueDefinition[];
     }>;
-    title: LocalizedText; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+    title: LocalizedText; layout?: BindingPanelLayout; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;

@@ -4606,35 +4606,40 @@
       "label": {
         "nl": "Gepland",
         "en": "Planned"
-      }
+      },
+      "color": "standard:neutral"
     },
     {
       "value": "active",
       "label": {
         "nl": "Actief",
         "en": "Active"
-      }
+      },
+      "color": "standard:blue"
     },
     {
       "value": "on_hold",
       "label": {
         "nl": "Gepauzeerd",
         "en": "On hold"
-      }
+      },
+      "color": "standard:orange"
     },
     {
       "value": "completed",
       "label": {
         "nl": "Afgerond",
         "en": "Completed"
-      }
+      },
+      "color": "standard:green"
     },
     {
       "value": "cancelled",
       "label": {
         "nl": "Geannuleerd",
         "en": "Cancelled"
-      }
+      },
+      "color": "standard:red"
     }
   ],
   "PROJECTROLE": [

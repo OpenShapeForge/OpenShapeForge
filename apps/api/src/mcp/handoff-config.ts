@@ -89,17 +89,6 @@ export function signedInConfigurationUrl(
     : undefined;
 }
 
-/**
- * The upload link is a bearer: it stages a file as the person, with their
- * roles, and no signed-in web page exists to address it by id instead. It
- * reaches model-visible tool text only where the deployment said so.
- */
-export const MODEL_VISIBLE_UPLOAD_LINK_ENV = "OPENSHAPEFORGE_MODEL_VISIBLE_UPLOAD_LINK";
-
-export function modelVisibleUploadLinkAllowed(): boolean {
-  return process.env[MODEL_VISIBLE_UPLOAD_LINK_ENV] === "1";
-}
-
 export function elicitedKeyring() {
   return keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
 }

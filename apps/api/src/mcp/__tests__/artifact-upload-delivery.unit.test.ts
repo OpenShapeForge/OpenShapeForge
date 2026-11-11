@@ -1,57 +1,66 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { afterEach, describe, expect, it } from "bun:test";
-import { artifactUploadToolResult } from "../artifact-upload.js";
-import { MODEL_VISIBLE_UPLOAD_LINK_ENV, modelVisibleUploadLinkAllowed } from "../handoff-config.js";
+import { describe, expect, it } from "bun:test";
+import { artifactUploadSession, artifactUploadToolResult } from "../artifact-upload.js";
 
-const UPLOAD_URL = "https://api.example.test/api/artifact-upload/private-bearer-token";
+const UPLOAD_URL = "https://api.example.test/api/artifact-upload/one-time-token";
 const minted = { uploadUrl: UPLOAD_URL, expiresAt: "2026-09-05T10:10:00.000Z" };
 
-function minter() {
-  const state = { calls: 0 };
-  return { state, mint: async () => { state.calls += 1; return minted; } };
-}
-
 describe("artifact upload link delivery", () => {
-  it("keeps the bearer link in private metadata when the picker can render", async () => {
-    const { state, mint } = minter();
-    const result = await artifactUploadToolResult({ privatePicker: true, modelVisibleLinkAllowed: false, mint });
-    expect(state.calls).toBe(1);
+  it("keeps the link in private metadata when the picker can render", () => {
+    const result = artifactUploadToolResult({ privatePicker: true, minted });
     expect(result._meta).toEqual(minted);
     expect(JSON.stringify(result.content)).not.toContain("/api/artifact-upload/");
     expect(result.structuredContent).toBeUndefined();
   });
 
-  it("mints nothing and refuses when the link would be model-visible", async () => {
-    const { state, mint } = minter();
-    const error = await artifactUploadToolResult({ privatePicker: false, modelVisibleLinkAllowed: false, mint })
-      .catch((caught: unknown) => caught);
-    expect(error).toMatchObject({ status: 409, code: "PRIVATE_UPLOAD_UNAVAILABLE" });
-    expect((error as Error).message).not.toContain("/api/artifact-upload/");
-    expect(state.calls).toBe(0);
-  });
-
-  it("shares the link in text only where the deployment opted in", async () => {
-    const { state, mint } = minter();
-    const result = await artifactUploadToolResult({ privatePicker: false, modelVisibleLinkAllowed: true, mint });
-    expect(state.calls).toBe(1);
-    expect(result.content[0]?.text).toContain(UPLOAD_URL);
-    expect(result.structuredContent).toEqual({ pending: true, ...minted });
+  it("gives every other client the link and how to send the file", () => {
+    const result = artifactUploadToolResult({ privatePicker: false, minted });
+    expect(result._meta).toBeUndefined();
+    const text = result.content[0]?.text ?? "";
+    expect(text).toContain(UPLOAD_URL);
+    expect(text).toContain("application/octet-stream");
+    expect(text).toContain("x-file-name");
+    expect(text).toContain("one file, once, until 2026-09-05T10:10:00.000Z");
+    expect(result.structuredContent).toEqual({
+      pending: true,
+      ...minted,
+      upload: {
+        method: "POST",
+        headers: { "content-type": "application/octet-stream", "x-file-name": "<URL-encoded file name>" },
+        body: "the raw file bytes",
+      },
+    });
   });
 });
 
-describe("model-visible upload link opt-in", () => {
-  const previous = process.env[MODEL_VISIBLE_UPLOAD_LINK_ENV];
-  afterEach(() => {
-    if (previous === undefined) delete process.env[MODEL_VISIBLE_UPLOAD_LINK_ENV];
-    else process.env[MODEL_VISIBLE_UPLOAD_LINK_ENV] = previous;
+describe("the session an upload link produces", () => {
+  it("names the tenant and the person and carries no authority", () => {
+    expect(artifactUploadSession({
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "person-a",
+      credential: "bearer",
+    })).toEqual({
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "person-a",
+      roles: [],
+      groups: [],
+      scope: "self",
+      credential: "bearer",
+    });
   });
 
-  it("is off unless the deployment sets exactly 1", () => {
-    delete process.env[MODEL_VISIBLE_UPLOAD_LINK_ENV];
-    expect(modelVisibleUploadLinkAllowed()).toBe(false);
-    process.env[MODEL_VISIBLE_UPLOAD_LINK_ENV] = "true";
-    expect(modelVisibleUploadLinkAllowed()).toBe(false);
-    process.env[MODEL_VISIBLE_UPLOAD_LINK_ENV] = "1";
-    expect(modelVisibleUploadLinkAllowed()).toBe(true);
+  it("ignores roles a stored token still carries", () => {
+    const stored = {
+      tenantId: "11111111-1111-4111-8111-111111111111",
+      userId: "person-a",
+      credential: "bearer" as const,
+      roles: ["organization-admin"],
+      groups: ["finance"],
+      scope: "tenant",
+    };
+    const session = artifactUploadSession(stored);
+    expect(session.roles).toEqual([]);
+    expect(session.groups).toEqual([]);
+    expect(session.scope).toBe("self");
   });
 });

@@ -7,12 +7,12 @@
  */
 import {
   ARTIFACT_UPLOAD_PATH,
+  artifactUploadSession,
   claimArtifactUpload,
   renderArtifactUploadPage,
 } from "./artifact-upload.js";
 import { HttpError } from "../rest/http-error.js";
 import { ARTIFACT_UPLOAD_LIMIT_BYTES, assertUploadFileName, limitUploadBody } from "../artifacts/upload-input.js";
-import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import { callbackOrigin, elicitedKeyring } from "./handoff-config.js";
 import { type McpRouteContext } from "./route-context.js";
 
@@ -73,14 +73,7 @@ export async function registerArtifactUploadRoutes(
           throw new HttpError(400, "BAD_USER_INPUT", "A file body is required.");
         }
         const source = limitUploadBody(body, request.headers["content-length"]);
-        const uploadSession: TrustedSessionContext = {
-          tenantId: pending.tenantId,
-          userId: pending.userId,
-          roles: pending.roles,
-          groups: pending.groups,
-          scope: pending.scope,
-          credential: pending.credential,
-        };
+        const uploadSession = artifactUploadSession(pending);
         const descriptor = await options.modulePlatform!.withActiveOperationSession(
           uploadSession,
           (activeSession) => options.modulePlatform!.services.artifacts.stage(

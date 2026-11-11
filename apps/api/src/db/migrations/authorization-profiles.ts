@@ -434,7 +434,8 @@ async function installAuthorizationRowPolicies(db: OpenShapeForgeDatabase) {
       const scope=sql.join(subtype.subtype!.scope.map(scope=>sql`${sql.ref(scope.column)} is not distinct from ${sql.lit(scope.value)}`),sql` and `);
       checks.push(sql`(not (${scope}) or not (select app.authorization_entity_managed(${sql.lit(subtype.source!.authoringEntityName!)})) or app.authorization_allows(${sql.lit(subtype.source!.authoringEntityName!)},to_jsonb(${row})))`);
     }
-    const subjectLookup=entity==='RelationGroup'?sql`current_user=${sql.lit(databaseRole('identityResolver').name)} and app.has_any_role(array['Organization.Security.Manage'])`:sql`false`;
+    const subjectLookup=entity==='RelationGroup'?sql`current_user=${sql.lit(databaseRole('identityResolver').name)} and app.has_any_role(array['Organization.Security.Manage'])`
+      :entity==='TenantSetting'?sql`current_user=${sql.lit(databaseRole('identityResolver').name)} and namespace='appearance' and key='colors'`:sql`false`;
     const predicate=sql`app.bypass_rls() or (${subjectLookup}) or (${sql.join(checks,sql` and `)})`;
     await sql`drop policy if exists authorization_profile_scope on ${target}`.execute(db);
     await sql`create policy authorization_profile_scope on ${target} as restrictive for all using (${predicate}) with check (${predicate})`.execute(db);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { applyPublicColorPaletteMigration } from './migrations/color-palette.js';
 /**
  * The ordered chain that builds a database from the compiled manifest,
  * shared by db:migrate, db:reset and the empty-database bootstrap
@@ -236,6 +237,8 @@ export async function runMigrationChain(
   // the entities that declared an action from the manifest.
   await applyRecordActionsMigration(db);
   await applyAuthorizationProfilesMigration(db);
+  // Revoke the worker/default function sweep for this API-only public projection.
+  await applyPublicColorPaletteMigration(db);
   const pageConfigs = await applyEntityPageConfigsSeed(db);
   const moduleSeeds: Record<string, CatalogSeedResult> = {};
   for (const seed of options.moduleSeeds ?? []) {

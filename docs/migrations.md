@@ -123,6 +123,20 @@ outside the definer's reach rather than merely unselected by its body. The
 worker connection holds `EXECUTE` on the liveness lookup only, applied after
 the role sweeps that grant `EXECUTE` on every function in `app`.
 
+The same NOLOGIN resolver owns `app.public_color_palette(uuid)`, an API-only
+projection for an already authenticated tenant session. It checks the requested
+tenant against `app.current_tenant()` and can select only the reserved
+`appearance/colors` setting under an additional restrictive policy. Its fixed
+search path and the reserved-key resolver exception in the managed setting
+policy allow this public appearance data to resolve when ordinary reads are managed. Only bounded,
+validated primitive `key`, `name`, `value`, and `active` fields are returned;
+malformed values fail closed. General settings, credentials and record IDs are
+never projected. PUBLIC and the worker have no EXECUTE privilege, and the
+resolver retains no CREATE privilege. Palette/reference writes retain their
+ordinary authorization and shared tenant lock; internal boolean integrity
+probes use the existing audited tenant bypass so hidden references still block
+removal.
+
 A definer role exists so one function can read what its caller may not, and
 owns nothing else. `openshapeforge_record_action_resolver` is the narrowest of
 them: per entity that declares a record action it holds column-level `SELECT`

@@ -71,6 +71,10 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     if (panel.fields?.some(key => !record.contract.model.fields.some(field => field.key === key))) throw new Error(`${name}: summary fields require direct record fields.`);
     for (const key of [panel.heading, panel.subtitle, ...(panel.fields ?? [])].filter(Boolean)) path(record, key!, undefined);
   }
+  if (panel?.view !== undefined) {
+    if (record.contract.interfaces?.web?.namedViews?.[panel.view]?.kind !== 'record') throw new Error(`${name}: record panel view ${panel.view} must name a record view of ${record.contract.entity.name}.`);
+    if (panel.includeRecord !== undefined || panel.summaryColumns) throw new Error(`${name}: a record panel view replaces includeRecord and summaryColumns.`);
+  }
   if (panel?.primaryMembership) {
     if (!membership || !through || !panel.summaryColumns) throw new Error(`${name}: primaryMembership requires a summary and a membership tree.`);
     path(membership, panel.primaryMembership.field, undefined);

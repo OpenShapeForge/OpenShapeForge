@@ -1353,6 +1353,7 @@
                 }
               }
             },
+            "actions": { "type": "array", "uniqueItems": true, "items": { "const": "update" }, "description": "Make the fields in this view's layout editable through the canonical update Operation.", "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } } },
             "layout": {
               "$ref": "#/$defs/webViewsV2/properties/record/properties/layout",
               "x-osf-i18n": {
@@ -2058,6 +2059,7 @@
             }
           },
             "avatar": { "type": "string", "minLength": 1, "description": "Optional image document field in the read binding for the panel heading." },
+            "view": { "type": "string", "minLength": 1, "description": "Named record view of the row's record entity shown as the panel body.", "x-osf-i18n": { "title": { "en": "Record view", "nl": "Recordweergave" } } },
             "includeRecord": { "type": "boolean", "description": "Keep the canonical record editor alongside the typed summary.", "x-osf-i18n": { "title": { "en": "Include record", "nl": "Record tonen" } } },
             "primaryMembership": {
               "type": "object",

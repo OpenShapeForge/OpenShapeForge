@@ -1571,6 +1571,7 @@ export function compileAuthoringBackendManifest(
         ...(primaryKey ? { primaryKey: true } : {}),
         ...(primaryKey || !storageColumn.nullable ? { required: true } : {}),
         sourceField: storageColumn.field,
+        ...(field?.osfType === "color" ? { colorReference: true } : {}),
         ...(policy && (policy.readRoles || policy.children || policy.item)
           ? { fieldPolicy: policy } : {}),
         ...(sensitivity ? { classification: sensitivity } : {}),

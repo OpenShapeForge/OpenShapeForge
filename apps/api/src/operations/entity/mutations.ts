@@ -1,3 +1,4 @@
+import { guardColorWrite } from "./color-references.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { applyDefaultTemplates } from "./default-template.js";
 import { sql, type Transaction } from "kysely";
@@ -322,6 +323,7 @@ async function insertGeneratedRowInTransaction(
   const identified = prepareProtectedFieldWrites(table, session, defaulted, "create", undefined, false);
   const entityPrepared = await prepareEntityValueWriteInTransaction(trx, session, table, identified, "create", undefined, entityValues);
   const prepared = await prepareTypedValueWrite(trx, session, table, entityPrepared);
+  await guardColorWrite(trx, session, table, prepared);
   // A value typed by a stored FieldDefinition is checked against it here, so
   // the pair holds however the write arrived.
   // The parents and lookup targets of this create, each once and in one order.
@@ -592,6 +594,7 @@ async function applyGeneratedRowUpdate(
     const protectedValues = prepareProtectedFieldWrites(table, session, values, "update", current ?? undefined, caller, trustedFields);
     const entityPrepared = await prepareEntityValueWriteInTransaction(trx, session, table, protectedValues, "update", current ?? undefined, entityValues);
     let prepared = await prepareTypedValueWrite(trx, session, table, entityPrepared, current ?? undefined);
+    await guardColorWrite(trx, session, table, prepared, current ?? undefined);
     // Either half of a typed-value pair may be the one that changes; the row
     // under the lock supplies the other.
 
@@ -748,6 +751,7 @@ export async function deleteGeneratedEntity(
     await lockLinkedRecords(trx, session, table, { operation: "delete", id: input.id });
     const current = await fetchGeneratedRowInTransaction(trx, session, table, input.id, true);
     if (current) {
+      await guardColorWrite(trx, session, table, new Map(), current, true);
       await assertHardDeleteAllowedInTransaction(
         trx,
         session,

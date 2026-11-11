@@ -39,7 +39,7 @@ test("document themes are tenant-owned, selected on templates, and projected gen
   const fields = Object.fromEntries(contract.model.fields.map((field) => [field.key, field]));
   expect(fields.isDefault?.defaultValue).toBe(false);
   expect(fields.isDefault?.readOnly).toBe(true);
-  expect(fields.surfaceColor?.validation?.pattern).toBe("^#[0-9A-Fa-f]{6}$");
+  expect(fields.surfaceColor?.validation?.pattern).toBe("^(standard|tenant):[a-z][a-z0-9\\-]{0,63}$");
   for (const key of ["surfaceColor", "textColor", "accentColor"]) {
     expect(fields[key]?.osfType).toBe("color");
     expect(fields[key]?.baseType).toBe("string");
@@ -52,8 +52,8 @@ test("document themes are tenant-owned, selected on templates, and projected gen
   const table = compile.manifest.tables.find((candidate) => candidate.source?.authoringEntityName === "DocumentTheme");
   const columnNames = table?.columns.map((column) => column.name) ?? [];
   expect(columnNames).toEqual(expect.arrayContaining(["surface_color", "text_color", "accent_color", "font_family", "typography"]));
-  expect(columnNames.some((name) => /logo|icon|css|storage/.test(name))).toBe(false);
-  expect(contract.model.fields.some((field) => /logo|icon|css|storage/i.test(field.key))).toBe(false);
+  expect(columnNames.some((name) => /logo|css|storage/.test(name))).toBe(false);
+  expect(contract.model.fields.some((field) => /logo|css|storage/i.test(field.key))).toBe(false);
   expect(table?.indexes).toEqual(expect.arrayContaining([
     expect.objectContaining({
       name: "document_themes_tenant_default_uidx",
@@ -77,9 +77,10 @@ test("document themes are tenant-owned, selected on templates, and projected gen
   const document = compile.entities.find((entity) => entity.contract.entity.name === "Document")!.contract;
   expect(document.model.fields.some((field) => field.key === "documentThemeId")).toBe(false);
   const block = compile.entities.find((entity) => entity.contract.entity.name === "Block")!.contract;
-  expect(block.model.fields.some((field) => /theme|color|font|css/i.test(field.key))).toBe(false);
+  expect(block.model.fields.some((field) => field.key !== "color" && /theme|color|font|css/i.test(field.key))).toBe(false);
 
   const web = buildWebManifest(compile.entities, {}, corpusWebOperations(resolveActiveAuthoringDir(root)));
+  expect(web.entities.DocumentTheme?.fields.accentColor?.presentation?.component).toBe("FieldColorIcon");
   expect(web.entities.DocumentTheme?.views.collection.route).toBe("/document-themes");
   expect(web.entities.DocumentTheme?.views.record?.routes.create).toBe("/document-themes/new");
   expect(web.entities.DocumentTheme?.operations.setDefault).toMatchObject({ target: { scope: "record" } });

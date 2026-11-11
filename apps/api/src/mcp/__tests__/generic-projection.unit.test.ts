@@ -54,9 +54,9 @@ describe("the generic osf_* listing", () => {
     expect(create).toBeDefined();
     const schema = create.inputSchema as Record<string, any>;
     expect(schema.anyOf).toBeUndefined();
-    expect(schema.properties.entity.enum).toEqual(["Address"]);
+    expect(schema.properties.entity.enum).toEqual(["Address", "Relation"]);
     expect(create.description).toContain('osf_describe { entity, operation: "create" }');
-    // Bounded: a single-entity session sees one entity, and the whole
+    // Bounded: a session sees its permitted generic entities, and the whole
     // generic surface stays small however many entities the catalogue has.
     const bytes = tools
       .filter((tool) => tool.name.startsWith("osf_"))
@@ -67,7 +67,7 @@ describe("the generic osf_* listing", () => {
   it.skipIf(generic.length === 0)("lists osf_describe exactly when the session can address a generic entity", () => {
     const withGeneric = crudToolsForSession(session(RELATIONS), tables as never, english);
     const describe = withGeneric.find((tool) => tool.name === "osf_describe")!;
-    expect((describe.inputSchema as any).properties.entity.enum).toEqual(["Address"]);
+    expect((describe.inputSchema as any).properties.entity.enum).toEqual(["Address", "Relation"]);
     const without = crudToolsForSession(session("Nobody.Role"), tables as never, english);
     expect(without.find((tool) => tool.name === "osf_describe")).toBeUndefined();
   });
@@ -113,7 +113,7 @@ describe("the generic osf_* listing", () => {
 
   it.skipIf(generic.length === 0)("refuses an entity the session cannot address, naming only what it can", () => {
     expect(() => describeGenericEntity("Quote", undefined, session(RELATIONS), tables as never, english))
-      .toThrow(/"Quote" is not one of the entities .* Address\./);
+      .toThrow(/"Quote" is not one of the entities .* Address, Relation\./);
     expect(() => describeGenericEntity(undefined, undefined, session(RELATIONS), tables as never, english))
       .toThrow(/needs an "entity" argument/);
     expect(() => describeGenericEntity("Address", "purge", session(RELATIONS), tables as never, english))
@@ -174,29 +174,18 @@ describe("the generic osf_* listing", () => {
   });
 });
 
-describe("dedicated entity tools in the session's language", () => {
-  const relation = catalog.tools.find((tool) => tool.name === "relation_list");
-  it.skipIf(!relation)("uses the canonical operation's localized name and the whole description in that language", () => {
-    const en = crudToolsForSession(session(RELATIONS), tables as never, english)
-      .find((tool) => tool.name === "relation_list")!;
-    const nl = crudToolsForSession(session(RELATIONS), tables as never, dutch)
-      .find((tool) => tool.name === "relation_list")!;
-    expect(en.title).toBe("List relations");
-    expect(nl.title).toBe("Relaties tonen");
-    expect(en.description).toBe(
-      "Returns a filtered and sorted page of relations. Use this operation to find relations; use get for one known id.",
-    );
-    // Assistant guidance follows the canonical sentence into Dutch.
-    expect(nl.description).toBe(
-      "Geeft een gefilterde en gesorteerde pagina met relaties terug. " +
-        "Gebruik deze operatie om relaties te zoeken; gebruik get voor één bekend id.",
-    );
-    expect(nl.annotations?.title).toBe("Relaties tonen");
+describe("generic entity operation descriptions in the session's language", () => {
+  it("describes the canonical Relation list operation in both languages without dedicated tools", () => {
+    const en = (describeGenericEntity("Relation", "list", session(RELATIONS), tables as never, english) as any).operations.list;
+    const nl = (describeGenericEntity("Relation", "list", session(RELATIONS), tables as never, dutch) as any).operations.list;
+    expect(en.tool).toBe("osf_list");
+    expect(nl.tool).toBe("osf_list");
+    expect(en.description).toBe("Returns a filtered and sorted page of relations. Use this operation to find relations; use get for one known id.");
+    expect(nl.description).toBe("Geeft een gefilterde en gesorteerde pagina met relaties terug. Gebruik deze operatie om relaties te zoeken; gebruik get voor één bekend id.");
   });
-
-  it.skipIf(!relation)("composes authored instructions and the write reminder in the session's language", () => {
-    const nl = crudToolsForSession(session(RELATIONS), tables as never, dutch)
-      .find((tool) => tool.name === "relation_create")!;
+  it("describes authored create instructions and the write reminder in the session's language", () => {
+    const nl = (describeGenericEntity("Relation", "create", session(RELATIONS), tables as never, dutch) as any).operations.create;
+    expect(nl.tool).toBe("osf_create");
     expect(nl.description).toContain("Vraag ontbrekende verplichte velden uit voordat je deze tool aanroept.");
     expect(nl.description).toContain(" Invullen: leid waarden af uit bestaande records");
     expect(nl.description).not.toContain("Ask for missing required fields");

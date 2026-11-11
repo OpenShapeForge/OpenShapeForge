@@ -3,7 +3,24 @@ kind: osfTypeCatalog
 
 # Core semantic types — always available
 types:
+  icon:
+    label: { en: Icon, nl: Icoon }
+    baseType: string
+    validation:
+      pattern: "^[a-z][a-z0-9\\-]{0,63}$"
+      maxLength: 64
+
   color:
+    label: { en: Palette color, nl: Paletkleur }
+    baseType: string
+    validation:
+      pattern: "^(standard|tenant):[a-z][a-z0-9\\-]{0,63}$"
+      maxLength: 73
+    render:
+      display: FieldColorIcon
+      input: FieldColorIcon
+
+  colorValue:
     label: { en: Color, nl: Kleur }
     baseType: string
     validation:
@@ -12,6 +29,37 @@ types:
     render:
       display: ColorDisplay
       input: ColorPicker
+
+  colorPalette:
+    kind: object
+    baseType: object
+    label: { en: Custom colors, nl: Eigen kleuren }
+    children:
+      - key: colors
+        osfType: object
+        label: { en: Colors, nl: Kleuren }
+        required: true
+        cardinality: { min: 0, max: 100 }
+        children:
+          - key: key
+            osfType: string
+            required: true
+            deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
+            label: { en: Stable key, nl: Vaste sleutel }
+            validation: { pattern: "^[a-z][a-z0-9\\-]{0,63}$", maxLength: 64 }
+          - key: name
+            osfType: string
+            required: true
+            label: { en: Name, nl: Naam }
+            validation: { minLength: 1, maxLength: 100 }
+          - key: value
+            osfType: colorValue
+            required: true
+            label: { en: Color value, nl: Kleurwaarde }
+          - key: active
+            osfType: boolean
+            required: true
+            label: { en: Available for selection, nl: Beschikbaar om te kiezen }
 
   # A selected entity definition supplies the shape. Its relationship fields
   # are stored relationally, never embedded in this object's JSON values.

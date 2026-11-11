@@ -134,6 +134,7 @@ export type WebFieldSuggestions = {
 };
 
 export type WebFieldOption = {
+  color?: string;
   value: string;
   label: LocalizedText;
   /** Icon key, e.g. for a choice tile. The host resolves it; an unknown key renders no icon. */
@@ -266,9 +267,12 @@ export type WebCollectionTable = {
   membershipDescription?: WebValuePath;
   groupRows?: "plain" | "bundle";
   viewSwitch?: boolean;
+  /** Collection controls the web table offers; `false` hides one. Other channels keep their Operations. */
+  toolbar?: { visible?: boolean; search?: boolean; create?: boolean };
   recordPanel?: {
     actions?: Array<"edit" | "openFull">;
     primaryMembership?: { field: string; equals: string };
+    avatar?: string;
     summaryColumns?: string[];
     sections?: Array<{
       title: LocalizedText;
@@ -283,7 +287,7 @@ export type WebCollectionTable = {
       details?: WebCollectionTableValue[];
       values: WebCollectionTableValue[];
     }>;
-    title: LocalizedText; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+    title: LocalizedText; layout?: { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: string[] }> }> }; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;
@@ -292,6 +296,12 @@ export type WebCollectionTable = {
   ungrouped?: LocalizedText;
   columns: Array<{ key: string; label: LocalizedText; values: WebCollectionTableValue[]; membershipValues?: WebCollectionTableValue[] }>;
   summary?: { field: string; labels?: Record<string, LocalizedText> };
+  /**
+   * Footer: the read is executed with `{ filter }` (the list's matching filter) and answers
+   * `{ status, count, totals: [{ currencyCode, amount }], excluded }`. Currencies are never added together;
+   * `excluded` counts records whose amount is not known, which are never zero.
+   */
+  totals?: { entityId: string; operation: WebCustomOperationRef; count: LocalizedText; label: LocalizedText; note?: LocalizedText };
 };
 
 export type WebCollectionView = {
@@ -303,7 +313,7 @@ export type WebCollectionView = {
    * depth limit. `label` and `count` name fields of the entity shown on the
    * group heading; without `count` the renderer counts the children.
    */
-  tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
+  tree?: { children: string; parent?: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
   board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: WebValuePath; currency: WebValuePath }; card: { title: WebValuePath[]; timestamp?: WebValuePath; indicator?: string; subtitle?: WebValuePath[]; amount?: { value: WebValuePath; currency: WebValuePath }; body: WebValuePath[] } };
   presentation?: WebTimelinePresentation;
   id: string;
@@ -605,6 +615,53 @@ export type WebPage = {
   route: string;
   /** Operation ids in display order; the landing operation, if any, first. */
   operations: string[];
+};
+
+/**
+ * What an application entry opens. A reference only: fields, layout, inputs
+ * and permissions stay with the entity view, page or host page it names.
+ */
+export type WebAppEntryTarget =
+  /** An entity's canonical collection, or the named collection view `view`. */
+  | { kind: "entityView"; entityId: string; view?: string }
+  /** A page of standalone Operations. */
+  | { kind: "operationPage"; pageId: string }
+  /** A route the host renders itself; it has no compiled surface. */
+  | { kind: "hostPage" };
+
+/** Why an entry is not offered as an MCP application. */
+export type WebAppEntryMcpExclusion = "host-page" | "authored";
+
+/**
+ * One addressable destination of the application: a sidebar item in the
+ * browser, a named opener in an MCP host. The id is the authored menu key and
+ * never derives from a label or a route.
+ */
+export type WebAppEntry = {
+  id: string;
+  label: LocalizedText;
+  icon?: string;
+  target: WebAppEntryTarget;
+  /** The parameterless route the target resolves to. Navigation only, never a grant. */
+  route: string;
+  /**
+   * Canonical Operations whose discoverability admits the entry: a session
+   * that can discover any one may be offered it. Empty for a host page, whose
+   * visibility the host decides. The Operations keep the authorization.
+   */
+  discoverOperations: string[];
+  mcp: { exposed: true } | { exposed: false; reason: WebAppEntryMcpExclusion };
+};
+
+/** Sidebar grouping and order; the entries themselves are defined once in `entries`. */
+export type WebAppEntryGroup = { id: string; label?: LocalizedText; entries: string[] };
+
+/** The application's entries, projected from the authored shell and the web manifest. */
+export type WebAppEntriesV1 = {
+  contract: "openshapeforge.web-app-entries";
+  version: 1;
+  entries: Record<string, WebAppEntry>;
+  navigation: WebAppEntryGroup[];
 };
 
 /** Compiler-owned security metadata; the server independently enforces the ceiling. */

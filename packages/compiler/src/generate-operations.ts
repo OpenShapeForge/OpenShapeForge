@@ -923,6 +923,7 @@ export function collectAuthoredEntityPluginOperations(
     ...collectConstrainedReferenceCreateOperations(entities, referentiedata),
     ...collectApplicationSearch(entities, context, catalogs),
     ...collectCollectionOptions(entities, context),
+    ...collectColorPaletteOperation(context, entities),
     ...(needsEntityTypeList
       ? collectEntityTypeListOperation(context, entities)
       : []),
@@ -1251,7 +1252,7 @@ export function assertOperationRuntimeModules(
 ): void {
   const available = new Set(runtimeModuleNames);
   for (const operation of operations) {
-    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listEntityTypes", "constrainedReferenceCreate", "searchApplication", "listCollectionOptions"].includes(operation.handler) ||
+    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listColors", "listEntityTypes", "constrainedReferenceCreate", "searchApplication", "listCollectionOptions"].includes(operation.handler) ||
       verifiedNativeOperations.get(operation) !== JSON.stringify(operation.implementation))) {
       throw new Error(`Operation ${operation.id} has unverified native implementation metadata.`);
     }
@@ -1502,4 +1503,20 @@ function collectCollectionOptions(entities: readonly Pick<CompiledEntityInfo,"co
   const operation=collectionOptionsDefinition(entities);
   nativeBindings.set(operation,{type:"collection-options",sources});
   return collectOperationContracts([{name:"core",operations:[operation]}],context,true);
+}
+
+function collectColorPaletteOperation(context: PluginBaseContext, entities: readonly Pick<CompiledEntityInfo, "contract">[]): CompiledPluginOperation[] {
+  if (!entities.some(({contract}) => contract.entity?.name === "TenantSetting")) return [];
+  const operation: PluginOperationContract = {
+    key: "colors.list", title: "List available colors", description: "Read the standard palette and this tenant's named colors, including archived colors for existing references. No other tenant settings are returned.",
+    handler: "listColors", auth: { mode: "session", anyAuthenticatedSession: true }, tenancy: { mode: "required" },
+    idempotency: { mode: "none" }, effects: { data: "read", external: "none" },
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    outputSchema: { type: "object", required: ["colors"], properties: { colors: { type: "array", items: { type: "object", required: ["reference", "key", "name", "value", "active", "source"], properties: {
+      reference: { type: "string" }, key: { type: "string" }, name: { type: "string" }, value: { type: "string" }, active: { type: "boolean" }, source: { type: "string", enum: ["standard", "tenant"] }
+    } } } } }, errors: [],
+    transports: { rest: { method: "GET", path: "/api/core/colors", response: { kind: "json" } }, mcp: { enabled: true, name: "colors_list" }, graphql: { enabled: true, kind: "query", field: "colorsList" }, typescript: { enabled: true, functionName: "colorsList" } },
+  };
+  nativeBindings.set(operation, { type: "color-palette" });
+  return collectOperationContracts([{ name: "core", operations: [operation] }], context, true);
 }

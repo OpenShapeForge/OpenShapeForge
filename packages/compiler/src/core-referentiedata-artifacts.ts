@@ -1,3 +1,4 @@
+import { STANDARD_COLORS } from "@openshapeforge/operations";
 // SPDX-License-Identifier: BUSL-1.1
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -8,6 +9,8 @@ import type { GeneratedArtifact } from "./schema.js";
 
 export type CoreReferentiedataCatalogItem = Record<string, unknown> & {
   value: string;
+  color?: string;
+  icon?: string;
   label?: Partial<Record<"nl" | "en" | "fr", string>>;
 };
 
@@ -21,6 +24,8 @@ export type CoreReferentiedataCatalog = Record<string, unknown> & {
 
 type SnapshotItem = {
   value: string;
+  color?: string;
+  icon?: string;
   label: { nl: string; en: string };
 };
 
@@ -62,8 +67,16 @@ export function buildCoreReferentiedataSnapshot(
           `Core referentiedata group "${groupName}" contains an item without a value.`,
         );
       }
+      if (item.color !== undefined && (typeof item.color !== "string" || !STANDARD_COLORS.some(color => `standard:${color.key}` === item.color))) {
+        throw new Error(`Invalid color for ${groupName}.${item.value}`);
+      }
+      if (item.icon !== undefined && (typeof item.icon !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(item.icon))) {
+        throw new Error(`Invalid icon for ${groupName}.${item.value}`);
+      }
       return {
         value: item.value,
+        ...(item.color ? { color: item.color } : {}),
+        ...(item.icon ? { icon: item.icon } : {}),
         label: {
           nl: requireLabel(item, groupName, "nl"),
           en: requireLabel(item, groupName, "en"),

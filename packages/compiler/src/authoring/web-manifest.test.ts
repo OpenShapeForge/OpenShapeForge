@@ -2313,9 +2313,27 @@ test("a collection tree names a stored collection of the entity and fields for i
   expect(build().entities.BundleItem!.views.collection.tree).toBeUndefined();
   product.contract.interfaces!.web!.collectionTree = { children: "displayName" };
   expect(build).toThrow("Product: collection tree children displayName must be a stored collection relationship of Product.");
+  product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", parent: "displayName" };
+  expect(build).toThrow("must be a stored belongsTo relationship");
   product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", count: "missing" };
   expect(build).toThrow("Product: collection tree count missing is not a field of Product.");
 });
+
+test("the real Team subtype can inherit a stored parent reference to RelationGroup", async () => {
+  const active = await loadActivePlatformCompile(join(import.meta.dir, "../../../.."));
+  const entities = structuredClone(active.entities);
+  const team = entities.find(entry => entry.contract.entity.name === "Team")!;
+  const base = entities.find(entry => entry.contract.entity.name === "RelationGroup")!;
+  expect(team.contract.subtype?.base.name).toBe("RelationGroup");
+  // A composed base patch is inherited without inventing a second entity-value type.
+  for (const entry of [base, team]) {
+    entry.contract.model.fields.push(field("parentTeamId", { osfType: "RelationGroup" }));
+    entry.contract.model.relationships.push({ key: "parentTeamId", fieldKey: "parentTeamId", kind: "belongsTo", target: "RelationGroup", foreignKey: "parent_team_id", ownership: "reference" });
+  }
+  team.contract.interfaces!.web!.collectionTree = { children: "memberships", parent: "parentTeamId" };
+  const result = buildWebManifest(entities, {}, corpusWebOperations(authoringDir));
+  expect(result.entities.Team!.views.collection.tree).toMatchObject({ children: "memberships", parent: "parentTeamId" });
+}, 30_000);
 
 describe('declarative collection tables', () => {
   const fixture = () => {
@@ -2395,13 +2413,13 @@ describe('declarative collection tables', () => {
     const employee = entity('Employee', 'employees', [field('fte', { baseType: 'number' }), field('person')], coreView(), [{ key: 'person', fieldKey: 'person', kind: 'belongsTo', target: 'Person', foreignKey: 'person_id' }]);
     member.contract.model.relationships.find(item => item.key === 'item')!.target = 'Employee';
     const table = product.contract.interfaces!.web!.collectionTable!;
-    table.rowLabel = 'person'; table.membershipDescription = 'role'; table.groupRows = 'plain'; table.viewSwitch = false;
+    table.rowLabel = 'person'; table.membershipDescription = 'role'; table.groupRows = 'plain'; table.viewSwitch = false; table.toolbar = { visible: false, search: false, create: false };
     table.columns = [{ key: 'fte', label: text('FTE'), values: [{ path: 'fte' }] }];
     const projected = buildWebManifest([product, member, employee, person]).entities.Product!.views.collection.table!;
     expect(projected.columns[0]!.values[0]!.path?.targetEntityId).toBe('Employee');
     expect(projected.rowLabel?.targetEntityId).toBe('Person');
     expect(projected.membershipDescription?.targetEntityId).toBe('Membership');
-    expect(projected.groupRows).toBe('plain'); expect(projected.viewSwitch).toBe(false);
+    expect(projected.groupRows).toBe('plain'); expect(projected.viewSwitch).toBe(false); expect(projected.toolbar).toEqual({ visible: false, search: false, create: false });
     table.rowLabel = 'missing';
     expect(() => buildWebManifest([product, member, employee, person])).toThrow('missing');
   });

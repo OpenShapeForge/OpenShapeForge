@@ -810,6 +810,8 @@ export class ModulePlatformRuntime {
             port: Number(request.port),
             tls: request.tls === true,
             ...(request.servername ? { servername: String(request.servername) } : {}),
+            // Passed on as a request only: `connectSocket` honours it solely
+            // when the deployment opted in to unverified TLS.
             ...(request.rejectUnauthorized === false
               ? { rejectUnauthorized: false }
               : {}),

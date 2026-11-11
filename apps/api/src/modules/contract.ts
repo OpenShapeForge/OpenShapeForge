@@ -269,7 +269,11 @@ export type ModuleSocketRequest = {
   tls: boolean;
   /** SNI name; defaults to `host`. */
   servername?: string;
-  /** Only a test server against a self-signed certificate sets this false. */
+  /**
+   * Only a test server against a self-signed certificate sets this false, and
+   * it is ignored unless the deployment sets
+   * `OSF_SOCKET_EGRESS_ALLOW_INSECURE_TLS=1`.
+   */
   rejectUnauthorized?: boolean;
   /** Deadline for establishing the connection. */
   timeoutMs?: number;

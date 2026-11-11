@@ -3,9 +3,9 @@ themes:
   - key: default
     isDefault: true
     names: { en: Default, nl: Standaard, fr: Par défaut }
-    surfaceColor: "#ffffff"
-    textColor: "#111827"
-    accentColor: "#2563eb"
+    surfaceColor: "standard:white"
+    textColor: "standard:ink"
+    accentColor: "standard:cobalt"
     fontFamily: dm-sans
     typography:
       body: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: text }

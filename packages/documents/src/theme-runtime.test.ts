@@ -1,3 +1,4 @@
+import { resolvePalette } from "@openshapeforge/operations";
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import type { ModuleOperationContext } from "@openshapeforge/plugin-runtime";
@@ -12,8 +13,8 @@ const versionId = "20000000-0000-4000-8000-000000000021";
 const documentId = "20000000-0000-4000-8000-000000000022";
 
 const themeRow = (id: string, color: string, isDefault = false) => ({
-  id, key: id === defaultId ? "default" : "brand", name: "Theme", isDefault, surfaceColor: color,
-  textColor: "#111827", accentColor: "#2563eb", fontFamily: "dm-sans",
+  id, key: id === defaultId ? "default" : "brand", name: "Theme", isDefault, surfaceColor: `tenant:test-${color.slice(1)}`,
+  textColor: "standard:ink", accentColor: "tenant:test-2563eb", fontFamily: "dm-sans",
   typography: {
     body: { fontSize: 11, lineHeight: 1.5, fontWeight: 400, colorRole: "text" },
     heading1: { fontSize: 22, lineHeight: 1.25, fontWeight: 700, colorRole: "text" },
@@ -31,6 +32,7 @@ function context(queries: Array<{ sql: string; rows: unknown[] }>): ModuleOperat
     transport: "operation",
     session: { tenantId: tenant, userId: tenant, credential: "bearer", roles: ["CaseFile.All.Read"], groups: [], scope: "tenant" },
     platform: {
+      operations: {execute: async () => ({data:{colors:resolvePalette(['ff0000','00aa00','0000aa','111827','2563eb','ffffff','112233'].map(hex=>({key:`test-${hex}`,name:hex,value:`#${hex}`,active:true})))}})},
       records: { assertAccess: async () => undefined },
       db: {
         withSession: async (_session: unknown, work: (trx: unknown) => Promise<unknown>) => work({

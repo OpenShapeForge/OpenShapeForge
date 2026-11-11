@@ -302,6 +302,7 @@ export type ColumnDefinition = {
   generated?: "identity";
   references?: ReferenceDefinition;
   sourceField?: string;
+  colorReference?: boolean;
   /** Stored canonical FieldDefinition position, projected from osfType. */
   storedFieldDefinition?: "single" | "collection";
   fieldPolicy?: import("@openshapeforge/operations").FieldValuePolicy;

@@ -936,6 +936,7 @@ function renderManifestJson(
       // to report a changed default as drift.
       ...(column.default === undefined ? {} : { default: column.default }),
       ...(column.sourceField === undefined ? {} : { sourceField: column.sourceField }),
+      ...(column.colorReference ? { colorReference: true } : {}),
       ...(column.storedFieldDefinition === undefined ? {} : { storedFieldDefinition: column.storedFieldDefinition }),
       ...(column.document ? { document: column.document } : {}),
       ...(column.fieldPolicy === undefined ? {} : { fieldPolicy: column.fieldPolicy }),

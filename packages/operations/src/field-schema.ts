@@ -102,6 +102,7 @@ function withFieldMetadata(
   if (title) schema.title = title;
   // The type a form renders the property through; the JSON type beside it is what validates.
   schema["x-osf-type"] = field.osfType;
+  if (field.deriveOnCreate) schema["x-osf-derive-on-create"] = { ...field.deriveOnCreate };
   if (field.typedBy) schema["x-osf-typed-by"] = { ...field.typedBy };
   const context = {
     ...(field.unit ? { unit: field.unit } : {}),
@@ -236,7 +237,7 @@ export function objectSchema(
     // actually materialize it. Connector contract validators deliberately do
     // not, so their callers keep the stricter boundary.
     if (
-      options.requireRequired && field.required &&
+      options.requireRequired && field.required && !field.deriveOnCreate &&
       (!options.defaultsAreMaterialized || field.defaultValue === undefined)
     ) required.push(field.key);
   }

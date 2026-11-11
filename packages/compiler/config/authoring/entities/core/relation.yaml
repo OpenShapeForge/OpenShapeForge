@@ -51,6 +51,13 @@ fields:
         computed per request from label_rules.
       nl: Runtime-afgeleide uitkomsten van labelregels voor deze relatie. Niet
         gepersisteerd; elke request opnieuw bepaald op basis van label_rules.
+  - key: avatar
+    osfType: Document
+    required: false
+    label: { en: Avatar, nl: Avatar }
+    document: { content: file, mimeTypes: [image/png, image/jpeg, image/webp] }
+    persisted: { column: avatar_document_id, storageClass: core }
+    relationship: { ownership: reference }
   - key: displayName
     osfType: string
     required: true
@@ -375,6 +382,7 @@ interfaces:
   rest: {}
   graphql: {}
   mcp:
+    tools: generic
     operations:
       create:
         instructions:

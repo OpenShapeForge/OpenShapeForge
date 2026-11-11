@@ -58,6 +58,7 @@ export type OperationDocumentPolicy = { content: "file" | "blocks"; mimeTypes?: 
 export type OperationFieldDefinition = {
   document?: OperationDocumentPolicy;
   key: string;
+  deriveOnCreate?: { from: string; transform: "slug"; onConflict: "suffix" };
   typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
   /** A base type, a osf-type catalog key, or an entity name. */
   osfType: string;
@@ -145,6 +146,7 @@ export type OperationFieldSchemaOptions = {
 export type ResolvedOperationField = {
   document?: OperationDocumentPolicy;
   key: string;
+  deriveOnCreate?: { from: string; transform: "slug"; onConflict: "suffix" };
   typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
   osfType: string;
   baseType: OperationFieldBaseType;

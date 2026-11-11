@@ -32,7 +32,8 @@ const webPresent = existsSync(join(repoRoot, "apps/web"));
 // (test/fixtures/authoring/extensible) and carries a Web contract so the Web
 // manifest projects its tenant-field designer (`customFields`).
 const activeLayers = loadAuthoringConfig(repoRoot).layers;
-const expectedGeneratedCrudEntityCount = 117 +
+// ReferenceValueAppearance has its own generated CRUD pages.
+const expectedGeneratedCrudEntityCount = 118 +
   (activeLayers.includes("test/fixtures/authoring/record-actions") ? 2 : 0) +
   (activeLayers.includes("test/fixtures/authoring/extensible") ? 1 : 0);
 

@@ -443,7 +443,7 @@ export interface EntityWebRecordLayout {
 export type EntityWebNamedViewDefinition =
     | { kind: "record"; title?: string; fields: string[] }
     | { kind: "record"; title?: string; layout: EntityWebRecordLayout }
-    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | LocalizedText; title?: LocalizedText; filter?: Record<string, unknown>; tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
+    | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | LocalizedText; title?: LocalizedText; filter?: Record<string, unknown>; tree?: { children: string; parent?: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
     | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
 
 
@@ -457,6 +457,9 @@ export type CollectionTableValueDefinition = {
   when?: { path: string; equals: string | number | boolean };
   defaultValue?: string | number;
 };
+/** Binding-backed record panel body: the same tabs -> groups -> fields shape as a record view layout, resolved against the binding schema. */
+export type BindingPanelLayout = { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: string[] }> }> };
+
 export type CollectionTableDefinition = {
   bindings?: Record<string, { entity: string; operation: string; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;
   navigation?: Array<{ route: string; label: LocalizedText }>;
@@ -464,9 +467,12 @@ export type CollectionTableDefinition = {
   membershipDescription?: string;
   groupRows?: "plain" | "bundle";
   viewSwitch?: boolean;
+  /** Collection controls the web table offers; `false` hides one. Other channels keep their Operations. */
+  toolbar?: { visible?: boolean; search?: boolean; create?: boolean };
   recordPanel?: {
     actions?: Array<"edit" | "openFull">;
     primaryMembership?: { field: string; equals: string };
+    avatar?: string;
     summaryColumns?: string[];
     sections?: Array<{
       title: LocalizedText;
@@ -481,7 +487,7 @@ export type CollectionTableDefinition = {
       details?: CollectionTableValueDefinition[];
       values: CollectionTableValueDefinition[];
     }>;
-    title: LocalizedText; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+    title: LocalizedText; layout?: BindingPanelLayout; binding?: string; includeRecord?: boolean; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;
@@ -490,6 +496,8 @@ export type CollectionTableDefinition = {
   ungrouped?: LocalizedText;
   columns: Array<{ key: string; label: LocalizedText; values: CollectionTableValueDefinition[]; membershipValues?: CollectionTableValueDefinition[] }>;
   summary?: { field: string; labels?: Record<string, LocalizedText> };
+  /** Footer: the matching population and one total per currency from a collection read over the whole authorized set. */
+  totals?: { entity: string; operation: string; count: LocalizedText; label: LocalizedText; note?: LocalizedText };
 };
 
 export interface EntityWebViewDefinition {
@@ -505,7 +513,7 @@ export interface EntityWebViewDefinition {
      * record groups the records its `children` collection holds.
      */
     table?: CollectionTableDefinition;
-    tree?: { children: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
+    tree?: { children: string; parent?: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
     /** Optional grouped board presentation of this same collection. */
     board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: string; currency: string }; card: { title: string | string[]; timestamp?: string; indicator?: string; subtitle?: string[]; amount?: { value: string; currency: string }; body?: string[] } };
     /** Opaque host renderer-registry key; omission uses the generic collection renderer. */

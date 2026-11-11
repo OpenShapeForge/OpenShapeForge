@@ -294,6 +294,15 @@ interfaces:
           - update
           - delete
         layout:
+          context:
+            fields:
+              - status
+              - startDate
+              - endDate
+              - budgetTotal
+            relationships:
+              - parentProjectId
+              - costDimensionId
           tabs:
             - id: overview
               label:
@@ -307,6 +316,7 @@ interfaces:
                     - code
                     - name
                     - status
+                    - parentProjectId
                 - title:
                     en: Period
                     nl: Periode
@@ -317,8 +327,9 @@ interfaces:
                     en: Budget
                     nl: Budget
                   fields:
-                    - currencyCode
                     - budgetTotal
+                    - currencyCode
+                    - costDimensionId
                 - title:
                     en: Description
                     nl: Omschrijving
@@ -333,6 +344,46 @@ interfaces:
                     - sourceAuthority
                     - sourceOrganization
                     - sourceAdministration
+            - id: phases
+              label:
+                en: Phases
+                nl: Fasen
+              relationship: projectPhases
+            - id: tasks
+              label:
+                en: Tasks
+                nl: Taken
+              relationship: projectTasks
+            - id: team
+              label:
+                en: Team
+                nl: Team
+              relationship: projectRoles
+            - id: objectives
+              label:
+                en: Objectives
+                nl: Doelstellingen
+              relationship: projectObjectives
+            - id: budgetLines
+              label:
+                en: Budget lines
+                nl: Budgetregels
+              relationship: projectBudgetLines
+            - id: orders
+              label:
+                en: Orders
+                nl: Opdrachten
+              relationship: projectOrders
+            - id: spendings
+              label:
+                en: Spending
+                nl: Bestedingen
+              relationship: projectSpendings
+            - id: subprojects
+              label:
+                en: Subprojects
+                nl: Subprojecten
+              relationship: projects
         modes:
           create:
             title:
@@ -346,6 +397,7 @@ interfaces:
                   - code
                   - name
                   - status
+                  - parentProjectId
               - title:
                   en: Period
                   nl: Periode
@@ -356,22 +408,14 @@ interfaces:
                   en: Budget
                   nl: Budget
                 fields:
-                  - currencyCode
                   - budgetTotal
+                  - currencyCode
+                  - costDimensionId
               - title:
                   en: Description
                   nl: Omschrijving
                 fields:
                   - description
-              - title:
-                  en: Source
-                  nl: Herkomst
-                fields:
-                  - externalId
-                  - externalCode
-                  - sourceAuthority
-                  - sourceOrganization
-                  - sourceAdministration
           update:
             title:
               en: Edit project

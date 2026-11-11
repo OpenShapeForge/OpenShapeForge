@@ -32,9 +32,14 @@ export interface AppShellNavItem {
   icon?: string;
   route?: LocalizedText;
   entity?: string | null;
+  /** A named collection view of `entity`; absent opens its canonical collection. */
   view?: string;
+  /** A page of standalone Operations, by page id. */
+  page?: string;
   context?: string;
   disabled?: boolean;
+  /** `false` keeps the entry out of MCP application openers; the browser item is unaffected. */
+  mcp?: false;
   children?: AppShellNavItem[];
 }
 

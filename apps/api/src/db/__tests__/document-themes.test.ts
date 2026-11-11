@@ -16,6 +16,7 @@ import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { jsonbLiteral } from "../sql-helpers.js";
+import { resolvePalette } from "@openshapeforge/operations";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -73,7 +74,7 @@ async function insertTheme(db: Kysely<DB>, tenant: string, key: string, opts: { 
       id, tenant_id, key, name, is_default, surface_color, text_color, accent_color, font_family, typography
     ) values (
       ${id}::uuid, ${tenant}::uuid, ${key}, ${key}, ${opts.isDefault ?? false},
-      ${opts.color ?? "#ffffff"}, '#111827', '#2563eb', 'dm-sans', ${jsonbLiteral(typography)}
+      ${opts.color ? `tenant:test-${opts.color.slice(1)}` : "standard:white"}, 'standard:ink', 'standard:cobalt', 'dm-sans', ${jsonbLiteral(typography)}
     )
   `.execute(db);
   return id;
@@ -84,6 +85,10 @@ function resolveContext(db: Kysely<DB>, tenantId: string): ModuleOperationContex
     transport: "operation",
     session: { tenantId, userId: tenantId, credential: "bearer", roles: ["Organization.All.ReadWrite"], groups: [], scope: "tenant" },
     platform: {
+      operations: { execute: async (_session: unknown, request: {operation:{id:string}}) => {
+        expect(request.operation.id).toBe("colors.list");
+        return {data:{colors:resolvePalette(["ff0000","00ff00","0000aa","abcdef"].map(hex=>({key:`test-${hex}`,name:hex,value:`#${hex}`,active:true})))}};
+      } },
       records: { assertAccess: async () => undefined },
       db: { withSession: async (_session: unknown, work: (trx: unknown) => Promise<unknown>) => db.transaction().execute(work) },
     },
@@ -146,7 +151,7 @@ describe("document theme invariants", () => {
       expect(before.value.theme).toMatchObject({ id: second, surfaceColor: "#ff0000" });
       expect(before.value.resolution.kind).toBe("template");
 
-      await sql`update erp.document_themes set surface_color = '#0000aa' where id = ${second}::uuid`.execute(db);
+      await sql`update erp.document_themes set surface_color = 'tenant:test-0000aa' where id = ${second}::uuid`.execute(db);
       const after = await resolveDocumentTheme({ templateId }, ctx) as { value: { theme: { surfaceColor: string } } };
       expect(after.value.theme.surfaceColor).toBe("#0000aa");
 

@@ -90,6 +90,7 @@ jobs:
           sudo rm -f \
             /etc/apt/sources.list.d/google-chrome.list \
             /etc/apt/sources.list.d/google-chrome.sources
+          bash ../../scripts/ci/prepare-playwright-network.sh
           bunx playwright install --with-deps chromium
 
       - name: Provision database roles

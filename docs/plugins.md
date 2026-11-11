@@ -21,6 +21,14 @@ retried and a redirect is a refusal. The body is buffered up to a budget: an SSE
 response is returned once the upstream closes it, and one still open at the
 deadline fails, so this does not carry streaming notifications.
 
+`platform.egress.connect(session, grant, request)` opens a raw socket to a
+`host:port` the Adapter grants. Core resolves the name itself, refuses the
+connection if any answer is a loopback, link-local, private or otherwise
+non-public address, and dials only the checked addresses while keeping the name
+for TLS. A module's `rejectUnauthorized: false` is ignored unless the deployment
+sets `OSF_SOCKET_EGRESS_ALLOW_INSECURE_TLS=1`; leave it unset outside test
+environments.
+
 Canonical read handlers can call `platform.readProgress?.report(session, {data, message})`
 to publish provisional evidence while the original request is still running.
 The ordinary final result remains mandatory and unchanged. Core accepts only

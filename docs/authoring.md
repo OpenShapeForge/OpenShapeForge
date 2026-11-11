@@ -1364,6 +1364,27 @@ filed anywhere but the layer root. Patches stack across layers in order.
 Shell component + sidebar navigation (labels, icons, `entity:` references).
 Consumed only by web UI generation, so it has no effect in a repo with no `apps/web`.
 
+Each sidebar item is also one **application entry**: `projectWebAppEntries(shell, manifest)`
+(`@openshapeforge/compiler`) resolves it against the compiled web manifest into the
+`WebAppEntriesV1` contract of `@openshapeforge/interface-web`. A host reads its browser
+navigation and its MCP application openers from that one result. An item names exactly one target:
+
+| Key | Target | Notes |
+|---|---|---|
+| `entity: <slug>` | the entity's canonical collection | |
+| `entity: <slug>` + `view: <name>` | a named collection view with its own route | the view must be an addressable collection |
+| `page: <id>` | a page of standalone Operations | |
+| `route: /path` | a route the host renders itself | never offered as an MCP opener; rejected when a compiled view or page already answers the route |
+
+`key` is the entry id and stays stable when labels or routes change; it is a lowercase
+hyphenated word. `mcp: false` keeps an entry out of MCP openers without touching the
+browser item. An entry copies no fields, layout, schema or roles: it lists the canonical
+Operations whose discoverability admits it (`discoverOperations`), and those Operations
+keep the authorization. Duplicate keys, two items opening the same route, a route that
+needs a record, a missing entity, view or page, and a route claimed by more than one
+top-level view all fail the projection. `resolveWebTarget(manifest, pathname, entries)`
+is the matching resolver; it returns an entity view, an Operation page or a declared host page.
+
 ## Contexts and mappings (supported, unused here)
 
 The loader also understands a per-context structure that this repo does not

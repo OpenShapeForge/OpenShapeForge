@@ -141,6 +141,8 @@ export type {
 } from "./plugins.js";
 export type { TableDefinition } from "./schema.js";
 export { buildWebManifest, renderWebManifest, hasWebRestCollection } from "./authoring/web-manifest.js";
+export { projectWebAppEntries } from "./authoring/web-app-entries.js";
+export type { WebAppEntryOptions, WebAppEntryProjection, WebAppEntryShell } from "./authoring/web-app-entries.js";
 export { collectPluginSeedFixtures, prepareRuntimeModules } from "./prepare-runtime.js";
 export { resolveModelFields } from "./authoring/compiler/model.js";
 export { BASE_TYPES, isBaseType, resolveBaseType, osfTypeDefinitionOf, withBaseTypes } from "./authoring/entity-fields.js";

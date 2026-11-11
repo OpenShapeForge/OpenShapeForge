@@ -131,7 +131,33 @@
     }
   },
   "osfTypes": {
+    "icon": {
+      "label": {
+        "en": "Icon",
+        "nl": "Icoon"
+      },
+      "baseType": "string",
+      "validation": {
+        "pattern": "^[a-z][a-z0-9\\-]{0,63}$",
+        "maxLength": 64
+      }
+    },
     "color": {
+      "label": {
+        "en": "Palette color",
+        "nl": "Paletkleur"
+      },
+      "baseType": "string",
+      "validation": {
+        "pattern": "^(standard|tenant):[a-z][a-z0-9\\-]{0,63}$",
+        "maxLength": 73
+      },
+      "render": {
+        "display": "FieldColorIcon",
+        "input": "FieldColorIcon"
+      }
+    },
+    "colorValue": {
       "label": {
         "en": "Color",
         "nl": "Kleur"
@@ -145,6 +171,80 @@
         "display": "ColorDisplay",
         "input": "ColorPicker"
       }
+    },
+    "colorPalette": {
+      "kind": "object",
+      "baseType": "object",
+      "label": {
+        "en": "Custom colors",
+        "nl": "Eigen kleuren"
+      },
+      "children": [
+        {
+          "key": "colors",
+          "osfType": "object",
+          "label": {
+            "en": "Colors",
+            "nl": "Kleuren"
+          },
+          "required": true,
+          "cardinality": {
+            "min": 0,
+            "max": 100
+          },
+          "children": [
+            {
+              "key": "key",
+              "osfType": "string",
+              "required": true,
+              "deriveOnCreate": {
+                "from": "name",
+                "transform": "slug",
+                "onConflict": "suffix"
+              },
+              "label": {
+                "en": "Stable key",
+                "nl": "Vaste sleutel"
+              },
+              "validation": {
+                "pattern": "^[a-z][a-z0-9\\-]{0,63}$",
+                "maxLength": 64
+              }
+            },
+            {
+              "key": "name",
+              "osfType": "string",
+              "required": true,
+              "label": {
+                "en": "Name",
+                "nl": "Naam"
+              },
+              "validation": {
+                "minLength": 1,
+                "maxLength": 100
+              }
+            },
+            {
+              "key": "value",
+              "osfType": "colorValue",
+              "required": true,
+              "label": {
+                "en": "Color value",
+                "nl": "Kleurwaarde"
+              }
+            },
+            {
+              "key": "active",
+              "osfType": "boolean",
+              "required": true,
+              "label": {
+                "en": "Available for selection",
+                "nl": "Beschikbaar om te kiezen"
+              }
+            }
+          ]
+        }
+      ]
     },
     "entityValue": {
       "kind": "object",
@@ -17231,6 +17331,19 @@
           }
         },
         {
+          "key": "relations",
+          "label": {
+            "en": "Relations",
+            "nl": "Relaties"
+          },
+          "osfType": "Relation",
+          "cardinality": "collection",
+          "relationship": {
+            "inverse": "avatar",
+            "ownership": "reference"
+          }
+        },
+        {
           "key": "variants",
           "label": {
             "en": "Content",
@@ -17608,7 +17721,7 @@
           "key": "surfaceColor",
           "osfType": "color",
           "required": true,
-          "defaultValue": "#ffffff",
+          "defaultValue": "standard:white",
           "label": {
             "en": "Surface",
             "nl": "Oppervlak"
@@ -17622,7 +17735,7 @@
           "key": "textColor",
           "osfType": "color",
           "required": true,
-          "defaultValue": "#111827",
+          "defaultValue": "standard:ink",
           "label": {
             "en": "Text",
             "nl": "Tekst"
@@ -17636,7 +17749,7 @@
           "key": "accentColor",
           "osfType": "color",
           "required": true,
-          "defaultValue": "#2563eb",
+          "defaultValue": "standard:cobalt",
           "label": {
             "en": "Accent",
             "nl": "Accent"
@@ -34708,6 +34821,89 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "ReferenceValueAppearance": {
+      "kind": "entity",
+      "entity": "ReferenceValueAppearance",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Reference value appearance",
+        "nl": "Weergave referentiewaarde"
+      },
+      "pluralLabel": {
+        "en": "Reference value appearances",
+        "nl": "Weergaven referentiewaarden"
+      },
+      "shape": [
+        {
+          "key": "groupKey",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "label": {
+            "en": "Catalog group",
+            "nl": "Catalogusgroep"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "persisted": {
+            "column": "group_key",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "code",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "label": {
+            "en": "Value code",
+            "nl": "Waardecode"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "persisted": {
+            "column": "code",
+            "storageClass": "core"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "referenceValueAppearanceId": {
+      "kind": "entityId",
+      "entity": "ReferenceValueAppearance",
+      "baseType": "string",
+      "label": {
+        "en": "Reference value appearance",
+        "nl": "Weergave referentiewaarde"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "ReferenceValueAppearance",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{groupKey}} / {{code}}",
+      "filterField": "code",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Relation": {
       "kind": "entity",
       "entity": "Relation",
@@ -34737,6 +34933,30 @@
           "description": {
             "en": "Runtime-resolved label rule outputs for this relation. Not persisted; computed per request from label_rules.",
             "nl": "Runtime-afgeleide uitkomsten van labelregels voor deze relatie. Niet gepersisteerd; elke request opnieuw bepaald op basis van label_rules."
+          }
+        },
+        {
+          "key": "avatar",
+          "osfType": "Document",
+          "required": false,
+          "label": {
+            "en": "Avatar",
+            "nl": "Avatar"
+          },
+          "document": {
+            "content": "file",
+            "mimeTypes": [
+              "image/png",
+              "image/jpeg",
+              "image/webp"
+            ]
+          },
+          "persisted": {
+            "column": "avatar_document_id",
+            "storageClass": "core"
+          },
+          "relationship": {
+            "ownership": "reference"
           }
         },
         {
@@ -48302,6 +48522,7 @@
       "items": [
         {
           "value": "planned",
+          "color": "standard:neutral",
           "label": {
             "nl": "Gepland",
             "en": "Planned"
@@ -48309,6 +48530,7 @@
         },
         {
           "value": "active",
+          "color": "standard:blue",
           "label": {
             "nl": "Actief",
             "en": "Active"
@@ -48316,6 +48538,7 @@
         },
         {
           "value": "on_hold",
+          "color": "standard:orange",
           "label": {
             "nl": "Gepauzeerd",
             "en": "On hold"
@@ -48323,6 +48546,7 @@
         },
         {
           "value": "completed",
+          "color": "standard:green",
           "label": {
             "nl": "Afgerond",
             "en": "Completed"
@@ -48330,6 +48554,7 @@
         },
         {
           "value": "cancelled",
+          "color": "standard:red",
           "label": {
             "nl": "Geannuleerd",
             "en": "Cancelled"

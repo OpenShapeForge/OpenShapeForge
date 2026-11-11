@@ -62,6 +62,18 @@ fields:
       storageClass: core
     render:
       component: FieldDateAndTime
+  - key: color
+    osfType: color
+    required: false
+    label: { en: Color, nl: Kleur }
+    description: { en: Display color of this record., nl: Weergavekleur van dit record. }
+    persisted: { column: color, storageClass: core }
+  - key: icon
+    osfType: icon
+    required: false
+    label: { en: Icon, nl: Icoon }
+    description: { en: Icon key of this record., nl: Icoonsleutel van dit record. }
+    persisted: { column: icon, storageClass: core }
   - key: externalId
     osfType: string
     required: false

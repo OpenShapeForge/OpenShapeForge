@@ -11,3 +11,6 @@ export * from "./session-recovery.js";
 export * from "./session-updater.js";
 
 export { missingLocalizedMetadata } from "./localization.js";
+export { matchPageRoute, pageRoute, resolveWebTarget, sortedPages, webAppEntryForRoute } from "./routing.js";
+export type { WebRouteTarget } from "./routing.js";
+export * from "./app-entry-tools.js";

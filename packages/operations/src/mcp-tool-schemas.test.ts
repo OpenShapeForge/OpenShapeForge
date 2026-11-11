@@ -59,3 +59,17 @@ test("generic execution preserves every JSON result type, including recursively 
   expect(validate({ operations: [] })).toBe(false);
   expect(validate({ data: null, operations: [null] })).toBe(false);
 });
+
+
+test("generic execution accepts durable references and rejects malformed or undeclared envelope fields", () => {
+  const validate = ajv.compile(searchTools[1]!.outputSchema!);
+  const envelope = { data: { status: "waiting" }, operations: [] };
+  for (const kind of ["workflow", "export"]) {
+    expect(validate({ ...envelope, execution: { kind, ref: "run-1" } })).toBe(true);
+  }
+  for (const execution of [null, "run-1", {}, { kind: "workflow" }, { ref: "run-1" },
+    { kind: 1, ref: "run-1" }, { kind: "workflow", ref: 1 }, { kind: "workflow", ref: "run-1", extra: true }]) {
+    expect(validate({ ...envelope, execution })).toBe(false);
+  }
+  expect(validate({ ...envelope, unknown: true })).toBe(false);
+});

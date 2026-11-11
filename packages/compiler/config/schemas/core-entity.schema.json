@@ -1771,6 +1771,38 @@
             }
           }
         },
+        "toolbar": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Which collection controls the web table offers. Presentation only: the list and create Operations stay available to every other channel.",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Toolbar",
+              "nl": "Werkbalk"
+            }
+          },
+          "properties": {
+            "visible": {"type": "boolean", "x-osf-i18n": {"title": {"en": "Show toolbar", "nl": "Werkbalk tonen"}}},
+            "search": {
+              "type": "boolean",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Show search",
+                  "nl": "Zoeken tonen"
+                }
+              }
+            },
+            "create": {
+              "type": "boolean",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Show create button",
+                  "nl": "Toevoegknop tonen"
+                }
+              }
+            }
+          }
+        },
         "heading": {
           "type": "object",
           "additionalProperties": false,
@@ -1889,6 +1921,72 @@
             }
           }
         },
+        "totals": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "A footer that states the matching population and one aggregate total per currency, computed by a collection read Operation over the whole authorized matching set. Currencies are never added together.",
+          "required": [
+            "entity",
+            "operation",
+            "count",
+            "label"
+          ],
+          "properties": {
+            "entity": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Entity",
+                  "nl": "Entiteit"
+                }
+              }
+            },
+            "operation": {
+              "type": "string",
+              "minLength": 1,
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Totals Operation",
+                  "nl": "Totaal-Operation"
+                }
+              }
+            },
+            "count": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Population noun",
+                  "nl": "Naam van de populatie"
+                }
+              }
+            },
+            "label": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Total label",
+                  "nl": "Totaallabel"
+                }
+              }
+            },
+            "note": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Note",
+                  "nl": "Notitie"
+                }
+              }
+            }
+          },
+          "x-osf-i18n": {
+            "title": {
+              "en": "Totals",
+              "nl": "Totalen"
+            }
+          }
+        },
         "summary": {
           "type": "object",
           "additionalProperties": false,
@@ -1939,6 +2037,28 @@
             }
           },
           "properties": {
+          "layout": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["tabs"],
+            "properties": {
+              "tabs": {
+                "type": "array", "minItems": 1,
+                "items": {
+                  "type": "object", "additionalProperties": false, "required": ["id", "label", "groups"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "label": { "type": "object", "additionalProperties": false, "required": ["en"], "properties": { "en": { "type": "string" }, "nl": { "type": "string" } } },
+                    "groups": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["fields"], "properties": {
+                      "id": { "type": "string" },
+                      "title": { "type": "object", "additionalProperties": false, "required": ["en"], "properties": { "en": { "type": "string" }, "nl": { "type": "string" } } },
+                      "fields": { "type": "array", "minItems": 1, "items": { "type": "string" } } } } }
+                  }
+                }
+              }
+            }
+          },
+            "avatar": { "type": "string", "minLength": 1, "description": "Optional image document field in the read binding for the panel heading." },
             "includeRecord": { "type": "boolean", "description": "Keep the canonical record editor alongside the typed summary.", "x-osf-i18n": { "title": { "en": "Include record", "nl": "Record tonen" } } },
             "actions": { "type": "array", "uniqueItems": true, "items": { "enum": ["edit", "openFull"] } },
             "primaryMembership": {
@@ -2308,6 +2428,7 @@
                 "children": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Children collection", "nl": "Collectie met onderdelen" } } },
                 "label": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group label field", "nl": "Groepslabelveld" } } },
                 "count": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group count field", "nl": "Groepstellingsveld" } } },
+                "parent": {"$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": {"title": {"en": "Parent field", "nl": "Bovenliggend veld"}}},
                 "through": {"$ref": "#/$defs/webCollectionTreeThrough"}
               }
             },

@@ -1006,3 +1006,19 @@ privileges — `process.env` (including the secret keyring), the database
 handle, the network — exactly as the
 [connector execution trust model](connectors.md#execution-trust-model)
 describes for connector packages. Load only reviewed modules.
+
+
+### Predefined tenant variables
+
+A runtime module may contribute `tenantSettingDefaults`: ordinary `namespace`,
+`key`, canonical stored `definition`, optional `value` and `description` metadata.
+The same runtime field-schema compiler that validates typed CRUD values validates
+these defaults. A confidential definition must start unset; never ship provider
+keys or other plaintext secrets in defaults. Duplicate contributed slots are
+refused before persistence.
+
+Platform tenant provisioning and the closed managed-tenant provisioning command
+insert missing declared variables. `db:migrate` reconciles existing tenants under
+an audited system session. Existing rows, definitions, values, ciphertext and
+versions are never rewritten. The normal tenant-variable CRUD operations own
+subsequent edits. The core palette uses this same insert-only reconciliation.

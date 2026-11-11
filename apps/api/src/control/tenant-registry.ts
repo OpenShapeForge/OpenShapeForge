@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import type { RuntimeTenantSettingDefault } from "@openshapeforge/plugin-runtime";
 /**
  * Reading the tenant registry, and moving a tenant through its lifecycle.
  *
@@ -164,6 +165,7 @@ export function toTenantRecord(row: TenantRow): TenantRecord {
  * Keycloak surfaces.
  */
 export type ControlDeps = {
+  tenantSettingDefaults?: readonly RuntimeTenantSettingDefault[] | undefined;
   db: OpenShapeForgeDatabase;
   /** The identity-configuration SPI: organization creation and hierarchy. */
   keycloak: KeycloakSpiClient;

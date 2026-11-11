@@ -35,6 +35,10 @@ import externalRuntimeModule, {
   setExternalOwnerMode,
 } from "../../modules/__tests__/fixtures/external-egress-owner/runtime.js";
 import { toHttpError } from "../../rest/http-error.js";
+import { __setOutboundAddressResolverForTests } from "../../modules/egress.js";
+
+// Test hosts are not in DNS; core resolves every owner-bound request.
+__setOutboundAddressResolverForTests(async () => ["93.184.216.34"]);
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -203,6 +207,7 @@ describe("the full dispatch chain", () => {
             ...invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
             egressSource: trustedSource,
             egressOwner: {
+              pinsResolvedAddresses: true as const,
               fetch: async (request) => {
                 egressRequests.push(request);
                 return fetch(request.url, request.init);
@@ -427,6 +432,7 @@ describe("the full dispatch chain", () => {
         ...invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
         registry: hostileRegistry,
         egressOwner: {
+          pinsResolvedAddresses: true as const,
           fetch: async () => new Response(null, {
             status: 307,
             headers: { location: "https://us.objectstore.example/final" },
@@ -474,6 +480,7 @@ describe("the full dispatch chain", () => {
           ...invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
           signal: before.signal,
           egressOwner: {
+            pinsResolvedAddresses: true as const,
             fetch: async () => {
               hookCalls += 1;
               return Response.json({ objects: [] });
@@ -495,6 +502,7 @@ describe("the full dispatch chain", () => {
         ...invocationContext(TENANT, ["Connectors.ExampleObjectStore.Read"]),
         signal: during.signal,
         egressOwner: {
+          pinsResolvedAddresses: true as const,
           fetch: async (request) => {
             hookCalls += 1;
             entered();

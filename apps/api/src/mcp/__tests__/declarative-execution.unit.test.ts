@@ -35,6 +35,10 @@ import {
   keyringFromEnv,
 } from "../../connectors/secrets.js";
 import { toHttpError } from "../../rest/http-error.js";
+import { __setOutboundAddressResolverForTests } from "../../modules/egress.js";
+
+// Test hosts are not in DNS; core resolves every owner-bound request.
+__setOutboundAddressResolverForTests(async () => ["93.184.216.34"]);
 
 const KEYRING = keyringFromEnv(
   `test:${Buffer.alloc(32, 9).toString("base64")}`,
@@ -191,6 +195,7 @@ describe("redirect egress", () => {
         },
         source,
         owner: {
+          pinsResolvedAddresses: true as const,
           fetch: async (request) => {
             requests.push(request);
             sourceSnapshots.push(request.source);
@@ -579,6 +584,7 @@ describe("executeBinding", () => {
         signal: controller.signal,
         egress: {
           owner: {
+            pinsResolvedAddresses: true as const,
             fetch: async () => {
               hookCalls += 1;
               return new Response("{}");
@@ -622,6 +628,7 @@ describe("executeBinding", () => {
       signal: controller.signal,
       egress: {
         owner: {
+          pinsResolvedAddresses: true as const,
           fetch: async () => {
             markOwnerStarted();
             await ownerBarrier;
@@ -670,6 +677,7 @@ describe("executeBinding", () => {
       signal: controller.signal,
       egress: {
         owner: {
+          pinsResolvedAddresses: true as const,
           fetch: async () =>
             new Response(
               new ReadableStream<Uint8Array>(
@@ -743,6 +751,7 @@ describe("executeBinding", () => {
         keyring: KEYRING,
         egress: {
           owner: {
+            pinsResolvedAddresses: true as const,
             fetch: async (request) => {
               throw request.createFailure(kind);
             },
@@ -1011,6 +1020,7 @@ describe("executeBinding", () => {
           kind: "query",
         },
         owner: {
+          pinsResolvedAddresses: true as const,
           fetch: async (request) => {
             requests.push(request);
             return new Response(
@@ -1374,6 +1384,7 @@ describe("oauth2ClientCredentials", () => {
         },
         source,
         owner: {
+          pinsResolvedAddresses: true as const,
           fetch: async (request) => {
             requests.push(request);
             return request.purpose === "oauth"
@@ -1431,6 +1442,7 @@ describe("oauth2ClientCredentials", () => {
           scope: "personal",
         },
         owner: {
+          pinsResolvedAddresses: true as const,
           fetch: async (request) => {
             oauthSource = request.source;
             throw request.createFailure("policy_blocked");

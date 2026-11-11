@@ -8,6 +8,7 @@ import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { createHandoff, readHandoff } from "./handoff-store.js";
 import { escapeHtml } from "./browser-pages.js";
 import { productName } from "../config/product-name.js";
+import { HttpError } from "../rest/http-error.js";
 
 export const ARTIFACT_UPLOAD_APP_URI = "ui://openshapeforge/artifact-upload";
 export const ARTIFACT_UPLOAD_PATH = "/api/artifact-upload";
@@ -61,6 +62,54 @@ export async function mintArtifactUpload(input: {
   return {
     uploadUrl: `${input.origin}${ARTIFACT_UPLOAD_PATH}/${token}`,
     expiresAt: new Date(expiresAtMs).toISOString(),
+  };
+}
+
+/**
+ * What the upload tool answers. The upload link is a bearer carrying the
+ * person's roles, so where it goes decides who can use it:
+ *
+ *   private picker   the link travels in `_meta`, which the model never sees.
+ *   any other client the link would sit in model-visible text, usable by
+ *                    anyone who reads the tool result until it expires. Nothing
+ *                    is minted and the tool refuses — unless the deployment
+ *                    explicitly accepted a model-visible link.
+ */
+export async function artifactUploadToolResult(input: {
+  privatePicker: boolean;
+  modelVisibleLinkAllowed: boolean;
+  mint: () => Promise<{ uploadUrl: string; expiresAt: string }>;
+}): Promise<{
+  content: { type: "text"; text: string }[];
+  _meta?: Record<string, unknown>;
+  structuredContent?: Record<string, unknown>;
+}> {
+  if (input.privatePicker) {
+    const minted = await input.mint();
+    return {
+      content: [{ type: "text", text: "A private document upload control is ready." }],
+      _meta: { uploadUrl: minted.uploadUrl, expiresAt: minted.expiresAt },
+    };
+  }
+  if (!input.modelVisibleLinkAllowed) {
+    throw new HttpError(
+      409,
+      "PRIVATE_UPLOAD_UNAVAILABLE",
+      "This MCP client cannot show the private file picker, and the upload link is not shared in chat. " +
+        "Ask the person to upload the document from a client that shows the picker, or in the web application.",
+    );
+  }
+  const minted = await input.mint();
+  return {
+    content: [{
+      type: "text",
+      text: `This MCP client cannot show the private file picker. Ask the person to open ${minted.uploadUrl}; the one-time link expires at ${minted.expiresAt}.`,
+    }],
+    structuredContent: {
+      pending: true,
+      uploadUrl: minted.uploadUrl,
+      expiresAt: minted.expiresAt,
+    },
   };
 }
 

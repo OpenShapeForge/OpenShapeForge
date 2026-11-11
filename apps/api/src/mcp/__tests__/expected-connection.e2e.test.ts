@@ -82,6 +82,10 @@ import { mintInvocationSourceReference } from "../../modules/source-reference.js
 import { DECLARATIVE_CONNECTION_CAPABILITIES } from "../connection-expectation.js";
 import { createRuntimeDeclarativeServiceExecutor } from "../runtime-executors.js";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
+import { __setOutboundAddressResolverForTests } from "../../modules/egress.js";
+
+// Test hosts are not in DNS; core resolves every owner-bound request.
+__setOutboundAddressResolverForTests(async () => ["93.184.216.34"]);
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -443,6 +447,7 @@ describe("an expected Connection through the declarative Service engine", () => 
         const module: RuntimeModule = {
           name: "expected-connection-test-module",
           egress: {
+            pinsResolvedAddresses: true as const,
             fetch: async (request) => {
               served.push({
                 url: request.url.toString(),

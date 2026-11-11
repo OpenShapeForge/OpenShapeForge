@@ -134,11 +134,13 @@ export async function fetchWithAllowedRedirects(
       allowlist,
       fallback: (target, targetInit) => fetchImpl(target, targetInit),
       ...(egress ? { dispatch: egress } : {}),
-      denied: (deniedUrl) =>
+      denied: (deniedUrl, reason) =>
         new HttpError(
           403,
           "EGRESS_DENIED",
-          `Redirect host ${deniedUrl.hostname} is outside the egress allow-list.`,
+          reason === "address"
+            ? `Host ${deniedUrl.hostname} does not resolve to a public address.`
+            : `Redirect host ${deniedUrl.hostname} is outside the egress allow-list.`,
         ),
     });
     requestInit.signal?.throwIfAborted();

@@ -231,9 +231,10 @@ export type ModuleEgressRequest = {
    */
   source?: ModuleEgressInvocationSource;
   /**
-   * Present only on a Connection request: the public addresses core resolved
-   * `url` to. An owner that declares `pinsResolvedAddresses` dials only these
-   * and keeps `url`'s hostname for SNI, certificate validation and `Host`.
+   * The public addresses core resolved `url` to, present on every request an
+   * owner receives. The owner dials only these and keeps `url`'s hostname for
+   * SNI, certificate validation and `Host`; resolving the name again would let
+   * DNS answer differently. Optional in the type only for older owners.
    */
   resolvedAddresses?: readonly string[];
   signal?: AbortSignal;
@@ -598,7 +599,7 @@ export type RuntimeModule = RuntimeModuleContract<
   /** At most one loaded module may own final outbound request execution. */
   egress?: {
     fetch(request: ModuleEgressRequest): Promise<Response>;
-    /** Declares that `resolvedAddresses` is honored; Connection requests require it. */
+    /** Declares that `resolvedAddresses` is honored; core calls no owner without it. */
     pinsResolvedAddresses?: true;
   };
   /**

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { ARTIFACT_UPLOAD_TOOL_NAME, mintArtifactUpload } from "./artifact-upload.js";
+import { ARTIFACT_UPLOAD_TOOL_NAME, artifactUploadToolResult, mintArtifactUpload } from "./artifact-upload.js";
 import { callEditLeaseTool } from "./edit-lease-tools.js";
 import { HttpError } from "../rest/http-error.js";
 import { listConnectorContracts } from "../connectors/catalog.js";
@@ -21,6 +21,7 @@ import {
 import { operationMayInvoke } from "./entity-tool-invocation.js";
 import {
   callbackOrigin,
+  modelVisibleUploadLinkAllowed,
   elicitedKeyring,
   publicOriginIsHttps,
   supportsMcpApp,
@@ -91,32 +92,16 @@ export async function staticToolCall(
           "Secure upload handoffs are not configured.",
         );
       }
-      const minted = await mintArtifactUpload({
-        db,
-        keyring,
-        session,
-        origin: callbackOrigin(),
+      return await artifactUploadToolResult({
+        privatePicker: supportsMcpApp(server) && publicOriginIsHttps(),
+        modelVisibleLinkAllowed: modelVisibleUploadLinkAllowed(),
+        mint: () => mintArtifactUpload({
+          db,
+          keyring,
+          session,
+          origin: callbackOrigin(),
+        }),
       });
-      if (supportsMcpApp(server) && publicOriginIsHttps()) {
-        return {
-          content: [{ type: "text", text: "A private document upload control is ready." }],
-          _meta: {
-            uploadUrl: minted.uploadUrl,
-            expiresAt: minted.expiresAt,
-          },
-        };
-      }
-      return {
-        content: [{
-          type: "text",
-          text: `This MCP client cannot show the private file picker. Ask the person to open ${minted.uploadUrl}; the one-time link expires at ${minted.expiresAt}.`,
-        }],
-        structuredContent: {
-          pending: true,
-          uploadUrl: minted.uploadUrl,
-          expiresAt: minted.expiresAt,
-        },
-      };
     } catch (error) {
       return failed(error);
     }

@@ -89,31 +89,39 @@ this UX order:
    `http://` or loopback origin (local development) cannot render there — the
    panel stays blank — and the runtime does not offer it at all. The private
    app receives its single-use handoff only in tool-result metadata.
-3. **The configuration URL in the open.** Every other client (Codex, ChatGPT
+3. **The signed-in form's URL in the open.** Every other client (Codex, ChatGPT
    without an MCP-App-capable origin, a plain connector) gets a result whose
    text and `structuredContent` both carry it:
 
    ```json
    {
      "action": "configure", "status": "awaiting_person", "pending": true,
-     "configurationUrl": "https://api.example.com/api/entity-configuration/<token>",
+     "configurationUrl": "https://app.example.com/configuration?formId=<form id>",
      "expiresAt": "2026-09-05T10:30:00.000Z", "expiresInSeconds": 1800,
      "fields": [
        { "key": "clientId", "label": "Google OAuth client ID", "secret": false },
        { "key": "clientSecret", "label": "Google OAuth client secret", "secret": true }
      ],
      "resumeWith": "list_connections",
-     "instructions": "The secure form could not be completed in this client. Give the person configurationUrl: open this link in a browser and enter the values there; they never pass through the chat. …"
+     "instructions": "The secure form could not be completed in this client. Give the person configurationUrl: open this link in a browser, sign in as the same person in the same organization and enter the values there; they never pass through the chat. …"
    }
    ```
 
-   The page is served on the API's own origin (`/api/entity-configuration/<token>`,
-   branded, see `browser-pages.ts`), so no web origin is needed; the token is
-   single-use and expires after 30 minutes. Submitting the form verifies the
-   values the way `test_connection` does, creates the row, and burns the
-   token. When `OPENSHAPEFORGE_WEB_ORIGIN` is set the result also carries
-   `externalUrl`, the signed-in host web form that resolves the same pending
-   handoff after Keycloak login.
+   Tool text and `structuredContent` are readable by the model and by anyone
+   who reads the tool result, so `configurationUrl` is never the handoff
+   token. It addresses the signed-in host web form (`OPENSHAPEFORGE_WEB_ORIGIN`)
+   by the pending form's id; the person signs in as the form's owner, and the
+   pending form expires after 30 minutes. Submitting it verifies the values the
+   way `test_connection` does and creates the row. A deployment without a web
+   origin has no such form: the create tool then fails with 503
+   `CONFIGURATION_UNAVAILABLE` instead of exposing a bearer link.
+
+The document upload tool follows the same rule. Its upload link is a bearer
+that stages a file as the person, so it travels only in the private picker's
+tool-result metadata. A client that cannot show the picker is refused with 409
+`PRIVATE_UPLOAD_UNAVAILABLE` and nothing is minted, unless the deployment sets
+`OPENSHAPEFORGE_MODEL_VISIBLE_UPLOAD_LINK=1` and accepts that anyone who can
+read the tool result can use the link until it expires or is consumed.
 
 Secret and confidential values post directly to the runtime and are encrypted
 at rest with `OPENSHAPEFORGE_ELICITED_SECRET_KEYS`.
@@ -890,7 +898,7 @@ and the onboarding checklist cannot disagree:
 | code | who | message |
 | --- | --- | --- |
 | `CONNECTION_MISSING` (400) | employee | *The organization's Google connection is not set up. Ask an organization administrator to set up the Google connection (create_connection).* |
-| `CONNECTION_MISSING` (400) | organization administrator | the same, plus *set it up with create_connection { adapterId: "…" }, or open `<configurationUrl>` in a browser …* — a fresh 30-minute browser handoff to the same secure form is minted for administrators when no Connection row exists yet |
+| `CONNECTION_MISSING` (400) | organization administrator | the same, plus *set it up with create_connection { adapterId: "…" }, or open `<configurationUrl>` in a browser …* — a fresh 30-minute pending form is minted for administrators when no Connection row exists yet and a web origin is deployed; the link is the signed-in web form, never the handoff token |
 | `CONNECTION_REQUIRED` (403) | personal sign-in missing | *This tool needs your personal Google sign-in. Call connect_service { tool: "inbox_doorzoeken" } and open the returned URL to approve at Google.* |
 | `CONNECTION_REQUIRED` (403) | tenant-wide sign-in missing | *… needs a one-time sign-in for the whole organization. Ask an organization administrator to call connect_service { tool: "…" } …* |
 | `REAUTHORIZATION_REQUIRED` (403) | token expired / unreadable / scopes missing | *Your Google sign-in does not cover the required scopes: …. Call connect_service { tool: "…" } again and approve at Google.* |

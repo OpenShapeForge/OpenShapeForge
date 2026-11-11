@@ -33,6 +33,18 @@ import {
   __withholdClassifiedForTests as withholdClassified,
 } from "../generated-mcp-server.js";
 
+function withWebOrigin(origin: string | undefined, run: () => void): void {
+  const previous = process.env.OPENSHAPEFORGE_WEB_ORIGIN;
+  if (origin === undefined) delete process.env.OPENSHAPEFORGE_WEB_ORIGIN;
+  else process.env.OPENSHAPEFORGE_WEB_ORIGIN = origin;
+  try {
+    run();
+  } finally {
+    if (previous === undefined) delete process.env.OPENSHAPEFORGE_WEB_ORIGIN;
+    else process.env.OPENSHAPEFORGE_WEB_ORIGIN = previous;
+  }
+}
+
 function withPublicOrigin(origin: string, run: () => void): void {
   const previous = process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN;
   process.env.OPENSHAPEFORGE_PUBLIC_ORIGIN = origin;
@@ -95,11 +107,11 @@ describe("MCP App capability negotiation", () => {
     });
   });
 
-  it("answers clients without a secure form with the configuration URL in text and structure", () => {
-    withPublicOrigin("http://127.0.0.1:3271", () => {
+  it("answers clients without a secure form with the signed-in form URL in text and structure", () => {
+    withWebOrigin("https://app.example.test", () => withPublicOrigin("http://127.0.0.1:3271", () => {
       const result = configurationHandoffResult({
         continuation: { action: "configure", status: "awaiting_person", resumeWith: "list_connections" },
-        token: "handoff-token",
+        configurationId: "public-form-id",
         expiresInSeconds: 1800,
         definitions: [
           { key: "clientId", label: { en: "Google OAuth client ID" }, required: true },
@@ -113,12 +125,13 @@ describe("MCP App capability negotiation", () => {
         instructions: configurationFallbackLead("unsupported", "external"),
         nowMs: Date.parse("2026-09-05T10:00:00.000Z"),
       });
-      const url = "http://127.0.0.1:3271/api/entity-configuration/handoff-token";
+      const url = "https://app.example.test/configuration?formId=public-form-id";
       expect(result.content[0]).toEqual({
         type: "text",
         text:
-          `Configuration needed: open ${url} in a browser and enter the values there ` +
-          "(link valid until 2026-09-05T10:30:00.000Z); they never pass through the chat.",
+          `Configuration needed: open ${url} in a browser, sign in as the same person ` +
+          "in the same organization and enter the values there (valid until " +
+          "2026-09-05T10:30:00.000Z); they never pass through the chat.",
       });
       expect(result.structuredContent).toEqual({
         action: "configure",
@@ -126,6 +139,7 @@ describe("MCP App capability negotiation", () => {
         resumeWith: "list_connections",
         pending: true,
         configurationUrl: url,
+        externalUrl: "https://app.example.test/configuration",
         expiresAt: "2026-09-05T10:30:00.000Z",
         fields: [
           { key: "clientId", label: "Google OAuth client ID", secret: false },
@@ -133,13 +147,28 @@ describe("MCP App capability negotiation", () => {
         ],
         instructions:
           "The secure form could not be completed in this client. Give the person " +
-          "configurationUrl: open this link in a browser and enter the values there; " +
-          "they never pass through the chat.",
+          "configurationUrl: open this link in a browser, sign in as the same person " +
+          "in the same organization and enter the values there; they never pass " +
+          "through the chat.",
       });
       expect(JSON.parse(String((result.content[1] as { text: string }).text))).toEqual(
         result.structuredContent,
       );
-    });
+      // Model-visible content never addresses the bearer handoff route.
+      expect(JSON.stringify(result)).not.toContain("/api/entity-configuration/");
+    }));
+  });
+
+  it("refuses the model-visible handoff when no signed-in web form is deployed", () => {
+    withWebOrigin(undefined, () => withPublicOrigin("https://api.example.test", () => {
+      expect(() => configurationHandoffResult({
+        continuation: { action: "configure" },
+        configurationId: "public-form-id",
+        expiresInSeconds: 1800,
+        definitions: [],
+        instructions: "",
+      })).toThrow(expect.objectContaining({ status: 503, code: "CONFIGURATION_UNAVAILABLE" }));
+    }));
   });
 
   it("keeps the bearer handoff URL out of model-visible content", () => {
@@ -203,8 +232,9 @@ describe("MCP App capability negotiation", () => {
     );
     expect(configurationFallbackLead("unsupported", "external")).toBe(
       "The secure form could not be completed in this client. " +
-        "Give the person configurationUrl: open this link in a browser and enter " +
-        "the values there; they never pass through the chat.",
+        "Give the person configurationUrl: open this link in a browser, sign in as " +
+        "the same person in the same organization and enter the values there; they " +
+        "never pass through the chat.",
     );
     expect(configurationFallbackLead("timeout", "external")).toStartWith(
       "The secure form expired before it was completed — anything typed into it was NOT saved. ",

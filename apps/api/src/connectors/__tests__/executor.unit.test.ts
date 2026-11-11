@@ -12,6 +12,10 @@ import {
   type ConnectorExecutionErrorCode,
 } from "../executor.js";
 import type { ConnectorContract, ConnectorOperationContract } from "../catalog.js";
+import { __setOutboundAddressResolverForTests } from "../../modules/egress.js";
+
+// Test hosts are not in DNS; core resolves every owner-bound request.
+__setOutboundAddressResolverForTests(async () => ["93.184.216.34"]);
 
 const OPERATION: ConnectorOperationContract = {
   key: "listObjects",
@@ -332,6 +336,7 @@ describe("egress allowlist", () => {
           },
           source,
           owner: {
+            pinsResolvedAddresses: true as const,
             fetch: async (request) => {
               calls += 1;
               sourceSnapshots.push(request.source);
@@ -438,6 +443,7 @@ describe("invocation", () => {
     const policyFailure = (await invoke(pkg, {
       egress: {
         owner: {
+          pinsResolvedAddresses: true as const,
           fetch: async (request) => {
             throw request.createFailure("policy_blocked");
           },
@@ -483,6 +489,7 @@ describe("invocation", () => {
       {
         egress: {
           owner: {
+            pinsResolvedAddresses: true as const,
             fetch: async (request) => {
               throw request.createFailure("policy_blocked");
             },
@@ -522,6 +529,7 @@ describe("invocation", () => {
     const first = await invoke(pkg, {
       egress: {
         owner: {
+          pinsResolvedAddresses: true as const,
           fetch: async (request) => {
             throw request.createFailure("policy_blocked");
           },
@@ -571,6 +579,7 @@ describe("invocation", () => {
       {
         egress: {
           owner: {
+            pinsResolvedAddresses: true as const,
             fetch: async (request) => {
               await new Response(request.init.body).text();
               return Response.json([]);
@@ -612,6 +621,7 @@ describe("invocation", () => {
       {
         egress: {
           owner: {
+            pinsResolvedAddresses: true as const,
             fetch: async (request) => {
               ownerSignal = request.signal;
               return Response.json([]);

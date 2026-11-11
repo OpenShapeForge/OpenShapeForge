@@ -8,6 +8,16 @@ Deployments that intentionally make no outbound calls may run without an owner.
 Configure exactly one owner and its host allowlists before enabling outbound
 integrations. This requirement does not relax any TLS, DNS or host checks.
 
+Core does not leave private-address blocking to the owner. For every request an
+owner receives — connector calls and each redirect hop, declarative MCP
+execution, OAuth exchanges and discovery — core resolves the host, refuses it if
+any answer is a loopback, link-local, private or otherwise non-public address,
+and passes the checked addresses as `resolvedAddresses`. In every environment
+the owner must declare `pinsResolvedAddresses: true`, a promise to dial only
+those addresses while keeping the hostname for TLS; an owner without it is
+reported at startup and every outbound call fails with 503
+`EGRESS_OWNER_REQUIRED`.
+
 `platform.egress.request(session, grant, request)` sends one HTTPS POST for a
 Connection resolved through `platform.secrets`. The destination must pass that
 Connection's Adapter allow-list, and the `egressGrant` works once, only in the

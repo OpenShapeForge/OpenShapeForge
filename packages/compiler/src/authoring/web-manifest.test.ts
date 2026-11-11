@@ -2313,9 +2313,27 @@ test("a collection tree names a stored collection of the entity and fields for i
   expect(build().entities.BundleItem!.views.collection.tree).toBeUndefined();
   product.contract.interfaces!.web!.collectionTree = { children: "displayName" };
   expect(build).toThrow("Product: collection tree children displayName must be a stored collection relationship of Product.");
+  product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", parent: "displayName" };
+  expect(build).toThrow("must be a stored belongsTo relationship");
   product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", count: "missing" };
   expect(build).toThrow("Product: collection tree count missing is not a field of Product.");
 });
+
+test("the real Team subtype can inherit a stored parent reference to RelationGroup", async () => {
+  const active = await loadActivePlatformCompile(join(import.meta.dir, "../../../.."));
+  const entities = structuredClone(active.entities);
+  const team = entities.find(entry => entry.contract.entity.name === "Team")!;
+  const base = entities.find(entry => entry.contract.entity.name === "RelationGroup")!;
+  expect(team.contract.subtype?.base.name).toBe("RelationGroup");
+  // A composed base patch is inherited without inventing a second entity-value type.
+  for (const entry of [base, team]) {
+    entry.contract.model.fields.push(field("parentTeamId", { osfType: "RelationGroup" }));
+    entry.contract.model.relationships.push({ key: "parentTeamId", fieldKey: "parentTeamId", kind: "belongsTo", target: "RelationGroup", foreignKey: "parent_team_id", ownership: "reference" });
+  }
+  team.contract.interfaces!.web!.collectionTree = { children: "memberships", parent: "parentTeamId" };
+  const result = buildWebManifest(entities, {}, corpusWebOperations(authoringDir));
+  expect(result.entities.Team!.views.collection.tree).toMatchObject({ children: "memberships", parent: "parentTeamId" });
+}, 30_000);
 
 describe('declarative collection tables', () => {
   const fixture = () => {
@@ -2369,6 +2387,18 @@ describe('declarative collection tables', () => {
     product.contract.interfaces!.web!.collectionTable!.columns[0]!.values = [value];
     expect(build).toThrow('select: one'); value.select = 'one';
     expect(build().entities.Product!.views.collection.table?.columns[0]?.values[0]?.path?.cardinality).toBe('many');
+  });
+
+  test('explicit single-result selection applies to conditional paths without erasing their cardinality', () => {
+    const { product, build } = fixture();
+    const value = { text: text('Primary'), when: { path: 'parts.role', equals: 'main' } } as { text: ReturnType<typeof text>; select?: 'one'; when: { path: string; equals: string } };
+    product.contract.interfaces!.web!.collectionTable!.columns[0]!.values = [value];
+    expect(build).toThrow('select: one');
+    value.select = 'one';
+    const compiled = build().entities.Product!.views.collection.table?.columns[0]?.values[0];
+    expect(compiled?.select).toBe('one');
+    expect(compiled?.when?.path.cardinality).toBe('many');
+    expect(compiled?.when?.path.targetEntityId).toBe('Membership');
   });
   test('keeps money and currency on the same readable record', () => {
     const { product, build } = fixture();

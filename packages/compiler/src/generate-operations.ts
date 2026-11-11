@@ -1506,7 +1506,7 @@ function collectCollectionOptions(entities: readonly Pick<CompiledEntityInfo,"co
 }
 
 function collectColorPaletteOperation(context: PluginBaseContext, entities: readonly Pick<CompiledEntityInfo, "contract">[]): CompiledPluginOperation[] {
-  if (!entities.some(({contract}) => contract.entity.name === "TenantSetting")) return [];
+  if (!entities.some(({contract}) => contract.entity?.name === "TenantSetting")) return [];
   const operation: PluginOperationContract = {
     key: "colors.list", title: "List available colors", description: "Read the standard palette and this tenant's named colors, including archived colors for existing references. No other tenant settings are returned.",
     handler: "listColors", auth: { mode: "session", anyAuthenticatedSession: true }, tenancy: { mode: "required" },

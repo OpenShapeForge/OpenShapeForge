@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { afterAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { createConnection, createServer, type Server } from "node:net";
+import { createConnection, createServer, type Server, type Socket } from "node:net";
 import { SQL } from "bun";
 import { Registry } from "@openshapeforge/observability";
 import { createDatabaseRuntime } from "../../db/connection.js";
@@ -19,6 +19,8 @@ let app: ReturnType<typeof createApiApp> | null = null;
 let proxy: Server | null = null;
 let control: SQL | null = null;
 const logLines: string[] = [];
+const sockets = new Set<Socket>();
+let available = true;
 
 if (!/^[a-z0-9_]+$/.test(databaseName) || new URL(ADMIN_URL).pathname === "/openshapeforge_dev") {
   throw new Error("Refusing an unsafe readiness outage scratch database target.");
@@ -26,6 +28,7 @@ if (!/^[a-z0-9_]+$/.test(databaseName) || new URL(ADMIN_URL).pathname === "/open
 
 afterAll(async () => {
   await app?.close().catch(() => undefined);
+  for (const socket of sockets) socket.destroy();
   await new Promise<void>((resolve) => proxy?.close(() => resolve()) ?? resolve());
   await control?.close();
   await admin.unsafe(`drop database if exists "${databaseName}" with (force)`);
@@ -42,48 +45,53 @@ describe("live dependency-aware readiness", () => {
       await migrator.close();
     }
 
-    const reservation = createServer();
-    await new Promise<void>((resolve) => reservation.listen(0, "127.0.0.1", resolve));
-    const reservedAddress = reservation.address();
-    if (!reservedAddress || typeof reservedAddress === "string") {
-      throw new Error("Failed to reserve a local database-proxy port.");
-    }
-    const proxyPort = reservedAddress.port;
-    await new Promise<void>((resolve) => reservation.close(() => resolve()));
-    const unavailableUrl = new URL(databaseUrl);
-    unavailableUrl.hostname = "127.0.0.1";
-    unavailableUrl.port = String(proxyPort);
-
-    app = createApiApp({
-      cors: false,
-      databaseUrl: unavailableUrl.toString(),
-      readinessCacheMs: 0,
-      metricsRegistry: new Registry(),
-      logStream: { write: (line) => logLines.push(line) },
-    });
-    await app.ready();
-    const unavailable = await app.inject({ method: "GET", url: "/api/ready" });
-    expect(unavailable.statusCode).toBe(503);
-    expect(unavailable.json().checks.database).toBe("not_ready");
-    expect(unavailable.body).not.toContain(databaseName);
-    const liveDuringOutage = await app.inject({ method: "GET", url: "/api/health" });
-    expect(liveDuringOutage.statusCode).toBe(200);
-
     const adminAddress = new URL(ADMIN_URL);
     proxy = createServer((client) => {
+      if (!available) { client.destroy(); return; }
       const upstream = createConnection({
         host: adminAddress.hostname,
         port: Number(adminAddress.port || 5432),
       });
+      for (const socket of [client, upstream]) {
+        sockets.add(socket);
+        socket.on("close", () => sockets.delete(socket));
+      }
       client.pipe(upstream);
       upstream.pipe(client);
       client.on("error", () => upstream.destroy());
       upstream.on("error", () => client.destroy());
+      client.on("close", () => upstream.destroy());
+      upstream.on("close", () => client.destroy());
     });
     await new Promise<void>((resolve, reject) => {
       proxy!.once("error", reject);
-      proxy!.listen(proxyPort, "127.0.0.1", resolve);
+      proxy!.listen(0, "127.0.0.1", resolve);
     });
+    const address = proxy.address();
+    if (!address || typeof address === "string") throw new Error("Database proxy did not bind.");
+    const runtimeUrl = new URL(process.env.DATABASE_URL ??
+      "postgres://openshapeforge_app:openshapeforge_app@localhost:5434/openshapeforge_dev");
+    runtimeUrl.pathname = `/${databaseName}`;
+    runtimeUrl.hostname = "127.0.0.1";
+    runtimeUrl.port = String(address.port);
+    app = createApiApp({
+      cors: false,
+      databaseUrl: runtimeUrl.toString(),
+      readinessCacheMs: 0,
+      metricsRegistry: new Registry(),
+      logStream: { write: (line) => logLines.push(line) },
+    });
+    // Startup validates the restricted role and schema while the database is reachable.
+    await app.ready();
+    expect((await app.inject({ method: "GET", url: "/api/ready" })).statusCode).toBe(200);
+    available = false;
+    for (const socket of sockets) socket.destroy();
+    const unavailable = await app.inject({ method: "GET", url: "/api/ready" });
+    expect(unavailable.statusCode).toBe(503);
+    expect(unavailable.json().checks.database).toBe("not_ready");
+    expect(unavailable.body).not.toContain(databaseName);
+    expect((await app.inject({ method: "GET", url: "/api/health" })).statusCode).toBe(200);
+    available = true;
 
     let recovered = await app.inject({ method: "GET", url: "/api/ready" });
     for (let attempt = 0; recovered.statusCode !== 200 && attempt < 20; attempt += 1) {

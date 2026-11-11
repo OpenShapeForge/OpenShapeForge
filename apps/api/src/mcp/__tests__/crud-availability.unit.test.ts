@@ -127,7 +127,7 @@ async function operationIds(client: Client): Promise<string[]> {
   return ids;
 }
 const operationId = (entity: string, intent: string) =>
-  crudToolsNamed(intent === 'delete' && entity === 'Relation' ? 'relation_delete' : `osf_${intent}`).find(tool => tool.entity === entity)!.operationId;
+  crudToolsNamed(`osf_${intent}`).find(tool => tool.entity === entity)!.operationId;
 
 describe("one availability rule for listing, describe and call", () => {
   it("resolves neither the generic nor the dedicated delete of an owned child", () => {
@@ -141,7 +141,7 @@ describe("one availability rule for listing, describe and call", () => {
     } catch (error) {
       expect(String((error as Error).message)).toMatch(/"Address" is not one of the entities/);
     }
-    const relation = crudToolsNamed("relation_delete")[0]!;
+    const relation = crudToolsNamed("osf_delete").find(tool => tool.entity === "Relation")!;
     expect(crudToolAvailable(relation, session(...RELATIONS), tablesOwning("Relation"))).toBe(false);
     // Unchanged tables: both are available to the same session.
     const real = new Map(getGeneratedCrudTables().map((table) => [table.name, table]));

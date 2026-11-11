@@ -1783,6 +1783,7 @@
             }
           },
           "properties": {
+            "visible": {"type": "boolean", "x-osf-i18n": {"title": {"en": "Show toolbar", "nl": "Werkbalk tonen"}}},
             "search": {
               "type": "boolean",
               "x-osf-i18n": {
@@ -2061,6 +2062,7 @@
             "avatar": { "type": "string", "minLength": 1, "description": "Optional image document field in the read binding for the panel heading." },
             "view": { "type": "string", "minLength": 1, "description": "Named record view of the row's record entity shown as the panel body.", "x-osf-i18n": { "title": { "en": "Record view", "nl": "Recordweergave" } } },
             "includeRecord": { "type": "boolean", "description": "Keep the canonical record editor alongside the typed summary.", "x-osf-i18n": { "title": { "en": "Include record", "nl": "Record tonen" } } },
+            "actions": { "type": "array", "uniqueItems": true, "items": { "enum": ["edit", "openFull"] } },
             "primaryMembership": {
               "type": "object",
               "additionalProperties": false,
@@ -2112,6 +2114,8 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "orderBy": { "type": "string", "minLength": 1 },
+                  "presentation": { "enum": ["options", "rows"] },
                   "relationship": {
                     "type": "string",
                     "minLength": 1
@@ -2426,7 +2430,7 @@
                 "children": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Children collection", "nl": "Collectie met onderdelen" } } },
                 "label": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group label field", "nl": "Groepslabelveld" } } },
                 "count": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group count field", "nl": "Groepstellingsveld" } } },
-                "parent": {"$ref": "#/$defs/fieldKey"},
+                "parent": {"$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": {"title": {"en": "Parent field", "nl": "Bovenliggend veld"}}},
                 "through": {"$ref": "#/$defs/webCollectionTreeThrough"}
               }
             },

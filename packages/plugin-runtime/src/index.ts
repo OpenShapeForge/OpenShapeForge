@@ -524,6 +524,9 @@ export type RuntimeOperationExecutionResult =
  * no identity to hand out, including a composition that stopped part-way.
  * Ignoring it leaves behaviour exactly as it was.
  */
+/** In-process provider observation; symbol keys never enter serialized Operation errors. */
+export const DECLARATIVE_PROVIDER_FAILURE: unique symbol = Symbol("declarative-provider-failure");
+
 export type RuntimeDeclarativeServiceExecutionResult =
   // A Service is composed, never taken over by an operation override: its
   // answer is its data or a failure, not an acceptance.
@@ -532,7 +535,7 @@ export type RuntimeDeclarativeServiceExecutionResult =
   & { connectionUse?: RuntimeDeclarativeServiceConnectionUse;
     /** Core-only observation from the admitted single REST binding, never a
      * token-endpoint response or provider-controlled body. Not part of public errors. */
-    delegatedProviderFailure?: {status:number};
+    [DECLARATIVE_PROVIDER_FAILURE]?: {status:number};
   };
 
 export type RuntimeOperationExecutionContext = {
@@ -1065,6 +1068,7 @@ export type RuntimeWorkerHandle = {
   stop(): Promise<void>;
 };
 
+/** Durable workers contribute all three callbacks together; ordinary workers omit all three. */
 export type RuntimeWorkerContract<Context> = {
   start(context: Context): RuntimeWorkerHandle | Promise<RuntimeWorkerHandle>;
   /**
@@ -1083,7 +1087,9 @@ export type RuntimeWorkerContract<Context> = {
     fingerprint: string,
   ): Promise<void>;
   /**
-   * Required for non-repeatable writes. Atomically acquire, under the exact
+   * Required whenever resolveOperationWork/pinOperationContract are supplied;
+   * startup rejects a partial callback triple. Used for non-repeatable writes.
+   * Atomically acquire, under the exact
    * active claim and committed before core dispatches, this attempt's `started`
    * mark. Reject a second acquisition of the same attempt, including from
    * another broker/process. Once core has

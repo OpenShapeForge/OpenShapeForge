@@ -4,14 +4,14 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 528 packages.
+Regenerate with `bun run notices`. 525 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 404 |
-| Apache-2.0 | 60 |
+| MIT | 403 |
+| Apache-2.0 | 59 |
 | ISC | 31 |
 | BSD-3-Clause | 16 |
 | BlueOak-1.0.0 | 6 |
@@ -223,15 +223,7 @@ Regenerate with `bun run notices`. 528 packages.
 - License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
-### @img/sharp-libvips-linuxmusl-x64@1.3.4
-- License: **LGPL-3.0-or-later** — https://sharp.pixelplumbing.com
-- Author: Lovell Fuller <npm@lovell.info>
-
 ### @img/sharp-linux-x64@0.35.5
-- License: **Apache-2.0** — https://sharp.pixelplumbing.com
-- Author: Lovell Fuller <npm@lovell.info>
-
-### @img/sharp-linuxmusl-x64@0.35.5
 - License: **Apache-2.0** — https://sharp.pixelplumbing.com
 - Author: Lovell Fuller <npm@lovell.info>
 
@@ -299,9 +291,6 @@ Regenerate with `bun run notices`. 528 packages.
 - Author: Next.js Team <support@vercel.com>
 
 ### @next/swc-linux-x64-gnu@16.4.5
-- License: **MIT** — https://github.com/vercel/next.js
-
-### @next/swc-linux-x64-musl@16.4.5
 - License: **MIT** — https://github.com/vercel/next.js
 
 ### @nodable/entities@3.1.0
@@ -2749,7 +2738,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ```
 </details>
 
-<details><summary>@img/sharp-linux-x64@0.35.5, @img/sharp-linuxmusl-x64@0.35.5, sharp@0.35.5</summary>
+<details><summary>@img/sharp-linux-x64@0.35.5, sharp@0.35.5</summary>
 
 ```
 Apache License

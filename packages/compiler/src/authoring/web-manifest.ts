@@ -912,6 +912,7 @@ function collectionTree(contract: CompiledEntityContract): WebCollectionView["tr
   if (!children || children.kind !== "hasMany" || children.provider) {
     throw new Error(`${entityName}: collection tree children ${tree.children} must be a stored collection relationship of ${entityName}.`);
   }
+  if (tree.parent && !contract.model.relationships.some(edge => edge.key === tree.parent && edge.kind === "belongsTo" && !edge.provider)) throw new Error(`${entityName}: collection tree parent ${tree.parent} must be a stored belongsTo relationship of ${entityName}.`);
   for (const key of ["label", "count", "parent"] as const) {
     const field = tree[key];
     if (field !== undefined && !contract.model.fields.some((candidate) => candidate.key === field)) {

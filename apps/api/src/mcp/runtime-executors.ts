@@ -10,6 +10,7 @@
 import { delegatedProviderFailure } from "./connection-delegation.js";
 import { withStoredConnectionGrant } from "../modules/connection-use-grants.js";
 import { randomUUID } from "node:crypto";
+import { DECLARATIVE_PROVIDER_FAILURE } from "@openshapeforge/plugin-runtime";
 import type {
   RuntimeDeclarativeServiceExecutionResult,
   RuntimeDeclarativeServiceRequest,
@@ -72,7 +73,7 @@ export function createRuntimeDeclarativeServiceExecutor(input: {
       return await withStoredConnectionGrant(input.db, session, request, subject => input.modulePlatform.services.records.assertAccess(session,subject), async () => {
         const result=await execute(request,randomUUID(),undefined,options?.signal);
         const failure=delegatedProviderFailure(session);
-        return 'error' in result && failure ? {...result,delegatedProviderFailure:failure} : result;
+        return 'error' in result && failure ? {...result,[DECLARATIVE_PROVIDER_FAILURE]:failure} : result;
       });
     } finally {
       input.modulePlatform.unregisterServer(server);

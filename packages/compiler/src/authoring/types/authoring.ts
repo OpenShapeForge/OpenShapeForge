@@ -468,7 +468,7 @@ export type CollectionTableDefinition = {
   groupRows?: "plain" | "bundle";
   viewSwitch?: boolean;
   /** Collection controls the web table offers; `false` hides one. Other channels keep their Operations. */
-  toolbar?: { search?: boolean; create?: boolean };
+  toolbar?: { visible?: boolean; search?: boolean; create?: boolean };
   recordPanel?: {
     actions?: Array<"edit" | "openFull">;
     primaryMembership?: { field: string; equals: string };

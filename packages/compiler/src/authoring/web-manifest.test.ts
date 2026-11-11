@@ -2319,6 +2319,22 @@ test("a collection tree names a stored collection of the entity and fields for i
   expect(build).toThrow("Product: collection tree count missing is not a field of Product.");
 });
 
+test("the real Team subtype can inherit a stored parent reference to RelationGroup", async () => {
+  const active = await loadActivePlatformCompile(join(import.meta.dir, "../../../.."));
+  const entities = structuredClone(active.entities);
+  const team = entities.find(entry => entry.contract.entity.name === "Team")!;
+  const base = entities.find(entry => entry.contract.entity.name === "RelationGroup")!;
+  expect(team.contract.subtype?.base.name).toBe("RelationGroup");
+  // A composed base patch is inherited without inventing a second entity-value type.
+  for (const entry of [base, team]) {
+    entry.contract.model.fields.push(field("parentTeamId", { osfType: "RelationGroup" }));
+    entry.contract.model.relationships.push({ key: "parentTeamId", fieldKey: "parentTeamId", kind: "belongsTo", target: "RelationGroup", foreignKey: "parent_team_id", ownership: "reference" });
+  }
+  team.contract.interfaces!.web!.collectionTree = { children: "memberships", parent: "parentTeamId" };
+  const result = buildWebManifest(entities, {}, corpusWebOperations(authoringDir));
+  expect(result.entities.Team!.views.collection.tree).toMatchObject({ children: "memberships", parent: "parentTeamId" });
+}, 30_000);
+
 describe('declarative collection tables', () => {
   const fixture = () => {
     const product = entity('Product', 'products', [field('displayName'), field('category')], coreView(), [{ key: 'parts', kind: 'hasMany', target: 'Membership', foreignKey: 'parent_id' }]);

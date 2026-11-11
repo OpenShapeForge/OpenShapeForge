@@ -29,9 +29,10 @@
  * core, with a grant core minted for it, and core decides and then dials. That
  * ordering is the whole point — a check a module could skip is not a policy.
  */
-import { connect as netConnect, type Socket } from "node:net";
+import { connect as netConnect, isIP, type Socket } from "node:net";
 import { connect as tlsConnect, type TLSSocket } from "node:tls";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
+import { isPublicAddress, resolveAddresses } from "./connection-http-egress.js";
 import { hostAllowed } from "./egress.js";
 import type { ModuleSocketGrant, ModuleSocketRequest } from "./contract.js";
 
@@ -138,6 +139,68 @@ function grantedTargets(allowlist: readonly string[]): string[] {
 const DEFAULT_TIMEOUT_MS = 20_000;
 
 /**
+ * The one deployment switch that lets a module's `rejectUnauthorized: false`
+ * through. A module asking is not enough: the request is module code, and this
+ * path exists to contain module mistakes.
+ */
+export const INSECURE_TLS_ENV = "OSF_SOCKET_EGRESS_ALLOW_INSECURE_TLS";
+
+export type SocketEgressDependencies = {
+  /** Injectable for tests; answers every address a name resolves to. */
+  resolve?: (hostname: string) => Promise<readonly string[]>;
+  /** Injectable for tests; defaults to the deployment's explicit opt-in. */
+  allowInsecureTls?: boolean;
+  /** Injectable for tests; the dial always receives a verified address. */
+  dialPlain?: typeof netConnect;
+  dialTls?: typeof tlsConnect;
+};
+
+/**
+ * The allow-list names a host; the dial needs an address. Every answer must be
+ * public, because the name is often tenant-influenced and DNS is not ours: an
+ * allow-listed name that answers with a loopback, link-local or private address
+ * would otherwise reach the deployment's own network. The verified answers are
+ * what gets dialled, so a second lookup cannot answer differently.
+ */
+async function pinnedAddresses(
+  host: string,
+  port: number,
+  resolve: NonNullable<SocketEgressDependencies["resolve"]>,
+  deadlineMs: number,
+): Promise<readonly string[]> {
+  const literal = host.replace(/^\[|\]$/g, "");
+  let addresses: readonly string[];
+  if (isIP(literal) !== 0) {
+    addresses = [literal];
+  } else {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      addresses = await Promise.race([
+        resolve(host),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error("name lookup timed out")), deadlineMs);
+        }),
+      ]);
+    } catch (error) {
+      throw new SocketUnavailable(
+        `${host}:${port} could not be reached (${error instanceof Error ? error.message : "name lookup failed"}).`,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    if (addresses.length === 0) {
+      throw new SocketUnavailable(`${host}:${port} could not be reached (the name has no address).`);
+    }
+  }
+  if (!addresses.every(isPublicAddress)) {
+    throw new SocketEgressDenied(
+      `Connecting to ${host}:${port} is not allowed: the host does not resolve to a public address.`,
+    );
+  }
+  return [...new Set(addresses)];
+}
+
+/**
  * Decide, then dial. A refusal names the Adapter, the target, and what the
  * Adapter does grant — an administrator can fix the Adapter from the sentence
  * alone, which is the difference between this and a socket error.
@@ -145,6 +208,7 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 export async function connectSocket(
   grant: ModuleSocketGrant,
   request: ModuleSocketRequest,
+  dependencies: SocketEgressDependencies = {},
 ): Promise<Socket | TLSSocket> {
   const state = grants.get(grant);
   if (!state) {
@@ -171,36 +235,62 @@ export async function connectSocket(
   }
 
   const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  return await new Promise<Socket | TLSSocket>((resolve, reject) => {
-    const fail = (error: Error) => {
-      socket.destroy();
-      reject(
-        new SocketUnavailable(
-          `${host}:${port} could not be reached (${error.message}).`,
-        ),
-      );
-    };
-    const ready = () => {
-      // Hand the socket over clean: the connect deadline and the failure
-      // listener belong to the dial, not to the conversation that follows.
-      socket.setTimeout(0);
-      socket.off("error", fail);
-      resolve(socket);
-    };
-    const socket = request.tls
-      ? tlsConnect(
-          {
-            host,
-            port,
-            servername: request.servername ?? host,
-            // Defaulting to true rather than reading the module's word for it:
-            // a caller that wants a self-signed test server has to say so.
-            rejectUnauthorized: request.rejectUnauthorized ?? true,
-          },
-          ready,
-        )
-      : netConnect({ host, port }, ready);
-    socket.setTimeout(timeoutMs, () => fail(new Error("connection timed out")));
-    socket.once("error", fail);
-  });
+  const deadline = Date.now() + timeoutMs;
+  const addresses = await pinnedAddresses(
+    host,
+    port,
+    dependencies.resolve ?? resolveAddresses,
+    timeoutMs,
+  );
+  // Verification is on unless the deployment itself turned it off AND the
+  // module asked. Either one alone leaves it on.
+  const allowInsecureTls =
+    dependencies.allowInsecureTls ?? process.env[INSECURE_TLS_ENV] === "1";
+  const rejectUnauthorized = !(allowInsecureTls && request.rejectUnauthorized === false);
+  // The certificate is checked against the name the module asked for, never
+  // against the address we pinned. An IP literal has no SNI name.
+  const servername = request.servername ?? (isIP(host.replace(/^\[|\]$/g, "")) === 0 ? host : undefined);
+  const dialPlain = dependencies.dialPlain ?? netConnect;
+  const dialTls = dependencies.dialTls ?? tlsConnect;
+
+  const dial = (address: string, remainingMs: number) =>
+    new Promise<Socket | TLSSocket>((resolve, reject) => {
+      const fail = (error: Error) => {
+        socket.destroy();
+        reject(error);
+      };
+      const ready = () => {
+        // Hand the socket over clean: the connect deadline and the failure
+        // listener belong to the dial, not to the conversation that follows.
+        socket.setTimeout(0);
+        socket.off("error", fail);
+        resolve(socket);
+      };
+      const socket: Socket | TLSSocket = request.tls
+        ? dialTls(
+            {
+              host: address,
+              port,
+              ...(servername ? { servername } : {}),
+              rejectUnauthorized,
+            },
+            ready,
+          )
+        : dialPlain({ host: address, port }, ready);
+      socket.setTimeout(remainingMs, () => fail(new Error("connection timed out")));
+      socket.once("error", fail);
+    });
+
+  // Any verified answer will do; the deadline covers the whole attempt.
+  let last = new Error("connection timed out");
+  for (const address of addresses) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+    try {
+      return await dial(address, remainingMs);
+    } catch (error) {
+      last = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+  throw new SocketUnavailable(`${host}:${port} could not be reached (${last.message}).`);
 }

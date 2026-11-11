@@ -23,7 +23,7 @@ import { isOrganizationAdministrator } from "./onboarding.js";
 import { catalog, entityForTable, type GeneratedTable } from "./catalog.js";
 import { serializeRow } from "./catalog-rows.js";
 import type { OAuthClientAuthentication } from "./entity-oauth-profile.js";
-import { ENTITY_CONFIGURATION_PATH, callbackOrigin, elicitedKeyring, oauthCallbackUrl } from "./handoff-config.js";
+import { configurationWebUrl, elicitedKeyring, oauthCallbackUrl, signedInConfigurationUrl } from "./handoff-config.js";
 
 export function looksLikeStoredSecret(value: unknown): value is StoredSecret {
   return (
@@ -197,7 +197,9 @@ export async function organizationConnectionProblem(input: {
     satisfiable &&
     !problem.missingValues &&
     session.tenantId &&
-    session.userId
+    session.userId &&
+    // The link below is the signed-in web form; without one, mint nothing.
+    configurationWebUrl()
   ) {
     try {
       const definitions = Array.isArray(providerRow[elicit.definitionsField])
@@ -222,10 +224,15 @@ export async function organizationConnectionProblem(input: {
         displayName: problem.adapter,
         messagePrefix,
       });
-      problem.configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${minted.token}`;
-      problem.expiresAt = new Date(
-        Date.now() + minted.expiresInSeconds * 1000,
-      ).toISOString();
+      // This message is model-visible: only the signed-in web form's URL,
+      // never the handoff token. No web origin, no link.
+      const configurationUrl = signedInConfigurationUrl(minted.id);
+      if (configurationUrl) {
+        problem.configurationUrl = configurationUrl;
+        problem.expiresAt = new Date(
+          Date.now() + minted.expiresInSeconds * 1000,
+        ).toISOString();
+      }
     } catch {
       // No public origin or no keyring: the create-tool instruction stands
       // on its own; the handoff is an extra, never a precondition.

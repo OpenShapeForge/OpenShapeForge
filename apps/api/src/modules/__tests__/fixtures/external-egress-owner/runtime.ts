@@ -22,6 +22,7 @@ export function externalOwnerLastMutationResult(): boolean | undefined {
 const runtimeModule = {
   name: "external-egress-owner-test-fixture",
   egress: {
+    pinsResolvedAddresses: true as const,
     async fetch(request: EgressRequest): Promise<Response> {
       if (mode === "normal") return Response.json({ value: "ok" });
       if (mode === "retain") {

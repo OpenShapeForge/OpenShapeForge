@@ -166,13 +166,13 @@ describe("connection problems", () => {
       connectionProblemMessage({
         ...organization,
         administrator: true,
-        configurationUrl: "http://127.0.0.1:3271/api/entity-configuration/tok",
+        configurationUrl: "https://app.example.test/configuration?formId=form-1",
         expiresAt: "2026-09-05T10:30:00.000Z",
       }),
     ).toBe(
       "The organization's Google connection is not set up. As an organization administrator, " +
         'set it up with create_connection { key: "google-gmail", name: "Google", adapterId: "adapter-google" }, or open ' +
-        "http://127.0.0.1:3271/api/entity-configuration/tok in a browser and enter the values " +
+        "https://app.example.test/configuration?formId=form-1 in a browser, sign in as the same person and enter the values " +
         "there (link valid until 2026-09-05T10:30:00.000Z); they never pass through the chat.",
     );
   });

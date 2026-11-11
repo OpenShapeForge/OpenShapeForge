@@ -8,6 +8,10 @@ import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { withDbSession } from "../../db/session.js";
 import type { GeneratedCrudTable } from "./types.js";
+import { __setOutboundAddressResolverForTests } from "../../modules/egress.js";
+
+// Test hosts are not in DNS; core resolves every owner-bound request.
+__setOutboundAddressResolverForTests(async () => ["93.184.216.34"]);
 
 // Bun shares imported modules across test files. A separate process guarantees
 // this fixture is registered before any public runtime catalog is constructed.
@@ -612,7 +616,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
     const invoke = (session: import("../../db/session.js").DbSessionInput = actor, id = connection.id) => platformToolCall({
       db: runtime.db, session, name, requestId: randomUUID(), tables: new Map([[table.name, table]]),
       request: { params: { name, arguments: { id } } },
-      egressOwner: { fetch: async (request: import("../../modules/contract.js").ModuleEgressRequest) => {
+      egressOwner: { pinsResolvedAddresses: true as const, fetch: async (request: import("../../modules/contract.js").ModuleEgressRequest) => {
         if (String(request.url) === "https://oauth.example.invalid/token") {
           refreshes++;
           const body = new URLSearchParams(await new Response(request.init.body).text());
@@ -725,7 +729,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       const invoke = (session: import("../../db/session.js").DbSessionInput = actor, id = connection.id) => platformToolCall({
         db: runtime.db, session, name, tables: new Map([[table.name, table]]),
         request: { params: { name, arguments: { id } } },
-        egressOwner: { fetch: async (request: import("../../modules/contract.js").ModuleEgressRequest) => {
+        egressOwner: { pinsResolvedAddresses: true as const, fetch: async (request: import("../../modules/contract.js").ModuleEgressRequest) => {
           requests++;
           expect(String(request.url)).toBe("https://probe.example.invalid/check");
           expect(new Headers(request.init.headers).get("authorization")).toBe(`Bearer ${token}`);

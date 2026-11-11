@@ -6,7 +6,8 @@
  */
 
 import { connectionFieldsOf } from "./connection-guidance.js";
-import { ENTITY_CONFIGURATION_PATH, callbackOrigin, configurationWebUrl } from "./handoff-config.js";
+import { ENTITY_CONFIGURATION_PATH, callbackOrigin, configurationWebUrl, signedInConfigurationUrl } from "./handoff-config.js";
+import { HttpError } from "../rest/http-error.js";
 import { ok, type ToolResult } from "./tool-results.js";
 import { configurationFormDefinitions } from "./configuration-submission.js";
 export function configurationAppResult(
@@ -21,8 +22,7 @@ export function configurationAppResult(
   // Capability advertisement does not acknowledge that the host rendered a
   // card. Keep a recovery path outside that card, without exposing its bearer
   // token. The ordinary web session must still match the pending form owner.
-  const webUrl = configurationWebUrl();
-  const externalUrl = webUrl && configurationId ? `${webUrl}?formId=${encodeURIComponent(configurationId)}` : undefined;
+  const externalUrl = signedInConfigurationUrl(configurationId);
   const result = ok(externalUrl && payload && typeof payload === "object" && !Array.isArray(payload)
     ? { ...payload, externalUrl }
     : payload);
@@ -54,19 +54,30 @@ export const __configurationAppResultForTests = configurationAppResult;
 /**
  * The model-visible handoff for clients without a usable secure form: the
  * configuration URL in plain text AND structured, so an assistant can tell
- * the person exactly where to go. The URL is the single-use, time-bound
- * handoff token; the values are entered in the browser and never pass
- * through the chat or the model.
+ * the person exactly where to go. Everything here is readable by the model
+ * and by anyone who reads the tool result, so the URL is the signed-in web
+ * form addressed by the pending form's id — never the handoff token. The
+ * person signs in as the form's owner; the values are entered in the browser
+ * and never pass through the chat or the model. Without a deployed web origin
+ * there is no such form and the handoff is refused rather than downgraded to
+ * a bearer link.
  */
 export function configurationHandoffResult(input: {
   continuation: Record<string, unknown>;
-  token: string;
+  configurationId: string | undefined;
   expiresInSeconds: number;
   definitions: unknown;
   instructions: string;
   nowMs?: number;
 }): ToolResult {
-  const configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${input.token}`;
+  const configurationUrl = signedInConfigurationUrl(input.configurationId);
+  if (!configurationUrl) {
+    throw new HttpError(
+      503,
+      "CONFIGURATION_UNAVAILABLE",
+      "This client cannot show the secure form, and no signed-in configuration web client is deployed to complete it in a browser.",
+    );
+  }
   const expiresAt = new Date(
     (input.nowMs ?? Date.now()) + input.expiresInSeconds * 1000,
   ).toISOString();
@@ -89,8 +100,9 @@ export function configurationHandoffResult(input: {
       {
         type: "text",
         text:
-          `Configuration needed: open ${configurationUrl} in a browser and enter the ` +
-          `values there (link valid until ${expiresAt}); they never pass through the chat.`,
+          `Configuration needed: open ${configurationUrl} in a browser, sign in as the ` +
+          `same person in the same organization and enter the values there (valid until ` +
+          `${expiresAt}); they never pass through the chat.`,
       },
       { type: "text", text: JSON.stringify(payload, null, 2) },
     ],

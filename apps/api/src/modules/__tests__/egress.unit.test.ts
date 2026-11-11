@@ -10,6 +10,10 @@ import externalRuntimeModule, {
   externalOwnerLastMutationResult,
   setExternalOwnerMode,
 } from "./fixtures/external-egress-owner/runtime.js";
+import { __setOutboundAddressResolverForTests } from "../egress.js";
+
+// Test hosts are not in DNS; core resolves every owner-bound request.
+__setOutboundAddressResolverForTests(async () => ["93.184.216.34"]);
 
 const scope = {
   tenantId: "tenant-a",
@@ -27,13 +31,17 @@ const source = {
 describe("canonical runtime-module egress boundary", () => {
   it("identifies missing production egress configuration at startup without affecting offline deployments", () => {
     expect(missingEgressOwnerDiagnostic("production", undefined)).toMatchObject({ code: "EGRESS_OWNER_REQUIRED" });
-    expect(missingEgressOwnerDiagnostic("production", {})).toBeUndefined();
+    expect(missingEgressOwnerDiagnostic("production", { pinsResolvedAddresses: true })).toBeUndefined();
+    // An owner that does not pin is refused at request time in every environment.
+    expect(missingEgressOwnerDiagnostic("production", {})).toMatchObject({ code: "EGRESS_OWNER_REQUIRED" });
+    expect(missingEgressOwnerDiagnostic("development", {})).toMatchObject({ code: "EGRESS_OWNER_REQUIRED" });
     expect(missingEgressOwnerDiagnostic("development", undefined)).toBeUndefined();
   });
   it("delivers the exact trusted context and preserves Request semantics and signal", async () => {
     const signal = new AbortController().signal;
     let seen: ModuleEgressRequest | undefined;
     const owner: NonNullable<RuntimeModule["egress"]> = {
+      pinsResolvedAddresses: true,
       fetch: async (request) => {
         seen = request;
         return new Response("ok");
@@ -71,6 +79,93 @@ describe("canonical runtime-module egress boundary", () => {
     expect(Object.isFrozen(seen?.init)).toBe(true);
   });
 
+  describe("address pinning", () => {
+    const call = (
+      owner: NonNullable<RuntimeModule["egress"]>,
+      options: { target?: string; allowlist?: string[]; resolve?: (host: string) => Promise<readonly string[]>; resolvedAddresses?: readonly string[] } = {},
+    ) => fetchValidatedOutbound({
+      target: options.target ?? "https://api.example.com/items",
+      init: {},
+      allowlist: options.allowlist ?? ["api.example.com"],
+      fallback: async () => { throw new Error("fallback must not run"); },
+      dispatch: { owner, purpose: "provider", scope, source },
+      ...(options.resolve ? { resolve: options.resolve } : {}),
+      ...(options.resolvedAddresses ? { resolvedAddresses: options.resolvedAddresses } : {}),
+      denied: (_url, reason) => new Error(`denied:${reason}`),
+    });
+
+    it("refuses an owner that does not declare pinning, before any lookup", async () => {
+      let calls = 0;
+      let lookups = 0;
+      const error = await call(
+        { fetch: async () => { calls += 1; return new Response(); } },
+        { resolve: async () => { lookups += 1; return ["93.184.216.34"]; } },
+      ).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ status: 503, code: "EGRESS_OWNER_REQUIRED" });
+      expect(calls).toBe(0);
+      expect(lookups).toBe(0);
+    });
+
+    it("resolves the host in core and hands the owner the checked addresses", async () => {
+      let seen: ModuleEgressRequest | undefined;
+      await call(
+        { pinsResolvedAddresses: true, fetch: async (request) => { seen = request; return new Response(); } },
+        { resolve: async (host) => { expect(host).toBe("api.example.com"); return ["93.184.216.34", "93.184.216.34", "2606:2800:220:1::1"]; } },
+      );
+      expect(seen?.resolvedAddresses).toEqual(["93.184.216.34", "2606:2800:220:1::1"]);
+      expect(Object.isFrozen(seen?.resolvedAddresses)).toBe(true);
+    });
+
+    it.each([
+      ["loopback", ["127.0.0.1"]],
+      ["cloud metadata", ["169.254.169.254"]],
+      ["private", ["10.0.0.8"]],
+      ["IPv6 loopback", ["::1"]],
+      ["one private answer among public ones", ["93.184.216.34", "192.168.1.4"]],
+    ])("refuses an allow-listed host that resolves to %s", async (_label, addresses) => {
+      let calls = 0;
+      const error = await call(
+        { pinsResolvedAddresses: true, fetch: async () => { calls += 1; return new Response(); } },
+        { resolve: async () => addresses },
+      ).catch((caught: unknown) => caught);
+      expect((error as Error).message).toBe("denied:address");
+      expect(calls).toBe(0);
+    });
+
+    it("refuses an allow-listed non-public IP literal without a lookup", async () => {
+      let calls = 0;
+      let lookups = 0;
+      const error = await call(
+        { pinsResolvedAddresses: true, fetch: async () => { calls += 1; return new Response(); } },
+        { target: "https://169.254.169.254/latest/meta-data", allowlist: ["169.254.169.254"], resolve: async () => { lookups += 1; return ["93.184.216.34"]; } },
+      ).catch((caught: unknown) => caught);
+      expect((error as Error).message).toBe("denied:address");
+      expect(calls).toBe(0);
+      expect(lookups).toBe(0);
+    });
+
+    it("reports an unresolvable host as unreachable without calling the owner", async () => {
+      let calls = 0;
+      const error = await call(
+        { pinsResolvedAddresses: true, fetch: async () => { calls += 1; return new Response(); } },
+        { resolve: async () => { throw new Error("ENOTFOUND"); } },
+      ).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ status: 502, code: "PROVIDER_ERROR" });
+      expect(calls).toBe(0);
+    });
+
+    it("keeps addresses a caller already verified and does not resolve again", async () => {
+      let seen: ModuleEgressRequest | undefined;
+      let lookups = 0;
+      await call(
+        { pinsResolvedAddresses: true, fetch: async (request) => { seen = request; return new Response(); } },
+        { resolvedAddresses: ["93.184.216.35"], resolve: async () => { lookups += 1; return ["93.184.216.34"]; } },
+      );
+      expect(seen?.resolvedAddresses).toEqual(["93.184.216.35"]);
+      expect(lookups).toBe(0);
+    });
+  });
+
   it("applies RequestInit overrides before the hook", async () => {
     let seen: ModuleEgressRequest | undefined;
     await fetchValidatedOutbound({
@@ -83,7 +178,7 @@ describe("canonical runtime-module egress boundary", () => {
       allowlist: ["api.example.com"],
       fallback: async () => new Response(),
       dispatch: {
-        owner: { fetch: async (request) => { seen = request; return new Response(); } },
+        owner: { pinsResolvedAddresses: true as const, fetch: async (request) => { seen = request; return new Response(); } },
         purpose: "oauth",
         scope,
       },
@@ -106,6 +201,7 @@ describe("canonical runtime-module egress boundary", () => {
         fallback: async () => { throw new Error("fallback must not run"); },
         dispatch: {
           owner: {
+            pinsResolvedAddresses: true as const,
             fetch: async (request) => {
               seen = request;
               return new Response();
@@ -146,7 +242,7 @@ describe("canonical runtime-module egress boundary", () => {
         allowlist: ["api.example.com"],
         fallback: async () => { transportCalls += 1; return new Response(); },
         dispatch: {
-          owner: { fetch: async () => { hookCalls += 1; return new Response(); } },
+          owner: { pinsResolvedAddresses: true as const, fetch: async () => { hookCalls += 1; return new Response(); } },
           purpose: "probe",
           scope,
         },
@@ -173,6 +269,7 @@ describe("canonical runtime-module egress boundary", () => {
         },
         dispatch: {
           owner: {
+            pinsResolvedAddresses: true as const,
             fetch: async () => {
               hookCalls += 1;
               return new Response();
@@ -207,6 +304,7 @@ describe("canonical runtime-module egress boundary", () => {
       },
       dispatch: {
         owner: {
+          pinsResolvedAddresses: true as const,
           fetch: async () => {
             markStarted();
             await ownerBarrier;
@@ -243,6 +341,7 @@ describe("canonical runtime-module egress boundary", () => {
     let ownerFailure: unknown;
     const invocation = createModuleEgressInvocation({
       owner: {
+        pinsResolvedAddresses: true as const,
         fetch: async (request) => {
           try {
             await new Response(request.init.body).text();
@@ -287,6 +386,7 @@ describe("canonical runtime-module egress boundary", () => {
     let ownerReason: unknown;
     const invocation = createModuleEgressInvocation({
       owner: {
+        pinsResolvedAddresses: true as const,
         fetch: async (request) => {
           markOwnerStarted();
           return new Promise<Response>((_resolve, reject) => {
@@ -332,6 +432,7 @@ describe("canonical runtime-module egress boundary", () => {
   it("trusts only a typed failure rejected directly by the registered hook", async () => {
     const invocation = createModuleEgressInvocation({
       owner: {
+        pinsResolvedAddresses: true as const,
         fetch: async (request) => {
           throw request.createFailure("policy_blocked");
         },
@@ -418,6 +519,7 @@ describe("canonical runtime-module egress boundary", () => {
   it("rejects unsupported failure kinds without retaining their value", async () => {
     const invocation = createModuleEgressInvocation({
       owner: {
+        pinsResolvedAddresses: true as const,
         fetch: async (request) => {
           throw request.createFailure("provider-private-detail" as never);
         },
@@ -502,7 +604,7 @@ it("production refuses every unowned outbound request before DNS or fetch", asyn
       })).rejects.toMatchObject({code:"EGRESS_OWNER_REQUIRED"});
     }
     await expect(fetchValidatedOutbound({target:"http://provider.example/token", init:{}, allowlist:["provider.example"],
-      dispatch:{owner:{fetch:async()=>{calls++;return new Response();}},purpose:"oauth",scope},
+      dispatch:{owner:{pinsResolvedAddresses: true as const, fetch:async()=>{calls++;return new Response();}},purpose:"oauth",scope},
       fallback:async()=>{calls++;return new Response();},denied:()=>Error('denied')
     })).rejects.toMatchObject({code:"EGRESS_DENIED"});
     expect(calls).toBe(0);

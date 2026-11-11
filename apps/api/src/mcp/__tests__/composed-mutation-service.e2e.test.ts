@@ -32,6 +32,10 @@ import type {
 } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { __buildGeneratedMcpServerForTests } from "../generated-mcp-server.js";
+import { __setOutboundAddressResolverForTests } from "../../modules/egress.js";
+
+// Test hosts are not in DNS; core resolves every owner-bound request.
+__setOutboundAddressResolverForTests(async () => ["93.184.216.34"]);
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -411,6 +415,7 @@ describe("composed mutation Service on the native provider", () => {
         const module: RuntimeModule = {
           name: "composed-test-module",
           egress: {
+            pinsResolvedAddresses: true as const,
             fetch: async () => {
               egressCalls += 1;
               throw new Error("The native provider never leaves the platform.");

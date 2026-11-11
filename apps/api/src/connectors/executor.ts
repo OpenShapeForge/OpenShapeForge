@@ -324,7 +324,9 @@ export function createBoundFetch(
             contract.slug,
             reason === "protocol"
               ? `Connector "${contract.slug}" attempted a ${deniedUrl.protocol} request; only http(s) is permitted.`
-              : `Connector "${contract.slug}" attempted to reach ${deniedUrl.hostname}, which its contract does not declare in network.egress.`,
+              : reason === "address"
+                ? `Connector "${contract.slug}" attempted to reach ${deniedUrl.hostname}, which does not resolve to a public address.`
+                : `Connector "${contract.slug}" attempted to reach ${deniedUrl.hostname}, which its contract does not declare in network.egress.`,
           ),
       });
       observe?.(response);

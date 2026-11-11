@@ -246,7 +246,7 @@ export function connectionProblemMessage(problem: ConnectionProblem): string {
         "As an organization administrator, set it up with " +
         connectionCreateCall(problem);
       const browser = problem.configurationUrl
-        ? `, or open ${problem.configurationUrl} in a browser and enter the values there` +
+        ? `, or open ${problem.configurationUrl} in a browser, sign in as the same person and enter the values there` +
           (problem.expiresAt ? ` (link valid until ${problem.expiresAt})` : "") +
           `; they never pass through the chat.`
         : ".";

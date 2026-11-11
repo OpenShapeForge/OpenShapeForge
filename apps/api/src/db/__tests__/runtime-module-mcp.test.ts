@@ -26,6 +26,10 @@ import {
 import { createRuntimeDeclarativeServiceExecutor } from "../../mcp/runtime-executors.js";
 import { connectionTokenSecretScope } from "../../connectors/secrets.js";
 import { encryptSecret, keyringFromEnv } from "../../platform/secrets.js";
+import { __setOutboundAddressResolverForTests } from "../../modules/egress.js";
+
+// Test hosts are not in DNS; core resolves every owner-bound request.
+__setOutboundAddressResolverForTests(async () => ["93.184.216.34"]);
 
 // The public plugin keeps its database generic unbound; the API runtime
 // specializes the same contract to the generated DB at its loader boundary.
@@ -434,6 +438,7 @@ describe("generated MCP runtime module security boundary", () => {
         const module: RuntimeModule = {
           name: "test-module",
           egress: {
+            pinsResolvedAddresses: true as const,
             fetch: async (request) => {
               egressRequests.push(request);
               if (mode === "cancel-during") {

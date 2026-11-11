@@ -131,6 +131,12 @@ export function searchableOperationToolDefinitions(
           data: { $ref: "#/$defs/JsonValue" },
           operations: { type: "array", items: { type: "object" } },
           resources: { type: "array", items: { type: "object" } },
+          execution: {
+            type: "object",
+            properties: { kind: { type: "string" }, ref: { type: "string" } },
+            required: ["kind", "ref"],
+            additionalProperties: false,
+          },
         },
         required: ["data", "operations"],
         additionalProperties: false,

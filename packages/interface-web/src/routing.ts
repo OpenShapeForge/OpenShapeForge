@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type {
+  WebAppEntriesV1,
+  WebAppEntry,
+  WebPage,
   WebCollectionView,
   WebEntityInterface,
   WebManifestV1,
@@ -60,6 +63,65 @@ export function matchWebRoute(manifest: WebManifestV1, pathname: string): WebRou
     }
   }
   return null;
+}
+
+function trimSlashes(path: string): string {
+  return path.replace(/^\/+|\/+$/g, "");
+}
+
+/** The browser path of a page: its authored route beneath the runtime base path. */
+export function pageRoute(page: Pick<WebPage, "route">, basePath = ""): string {
+  const base = basePath.replace(/\/+$/, "");
+  const route = trimSlashes(page.route);
+  return `${base}${route ? `/${route}` : ""}` || "/";
+}
+
+/** Pages in display order: authored order first, unordered pages last, ties by id. */
+export function sortedPages(manifest: Pick<WebManifestV1, "pages">): WebPage[] {
+  return Object.values(manifest.pages ?? {}).sort((left, right) =>
+    (left.order ?? Number.MAX_SAFE_INTEGER) - (right.order ?? Number.MAX_SAFE_INTEGER) || left.id.localeCompare(right.id));
+}
+
+/** The page whose route is the base-path-relative pathname; a query string and trailing slash are ignored. */
+export function matchPageRoute(manifest: Pick<WebManifestV1, "pages">, pathname: string): WebPage | null {
+  const actual = trimSlashes(pathname.split("?")[0] ?? "");
+  return sortedPages(manifest).find((page) => trimSlashes(page.route) === actual) ?? null;
+}
+
+/** What a pathname opens. Each kind carries its own target; none is inferred from the path text. */
+export type WebRouteTarget =
+  | ({ kind: "entityView" } & WebRouteMatch)
+  | { kind: "operationPage"; page: WebPage }
+  | { kind: "hostPage"; entry: WebAppEntry };
+
+/**
+ * The one resolver for browser and embedded hosts. Pages of standalone
+ * Operations are matched before entity routes, as the runtime renders them;
+ * a host page resolves only through an entry the application declares.
+ * Resolution is navigation: the Operations behind the target still authorize.
+ */
+export function resolveWebTarget(
+  manifest: WebManifestV1,
+  pathname: string,
+  entries?: Pick<WebAppEntriesV1, "entries">,
+): WebRouteTarget | null {
+  const page = matchPageRoute(manifest, pathname);
+  if (page) return { kind: "operationPage", page };
+  const match = matchWebRoute(manifest, pathname);
+  if (match) return { kind: "entityView", ...match };
+  const actual = trimSlashes(pathname.split("?")[0] ?? "");
+  const entry = Object.values(entries?.entries ?? {})
+    .find((candidate) => candidate.target.kind === "hostPage" && trimSlashes(candidate.route) === actual);
+  return entry ? { kind: "hostPage", entry } : null;
+}
+
+/** The entry a target was opened from, when the application declares one for it. */
+export function webAppEntryForRoute(
+  entries: Pick<WebAppEntriesV1, "entries">,
+  pathname: string,
+): WebAppEntry | null {
+  const actual = trimSlashes(pathname.split("?")[0] ?? "");
+  return Object.values(entries.entries).find((entry) => trimSlashes(entry.route) === actual) ?? null;
 }
 
 export type WebLocation = { tenantBase: string; pathname: string; search: string };

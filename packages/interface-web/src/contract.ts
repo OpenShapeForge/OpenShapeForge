@@ -615,6 +615,53 @@ export type WebPage = {
   operations: string[];
 };
 
+/**
+ * What an application entry opens. A reference only: fields, layout, inputs
+ * and permissions stay with the entity view, page or host page it names.
+ */
+export type WebAppEntryTarget =
+  /** An entity's canonical collection, or the named collection view `view`. */
+  | { kind: "entityView"; entityId: string; view?: string }
+  /** A page of standalone Operations. */
+  | { kind: "operationPage"; pageId: string }
+  /** A route the host renders itself; it has no compiled surface. */
+  | { kind: "hostPage" };
+
+/** Why an entry is not offered as an MCP application. */
+export type WebAppEntryMcpExclusion = "host-page" | "authored";
+
+/**
+ * One addressable destination of the application: a sidebar item in the
+ * browser, a named opener in an MCP host. The id is the authored menu key and
+ * never derives from a label or a route.
+ */
+export type WebAppEntry = {
+  id: string;
+  label: LocalizedText;
+  icon?: string;
+  target: WebAppEntryTarget;
+  /** The parameterless route the target resolves to. Navigation only, never a grant. */
+  route: string;
+  /**
+   * Canonical Operations whose discoverability admits the entry: a session
+   * that can discover any one may be offered it. Empty for a host page, whose
+   * visibility the host decides. The Operations keep the authorization.
+   */
+  discoverOperations: string[];
+  mcp: { exposed: true } | { exposed: false; reason: WebAppEntryMcpExclusion };
+};
+
+/** Sidebar grouping and order; the entries themselves are defined once in `entries`. */
+export type WebAppEntryGroup = { id: string; label?: LocalizedText; entries: string[] };
+
+/** The application's entries, projected from the authored shell and the web manifest. */
+export type WebAppEntriesV1 = {
+  contract: "openshapeforge.web-app-entries";
+  version: 1;
+  entries: Record<string, WebAppEntry>;
+  navigation: WebAppEntryGroup[];
+};
+
 /** Compiler-owned security metadata; the server independently enforces the ceiling. */
 export type WebAuthorizationOperation = {
   id:string; entity:string; roles:readonly string[]; grantable:boolean;

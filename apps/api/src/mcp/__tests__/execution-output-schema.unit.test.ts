@@ -5,7 +5,7 @@ import { Server, type Tool } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { searchableOperationToolDefinitions } from "../../../../../packages/operations/src/mcp-search-tools.js";
+import { searchableOperationToolDefinitions } from "@openshapeforge/operations";
 import { toolWithFailureOutputSchema } from "../tool-output-schema.js";
 
 test("strict legacy client accepts a workflow execution from the advertised generic executor over HTTP", async () => {

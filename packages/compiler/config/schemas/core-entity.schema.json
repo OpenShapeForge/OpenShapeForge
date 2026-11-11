@@ -1354,7 +1354,7 @@
                 }
               }
             },
-            "actions": { "type": "array", "uniqueItems": true, "items": { "const": "update" }, "description": "Make the fields in this view's layout editable through the canonical update Operation.", "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } } },
+            "actions": { "type": "array", "uniqueItems": true, "items": { "const": "update", "x-osf-i18n": { "title": { "en": "Action", "nl": "Actie" } } }, "description": "Make the fields in this view's layout editable through the canonical update Operation.", "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } } },
             "layout": {
               "$ref": "#/$defs/webViewsV2/properties/record/properties/layout",
               "x-osf-i18n": {

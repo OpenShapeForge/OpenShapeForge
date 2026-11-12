@@ -78,7 +78,7 @@ const CATALOGUE: Readonly<Record<number, string>> = Object.freeze({
  * what keeps "48" a statement about the authored contract.
  */
 const BASE_FIELDS = Object.freeze([
-  "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
+  "id", "createdAt", "updatedAt", "color", "icon", "externalId", "sourceAuthority",
   "sourceOrganization", "sourceAdministration", "sourceAdministrationName", "sourceVersion",
 ]);
 const DERIVED_FIELDS = Object.freeze(["children"]);

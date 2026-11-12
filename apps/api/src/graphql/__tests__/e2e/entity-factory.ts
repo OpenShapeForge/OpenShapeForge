@@ -8,6 +8,8 @@
 import { expect } from "bun:test";
 import { createHash, randomUUID } from "node:crypto";
 import { sql } from "kysely";
+import { withDbSession } from "../../../db/session.js";
+import { jsonbLiteral } from "../../../db/sql-helpers.js";
 import {
   createGeneratedEntity,
   getGeneratedEntity,
@@ -138,6 +140,7 @@ export function foreignKeyTargets(table: GeneratedTable): Map<string, string> {
 }
 
 export function sampleValue(column: Column, marker: string): unknown {
+  if (column.colorReference) return "standard:blue";
   switch (column.type) {
     case "text":
       return `e2e-${marker}-${fieldName(column)}`;
@@ -253,6 +256,7 @@ export function schemaSample(
       `e2e${marker.replace(/[^a-zA-Z0-9]/g, "")}${fieldName(column)}`,
       digest,
       `#${digest.slice(0, 6)}`,
+      "standard:blue",
     ];
     const fitting = candidates.find((candidate) => new RegExp(schema.pattern!).test(candidate));
     if (fitting === undefined) {
@@ -442,6 +446,38 @@ export async function createRow(
   const id = expectOperationData(table, created, graphql.createMutationName)?.id as string;
   expect(id).toBeTruthy();
   createdRows.push({ table, id, identity });
+  return id;
+}
+
+/**
+ * Seed a reference that satisfies its authored document policy. File metadata
+ * uses the real Document/Version invariant commands in this scratch database;
+ * relationship tests still exercise the caller's actual transport and RLS.
+ * This fixture does not claim artifact upload or byte-download coverage.
+ */
+export async function createReferenceRow(table: GeneratedTable, identity: Identity, column?: Column): Promise<string> {
+  const policy = column?.document;
+  if (policy?.content !== "file") return createRow(table, identity);
+  if (table.source?.authoringEntityName !== "Document") throw new Error("A document policy must reference Document.");
+  const mimeType = "image/png";
+  const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jCHsAAAAASUVORK5CYII=", "base64");
+  if (policy.mimeTypes && !policy.mimeTypes.includes(mimeType)) throw new Error("The reference fixture needs a supported file MIME type.");
+  if (policy.maxBytes && bytes.length > policy.maxBytes) throw new Error("The image fixture exceeds the authored file limit.");
+  const id = await createRow(table, identity, policy.documentType ? { documentType: policy.documentType } : {});
+  const artifactId = randomUUID();
+  await withDbSession(getSeedRuntime().db, identity, async (trx) => {
+    const result = await sql<{ id: string }>`
+      select document_internal.append_version_with_artifact(
+        ${id}::uuid, ${jsonbLiteral({ versionLabel: "image", status: "draft", isMajorVersion: false })}, ${artifactId}::uuid, 1::bigint
+      ) as id
+    `.execute(trx);
+    const row = result.rows[0];
+    if (!row) throw new Error("The typed file fixture returned no DocumentVersion.");
+    await sql`select document_internal.finalize_artifact_binding(
+      ${row.id}::uuid, ${artifactId}::uuid, 1::bigint, 2::bigint,
+      'reference.png'::text, ${mimeType}::text, ${createHash("sha256").update(bytes).digest("hex")}::text, ${bytes.length}::bigint
+    )`.execute(trx);
+  });
   return id;
 }
 
@@ -666,13 +702,11 @@ export function textColumnFor(
  * schema directly.
  */
 export function redactableColumnFor(table: GeneratedTable): Column | undefined {
-  return table.columns.find(
-    (column) =>
-      isMutableColumn(column, "update") &&
-      column.type === "text" &&
-      !column.required &&
-      isCreatableField(table, fieldName(column)),
-  );
+  return table.columns.find(column => {
+    const schema = createFieldSchema(table, fieldName(column));
+    return isMutableColumn(column, "update") && column.type === "text" && !column.required &&
+      isCreatableField(table, fieldName(column)) && !schema?.enum && !schema?.pattern && (schema?.maxLength ?? Infinity) >= 80;
+  });
 }
 
 /**

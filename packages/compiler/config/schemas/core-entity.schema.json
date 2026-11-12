@@ -1783,6 +1783,7 @@
             }
           },
           "properties": {
+            "visible": {"type": "boolean", "x-osf-i18n": {"title": {"en": "Show toolbar", "nl": "Werkbalk tonen"}}},
             "search": {
               "type": "boolean",
               "x-osf-i18n": {
@@ -2436,7 +2437,7 @@
                 "children": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Children collection", "nl": "Collectie met onderdelen" } } },
                 "label": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group label field", "nl": "Groepslabelveld" } } },
                 "count": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group count field", "nl": "Groepstellingsveld" } } },
-                "parent": {"$ref": "#/$defs/fieldKey"},
+                "parent": {"$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": {"title": {"en": "Parent field", "nl": "Bovenliggend veld"}}},
                 "through": {"$ref": "#/$defs/webCollectionTreeThrough"}
               }
             },

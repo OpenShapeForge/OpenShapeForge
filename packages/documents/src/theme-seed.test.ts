@@ -15,9 +15,9 @@ describe("DocumentTheme seed", () => {
       key: "default",
       isDefault: true,
       fontFamily: "dm-sans",
-      surfaceColor: "#ffffff",
-      textColor: "#111827",
-      accentColor: "#2563eb",
+      surfaceColor: "standard:white",
+      textColor: "standard:ink",
+      accentColor: "standard:cobalt",
     });
     expect(catalog[0]?.typography.body.colorRole).toBe("text");
     expect(catalog[0]?.typography.heading1.fontSize).toBe(22);

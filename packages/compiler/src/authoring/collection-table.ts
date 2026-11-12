@@ -74,7 +74,10 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     for (const key of [panel.heading, panel.subtitle, ...(panel.fields ?? [])].filter(Boolean)) path(record, key!, undefined);
   }
   if (panel?.view !== undefined) {
-    if (record.contract.interfaces?.web?.namedViews?.[panel.view]?.kind !== 'record') throw new Error(`${name}: record panel view ${panel.view} must name a record view of ${record.contract.entity.name}.`);
+    // Recursive projection removes named views to avoid projecting them again.
+    // Validate references against the complete entity, not that temporary projection.
+    const canonical = all.get(record.contract.entity.name) ?? record;
+    if (canonical.contract.interfaces?.web?.namedViews?.[panel.view]?.kind !== 'record') throw new Error(`${name}: record panel view ${panel.view} must name a record view of ${record.contract.entity.name}.`);
     if (panel.includeRecord !== undefined || panel.summaryColumns) throw new Error(`${name}: a record panel view replaces includeRecord and summaryColumns.`);
   }
   if (panel?.primaryMembership) {

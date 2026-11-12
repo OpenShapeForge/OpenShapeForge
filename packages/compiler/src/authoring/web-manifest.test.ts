@@ -655,6 +655,23 @@ describe("web manifest projection", () => {
     });
   });
 
+  test("a named collection panel can reference a named record view of the same entity", () => {
+    const source = entity("Source", "source", [field("displayName"), field("contactDetails")], coreView(), [
+      { key: "contactDetails", fieldKey: "contactDetails", kind: "belongsTo", target: "Target", foreignKey: "contact_details_id", ownership: "reference" },
+    ]);
+    const target = entity("Target", "target", [field("displayName")], coreView());
+    const table = { heading: { title: text('Sources') }, label: text('Source'), views: { tree: text('Grouped'), flat: text('All') }, recordPanel: { title: text('Details'), view: 'panel' }, columns: [{ key: 'name', label: text('Name'), values: [{ path: 'displayName' }] }] };
+    source.contract.interfaces!.web!.namedViews = {
+      panel: { kind: 'record', layout: { tabs: [{ id: 'summary', title: text('Summary'), fields: ['displayName'] }] } },
+      selected: { kind: 'collection', collectionLayout: 'table', route: '/sources/selected', table },
+    } as never;
+    const result = buildWebManifest([source, target]).entities.Source!;
+    expect(result.views.named!.selected).toMatchObject({ table: { recordPanel: { view: 'panel' } } });
+    expect(result.views.named!.panel).toMatchObject({ kind: 'record' });
+    table.recordPanel.view = 'missing';
+    expect(() => buildWebManifest([source, target])).toThrow(/must name a record view/);
+  });
+
   test("flat named views from the merged document chain compile through the shared pipeline", async () => {
     const active = await loadActivePlatformCompile(join(import.meta.dir, "../../../.."));
     const result = buildWebManifest(active.entities, {}, corpusWebOperations(authoringDir));

@@ -21,7 +21,8 @@ export function applicationSearchDefinition(entities: readonly Pick<CompiledEnti
 export function applicationSearchSources(entities: readonly Pick<CompiledEntityInfo,'contract'>[]) {
   return entities.flatMap(({contract:c})=>{
     // Internal CRUD remains available to other Operations, never to discovery.
-    if(c.entityOperations?.list?.withheld)return [];
+    if(c.entityOperations?.list?.withheld || !(c.rest?.operations.list || c.mcp?.operations.list ||
+      c.interfaces?.web?.operations.list || c.graphql?.operations?.list))return [];
     const list=c.entityOperations?.list?.id ?? c.pluginOperations?.find(op=>op.key==='list')?.id;
     const get=c.entityOperations?.get?.id ?? c.pluginOperations?.find(op=>op.key==='get')?.id;
     if(!list)return [];

@@ -182,13 +182,37 @@ function jsonForHtml(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c");
 }
 
-export function renderArtifactUploadPage(uploadUrl: string): string {
+/**
+ * The link carries a bearer token in its path. Every answer on it, the error
+ * responses included, stays out of caches and never leaks the path as a
+ * referrer.
+ */
+export const ARTIFACT_UPLOAD_PRIVACY_HEADERS = Object.freeze({
+  "cache-control": "private, no-store, max-age=0",
+  "referrer-policy": "no-referrer",
+  "x-content-type-options": "nosniff",
+});
+
+/** The page runs one inline script and posts only to its own upload URL. */
+export function artifactUploadPagePolicy(uploadOrigin: string, scriptNonce: string): string {
+  return [
+    "default-src 'none'",
+    `script-src 'nonce-${scriptNonce}'`,
+    "style-src 'unsafe-inline'",
+    `connect-src 'self' ${uploadOrigin}`,
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
+
+export function renderArtifactUploadPage(uploadUrl: string, scriptNonce?: string): string {
   return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <title>Upload document</title><body style="${PAGE_STYLE}">
 <h1 style="font-size:1.35rem">Upload document</h1>
 <p id="message">Choose the file that should be used by ${escapeHtml(productName())}.</p>
 <input id="file" type="file"><progress id="progress" hidden style="width:100%"></progress>
-<script>
+<script${scriptNonce ? ` nonce="${escapeHtml(scriptNonce)}"` : ""}>
 const url=${jsonForHtml(uploadUrl)}, file=document.getElementById('file'), message=document.getElementById('message'), progress=document.getElementById('progress');
 file.addEventListener('change',async()=>{const selected=file.files&&file.files[0];if(!selected)return;file.disabled=true;progress.hidden=false;progress.removeAttribute('value');message.textContent='Uploading…';try{const response=await fetch(url,{method:'POST',headers:{'content-type':'application/octet-stream','x-file-name':encodeURIComponent(selected.name)},body:selected});const body=await response.json();if(!response.ok)throw new Error(body?.error?.message||'Upload failed.');message.textContent='Uploaded '+body.data.fileName+' ('+body.data.byteSize+' bytes). Return to the assistant and continue with artifactId '+body.data.artifactId+'.';progress.value=1;progress.max=1;}catch(error){message.textContent=error instanceof Error?error.message:'Upload failed.';file.disabled=false;progress.hidden=true;}});
 </script></body>`;

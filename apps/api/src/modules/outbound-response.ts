@@ -39,8 +39,17 @@ export async function readBoundedResponse(response: Response, maxBytes = 20 * 10
   }
 }
 
+/**
+ * Local-only outbound relaxations (plain HTTP, the unpinned fallback) apply
+ * only where the environment says so. An unset or unknown NODE_ENV is treated
+ * as production, so a deployment that forgets the variable fails closed.
+ */
+export function outboundRelaxationsAllowed(environment: string | undefined): boolean {
+  return environment === "development" || environment === "test";
+}
+
 /** Production credentials and browser authorization redirects require TLS. */
-export function assertOutboundTls(url: URL, production = process.env.NODE_ENV === "production"): void {
+export function assertOutboundTls(url: URL, production = !outboundRelaxationsAllowed(process.env.NODE_ENV)): void {
   if (url.protocol !== "https:" && (url.protocol !== "http:" || production)) {
     throw new HttpError(403, "EGRESS_DENIED", "Outbound production endpoints require HTTPS.");
   }

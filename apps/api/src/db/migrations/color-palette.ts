@@ -13,8 +13,11 @@ export async function applyPublicColorPaletteMigration(db: OpenShapeForgeDatabas
   await sql`grant select(tenant_id,namespace,key,value) on erp.tenant_settings to ${sql.id(resolver)}`.execute(db);
   await sql`drop policy if exists public_color_palette_lookup on erp.tenant_settings`.execute(db);
   await sql`create policy public_color_palette_lookup on erp.tenant_settings for select to ${sql.id(resolver)} using(tenant_id=app.current_tenant() and namespace='appearance' and key='colors')`.execute(db);
+  // Resolver membership is inherited by the restricted migrator too. Only this
+  // table's owner may migrate all tenants; the definer keeps its tenant/key fence.
+  const ownsTable=sql`coalesce((select pg_catalog.pg_has_role(current_user,c.relowner,'USAGE') from pg_catalog.pg_class c where c.oid='erp.tenant_settings'::regclass),false)`;
   await sql`drop policy if exists public_color_palette_scope on erp.tenant_settings`.execute(db);
-  await sql`create policy public_color_palette_scope on erp.tenant_settings as restrictive for select to ${sql.id(resolver)} using(tenant_id=app.current_tenant() and namespace='appearance' and key='colors')`.execute(db);
+  await sql`create policy public_color_palette_scope on erp.tenant_settings as restrictive for select to ${sql.id(resolver)} using(${ownsTable} or (tenant_id=app.current_tenant() and namespace='appearance' and key='colors'))`.execute(db);
   await sql`
     grant create on schema app to ${sql.id(resolver)};
     create or replace function app.public_color_palette(requested_tenant uuid) returns table(value jsonb)

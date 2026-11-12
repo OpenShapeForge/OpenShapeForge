@@ -7,20 +7,31 @@ import { sql } from 'kysely';
 import { createDatabaseRuntime, type DatabaseRuntime } from '../db/connection.js';
 import { withSystemSession, SYSTEM_BYPASS_ROLE } from '../db/session.js';
 import { encryptSecret, keyringFromEnv } from '@openshapeforge/plugin-runtime/secrets';
-import { ensureTenantSettingDefaults, tenantSettingDefaultsOf } from './tenant-setting-defaults.js';
+import { applyPublicColorPaletteMigration } from '../db/migrations/color-palette.js';
+import { databaseRole } from '../db/database-roles.js';
+import { backfillTenantSettingDefaults, ensureTenantSettingDefaults, tenantSettingDefaultsOf } from './tenant-setting-defaults.js';
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@127.0.0.1:5434/postgres";
 const databaseName = `tenant_defaults_${randomUUID().replaceAll('-', '')}`;
+const migratorRole=databaseName+'_migrator';
+const migratorPassword='scratch-'+randomUUID();
+const resolver=databaseRole('identityResolver').name;
 let admin: SQL | undefined;
 let runtime: DatabaseRuntime | undefined;
 beforeAll(async () => {
   const url = new URL(adminUrl);
   url.pathname = '/postgres';
   admin = new SQL(url.toString(), { max: 1 });
-  await admin.unsafe(`create database "${databaseName}"`);
+  await admin.unsafe(`create role "${migratorRole}" login password '${migratorPassword}' nosuperuser nocreaterole nocreatedb nobypassrls`);
+  await admin.unsafe(`grant "${resolver}" to "${migratorRole}" with inherit true, set true`);
+  await admin.unsafe(`create database "${databaseName}" owner "${migratorRole}"`);
   url.pathname = '/' + databaseName;
+  url.username=migratorRole;url.password=migratorPassword;
   runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 1 });
   await sql.raw(`
+    create schema app;
+    create function app.current_tenant() returns uuid language sql stable as $$select nullif(current_setting('app.tenant_id',true),'')::uuid$$;
+    create function app.bypass_rls() returns boolean language sql stable as $$select coalesce(current_setting('app.bypass_rls',true),'')='true'$$;
     create schema platform;
     create schema erp;
     create table platform.tenants(id uuid primary key,slug text,name text,status text);
@@ -37,13 +48,17 @@ beforeAll(async () => {
       $$begin new.updated_at=clock_timestamp(); return new; end$$;
     create trigger fixture_updated_at before update on erp.tenant_settings
       for each row execute function erp.fixture_touch_updated_at();
+    alter table erp.tenant_settings enable row level security;
+    alter table erp.tenant_settings force row level security;
+    create policy tenant_scope on erp.tenant_settings using(app.bypass_rls() or tenant_id=app.current_tenant()) with check(app.bypass_rls() or tenant_id=app.current_tenant());
   `).execute(runtime.db);
+  await applyPublicColorPaletteMigration(runtime.db);
 }, 30000);
 afterAll(async () => {
   if (runtime) await runtime.close();
   if (admin) {
     try { await admin.unsafe(`drop database if exists "${databaseName}" with (force)`); }
-    finally { await admin.close(); }
+    finally { await admin.unsafe(`drop role if exists "${migratorRole}"`); await admin.close(); }
   }
 });
 const rollback = new Error('ROLLBACK_DEFAULTS_FIXTURE');
@@ -84,3 +99,23 @@ test('new tenant defaults are isolated and replay preserves saved ciphertext, ch
   } catch (error) { if (error !== rollback) throw error; }
   expect(checked).toBe(true);
 }, 30000);
+
+test('restricted owner/member replays populated-tenant defaults while the resolver remains palette fenced',async()=>{
+  if(!runtime)throw Error('Scratch database initialization required.');
+  const db=runtime.db,ids=[randomUUID(),randomUUID()];
+  await sql`insert into erp.tenants(id,tenant_id,slug,name) values ${sql.join(ids.map(id=>sql`(${id}::uuid,${id}::uuid,${'replay-'+id},'Replay test')`))}`.execute(db);
+  const modules=[{name:'fixture',tenantSettingDefaults:[{namespace:'example.replay',key:'model',definition:{key:'value',osfType:'string'},value:'initial-model'}]}];
+  expect(await backfillTenantSettingDefaults(db,modules)).toEqual({tenants:2,inserted:4});
+  const session={actorSubject:'defaults-replay-proof',roles:[SYSTEM_BYPASS_ROLE],reason:'Verify restricted owner replay without changing existing tenant values'};
+  await withSystemSession(db,session,async trx=>{await sql`update erp.tenant_settings set value='"saved-model"'::jsonb where tenant_id=${ids[0]}::uuid and namespace='example.replay'`.execute(trx);});
+  const before=await withSystemSession(db,session,trx=>sql`select * from erp.tenant_settings order by tenant_id,namespace,key`.execute(trx));
+  expect(await backfillTenantSettingDefaults(db,modules)).toEqual({tenants:2,inserted:0});
+  expect((await withSystemSession(db,session,trx=>sql`select * from erp.tenant_settings order by tenant_id,namespace,key`.execute(trx))).rows).toEqual(before.rows);
+  await db.transaction().execute(async trx=>{
+    await sql`set local role ${sql.id(resolver)}`.execute(trx);
+    await sql`select set_config('app.tenant_id',${ids[0]!},true),set_config('app.bypass_rls','true',true)`.execute(trx);
+    const visible=await sql<{tenant_id:string;namespace:string;key:string}>`select tenant_id,namespace,key from erp.tenant_settings`.execute(trx);
+    expect(visible.rows).toEqual([{tenant_id:ids[0]!,namespace:'appearance',key:'colors'}]);
+    expect((await sql<{owner:boolean}>`select pg_has_role(current_user,(select relowner from pg_class where oid='erp.tenant_settings'::regclass),'USAGE') as owner`.execute(trx)).rows[0]!.owner).toBe(false);
+  });
+},30000);

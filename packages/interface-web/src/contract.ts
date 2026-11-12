@@ -227,6 +227,8 @@ export type WebFieldGroup = {
   fields: string[];
   /** Icon key shown with the group; the host resolves it. */
   icon?: string;
+  /** `false` leaves out the group heading; its fields keep their own labels. */
+  showTitle?: boolean;
   /** The group applies only while these conditions hold for the draft being edited. */
   visibleWhen?: WebVisibilityCondition;
   /** Per-field presentation-renderer overrides authored on a FieldRef; keyed by field key, sparse. */
@@ -271,6 +273,10 @@ export type WebCollectionTable = {
   toolbar?: { visible?: boolean; search?: boolean; create?: boolean };
   recordPanel?: {
     actions?: Array<"edit" | "openFull">;
+    /** `direct` opens the panel view editable with one save action; `confirmed` (default) keeps Edit, Save and Cancel. */
+    editing?: "confirmed" | "direct";
+    /** Save action label: the first entry whose conditions hold for the values being edited; `{field}` inserts a value. */
+    saveLabel?: Array<{ label: LocalizedText; visibleWhen?: WebVisibilityCondition }>;
     primaryMembership?: { field: string; equals: string };
     avatar?: string;
     summaryColumns?: string[];
@@ -287,7 +293,7 @@ export type WebCollectionTable = {
       details?: WebCollectionTableValue[];
       values: WebCollectionTableValue[];
     }>;
-    title: LocalizedText; layout?: { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: string[] }> }> }; binding?: string; includeRecord?: boolean; view?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
+    title: LocalizedText; layout?: { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: Array<string | { field: string; label?: LocalizedText; value?: string; detail?: string; shareOf?: string; emphasis?: boolean }>; presentation?: "rows" | "fields"; position?: "before" | "after"; decimalPlaces?: number; visibleWhen?: WebVisibilityCondition }> }> }; binding?: string; includeRecord?: boolean; view?: string; heading?: string; subtitle?: string; currency?: string; fields?: string[]; collection?: { field: string; columns: string[]; title: LocalizedText }; note?: LocalizedText };
   heading: { title: LocalizedText; subtitle?: LocalizedText };
   views: { tree: LocalizedText; flat: LocalizedText };
   label: LocalizedText;

@@ -66,13 +66,18 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
   });
   const panel = authored.recordPanel;
   if (panel?.actions?.some(action => !["edit", "openFull"].includes(action))) throw new Error(`${name}: invalid summary action.`);
+  if (panel?.editing !== undefined && !["confirmed", "direct"].includes(panel.editing)) throw new Error(`${name}: record panel editing must be confirmed or direct.`);
+  if ((panel?.editing === "direct" || panel?.saveLabel) && panel.view === undefined) throw new Error(`${name}: direct editing and a save label require a record panel view.`);
   if (panel?.summaryColumns) {
     if (panel.binding || !panel.heading || panel.summaryColumns.some(key => !keys.has(key))) throw new Error(`${name}: record summaries require a heading and known table columns.`);
     if (panel.fields?.some(key => !record.contract.model.fields.some(field => field.key === key))) throw new Error(`${name}: summary fields require direct record fields.`);
     for (const key of [panel.heading, panel.subtitle, ...(panel.fields ?? [])].filter(Boolean)) path(record, key!, undefined);
   }
   if (panel?.view !== undefined) {
-    if ((all.get(record.contract.entity.name) ?? record).contract.interfaces?.web?.namedViews?.[panel.view]?.kind !== 'record') throw new Error(`${name}: record panel view ${panel.view} must name a record view of ${record.contract.entity.name}.`);
+    // Recursive projection removes named views to avoid projecting them again.
+    // Validate references against the complete entity, not that temporary projection.
+    const canonical = all.get(record.contract.entity.name) ?? record;
+    if (canonical.contract.interfaces?.web?.namedViews?.[panel.view]?.kind !== 'record') throw new Error(`${name}: record panel view ${panel.view} must name a record view of ${record.contract.entity.name}.`);
     // A typed binding can supply the read summary above the named record body.
     // Its layout/header fields are validated against that binding below.
     if (panel.includeRecord === true || panel.summaryColumns || panel.fields || panel.collection || (!panel.binding && (panel.heading || panel.subtitle || panel.layout))) throw new Error(`${name}: a record panel view replaces the inline record body.`);
@@ -100,7 +105,7 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     const panel = authored.recordPanel, binding = bindings?.[panel.binding!];
     if (!binding) throw new Error(`${name}: record panel binding is unknown.`);
     if (panel.avatar) bindingField(binding.schema, panel.avatar);
-    for (const tab of panel.layout?.tabs ?? []) for (const group of tab.groups) for (const field of group.fields) bindingField(binding.schema, field);
+    for (const tab of panel.layout?.tabs ?? []) for (const group of tab.groups) for (const row of group.fields) for (const field of typeof row === "string" ? [row] : [row.field, ...(row.value ? [row.value] : []), ...(row.detail ? [row.detail] : []), ...(row.shareOf ? [row.shareOf] : [])]) bindingField(binding.schema, field);
     for (const field of [...panel.fields ?? [], ...panel.heading ? [panel.heading] : [], ...panel.subtitle ? [panel.subtitle] : []]) bindingField(binding.schema, field);
     if (panel.collection) {
       const schema = bindingField(binding.schema, panel.collection.field);
@@ -112,5 +117,5 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     if (!link.route.startsWith('/') || link.route.startsWith('//')) throw new Error(`${name}: collection navigation requires local routes.`);
     return { ...link, label: local(link.label) };
   });
-  return { ...authored, ...(bindings ? { bindings } : {}), ...(totals ? { totals } : {}), ...(navigation ? { navigation } : {}), ...(authored.rowLabel ? { rowLabel: path(record, authored.rowLabel, undefined) } : {}), ...(authored.membershipDescription ? { membershipDescription: path(membership!, authored.membershipDescription, undefined) } : {}), ...(authored.recordPanel ? { recordPanel: { ...authored.recordPanel, ...(sections ? { sections } : {}), title: local(authored.recordPanel.title), ...(authored.recordPanel.collection ? { collection: { ...authored.recordPanel.collection, title: local(authored.recordPanel.collection.title) } } : {}), ...(authored.recordPanel.note ? { note: local(authored.recordPanel.note) } : {}) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
+  return { ...authored, ...(bindings ? { bindings } : {}), ...(totals ? { totals } : {}), ...(navigation ? { navigation } : {}), ...(authored.rowLabel ? { rowLabel: path(record, authored.rowLabel, undefined) } : {}), ...(authored.membershipDescription ? { membershipDescription: path(membership!, authored.membershipDescription, undefined) } : {}), ...(authored.recordPanel ? { recordPanel: { ...authored.recordPanel, ...(sections ? { sections } : {}), title: local(authored.recordPanel.title), ...(authored.recordPanel.saveLabel ? { saveLabel: authored.recordPanel.saveLabel.map(item => ({ ...item, label: local(item.label) })) } : {}), ...(authored.recordPanel.collection ? { collection: { ...authored.recordPanel.collection, title: local(authored.recordPanel.collection.title) } } : {}), ...(authored.recordPanel.note ? { note: local(authored.recordPanel.note) } : {}) } } : {}), heading: { title: local(authored.heading.title), ...(authored.heading.subtitle ? { subtitle: local(authored.heading.subtitle) } : {}) }, views: { tree: local(authored.views.tree), flat: local(authored.views.flat) }, label: local(authored.label), ...(authored.ungrouped ? { ungrouped: local(authored.ungrouped) } : {}), columns } as WebCollectionTable;
 }

@@ -229,6 +229,7 @@ function compileGroup(
     title: group.title,
     label: group.label,
     icon: group.icon,
+    showTitle: group.showTitle,
     visibleWhen: group.visibleWhen,
     ...(group.showInReadNavigation !== undefined ? { showInReadNavigation: group.showInReadNavigation } : {}),
     render: group.render ? typeof group.render === "string" ? vr(catalog, group.render) : { ...vr(catalog, group.render.component), ...(group.render.props ? { props: structuredClone(group.render.props) } : {}) } : undefined,

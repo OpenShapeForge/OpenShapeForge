@@ -106,6 +106,8 @@ export interface ViewGroupOverride {
   title?: LocalizedText;
   label?: LocalizedText;
   icon?: string;
+  /** `false` leaves out the group heading; its fields keep their own labels. */
+  showTitle?: boolean;
   visibleWhen?: VisibilityConfig;
   render?: string | { component: string; props?: Record<string, unknown> };
   /** Widget value slots mapped to existing scalar fields; presentation only. */
@@ -126,6 +128,8 @@ export interface ViewGroup {
   title?: LocalizedText;
   label?: LocalizedText;
   icon?: string;
+  /** `false` leaves out the group heading; its fields keep their own labels. */
+  showTitle?: boolean;
   /** Show the group only while these conditions hold for the record being edited. */
   visibleWhen?: VisibilityConfig;
   render?: string | { component: string; props?: Record<string, unknown> };

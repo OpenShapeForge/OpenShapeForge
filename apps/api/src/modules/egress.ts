@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { hostAllowed } from "@openshapeforge/plugin-runtime";
 export { hostAllowed } from "@openshapeforge/plugin-runtime";
-import { assertOutboundTls } from "./outbound-response.js";
+import { assertOutboundTls, outboundRelaxationsAllowed } from "./outbound-response.js";
 import {
   OutboundAddressError,
   verifiedPublicAddresses,
@@ -23,9 +23,9 @@ export function missingEgressOwnerDiagnostic(environment: string | undefined, ow
       ? undefined
       : { code: "EGRESS_OWNER_REQUIRED", message: "The configured egress owner does not declare pinsResolvedAddresses. Outbound requests will be refused until it dials only the addresses core resolved." };
   }
-  return environment === "production"
-    ? { code: "EGRESS_OWNER_REQUIRED", message: "No outbound egress owner is configured. Production outbound requests will be refused until one is installed." }
-    : undefined;
+  return outboundRelaxationsAllowed(environment)
+    ? undefined
+    : { code: "EGRESS_OWNER_REQUIRED", message: "No outbound egress owner is configured. Outbound requests will be refused until one is installed, or NODE_ENV is development or test." };
 }
 
 const trustedModuleEgressFailure = new WeakMap<
@@ -319,9 +319,10 @@ export async function fetchValidatedOutbound(input: {
   const owner = input.dispatch?.owner;
   if (!input.dispatch || !owner) {
     // Hostname matching alone cannot stop private addresses or DNS rebinding.
-    // Production network admission belongs to the selected hardened owner.
-    if (process.env.NODE_ENV === "production") {
-      throw new HttpError(503, "EGRESS_OWNER_REQUIRED", "Production outbound requests require a configured egress owner.");
+    // Network admission belongs to the selected hardened owner everywhere
+    // except an explicitly declared development or test environment.
+    if (!outboundRelaxationsAllowed(process.env.NODE_ENV)) {
+      throw new HttpError(503, "EGRESS_OWNER_REQUIRED", "Outbound requests require a configured egress owner.");
     }
     return withRuntimeSpan("external.headers", () => input.fallback(input.target, input.init), { ...(provider ? { provider } : {}) });
   }

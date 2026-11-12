@@ -459,7 +459,17 @@ export type CollectionTableValueDefinition = {
   defaultValue?: string | number;
 };
 /** Binding-backed record panel body: the same tabs -> groups -> fields shape as a record view layout, resolved against the binding schema. */
-export type BindingPanelLayout = { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: string[] }> }> };
+/**
+ * A row of a binding group: a field key, or a field with presentation. `label` replaces the
+ * field's own title, `value` names the field shown as the row's value (default: the field
+ * itself), `detail` adds a second field below it in parentheses, `shareOf` draws the field as
+ * a share of another numeric field, `emphasis` marks the row as the group's result.
+ *
+ * A group shows `rows` (label left, value right) or read-only `fields` (label above), sits
+ * `before` or `after` the panel's record view, and may depend on the values the view edits.
+ */
+export type BindingPanelRow = string | { field: string; label?: LocalizedText; value?: string; detail?: string; shareOf?: string; emphasis?: boolean };
+export type BindingPanelLayout = { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: BindingPanelRow[]; presentation?: "rows" | "fields"; position?: "before" | "after"; decimalPlaces?: number; visibleWhen?: VisibilityConfig }> }> };
 
 export type CollectionTableDefinition = {
   bindings?: Record<string, { entity: string; operation: string; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;
@@ -472,6 +482,10 @@ export type CollectionTableDefinition = {
   toolbar?: { visible?: boolean; search?: boolean; create?: boolean };
   recordPanel?: {
     actions?: Array<"edit" | "openFull">;
+    /** `direct` opens the panel view editable with one save action; `confirmed` (default) keeps Edit, Save and Cancel. */
+    editing?: "confirmed" | "direct";
+    /** Save action label: the first entry whose conditions hold for the values being edited; `{field}` inserts a value. */
+    saveLabel?: Array<{ label: LocalizedText; visibleWhen?: VisibilityConfig }>;
     primaryMembership?: { field: string; equals: string };
     avatar?: string;
     summaryColumns?: string[];

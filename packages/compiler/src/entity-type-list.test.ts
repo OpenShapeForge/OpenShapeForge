@@ -19,7 +19,7 @@ test("entity type discovery is a trusted canonical native read operation with au
 
 test('application search is a verified core read with compiler-owned searchable fields',()=>{
  const entities=[{contract:{entity:{name:'Example',title:'Example',labels:{en:'Examples',nl:'Voorbeelden'},filterField:'name'},
- authorization:{roles:{read:['Example.Read']}},entityOperations:{list:{id:'Example.list'},get:{id:'Example.get'}},
+ rest:{operations:{list:true}},authorization:{roles:{read:['Example.Read']}},entityOperations:{list:{id:'Example.list'},get:{id:'Example.get'}},
  model:{fields:[{key:'name',baseType:'string'},{key:'description',baseType:'string'}],relationships:[]}}}] as any;
  const operations=collectAuthoredEntityPluginOperations(entities,context);
  const search=operations.find(op=>op.key==='application.search')!;

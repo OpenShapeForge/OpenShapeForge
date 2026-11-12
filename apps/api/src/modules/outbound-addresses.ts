@@ -15,8 +15,9 @@ const NON_PUBLIC_V4 = [
   ["192.88.99.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["198.51.100.0", 24],
   ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4],
 ] as const;
-// Inside global unicast, but reserved or a tunnel to an embedded IPv4 address.
-const NON_PUBLIC_V6 = [["2001::", 23], ["2001:db8::", 32], ["2002::", 16]] as const;
+// Inside global unicast, but reserved, documentation-only (2001:db8::/32 and
+// 3fff::/20, RFC 9637) or a tunnel to an embedded IPv4 address.
+const NON_PUBLIC_V6 = [["2001::", 23], ["2001:db8::", 32], ["2002::", 16], ["3fff::", 20]] as const;
 
 function ipv4Bits(address: string): bigint {
   return address.split(".").reduce((bits, octet) => (bits << 8n) | BigInt(octet), 0n);

@@ -36,6 +36,30 @@ describe("canonical runtime-module egress boundary", () => {
     expect(missingEgressOwnerDiagnostic("production", {})).toMatchObject({ code: "EGRESS_OWNER_REQUIRED" });
     expect(missingEgressOwnerDiagnostic("development", {})).toMatchObject({ code: "EGRESS_OWNER_REQUIRED" });
     expect(missingEgressOwnerDiagnostic("development", undefined)).toBeUndefined();
+    // A deployment that forgot NODE_ENV is treated as production.
+    expect(missingEgressOwnerDiagnostic(undefined, undefined)).toMatchObject({ code: "EGRESS_OWNER_REQUIRED" });
+    expect(missingEgressOwnerDiagnostic("staging", undefined)).toMatchObject({ code: "EGRESS_OWNER_REQUIRED" });
+  });
+  it("refuses the unpinned fallback unless the environment is declared development or test", async () => {
+    const original = process.env.NODE_ENV;
+    try {
+      for (const environment of [undefined, "production", "staging"]) {
+        if (environment === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = environment;
+        let fallbackCalls = 0;
+        await expect(fetchValidatedOutbound({
+          target: "https://api.example.com/items",
+          init: {},
+          allowlist: ["api.example.com"],
+          fallback: async () => { fallbackCalls += 1; return new Response(); },
+          denied: (_url, reason) => new Error(reason),
+        })).rejects.toMatchObject({ code: "EGRESS_OWNER_REQUIRED" });
+        expect(fallbackCalls).toBe(0);
+      }
+    } finally {
+      if (original === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = original;
+    }
   });
   it("delivers the exact trusted context and preserves Request semantics and signal", async () => {
     const signal = new AbortController().signal;

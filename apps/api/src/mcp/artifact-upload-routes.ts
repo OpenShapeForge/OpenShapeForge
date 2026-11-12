@@ -5,8 +5,11 @@
  *
  * Split out of generated-mcp-server.ts.
  */
+import { randomBytes } from "node:crypto";
 import {
   ARTIFACT_UPLOAD_PATH,
+  ARTIFACT_UPLOAD_PRIVACY_HEADERS,
+  artifactUploadPagePolicy,
   artifactUploadSession,
   claimArtifactUpload,
   renderArtifactUploadPage,
@@ -32,14 +35,22 @@ export async function registerArtifactUploadRoutes(
       "application/octet-stream",
       (_request, payload, done) => done(null, payload),
     );
-    instance.get(`${ARTIFACT_UPLOAD_PATH}/:token`, async (request, reply) => {
+    const privateLink = async (_request: unknown, reply: { headers(values: Record<string, string>): unknown }) => {
+      reply.headers(ARTIFACT_UPLOAD_PRIVACY_HEADERS);
+    };
+    instance.get(`${ARTIFACT_UPLOAD_PATH}/:token`, { onRequest: privateLink }, async (request, reply) => {
       const token = (request.params as { token?: string }).token;
-      const uploadUrl = `${callbackOrigin()}${ARTIFACT_UPLOAD_PATH}/${encodeURIComponent(token ?? "")}`;
-      return reply.type("text/html").send(renderArtifactUploadPage(uploadUrl));
+      const origin = callbackOrigin();
+      const uploadUrl = `${origin}${ARTIFACT_UPLOAD_PATH}/${encodeURIComponent(token ?? "")}`;
+      const scriptNonce = randomBytes(16).toString("base64");
+      return reply
+        .header("content-security-policy", artifactUploadPagePolicy(origin, scriptNonce))
+        .type("text/html")
+        .send(renderArtifactUploadPage(uploadUrl, scriptNonce));
     });
     instance.post(
       `${ARTIFACT_UPLOAD_PATH}/:token`,
-      { bodyLimit: ARTIFACT_UPLOAD_LIMIT_BYTES },
+      { bodyLimit: ARTIFACT_UPLOAD_LIMIT_BYTES, onRequest: privateLink },
       async (request, reply) => {
         const keyring = elicitedKeyring();
         if (!keyring) {

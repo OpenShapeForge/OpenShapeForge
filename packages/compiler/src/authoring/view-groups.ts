@@ -23,6 +23,8 @@ export interface ResolvedViewGroup {
   title?: LocalizedText;
   label?: LocalizedText;
   icon?: string;
+  /** `false` leaves out the group heading; its fields keep their own labels. */
+  showTitle?: boolean;
   visibleWhen?: VisibilityConfig;
   render?: string | { component: string; props?: Record<string, unknown> };
   /** Widget value slots mapped to existing scalar fields; presentation only. */
@@ -74,6 +76,7 @@ function mergeGroupOverride(
     title: override.title ?? group.title,
     label: override.label ?? group.label,
     icon: override.icon ?? group.icon,
+    showTitle: override.showTitle ?? group.showTitle,
     visibleWhen: override.visibleWhen ?? group.visibleWhen,
     render: override.render ?? group.render,
     bindings: override.bindings ?? group.bindings,
@@ -155,6 +158,7 @@ function resolveGroupDefinition(
     title: group.title,
     label: group.label,
     icon: group.icon,
+    showTitle: group.showTitle,
     visibleWhen: group.visibleWhen,
     ...(group.showInReadNavigation !== undefined ? { showInReadNavigation: group.showInReadNavigation } : {}),
     render: group.render,

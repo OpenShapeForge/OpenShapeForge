@@ -2054,16 +2054,22 @@
                     "groups": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["fields"], "properties": {
                       "id": { "type": "string" },
                       "title": { "type": "object", "additionalProperties": false, "required": ["en"], "properties": { "en": { "type": "string" }, "nl": { "type": "string" } } },
-                      "fields": { "type": "array", "minItems": 1, "items": { "type": "string" } } } } }
+                      "fields": { "type": "array", "minItems": 1, "items": { "oneOf": [{ "type": "string" }, { "type": "object", "additionalProperties": false, "required": ["field"], "description": "A field with presentation: label replaces its title, value names the field shown, detail adds a second field below in parentheses, shareOf draws a share of another numeric field, emphasis marks the group's result.", "properties": { "field": { "type": "string", "minLength": 1 }, "label": { "type": "object", "additionalProperties": false, "required": ["en"], "properties": { "en": { "type": "string" }, "nl": { "type": "string" } } }, "value": { "type": "string", "minLength": 1 }, "detail": { "type": "string", "minLength": 1 }, "shareOf": { "type": "string", "minLength": 1 }, "emphasis": { "type": "boolean" } } }] } },
+                      "presentation": { "enum": ["rows", "fields"], "description": "rows (default) shows label left and value right; fields shows read-only fields with the label above." },
+                      "position": { "enum": ["before", "after"], "description": "Where the group sits relative to the panel's record view; after by default." },
+                      "decimalPlaces": { "type": "integer", "minimum": 0, "maximum": 4, "description": "Decimals shown for the group's money values; two by default." },
+                      "visibleWhen": { "$ref": "#/$defs/field/properties/visibility" } } } }
                   }
                 }
               }
             }
           },
             "avatar": { "type": "string", "minLength": 1, "description": "Optional image document field in the read binding for the panel heading." },
+            "actions": { "type": "array", "uniqueItems": true, "items": { "enum": ["edit", "openFull"] }, "description": "Actions the panel offers; absent offers all of them.", "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } } },
+            "editing": { "enum": ["confirmed", "direct"], "description": "confirmed (default) opens read-only behind Edit, Save and Cancel; direct opens the panel view editable with one save action.", "x-osf-i18n": { "title": { "en": "Editing", "nl": "Bewerken" } } },
+            "saveLabel": { "type": "array", "minItems": 1, "description": "Label of the save action: the first entry whose conditions hold for the values being edited. {field} inserts a value.", "x-osf-i18n": { "title": { "en": "Save label", "nl": "Opslaanlabel" } }, "items": { "type": "object", "additionalProperties": false, "required": ["label"], "properties": { "label": { "type": "object", "additionalProperties": false, "required": ["en"], "properties": { "en": { "type": "string" }, "nl": { "type": "string" } } }, "visibleWhen": { "$ref": "#/$defs/field/properties/visibility" } } } },
             "view": { "type": "string", "minLength": 1, "description": "Named record view of the row's record entity shown as the panel body.", "x-osf-i18n": { "title": { "en": "Record view", "nl": "Recordweergave" } } },
             "includeRecord": { "type": "boolean", "description": "Keep the canonical record editor alongside the typed summary.", "x-osf-i18n": { "title": { "en": "Include record", "nl": "Record tonen" } } },
-            "actions": { "type": "array", "uniqueItems": true, "items": { "enum": ["edit", "openFull"] } },
             "primaryMembership": {
               "type": "object",
               "additionalProperties": false,
@@ -3146,6 +3152,11 @@
           "pattern": "^[a-z][a-z0-9-]*$",
           "description": "Icon key shown with the group; the host resolves it.",
           "x-osf-i18n": { "title": { "en": "Icon", "nl": "Icoon" } }
+        },
+        "showTitle": {
+          "type": "boolean",
+          "description": "false leaves out the group heading; its fields keep their own labels.",
+          "x-osf-i18n": { "title": { "en": "Show title", "nl": "Titel tonen" } }
         },
         "visibleWhen": {
           "$ref": "#/$defs/field/properties/visibility",

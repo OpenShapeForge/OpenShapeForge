@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { assertOutboundTls, readBoundedResponse } from "./outbound-response.js";
+import { assertOutboundTls, outboundRelaxationsAllowed, readBoundedResponse } from "./outbound-response.js";
 
 describe("provider response budgets", () => {
   test("counts bytes across chunks, cancels oversized chunked responses", async () => {
@@ -29,5 +29,21 @@ describe("provider response budgets", () => {
     expect(() => assertOutboundTls(new URL("http://127.0.0.1/token"), true)).toThrow();
     expect(() => assertOutboundTls(new URL("https://provider.example/token"), true)).not.toThrow();
     expect(() => assertOutboundTls(new URL("http://localhost/token"), false)).not.toThrow();
+  });
+  test("an unset or unknown environment gets no local relaxation", () => {
+    expect(outboundRelaxationsAllowed("development")).toBe(true);
+    expect(outboundRelaxationsAllowed("test")).toBe(true);
+    for (const environment of [undefined, "", "production", "staging"]) {
+      expect(outboundRelaxationsAllowed(environment)).toBe(false);
+    }
+    const original = process.env.NODE_ENV;
+    try {
+      delete process.env.NODE_ENV;
+      expect(() => assertOutboundTls(new URL("http://localhost/token"))).toThrow();
+      expect(() => assertOutboundTls(new URL("https://provider.example/token"))).not.toThrow();
+    } finally {
+      if (original === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = original;
+    }
   });
 });

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { join } from "node:path";
 import { expect, test } from "bun:test";
-import { catalogApplicationSearchSources } from "./application-search.js";
+import { applicationSearchSources, catalogApplicationSearchSources } from "./application-search.js";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
 import type { OperationCatalogDefinition } from "./authoring/types.js";
 
@@ -152,4 +152,22 @@ test("this repository's own catalogs offer their tenant collections and withhold
     expect(offered).not.toContain(withheld);
   }
   expect(roles).toContain("Organization.Access.Manage");
+});
+
+
+test("application search excludes withheld entity lists while retaining exposed and plugin-backed lists", () => {
+  const entity = (name: string, withheld = false) => ({ contract: {
+    entity: { name, title: name }, model: { fields: [{ key: "name", baseType: "string" }] },
+    entityOperations: { list: { id: `${name}.list`, ...(withheld ? { withheld: true } : {}) } },
+    rest: { operations: { list: true } },
+  } });
+  const plugin = { contract: { ...entity("PluginPage").contract, entityOperations: undefined,
+    pluginOperations: [{ key: "list", id: "plugin.list" }] } };
+  const internal = { contract: { ...entity("NoInterfaces").contract, rest: undefined } };
+  const mcp = { contract: { ...entity("McpItem").contract, rest: undefined, mcp: { operations: { list: true } } } };
+  const web = { contract: { ...entity("WebItem").contract, rest: undefined, interfaces: { web: { operations: { list: true } } } } };
+  const graphql = { contract: { ...entity("GraphqlItem").contract, rest: undefined, graphql: { operations: { list: true } } } };
+  const sources = applicationSearchSources([entity("PublicItem"), entity("InternalLookup", true), entity("InternalGroup", true), internal, plugin, mcp, web, graphql] as never);
+  expect(sources.map(source => source.entity)).toEqual(["PublicItem", "PluginPage", "McpItem", "WebItem", "GraphqlItem"]);
+  expect(sources.map(source => source.list)).toEqual(["PublicItem.list", "plugin.list", "McpItem.list", "WebItem.list", "GraphqlItem.list"]);
 });

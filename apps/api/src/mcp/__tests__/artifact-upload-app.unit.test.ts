@@ -3,6 +3,8 @@ import { API_BUILD_IDENTITY } from "../../config/build-identity.js";
 import { describe, expect, it } from "bun:test";
 import {
   ARTIFACT_UPLOAD_APP_URI,
+  ARTIFACT_UPLOAD_PRIVACY_HEADERS,
+  artifactUploadPagePolicy,
   ARTIFACT_UPLOAD_TOOL_NAME,
   renderArtifactUploadApp,
   renderArtifactUploadPage,
@@ -28,5 +30,23 @@ describe("artifact upload MCP App", () => {
     );
     expect(html).toContain("application/octet-stream");
     expect(html).toContain("artifactId");
+  });
+
+  it("keeps the token link out of caches and referrers and confines the page", () => {
+    expect(ARTIFACT_UPLOAD_PRIVACY_HEADERS).toMatchObject({
+      "cache-control": "private, no-store, max-age=0",
+      "referrer-policy": "no-referrer",
+    });
+    const html = renderArtifactUploadPage(
+      "https://hubble.localhost/api/artifact-upload/token-value",
+      "bm9uY2U=",
+    );
+    expect(html).toContain('<script nonce="bm9uY2U=">');
+    const policy = artifactUploadPagePolicy("https://hubble.localhost", "bm9uY2U=");
+    expect(policy).toContain("default-src 'none'");
+    expect(policy).toContain("script-src 'nonce-bm9uY2U='");
+    expect(policy).toContain("connect-src 'self' https://hubble.localhost");
+    expect(policy).toContain("frame-ancestors 'none'");
+    expect(policy).not.toContain("token-value");
   });
 });

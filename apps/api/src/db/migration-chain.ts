@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { applyPublicColorPaletteMigration } from './migrations/color-palette.js';
 import { backfillTenantSettingDefaults } from "../control/tenant-setting-defaults.js";
+import { applyPublicColorPaletteMigration } from './migrations/color-palette.js';
 /**
  * The ordered chain that builds a database from the compiled manifest,
  * shared by db:migrate, db:reset and the empty-database bootstrap

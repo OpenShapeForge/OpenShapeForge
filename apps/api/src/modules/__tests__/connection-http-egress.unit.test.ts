@@ -233,7 +233,8 @@ describe("grant-bound connection HTTP", () => {
   });
 
   it("classifies public and non-public addresses", () => {
-    for (const address of ["93.184.216.34", "1.1.1.1", "2606:4700:4700::1111"]) {
+    // 3fff:1000:: is the first address past the 3fff::/20 documentation block.
+    for (const address of ["93.184.216.34", "1.1.1.1", "2606:4700:4700::1111", "3fff:1000::1"]) {
       expect(isPublicAddress(address)).toBe(true);
     }
     for (const address of [
@@ -241,6 +242,7 @@ describe("grant-bound connection HTTP", () => {
       "172.31.255.255", "192.168.1.1", "198.18.0.1", "203.0.113.5", "224.0.0.1", "255.255.255.255",
       "::", "::1", "fe80::1", "fc00::1", "fd12::1", "ff02::1", "::ffff:127.0.0.1", "::ffff:7f00:1",
       "::ffff:8.8.8.8", "64:ff9b::a00:1", "2001:db8::1", "2002:7f00:1::", "2001:0:4136::1",
+      "3fff::1", "3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff",
       "mcp.example.com", "",
     ]) {
       expect(isPublicAddress(address)).toBe(false);

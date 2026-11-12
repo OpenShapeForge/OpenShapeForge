@@ -459,7 +459,13 @@ export type CollectionTableValueDefinition = {
   defaultValue?: string | number;
 };
 /** Binding-backed record panel body: the same tabs -> groups -> fields shape as a record view layout, resolved against the binding schema. */
-export type BindingPanelLayout = { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: string[] }> }> };
+/**
+ * A row of a binding group: a field key, or a field with presentation. `lead` shows another
+ * field before the value, `shareOf` draws the value as a share of another numeric field,
+ * `emphasis` marks the row as the group's result.
+ */
+export type BindingPanelRow = string | { field: string; lead?: string; shareOf?: string; emphasis?: boolean };
+export type BindingPanelLayout = { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: BindingPanelRow[] }> }> };
 
 export type CollectionTableDefinition = {
   bindings?: Record<string, { entity: string; operation: string; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;

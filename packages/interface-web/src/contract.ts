@@ -432,7 +432,7 @@ export type WebRecordView = {
     actions?: WebCustomOperationRef[];
   };
   titleTemplate: string;
-  /** Authored form layout retained even when standalone create is unavailable. */
+  /** Authored forms; named editable records project update groups from their own layout, excluding server-owned/read-only fields. */
   formGroups?: { create?: WebFieldGroup[]; update?: WebFieldGroup[] };
   subtitleTemplate?: string;
   badges?: string[];

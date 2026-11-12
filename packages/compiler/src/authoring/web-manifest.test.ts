@@ -2471,3 +2471,31 @@ test('default collection filters survive authoring compilation and remain local 
  expect(manifest.entities.Chip!.views.collection.filter).toEqual(filter);
  expect(matchWebRoute(manifest,'/chips/all')?.entity.views.collection.filter).toBeUndefined();
 });
+
+test('same-entity flat and routed panels select a named editable record with canonical writable fields', () => {
+  const product = entity('Product','products',[field('id',{immutable:true}),field('displayName'),field('caption')],coreView());
+  const web=product.contract.interfaces!.web!;
+  web.namedViews={
+    panel:{kind:'record',actions:['update'],detail:{...coreView().detail!,groups:{render:{component:'TabBar'},items:[{id:'details',fields:['caption','id']}]}}},
+  };
+  web.collectionTable={heading:{title:text('Products')},views:{tree:text('Grouped'),flat:text('All')},label:text('Product'),columns:[{key:'name',label:text('Name'),values:[{path:'displayName'}]}],recordPanel:{title:text('Details'),view:'panel',includeRecord:false}};
+  web.namedViews.routed={kind:'collection',collectionLayout:'table',route:'/all-products',table:web.collectionTable};
+  const build=()=>buildWebManifest([product]).entities.Product!;
+  const result=build();
+  expect(result.views.collection.table!.recordPanel!.view).toBe('panel');
+  expect(result.views.named!.routed).toMatchObject({kind:'collection',table:{recordPanel:{view:'panel'}}});
+  expect(result.views.named!.panel).toMatchObject({modes:['read','update'],operations:{update:{id:'Product.update'}},formGroups:{update:[{fields:['caption']}]},layout:{tabs:[{groups:[{fields:['caption','id']}]}]}});
+  expect(result.fields.caption!.supports.update).toBe(true);
+  expect(result.fields.id!.supports.update).toBe(false);
+  expect(result.views.record!.formGroups!.update!.flatMap(group=>group.fields)).not.toContain('caption');
+  web.collectionTable.recordPanel!.view='missing';
+  expect(build).toThrow('must name a record view');
+  web.collectionTable.recordPanel!.view='panel';
+  web.collectionTable.recordPanel!.includeRecord=true;
+  expect(build).toThrow('replaces the inline record body');
+  web.collectionTable.recordPanel!.includeRecord=false;
+  web.namedViews.panel={kind:'record',actions:['update'],detail:{...coreView().detail!,groups:{render:{component:'TabBar'},items:[{id:'identity',fields:['id']}]}}};
+  expect(build).toThrow('requires writable layout fields');
+  delete product.contract.entityOperations.update;
+  expect(build).toThrow("requires the entity's update Operation");
+});

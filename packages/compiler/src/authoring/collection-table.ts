@@ -78,7 +78,7 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     // Validate references against the complete entity, not that temporary projection.
     const canonical = all.get(record.contract.entity.name) ?? record;
     if (canonical.contract.interfaces?.web?.namedViews?.[panel.view]?.kind !== 'record') throw new Error(`${name}: record panel view ${panel.view} must name a record view of ${record.contract.entity.name}.`);
-    if (panel.includeRecord !== undefined || panel.summaryColumns) throw new Error(`${name}: a record panel view replaces includeRecord and summaryColumns.`);
+    if (panel.includeRecord === true || panel.summaryColumns || panel.binding || panel.fields || panel.heading || panel.subtitle || panel.collection || panel.layout) throw new Error(`${name}: a record panel view replaces the inline record body.`);
   }
   if (panel?.primaryMembership) {
     if (!membership || !through || !panel.summaryColumns) throw new Error(`${name}: primaryMembership requires a summary and a membership tree.`);

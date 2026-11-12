@@ -11,6 +11,7 @@ import { REFRESH_LOCK_TTL_MS, type SessionStore, type StoredSession } from "./st
 
 const MAX_RETRIES = 3;
 const BASE_DELAY = 1000;
+const MAX_RECOVERY_DELAY_MS = 30_000;
 const REFRESH_ATTEMPT_BUDGET_MS = Math.max(1000, REFRESH_LOCK_TTL_MS - 1000);
 const REFRESH_MIN_FETCH_TIMEOUT_MS = 1000;
 const REFRESH_FETCH_TIMEOUT_MS = Math.max(
@@ -98,7 +99,8 @@ async function fetchWithRefreshTimeout(
 function temporarilyUnavailable<Extra extends object>(stored: StoredSession<Extra>, retryAfter: string | null = null): StoredSession<Extra> {
   const parsed = retryAfter === null ? NaN : /^\d+$/.test(retryAfter)
     ? Date.now() + Number(retryAfter) * 1000 : Date.parse(retryAfter);
-  const refreshRetryAt = Number.isFinite(parsed) ? Math.max(Date.now() + 1000, parsed) : Date.now() + 5000;
+  const now = Date.now();
+  const refreshRetryAt = Number.isFinite(parsed) ? Math.min(now + MAX_RECOVERY_DELAY_MS, Math.max(now + 1000, parsed)) : now + 5000;
   return { ...stored, error: "RefreshTokenUnavailable", refreshRetryAt };
 }
 
@@ -244,6 +246,10 @@ export function createTokenRefresh<Extra extends object>(
         return temporarilyUnavailable(stored, response.headers.get("retry-after"));
       }
 
+      // A complete HTML/empty success from a proxy is a transport fault, not
+      // a definitive rejection of the retained refresh credential.
+      if (body === undefined) return temporarilyUnavailable(stored);
+
       const nowS = Math.floor(Date.now() / 1000);
       const parsed = validateRefreshPayload(body, stored, options.refreshInvariant, nowS);
       if (!parsed.ok) {
@@ -332,7 +338,10 @@ export function createTokenRefresh<Extra extends object>(
         // writing the snapshot back would resurrect a session that ended.
         if (!current) return { ...stored, error: "RefreshTokenError" };
         if (current.error === "RefreshTokenError") return current;
-        if (current.refreshRetryAt && current.refreshRetryAt > Date.now()) return current;
+        // Only a bounded server hint may postpone refresh. An out-of-policy
+        // persisted hint must not keep an otherwise recoverable session frozen.
+        const retryDelay = (current.refreshRetryAt ?? 0) - Date.now();
+        if (retryDelay > 0 && retryDelay <= MAX_RECOVERY_DELAY_MS) return current;
         if (!current.error && hasUsableAccessWindow(current)) return current;
         const refreshed = await doRefreshAccessToken(current, 1, lockStartedAt + REFRESH_ATTEMPT_BUDGET_MS);
         if (!await store.updateSession(sessionId, refreshed, lockOwnerToken)) {

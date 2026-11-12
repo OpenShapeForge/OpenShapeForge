@@ -361,3 +361,56 @@ test("a refresh whose lease was replaced cannot overwrite the new holder's token
   expect(store.records.get("s1")).toEqual(newer);
   expect(store.locks.get("s1")).toBe("new-owner");
 });
+
+test("an excessive Retry-After cannot freeze the retained session after the provider recovers", async () => {
+  console.error = () => {};
+  let clock = originalNow(); Date.now = () => clock;
+  for (const hint of ["3600", new Date(clock + 86_400_000).toUTCString()]) {
+    const store = fakeStore({ s1: { ...stored } });
+    const refresh = refresher(store);
+    const calls = keycloakResponses(
+      { status: 429, headers: { "retry-after": hint } },
+      { status: 200, body: { access_token: jwt({ sub: "user-1", tid: "tenant-a", exp: nowS() + 300, realm_access: { roles: ["reader"] } }), expires_in: 300, refresh_token: "rotated" } },
+    );
+    const unavailable = await refresh.refreshSessionInRedis("s1", stored);
+    expect(unavailable.error).toBe("RefreshTokenUnavailable");
+    expect(unavailable.refreshToken).toBe("refresh-1");
+    clock += 29_999;
+    expect((await refresh.refreshSessionInRedis("s1", unavailable)).error).toBe("RefreshTokenUnavailable");
+    expect(calls).toHaveLength(1);
+    clock += 2;
+    const recovered = await refresh.refreshSessionInRedis("s1", unavailable);
+    expect(calls).toHaveLength(2);
+    expect(recovered.error).toBeUndefined();
+    expect(recovered.refreshToken).toBe("rotated");
+  }
+});
+
+test("a non-JSON proxy success preserves the refresh credential and can recover", async () => {
+  let clock = originalNow(); Date.now = () => clock;
+  const store = fakeStore({ s1: { ...stored } });
+  const refresh = refresher(store);
+  let calls = 0;
+  globalThis.fetch = (async () => ++calls === 1 ? new Response("<html>proxy unavailable</html>") : Response.json({
+    access_token: jwt({ sub: "user-1", tid: "tenant-a", exp: nowS() + 300, realm_access: { roles: ["reader"] } }), expires_in: 300, refresh_token: "rotated",
+  })) as typeof fetch;
+  const unavailable = await refresh.refreshSessionInRedis("s1", stored);
+  expect(unavailable.error).toBe("RefreshTokenUnavailable");
+  expect(unavailable.refreshToken).toBe("refresh-1");
+  clock += 5001;
+  const recovered = await refresh.refreshSessionInRedis("s1", unavailable);
+  expect(recovered.error).toBeUndefined();
+  expect(recovered.refreshToken).toBe("rotated");
+});
+
+test("an already stored excessive retry deadline does not block a recovered provider", async () => {
+  const unavailable = { ...stored, error: "RefreshTokenUnavailable" as const, refreshRetryAt: Date.now() + 3_600_000 };
+  const store = fakeStore({ s1: unavailable });
+  const calls = keycloakResponses({ status: 200, body: {
+    access_token: jwt({ sub: "user-1", tid: "tenant-a", exp: nowS() + 300, realm_access: { roles: ["reader"] } }), expires_in: 300, refresh_token: "rotated",
+  } });
+  const recovered = await refresher(store).refreshSessionInRedis("s1", unavailable);
+  expect(calls).toHaveLength(1);
+  expect(recovered.error).toBeUndefined();
+  expect(recovered.refreshRetryAt).toBeUndefined();
+});

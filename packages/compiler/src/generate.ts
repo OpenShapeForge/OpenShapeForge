@@ -937,6 +937,7 @@ function renderManifestJson(
       ...(column.default === undefined ? {} : { default: column.default }),
       ...(column.sourceField === undefined ? {} : { sourceField: column.sourceField }),
       ...(column.colorReference ? { colorReference: true } : {}),
+      ...(column.storedFieldDefinition === undefined ? {} : { storedFieldDefinition: column.storedFieldDefinition }),
       ...(column.document ? { document: column.document } : {}),
       ...(column.fieldPolicy === undefined ? {} : { fieldPolicy: column.fieldPolicy }),
       ...(column.classification === undefined ? {} : { classification: column.classification }),

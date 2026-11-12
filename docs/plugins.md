@@ -1,6 +1,6 @@
 # Plugins
 
-In production, outbound HTTP calls require one initialized runtime module to
+Outside `NODE_ENV=development` and `NODE_ENV=test` (an unset value counts as production), outbound HTTP calls require one initialized runtime module to
 provide the egress owner. Without one, the API emits startup warning
 `EGRESS_OWNER_REQUIRED` and refuses outbound calls with HTTP 503 of that code;
 connector invocations, OAuth exchanges and provider discovery cannot succeed.

@@ -2059,6 +2059,9 @@
             }
           },
             "avatar": { "type": "string", "minLength": 1, "description": "Optional image document field in the read binding for the panel heading." },
+            "actions": { "type": "array", "uniqueItems": true, "items": { "enum": ["edit", "openFull"] }, "description": "Actions the panel offers; absent offers all of them.", "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } } },
+            "editing": { "enum": ["confirmed", "direct"], "description": "confirmed (default) opens read-only behind Edit, Save and Cancel; direct opens the panel view editable with one save action.", "x-osf-i18n": { "title": { "en": "Editing", "nl": "Bewerken" } } },
+            "saveLabel": { "type": "array", "minItems": 1, "description": "Label of the save action: the first entry whose conditions hold for the values being edited. {field} inserts a value.", "x-osf-i18n": { "title": { "en": "Save label", "nl": "Opslaanlabel" } }, "items": { "type": "object", "additionalProperties": false, "required": ["label"], "properties": { "label": { "type": "object", "additionalProperties": false, "required": ["en"], "properties": { "en": { "type": "string" }, "nl": { "type": "string" } } }, "visibleWhen": { "$ref": "#/$defs/field/properties/visibility" } } } },
             "view": { "type": "string", "minLength": 1, "description": "Named record view of the row's record entity shown as the panel body.", "x-osf-i18n": { "title": { "en": "Record view", "nl": "Recordweergave" } } },
             "includeRecord": { "type": "boolean", "description": "Keep the canonical record editor alongside the typed summary.", "x-osf-i18n": { "title": { "en": "Include record", "nl": "Record tonen" } } },
             "primaryMembership": {

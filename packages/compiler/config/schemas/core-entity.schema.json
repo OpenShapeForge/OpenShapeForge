@@ -2052,7 +2052,7 @@
                     "groups": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["fields"], "properties": {
                       "id": { "type": "string" },
                       "title": { "type": "object", "additionalProperties": false, "required": ["en"], "properties": { "en": { "type": "string" }, "nl": { "type": "string" } } },
-                      "fields": { "type": "array", "minItems": 1, "items": { "type": "string" } } } } }
+                      "fields": { "type": "array", "minItems": 1, "items": { "oneOf": [{ "type": "string" }, { "type": "object", "additionalProperties": false, "required": ["field"], "description": "A field with presentation: lead shows another field before the value, shareOf draws the value as a share of another numeric field, emphasis marks the group's result.", "properties": { "field": { "type": "string", "minLength": 1 }, "lead": { "type": "string", "minLength": 1 }, "shareOf": { "type": "string", "minLength": 1 }, "emphasis": { "type": "boolean" } } }] } } } } }
                   }
                 }
               }

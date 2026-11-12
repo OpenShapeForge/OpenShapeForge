@@ -516,6 +516,21 @@ Session rules:
   emitted policy honours — plain and `rowScope` alike — so it is
   all-or-nothing over every tenant-scoped table in the manifest. In the local
   compose stack the `openshapeforge` superuser is exempt from RLS anyway.
+- `app.bypass_rls` is not a flag a runtime connection can raise by naming it.
+  A session that logged in as a runtime role (the API, a worker, or a login
+  that is a member of one) is admitted only when the setting holds the
+  credential derived from `OPENSHAPEFORGE_RLS_BYPASS_SECRET`, whose digest
+  `db:migrate` bakes into `app.bypass_rls()`; `withSystemSession` and
+  `withTenantBypassInTransaction` present it and nothing else in the runtime
+  can; a runtime session that names the literal `'true'` gets an error, not an
+  empty result. The literal is honoured only for a connection that did not log
+  in as a runtime role (an administrator's seed) and for the migrate role and
+  the `SECURITY DEFINER` functions it owns, which is how plugin SQL lifts RLS
+  for one fixed statement. Such a function must name the tenant in every
+  statement: a caller that already wrote `'true'` is honoured inside it.
+  `app.tenant_id` remains a setting the runtime writes, so the credential
+  removes enumerating or sweeping tenants, not naming a tenant whose id is
+  known. See `apps/api/src/db/rls-bypass.ts`.
 
 ### The worker axis
 
@@ -1335,6 +1350,7 @@ compose stack):
 | `OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI` / `_ISSUER` / `_AUDIENCE` | Keycloak bearer signature, issuer, and audience verification (JWKS URI or issuer unset ⇒ a request presenting a bearer is refused as unavailable, 503 — never downgraded to trusted-context, never run as nobody; the web host forwards the person's token, so set these wherever a web app runs) |
 | `OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES` | optional comma-separated exact allowlist for the verified token's `azp`; configured empty rejects every party |
 | `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` | trusted-context HMAC secret; the example default matches the repo's signing scripts (unset ⇒ trusted-context rejected) |
+| `OPENSHAPEFORGE_RLS_BYPASS_SECRET` | operator secret behind the credential a runtime presents to lift row-level security for an audited system session; `db:migrate`, the API and every worker of one database must share it (unset in production ⇒ derived from `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET`; unset elsewhere ⇒ the local default). After changing it, run `db:migrate` and restart the runtimes |
 | `APP_TENANT_BYPASS_ROLES` | comma-separated roles that grant `tenant` scope |
 | `OPENSHAPEFORGE_CONTROL_VERIFY_BEARER_ISSUER` / `_JWKS_URI` / `_CLIENT_ID` | control-realm operator verification; `_CLIENT_ID` pins `azp`, not `aud` |
 | `OPENSHAPEFORGE_CONTROL_KEYCLOAK_BASE_URL` + `KEYCLOAK_CLIENT_SECRET_OPENSHAPEFORGE_AUTH_API` | how provisioning reaches the SPI in the tenant realm; the secret shares its name with the realm generator's |

@@ -39,6 +39,7 @@ import {
   registerOperationExecutionPolicies,
 } from "../operations/execution-policy.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
+import { readRlsBypassSecret } from "../db/rls-bypass.js";
 import { runtimeSettings } from "../modules/settings.js";
 import type { ModuleWorker, ModuleWorkerHandle, ModuleWorkerLogger } from "../modules/contract.js";
 import {
@@ -171,6 +172,10 @@ export async function startWorkerRole(
   role: string,
   options: StartWorkerRoleOptions = {},
 ): Promise<WorkerRoleHandle> {
+  // Refuse to start in production without a usable row-level-security bypass
+  // credential, as the API does: a handler's audited tenant bypass would
+  // otherwise fail at its first use (db/rls-bypass.ts).
+  readRlsBypassSecret(options.env);
   // An explicit override is an injection point for tests, not an env fallback:
   // it never reads DATABASE_URL, and an empty string is still refused below.
   const databaseUrl =

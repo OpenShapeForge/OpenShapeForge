@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from 'kysely';
+import { rlsBypassToken } from "../../rls-bypass.js";
 import { STANDARD_COLORS, parseTenantColors } from '@openshapeforge/operations';
 import type { VersionedMigration } from '../versioned-runner.js';
 import { colorReferenceTables } from '../../../operations/entity/color-references.js';
 const migration: VersionedMigration = {
   version:'0025_color-palette-references', fileUrl:import.meta.url,
   async up(db) {
-    await sql`select set_config('app.bypass_rls','true',true)`.execute(db);
+    await sql`select set_config('app.bypass_rls',${rlsBypassToken()},true)`.execute(db);
     const tenants=await sql<{id:string}>`select id from erp.tenants`.execute(db);
     for(const tenant of tenants.rows) {
       const rows=await sql<{id:string;value:unknown}>`select id,value from erp.tenant_settings where tenant_id=${tenant.id}::uuid and namespace='appearance' and key='colors' for update`.execute(db);

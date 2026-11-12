@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import { databaseRole } from "../database-roles.js";
+import { APP_ROLE } from "./app-role.js";
 import { ensureCheckConstraint } from "./sql-invariants.js";
+
+const IDENTITY_RESOLVER_ROLE = databaseRole("identityResolver").name;
 
 /**
  * The invariants of `platform.capability_grants` (declared in
@@ -14,8 +18,8 @@ import { ensureCheckConstraint } from "./sql-invariants.js";
  *     session and do everything else — the secret comparison, the expiry,
  *     revocation and lock checks, the attempt bookkeeping — under RLS. It
  *     is the same shape as `app.tenant_for_keycloak_organization` and for
- *     the same reason: a point lookup carrying the bypass GUC only for its
- *     own statement, never a list, never a session;
+ *     the same reason: a SECURITY DEFINER point lookup owned by the identity
+ *     resolver and admitted over two columns, never a list, never a session;
  *   - `max_uses`, when set, is at least one, and `uses` never exceeds it, so
  *     a consumed grant is one whose use count reached its ceiling and
  *     nothing else;
@@ -23,27 +27,28 @@ import { ensureCheckConstraint } from "./sql-invariants.js";
  */
 export async function applyCapabilityGrantsMigration(db: OpenShapeForgeDatabase): Promise<void> {
   await sql`
+    grant usage on schema app, platform to ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    grant select (id, tenant_id) on platform.capability_grants to ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    drop policy if exists capability_grants_tenant_resolution on platform.capability_grants;
+    create policy capability_grants_tenant_resolution on platform.capability_grants for select
+      to ${sql.id(IDENTITY_RESOLVER_ROLE)} using (true);
+
     create or replace function app.capability_grant_tenant(grant_id uuid)
     returns uuid
-    language plpgsql volatile parallel unsafe
-    as $$
-    declare
-      previous_bypass text := current_setting('app.bypass_rls', true);
-      found_tenant uuid;
-    begin
-      perform set_config('app.bypass_rls', 'true', true);
-      found_tenant := (
-        select g.tenant_id
-          from platform.capability_grants g
-         where g.id = grant_id
-         limit 1
-      );
-      perform set_config('app.bypass_rls', coalesce(previous_bypass, ''), true);
-      return found_tenant;
-    exception when others then
-      raise;
-    end
-    $$;
+    language sql stable security definer
+    set search_path = pg_catalog, pg_temp
+    as $fn$
+      select g.tenant_id
+        from platform.capability_grants g
+       where g.id = $1
+       limit 1
+    $fn$;
+
+    grant create on schema app to ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    alter function app.capability_grant_tenant(uuid) owner to ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    revoke create on schema app from ${sql.id(IDENTITY_RESOLVER_ROLE)};
+    revoke all on function app.capability_grant_tenant(uuid) from public;
+    grant execute on function app.capability_grant_tenant(uuid) to ${sql.id(APP_ROLE)};
   `.execute(db);
   await ensureCheckConstraint(db, {
     table: "platform.capability_grants",

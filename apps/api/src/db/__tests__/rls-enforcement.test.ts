@@ -27,6 +27,7 @@ import type { DB } from "../../generated/db/types.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import { APP_ROLE } from "../migrations/app-role.js";
+import { rlsBypassToken, rlsBypassTokenDigest } from "../rls-bypass.js";
 
 /**
  * Privileged admin URL (superuser) used to create/drop the scratch database
@@ -139,7 +140,135 @@ describe("RLS enforcement against the restricted app role", () => {
               select count(*)::int as n from erp.relations where display_name = ${marker}
             `.execute(conn);
             expect(crossTenant.rows[0]?.n).toBe(0);
+
+            // (c) The runtime role cannot lift RLS by naming the setting. This
+            // is the statement an injection would send: before the bypass
+            // became a credential it returned every tenant's rows.
+            const probe = async (value: string) => {
+              await sql`select set_config('app.bypass_rls', ${value}, false)`.execute(conn);
+              const seen = await sql<{ n: number; bypass: boolean }>`
+                select count(*)::int as n, app.bypass_rls() as bypass
+                  from erp.relations where display_name = ${marker}
+              `.execute(conn);
+              return seen.rows[0];
+            };
+            await expect(probe("true")).rejects.toThrow("is not accepted from a runtime database role");
+            // A relation of the runtime role's own making cannot vouch for it:
+            // the role check reads pg_catalog.pg_roles, never a temporary
+            // table that calls the session a superuser.
+            await sql.raw(`create temp table pg_roles as
+              select oid, rolname, true as rolsuper from pg_catalog.pg_roles where rolname = session_user`).execute(conn);
+            await expect(probe("true")).rejects.toThrow("is not accepted from a runtime database role");
+            await sql`select set_config('search_path', 'pg_temp, app, public', false)`.execute(conn);
+            await expect(probe("true")).rejects.toThrow("is not accepted from a runtime database role");
+            // Nor can temporary types or a search_path that puts pg_temp ahead
+            // of pg_catalog stand in for anything the policy helper names.
+            await sql.raw(`create domain pg_temp.text as pg_catalog.text; create domain pg_temp.bool as pg_catalog.bool;
+              create domain pg_temp.name as pg_catalog.name; create temp table pg_proc as select 1 as oid`).execute(conn);
+            await sql`select set_config('search_path', 'pg_temp, pg_catalog, app', false)`.execute(conn);
+            await expect(probe("true")).rejects.toThrow("is not accepted from a runtime database role");
+            expect(await probe("not-the-credential")).toEqual({ n: 0, bypass: false });
+            await sql.raw(`reset search_path; drop table pg_temp.pg_roles; drop table pg_temp.pg_proc;
+              drop domain pg_temp.text; drop domain pg_temp.bool; drop domain pg_temp.name`).execute(conn);
+            // Swallowing the refusal yields nothing either: the statement that
+            // would have read the rows is the one that fails.
+            await sql`select set_config('app.bypass_rls', 'true', false)`.execute(conn);
+            await sql.raw(`do $probe$ declare seen integer; begin
+              select count(*) into seen from erp.relations;
+              raise exception 'leaked % rows', seen;
+            exception when insufficient_privilege then null; end $probe$`).execute(conn);
+            expect(await probe("TRUE")).toEqual({ n: 0, bypass: false });
+            expect(await probe("on")).toEqual({ n: 0, bypass: false });
+            // The digest baked into the function is readable; presenting it
+            // (or its preimage's neighbours) is not the credential.
+            const digest = await sql<{ source: string }>`
+              select prosrc as source from pg_proc where oid = 'app.bypass_rls()'::regprocedure
+            `.execute(conn);
+            const stored = /decode\('([0-9a-f]{64})'/.exec(digest.rows[0]?.source ?? "")?.[1];
+            expect(stored).toBe(rlsBypassTokenDigest());
+            expect(await probe(stored!)).toEqual({ n: 0, bypass: false });
+            // The runtime role cannot become a role the policies would trust.
+            await expect(sql`select set_config('role', 'openshapeforge', false)`.execute(conn)).rejects.toThrow();
+            // (d) The operator credential, which never enters the database
+            // except as a bound value in a bypass session, is what lifts it.
+            expect(await probe(rlsBypassToken())).toEqual({ n: 1, bypass: true });
+            expect(await probe("false")).toEqual({ n: 0, bypass: false });
+
+            // (d2) A SECURITY DEFINER function owned by a role outside the
+            // declared set may still raise the literal for its own statement —
+            // the shape plugin SQL uses. The runtime role can neither create
+            // such a function nor become its owner.
+            const definerOwner = `rls_probe_owner_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+            await withDb(scratchAdminUrl(name), (admin) => admin.connection().execute(async (owner) => {
+              await sql.raw(`
+                create role ${definerOwner} nologin nosuperuser nobypassrls noinherit;
+                grant usage on schema app, erp to ${definerOwner};
+                grant select on erp.relations to ${definerOwner};
+                create function app.rls_probe_definer(marker text) returns integer
+                language plpgsql security definer set search_path = pg_catalog as $fn$
+                declare found integer;
+                begin
+                  perform set_config('app.bypass_rls', 'true', true);
+                  select count(*) into found from erp.relations r where r.display_name = marker;
+                  perform set_config('app.bypass_rls', 'false', true);
+                  return found;
+                end $fn$;
+                alter function app.rls_probe_definer(text) owner to ${definerOwner};
+                grant execute on function app.rls_probe_definer(text) to ${APP_ROLE};
+              `).execute(owner);
+            }));
+            try {
+              await sql`select set_config('app.tenant_id', ${tenantB}, false)`.execute(conn);
+              const viaDefiner = await sql<{ n: number; bypass: boolean }>`
+                select app.rls_probe_definer(${marker}) as n, app.bypass_rls() as bypass
+              `.execute(conn);
+              expect(viaDefiner.rows[0]).toEqual({ n: 1, bypass: false });
+            } finally {
+              await withDb(scratchAdminUrl(name), (admin) => admin.connection().execute(async (owner) => {
+                await sql.raw(`drop function app.rls_probe_definer(text); drop owned by ${definerOwner}; drop role ${definerOwner};`).execute(owner);
+              }));
+            }
+
+            // The pre-tenant point lookups answer without any bypass setting.
+            await sql`select set_config('app.tenant_id', '', false)`.execute(conn);
+            const lookups = await sql<{ key: string | null; grant: string | null }>`
+              select app.api_key_tenant(${"absent"}) as key, app.capability_grant_tenant(${randomUUID()}::uuid) as grant
+            `.execute(conn);
+            expect(lookups.rows[0]).toEqual({ key: null, grant: null });
           });
+
+          // (d3) A per-workload login that is only a MEMBER of the app role is
+          // a runtime login too: it reads under the app role's policies and
+          // cannot name the literal either.
+          const member = `rls_probe_member_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+          await withDb(scratchAdminUrl(name), (admin) => sql.raw(
+            `create role ${member} login password '${APP_ROLE_PASSWORD}' nosuperuser nobypassrls; grant ${APP_ROLE} to ${member};`,
+          ).execute(admin));
+          try {
+            const memberUrl = new URL(scratchAppUrl(name));
+            memberUrl.username = member;
+            await withDb(memberUrl.toString(), (asMember) => asMember.connection().execute(async (conn) => {
+              await sql`select set_config('app.tenant_id', ${tenantB}, false), set_config('app.bypass_rls', 'true', false)`.execute(conn);
+              const runtime = await sql<{ runtime: boolean }>`select app.session_is_runtime_login() as runtime`.execute(conn);
+              expect(runtime.rows[0]?.runtime).toBe(true);
+              await expect(sql`select count(*)::int as n from erp.relations where display_name = ${marker}`.execute(conn))
+                .rejects.toThrow("is not accepted from a runtime database role");
+            }));
+          } finally {
+            await withDb(scratchAdminUrl(name), (admin) => sql.raw(`drop owned by ${member}; drop role ${member};`).execute(admin));
+          }
+
+          // (e) 'true' still serves a connection that did not LOG IN as a
+          // runtime role — the migrate role acting as the app role here — so
+          // migrations and administrator seeds keep working.
+          await withDb(scratchAdminUrl(name), (admin) => admin.connection().execute(async (conn) => {
+            await sql`select set_config('role', ${APP_ROLE}, false), set_config('app.tenant_id', ${tenantB}, false)`.execute(conn);
+            const before = await sql<{ n: number }>`select count(*)::int as n from erp.relations where display_name = ${marker}`.execute(conn);
+            expect(before.rows[0]?.n).toBe(0);
+            await sql`select set_config('app.bypass_rls', 'true', false)`.execute(conn);
+            const after = await sql<{ n: number }>`select count(*)::int as n from erp.relations where display_name = ${marker}`.execute(conn);
+            expect(after.rows[0]?.n).toBe(1);
+          }));
         });
       });
     },
@@ -250,7 +379,7 @@ describe("RLS enforcement against the restricted app role", () => {
               await sql`select set_config('app.tenant_id', ${tenant}, false)`.execute(conn);
               await sql`select set_config('app.user_id', ${userId}, false)`.execute(conn);
               await sql`select set_config('app.scope', ${scope}, false)`.execute(conn);
-              await sql`select set_config('app.bypass_rls', ${bypass ? "true" : "false"}, false)`.execute(conn);
+              await sql`select set_config('app.bypass_rls', ${bypass ? rlsBypassToken() : "false"}, false)`.execute(conn);
             };
 
             // ── As user A, scope=self (no bypass) ──
@@ -452,7 +581,7 @@ describe("RLS enforcement against the restricted app role", () => {
             ) => {
               await sql`select set_config('app.tenant_id', ${tenant}, false)`.execute(conn);
               await sql`select set_config('app.scope', ${scope}, false)`.execute(conn);
-              await sql`select set_config('app.bypass_rls', ${bypass ? "true" : "false"}, false)`.execute(conn);
+              await sql`select set_config('app.bypass_rls', ${bypass ? rlsBypassToken() : "false"}, false)`.execute(conn);
               if (directGroups.length === 0) {
                 await sql`select set_config('app.user_groups', '', false)`.execute(conn);
                 await sql`select set_config('app.user_groups_exact', '', false)`.execute(conn);

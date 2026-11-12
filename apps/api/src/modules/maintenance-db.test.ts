@@ -263,11 +263,14 @@ test("live registered owner keeps provenance immutable and store units audited, 
             query = transaction;
             const rows = await transaction.query<{
               tenant: string;
-              bypass: string;
+              bypass: boolean;
+              literal: boolean;
             }>(
-              "select current_setting('app.tenant_id') as tenant, current_setting('app.bypass_rls') as bypass",
+              "select current_setting('app.tenant_id') as tenant, app.bypass_rls() as bypass, current_setting('app.bypass_rls') = 'true' as literal",
             );
-            expect(rows[0]).toEqual({ tenant: tenantId, bypass: "true" });
+            // Lifted by the operator credential, never by the literal a
+            // runtime role is refused (db/rls-bypass.ts).
+            expect(rows[0]).toEqual({ tenant: tenantId, bypass: true, literal: false });
           });
           const read = await context.operations.execute("Relation.get", {
             id: foreignRelationId,

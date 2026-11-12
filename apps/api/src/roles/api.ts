@@ -34,6 +34,7 @@ import {
   rewriteShortAddress,
 } from "../mcp/organization-resource.js";
 import { assertProductionEnv } from "../config/production-guard.js";
+import { readRlsBypassSecret } from "../db/rls-bypass.js";
 import {
   assertRuntimeDatabaseRole,
   createDatabaseRuntime,
@@ -744,6 +745,9 @@ export async function startApiRole() {
   // auth configuration (unpinned bearer audience, default/absent context
   // secret, or no complete auth method). No-op in dev/test.
   assertProductionEnv();
+  // Same rule for the credential that lifts row-level security: refuse to
+  // serve with none, the published default or a guessable one (db/rls-bypass.ts).
+  readRlsBypassSecret();
 
   const port = Number(process.env.PORT ?? 3001);
   const host = process.env.HOST ?? "0.0.0.0";

@@ -107,6 +107,14 @@ auth:
   # Shared secret for signed service-to-service context headers. Provide via
   # existingSecret (key OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET) or inline below.
   internalContextSecret: ""
+  # Operator secret behind the credential a runtime presents to lift
+  # row-level security for an audited system session. The migrate Job, the API
+  # and every worker read the same key, so they always agree. Optional: when
+  # empty (and absent from existingSecret, key OPENSHAPEFORGE_RLS_BYPASS_SECRET)
+  # the credential is derived from the context secret above, which the web
+  # tier also holds. Changing it takes effect with the upgrade that carries it:
+  # the migrate Job re-keys the database before the pods roll.
+  rlsBypassSecret: ""
   # Comma-separated roles that grant tenant-wide read scope (optional).
   tenantBypassRoles: ""
 

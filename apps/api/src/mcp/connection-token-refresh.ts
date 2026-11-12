@@ -46,6 +46,7 @@ import {
   type ModuleEgressDispatch,
 } from "../modules/egress.js";
 import { fetchWithAllowedRedirects } from "./declarative-execution.js";
+import { rlsBypassToken } from "../db/rls-bypass.js";
 import {
   assertOAuthTokenEndpoint,
   tokenBindingCurrent,
@@ -233,7 +234,7 @@ export async function refreshConnectionRowLocked(input: {
             if (delegation && (delegation.connectionId !== input.rowId || delegation.connectionTable !== `${input.table.schema}.${input.table.table}` || delegation.ownerRelationId !== input.expectedOwnerUserId)) {
               throw new HttpError(403, 'CONNECTION_CONSENT_REQUIRED', 'The connection permission is unavailable.');
             }
-            const delegated = delegation ? await sql<{ row: Record<string, unknown> | null }>`select app.delegated_connection_row(${delegation.consentId}::uuid,${delegation.operationId},true) as row`.execute(lockedTrx) : undefined;
+            const delegated = delegation ? await sql<{ row: Record<string, unknown> | null }>`select app.delegated_connection_row(${delegation.consentId}::uuid,${delegation.operationId},true,${rlsBypassToken()}) as row`.execute(lockedTrx) : undefined;
             const delegatedRow = delegated?.rows[0]?.row;
             const locked = delegation ? { rows: delegatedRow ? [{
               values: delegatedRow[valuesColumn.name] as Record<string, unknown> | null,
@@ -313,7 +314,7 @@ export async function refreshConnectionRowLocked(input: {
           // string once more and the column becomes a jsonb *string*.
           const delegation = await revalidateConnectionDelegation(input.session);
           if (delegation) {
-            const written = await sql<{ updated: boolean }>`select app.delegated_connection_token_update(${delegation.consentId}::uuid,${delegation.operationId},${JSON.stringify(result)}::text::jsonb) as updated`.execute(trx!);
+            const written = await sql<{ updated: boolean }>`select app.delegated_connection_token_update(${delegation.consentId}::uuid,${delegation.operationId},${JSON.stringify(result)}::text::jsonb,${rlsBypassToken()}) as updated`.execute(trx!);
             if (written.rows[0]?.updated !== true) throw new HttpError(403, 'CONNECTION_CONSENT_REQUIRED', 'The connection permission is no longer valid.');
           } else await sql`
             update ${sql.id(input.table.schema, input.table.table)}

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Current-model invariant DDL: every stored business row journals in its writer transaction. */
 import { sql } from "kysely";
+import { rlsBypassToken } from "../rls-bypass.js";
 import { createHash } from "node:crypto";
 import auditCatalog from "../../generated/operations/audit.json" with { type: "json" };
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
@@ -287,7 +288,7 @@ async function installAuditHistory(db: OpenShapeForgeDatabase, tables: readonly 
       // local maintenance context clears stale ages across tenants before a
       // tracker is enabled, and is restored before normal migration work.
       const previousBypass = (await sql<{ value: string | null }>`select current_setting('app.bypass_rls', true) as value`.execute(db)).rows[0]?.value ?? "";
-      await sql`select set_config('app.bypass_rls','true',true)`.execute(db);
+      await sql`select set_config('app.bypass_rls',${rlsBypassToken()},true)`.execute(db);
       try {
         await sql`delete from platform.field_value_since where entity_type=${config.entity} and field_key in (${sql.join(resetFields.map(field => sql`${field}`))})`.execute(db);
         if (previous?.entity && previous.entity !== config.entity) {

@@ -15,6 +15,7 @@ import { fieldNameForColumn, serializeRow } from '../mcp/catalog-rows.js';
 import { loadOrderedBindings } from '../mcp/execution-bindings.js';
 import { runtimeJsonSchemas } from './field-schemas.js';
 import { HttpError } from '../rest/http-error.js';
+import { rlsBypassToken } from '../db/rls-bypass.js';
 import { connectionDelegationOrigin, connectionGrantSubject, revalidateConnectionDelegation, withVerifiedConnectionDelegation } from '../mcp/connection-delegation.js';
 
 const refused = () => new HttpError(403, 'CONNECTION_CONSENT_REQUIRED', 'The connection permission is unavailable or no longer valid.');
@@ -129,7 +130,7 @@ export async function delegatedConnectionRow(trx: Transaction<DB>, session: Trus
   const authority = await revalidateConnectionDelegation(session);
   if (!authority) return undefined;
   if (authority.connectionTable !== table.name) throw refused();
-  const result = await sql<{ row: Record<string, unknown> | null }>`select app.delegated_connection_row(${authority.consentId}::uuid,${authority.operationId},${lock}) as row`.execute(trx);
+  const result = await sql<{ row: Record<string, unknown> | null }>`select app.delegated_connection_row(${authority.consentId}::uuid,${authority.operationId},${lock},${rlsBypassToken()}) as row`.execute(trx);
   const row = result.rows[0]?.row;
   if (!row) throw refused();
   return serializeRow(table, row);

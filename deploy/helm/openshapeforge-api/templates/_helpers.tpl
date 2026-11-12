@@ -195,4 +195,10 @@ NODE_ENV=production is always set, which triggers the production env validator.
     secretKeyRef:
       name: {{ include "openshapeforge-api.secretName" . }}
       key: OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET
+- name: OPENSHAPEFORGE_RLS_BYPASS_SECRET
+  valueFrom:
+    secretKeyRef:
+      name: {{ include "openshapeforge-api.secretName" . }}
+      key: OPENSHAPEFORGE_RLS_BYPASS_SECRET
+      optional: true
 {{- end -}}

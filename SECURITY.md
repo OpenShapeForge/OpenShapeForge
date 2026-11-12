@@ -86,6 +86,10 @@ The remaining unchecked requirements below are the operator's responsibility.
   (`OPENSHAPEFORGE_API_VERIFY_BEARER_*`) — *the audience is enforced once a
   JWKS URI or issuer is set*,
 - set a strong, non-default `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` — *enforced*,
+- give `db:migrate`, the API and every worker the same
+  `OPENSHAPEFORGE_RLS_BYPASS_SECRET` — *enforced: a runtime database role cannot
+  lift row-level security without the credential derived from it; when unset
+  it is derived from the context secret above, which the web tier also holds*,
 - terminate TLS and require it at the identity provider — *not checked*,
 - never expose the local-dev compose ports or credentials — *not checked*.
 

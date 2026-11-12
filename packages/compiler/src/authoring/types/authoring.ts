@@ -472,6 +472,10 @@ export type CollectionTableDefinition = {
   toolbar?: { visible?: boolean; search?: boolean; create?: boolean };
   recordPanel?: {
     actions?: Array<"edit" | "openFull">;
+    /** `direct` opens the panel view editable with one save action; `confirmed` (default) keeps Edit, Save and Cancel. */
+    editing?: "confirmed" | "direct";
+    /** Save action label: the first entry whose conditions hold for the values being edited; `{field}` inserts a value. */
+    saveLabel?: Array<{ label: LocalizedText; visibleWhen?: VisibilityConfig }>;
     primaryMembership?: { field: string; equals: string };
     avatar?: string;
     summaryColumns?: string[];

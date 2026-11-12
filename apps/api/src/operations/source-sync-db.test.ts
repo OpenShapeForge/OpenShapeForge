@@ -29,6 +29,7 @@ const scratchName = `source_sync_${randomUUID().replaceAll("-", "").slice(0, 12)
 const FINANCE = ["Finance.All.Read", "Finance.All.ReadWrite"];
 const SOURCE = { sourceAuthority: "acme-erp", sourceAdministration: "01" };
 let admin: SQL, privileged: DatabaseRuntime, restricted: DatabaseRuntime;
+let pageQueries: { total: number; inserts: number } | undefined;
 
 function scratchUrl(role?: { username: string; password: string }): string {
   const url = new URL(ADMIN_URL);
@@ -75,6 +76,11 @@ describe("source-sync Operations", () => {
     restricted = createDatabaseRuntime({
       databaseUrl: scratchUrl({ username: APP_ROLE, password: process.env.OPENSHAPEFORGE_APP_PASSWORD ?? DEV_APP_ROLE_PASSWORD_DEFAULT }),
       maxConnections: 4,
+      log: (event) => {
+        if (event.level !== "query" || !pageQueries) return;
+        pageQueries.total++;
+        if (event.query.sql.includes('insert into "erp"."case_file_types"')) pageQueries.inserts++;
+      },
     });
   }, 120_000);
 
@@ -84,6 +90,37 @@ describe("source-sync Operations", () => {
     await admin?.unsafe(`drop database if exists "${scratchName}" with (force)`);
     await admin?.close();
   });
+
+  test("identical derived names have linear database work through a maximum-size source page", async () => {
+    // Run the small page first: the old triangular allocator fails here,
+    // without executing its 50 million statements for the maximum-size page.
+    for (const size of [100, 10_000]) {
+      const tenantId = await tenant();
+      const session = sessionFor(tenantId, ["Organization.All.ReadWrite"]);
+      const records = Array.from({ length: size }, (_, index) => ({
+        externalId: `repeated-${index}`, name: "Repeated import name", sourceVersion: "1",
+      }));
+      const counts = { total: 0, inserts: 0 };
+      let result: any;
+      pageQueries = counts;
+      try {
+        result = await run("applySourcePage", {
+          ...SOURCE, batches: [{ entity: "CaseFileType", action: "upsert", records }],
+        }, session);
+      } finally {
+        pageQueries = undefined;
+      }
+      expect(result.batches[0].chunks.reduce((sum: number, chunk: { created: number }) => sum + chunk.created, 0)).toBe(size);
+      expect(counts.inserts).toBeGreaterThanOrEqual(size);
+      expect(counts.inserts).toBeLessThanOrEqual(12 * size);
+      expect(counts.total).toBeLessThanOrEqual(100 * size);
+      const stored = await sql<{ count: number; codes: number }>`
+        select count(*)::int as count, count(distinct code)::int as codes
+          from erp.case_file_types where tenant_id = ${tenantId}::uuid
+      `.execute(privileged.db);
+      expect(stored.rows[0]).toEqual({ count: size, codes: size });
+    }
+  }, 180_000);
 
   test("creates a page once, updates it in place, and resumes from the highest version", async () => {
     const tenantId = await tenant(), session = sessionFor(tenantId);

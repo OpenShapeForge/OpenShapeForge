@@ -460,12 +460,16 @@ export type CollectionTableValueDefinition = {
 };
 /** Binding-backed record panel body: the same tabs -> groups -> fields shape as a record view layout, resolved against the binding schema. */
 /**
- * A row of a binding group: a field key, or a field with presentation. `lead` shows another
- * field before the value, `shareOf` draws the value as a share of another numeric field,
- * `emphasis` marks the row as the group's result.
+ * A row of a binding group: a field key, or a field with presentation. `label` replaces the
+ * field's own title, `value` names the field shown as the row's value (default: the field
+ * itself), `detail` adds a second field below it in parentheses, `shareOf` draws the field as
+ * a share of another numeric field, `emphasis` marks the row as the group's result.
+ *
+ * A group shows `rows` (label left, value right) or read-only `fields` (label above), sits
+ * `before` or `after` the panel's record view, and may depend on the values the view edits.
  */
-export type BindingPanelRow = string | { field: string; lead?: string; shareOf?: string; emphasis?: boolean };
-export type BindingPanelLayout = { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: BindingPanelRow[] }> }> };
+export type BindingPanelRow = string | { field: string; label?: LocalizedText; value?: string; detail?: string; shareOf?: string; emphasis?: boolean };
+export type BindingPanelLayout = { tabs: Array<{ id: string; label: LocalizedText; groups: Array<{ id?: string; title?: LocalizedText; fields: BindingPanelRow[]; presentation?: "rows" | "fields"; position?: "before" | "after"; decimalPlaces?: number; visibleWhen?: VisibilityConfig }> }> };
 
 export type CollectionTableDefinition = {
   bindings?: Record<string, { entity: string; operation: string; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;

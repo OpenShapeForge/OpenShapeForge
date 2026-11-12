@@ -428,6 +428,8 @@ export interface CompiledViewGroup {
   title?: LocalizedText;
   label?: LocalizedText;
   icon?: string;
+  /** `false` leaves out the group heading; its fields keep their own labels. */
+  showTitle?: boolean;
   visibleWhen?: VisibilityConfig;
   render?: CompiledViewRender;
   bindings?: Record<string, string>;

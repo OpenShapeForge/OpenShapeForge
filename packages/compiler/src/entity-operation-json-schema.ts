@@ -1,3 +1,4 @@
+import { collectionGroupingFields } from './authoring/collection-grouping.js';
 import { relatedUpdateSchema } from "./related-update-schema.js";
 import { blueprintBindingsSchema } from "./blueprint-create-schema.js";
 import { sortablePositionFieldKeys } from "./authoring/sortable-position.js";
@@ -731,8 +732,9 @@ export function entityOperationJsonSchemas(
       }};
       const sortable = entitySortableFieldKeys(contract, secureInputTarget, contracts);
       const boardAggregate = Boolean(contract.interfaces?.web?.collectionBoard?.aggregate);
-      const collectionGroups = Boolean(contract.interfaces?.web?.collectionTable?.groupBy);
-      const collectionSummary = Boolean(contract.interfaces?.web?.collectionTable?.summary);
+      const grouping = collectionGroupingFields(contract);
+      const collectionGroups = Boolean(grouping.collectionGroupBy);
+      const collectionSummary = Boolean(grouping.collectionSummaryBy);
       const pageSchema = entityListPageSchema(
         {
           type: "object",

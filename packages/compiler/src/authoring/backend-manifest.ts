@@ -1,3 +1,4 @@
+import { collectionGroupingFields } from './collection-grouping.js';
 import { validateDefaultTemplates } from "./compiler/default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { sortablePositionColumn } from "./sortable-position.js";
@@ -926,8 +927,7 @@ function buildSubtypeTable(
     ...(baseTable.retention ? { retention: structuredClone(baseTable.retention) } : {}),
     source: {
       path: candidate.path,
-      ...(contract.interfaces?.web?.collectionTable?.summary ? { collectionSummaryBy: contract.interfaces.web.collectionTable.summary.field } : {}),
-      ...collectionGroupMetadata(contract),
+      ...collectionGroupingFields(contract),
       ...(contract.interfaces?.web?.collectionBoard?.aggregate ? { boardAggregate: { groupBy: contract.interfaces.web.collectionBoard.groupBy, ...contract.interfaces.web.collectionBoard.aggregate } } : {}),
       authoringEntityName: contract.entity.name,
       authoringEntitySlug: candidate.slug,
@@ -1741,8 +1741,7 @@ export function compileAuthoringBackendManifest(
       ...(retention === undefined ? {} : { retention }),
       source: {
         path: candidate.path,
-        ...(candidate.contract.interfaces?.web?.collectionTable?.summary ? { collectionSummaryBy: candidate.contract.interfaces.web.collectionTable.summary.field } : {}),
-        ...collectionGroupMetadata(candidate.contract),
+        ...collectionGroupingFields(candidate.contract),
         ...(candidate.contract.interfaces?.web?.collectionBoard?.aggregate ? { boardAggregate: { groupBy: candidate.contract.interfaces.web.collectionBoard.groupBy, ...candidate.contract.interfaces.web.collectionBoard.aggregate } } : {}),
         ...(candidate.contract.blueprint ? { blueprint: candidate.contract.blueprint } : {}),
         ...(candidate.contract.transitions ? { transitions: candidate.contract.transitions } : {}),
@@ -2020,13 +2019,4 @@ export function buildAuthoringBackendReport(
     tables,
     hasDifferences: tables.some((table) => !table.matches),
   };
-}
-
-/** All routed collection projections share one authorized grouping key per entity. */
-function collectionGroupMetadata(contract: CompiledEntityContract): { collectionGroupBy?: string } {
-  const web = contract.interfaces?.web;
-  const keys = new Set([web?.collectionTable?.groupBy, ...Object.values(web?.namedViews ?? {}).flatMap(view => view.kind === "collection" && "table" in view ? [view.table?.groupBy] : [])].filter((key): key is string => Boolean(key)));
-  if (keys.size > 1) throw new Error(`${contract.entity.name}: routed collections currently require the same grouping field.`);
-  const key = [...keys][0];
-  return key ? { collectionGroupBy: key } : {};
 }

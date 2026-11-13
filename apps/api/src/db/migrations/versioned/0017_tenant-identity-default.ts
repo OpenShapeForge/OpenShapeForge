@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql, type Kysely } from "kysely";
-import { rlsBypassToken } from "../../rls-bypass.js";
 import manifest from "../../../generated/db/manifest.json" with { type: "json" };
 import type { VersionedMigration } from "../versioned-runner.js";
 
@@ -86,7 +85,7 @@ export function tenantIdentityRegistries(tables: readonly RegistryTable[]): Regi
  * others, so they neither help nor block.
  */
 async function assertAllRowsVisible(db: Kysely<any>, name: string, relation: string): Promise<void> {
-  await sql`select set_config('app.bypass_rls', ${rlsBypassToken()}, true)`.execute(db);
+  await sql`select set_config('app.bypass_rls', 'true', true)`.execute(db);
   const rls = await sql<{ enabled: boolean }>`
     select relrowsecurity as enabled from pg_class where oid = to_regclass(${relation})`.execute(db);
   if (!rls.rows[0]?.enabled) return;

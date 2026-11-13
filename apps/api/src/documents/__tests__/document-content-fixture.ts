@@ -78,6 +78,9 @@ const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 export type Staged = { artifactId: string; version: number; fileName: string; mediaType: string; sha256: string; byteSize: number; bytes: Uint8Array };
 export type Handlers = Record<string, (input: Record<string, unknown>, context: ModuleOperationContext) => Promise<{ value: unknown }>>;
 
+/** Block definitions whose values are plain fields, each with its own materialize Operation. */
+const FIELD_BLOCKS = ["TextBlock", "TextColumns", "ImageBlock", "SpacerBlock", "SectionBreak"] as const;
+
 export function platformFor(who: Session) {
   let active: Transaction<DB> | undefined;
   const events: { eventType: string; aggregateType: string; aggregateId: string; payload: Record<string, unknown> }[] = [];
@@ -89,7 +92,7 @@ export function platformFor(who: Session) {
     operation("DocumentVariant.get", "DocumentVariant", "get", "read", { type: "object" }),
     operation("Document.insertVariant", "Document", "invoke", "write", { type: "object" }),
     operation("DocumentVariant.insertBlock", "DocumentVariant", "invoke", "write", { type: "object" }),
-    operation("TextBlock.materialize", "TextBlock", "invoke", "read", { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: "TextBlock" }, values: { type: "object" } } }),
+    ...FIELD_BLOCKS.map((entity) => operation(`${entity}.materialize`, entity, "invoke", "read", { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: entity }, values: { type: "object" } } })),
     operation("DocumentVersion.create", "DocumentVersion", "create", "write", { type: "object" }),
     operation("DocumentVersion.get", "DocumentVersion", "get", "read", { type: "object" }),
   ];
@@ -139,7 +142,7 @@ export function platformFor(who: Session) {
             const row = (await sql<{ updatedAt: string }>`select to_jsonb(updated_at) #>> '{}' as "updatedAt" from ${sql.id("erp", table)} where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
             return { data: { ...result, parent: { updatedAt: row!.updatedAt } } };
           }
-          if (request.operation.id === "TextBlock.materialize") return { data: (await handlers.materializeFields!(request.input, context)).value };
+          if (FIELD_BLOCKS.some((entity) => request.operation.id === `${entity}.materialize`)) return { data: (await handlers.materializeFields!(request.input, context)).value };
           if (request.operation.id === "DocumentVersion.create") return { data: (await handlers.createDocumentVersion!(request.input, context)).value };
           if (request.operation.id === "DocumentVersion.get") {
             const row = (await sql<Record<string, unknown>>`select id, document_id as "documentId", artifact_id as "artifactId", artifact_version::int as "artifactVersion",

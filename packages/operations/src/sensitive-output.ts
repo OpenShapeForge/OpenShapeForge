@@ -28,10 +28,13 @@ export function assertSensitiveOutputSchema(schema: Schema): void {
   let nodes = 0;
   const visit = (s: Schema, depth = 0) => {
     if (++nodes > 20_000 || depth > 32) throw new Error("Output disclosure schema exceeds its inspection bound.");
-    if (Object.keys(s).some(k => ["$ref", "$dynamicRef", "$recursiveRef", "$defs", "definitions", "dependencies", "allOf", "anyOf", "oneOf", "patternProperties", "dependentSchemas", "if", "then", "else", "not", "contains", "prefixItems"].includes(k))) {
+    if (Object.keys(s).some(k => ["$ref", "$dynamicRef", "$recursiveRef", "dependencies", "allOf", "anyOf", "oneOf", "patternProperties", "dependentSchemas", "if", "then", "else", "not", "contains", "prefixItems"].includes(k))) {
       throw new Error("Sensitive output requires explicit object properties and homogeneous array items; references and conditional schemas are unsupported.");
     }
     if ((object(s.additionalProperties)) || Array.isArray(s.items)) throw new Error("Sensitive output requires explicit properties and homogeneous array items.");
+    for (const key of ["$defs", "definitions"]) {
+      if (object(s[key]) && Object.values(s[key]).some(hasSensitiveOutput)) throw new Error("Confidential definitions require reference resolution and cannot be disclosed.");
+    }
     const classification = s["x-osf-classification"];
     if (classification !== undefined && (!object(classification) || classification.sensitivity !== "confidential" || Object.keys(classification).some(k => k !== "sensitivity"))) {
       throw new Error("Output x-osf-classification must declare sensitivity: confidential.");

@@ -33,7 +33,7 @@ const webPresent = existsSync(join(repoRoot, "apps/web"));
 // manifest projects its tenant-field designer (`customFields`).
 const activeLayers = loadAuthoringConfig(repoRoot).layers;
 // ReferenceValueAppearance has its own generated CRUD pages.
-const expectedGeneratedCrudEntityCount = 118 +
+const expectedGeneratedCrudEntityCount = 120 +
   (activeLayers.includes("test/fixtures/authoring/record-actions") ? 2 : 0) +
   (activeLayers.includes("test/fixtures/authoring/extensible") ? 1 : 0);
 

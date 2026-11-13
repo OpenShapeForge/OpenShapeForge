@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { missingSchemaUiTranslations } from "@openshapeforge/interface-web";
 import { join } from "node:path";
 import Ajv from "ajv/dist/2020.js";
-import { operationFieldMetadataKeywords, operationTypeKeyword } from "@openshapeforge/operations";
+import { operationFieldMetadataKeywords, operationExactNumericKeyword, operationTypeKeyword } from "@openshapeforge/operations";
 import addFormats from "ajv-formats";
 import { buildWebManifest } from "./web-manifest.js";
 import { authoringValidator } from "./schema-validation.js";
@@ -26,7 +26,7 @@ const children = (child: CoreEntity) => child.fields.find((field) => field.key =
 
 test("real authored template collection Operations compile the direct-edit variant flow under strict AJV", () => {
   const authoringDir = join(import.meta.dir, "../../config/authoring");
-  const entries = ["template", "template-version", "template-variant", "block", "text-block", "youtube-embed", "template-block"].map((slug) => {
+  const entries = ["template", "template-version", "template-variant", "block", "text-block", "youtube-embed", "template-block", "text-columns", "image-block", "spacer-block"].map((slug) => {
     const contract = compileEntity(loadEntity(authoringDir, slug));
     // This regression owns native schema lowering, not separately authored plugin routes.
     contract.pluginOperations = contract.pluginOperations?.filter((operation) => operation.definition.implementation.type === "collection") ?? [];
@@ -40,9 +40,10 @@ test("real authored template collection Operations compile the direct-edit varia
   }
   expect(operations.filter((operation) => operation.implementation?.type === "collection").map((operation) => operation.id).sort()).toEqual(["Template.insertVariant", "TemplateVariant.insertBlock", "TemplateVariant.moveBlock", "TemplateVariant.removeBlock", "TemplateVariant.updateBlock"]);
   const schema = operations.find((operation) => operation.id === "Template.insertVariant")!.inputSchema;
-  const ajv = new Ajv.default({ strict: true }); (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
+  const ajv = new Ajv.default({ strict: true, allowUnionTypes: true }); (addFormats as unknown as (instance: typeof ajv) => unknown)(ajv);
   for (const keyword of ["x-osf-reference", "x-osf-i18n", "x-osf-sourceField", "x-osf-control"]) ajv.addKeyword({ keyword, valid: true });
   ajv.addKeyword(operationTypeKeyword);
+  ajv.addKeyword(operationExactNumericKeyword);
   for (const keyword of operationFieldMetadataKeywords) ajv.addKeyword(keyword);
   const validate = ajv.compile(schema);
   const base = { id: "10000000-0000-4000-8000-000000000001", expectedVersion: "2026-09-14T10:00:00Z" };
@@ -52,7 +53,7 @@ test("real authored template collection Operations compile the direct-edit varia
 
 test("a block's owner keys and the document lock never enter the owner-scoped values contracts", () => {
   const authoringDir = join(import.meta.dir, "../../config/authoring");
-  const entries = ["template", "template-version", "template-variant", "document", "document-version", "document-variant", "block", "text-block", "youtube-embed", "template-block",
+  const entries = ["template", "template-version", "template-variant", "document", "document-version", "document-variant", "block", "text-block", "youtube-embed", "template-block", "text-columns", "image-block", "spacer-block",
     "document-type", "case-file", "case", "relation", "account"].map((slug) => {
     const contract = compileEntity(loadEntity(authoringDir, slug));
     contract.pluginOperations = contract.pluginOperations?.filter((operation) => operation.definition.implementation.type === "collection") ?? [];

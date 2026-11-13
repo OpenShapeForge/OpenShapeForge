@@ -230,7 +230,7 @@
     },
     "packages/interface-web": {
       "name": "@openshapeforge/interface-web",
-      "version": "0.2.30",
+      "version": "0.2.31",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
       },

@@ -79,7 +79,7 @@ export type Staged = { artifactId: string; version: number; fileName: string; me
 export type Handlers = Record<string, (input: Record<string, unknown>, context: ModuleOperationContext) => Promise<{ value: unknown }>>;
 
 /** Block definitions whose values are plain fields, each with its own materialize Operation. */
-const FIELD_BLOCKS = ["TextBlock", "TextColumns", "ImageBlock", "SpacerBlock", "SectionBreak"] as const;
+const FIELD_BLOCKS = ["TextBlock", "TextColumns", "ImageBlock", "SpacerBlock"] as const;
 
 export function platformFor(who: Session) {
   let active: Transaction<DB> | undefined;

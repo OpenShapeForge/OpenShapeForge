@@ -524,11 +524,14 @@ async function materializeContent(
     }
   }
 
+  let ownPage: JsonObject | undefined;
   let identity: {templateVersionId:string;compositionHashVersion:"osf-template-content-v1"} | {documentId:string;documentVariantId:string;compositionHashVersion:"osf-document-content-v1"};
   if ("documentId" in request) {
     const variant=selectContentTemplateVariant({variants:request.variants},request.channel,request.locale);
     await visitBlocks(variant,{catalogue:contentVariableCatalogue({}),parameters:{}},{},[],[]);
     identity={documentId:request.documentId,documentVariantId:variant.id,compositionHashVersion:"osf-document-content-v1"};
+    // A document that follows no template is its own root: its variant's page settings travel with its content.
+    ownPage=variant.page;
   } else {
     await visit(request.templateVersionId, request.parameters ?? {}, [], []);
     identity={templateVersionId:request.templateVersionId,compositionHashVersion:"osf-template-content-v1"};
@@ -539,6 +542,7 @@ async function materializeContent(
     ...identity,
     channel: request.channel,
     locale: request.locale,
+    ...(ownPage ? { page: ownPage } : {}),
     blocks,
     compositions,
     templates,

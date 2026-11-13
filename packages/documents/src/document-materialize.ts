@@ -25,7 +25,7 @@ const BLOCK_OWNER_COLUMN = "document_variant_id";
 export async function documentContentVariants(trx: unknown, document: { readonly id: string; readonly channel: string; readonly defaultLocales?: ReadonlySet<string>; readonly templatePages?: (locale: string) => JsonObject | undefined },
   selection: BlockRowSelection, allowedDefinitions: readonly string[]): Promise<readonly ContentTemplateVariant[]> {
   const variants = await rows<{ id: string; channel: string; locale: string } & Record<string, unknown>>(trx,
-    "select id, channel, locale, page_layout, page_margin, page_gap, page_block_gap, page_background, page_background_image, page_body_alignment from erp.document_variants where tenant_id = $1 and document_id = $2 and channel = $3 order by locale, id for share",
+    "select id, channel, locale, page_layout, page_format, page_width, page_height, page_margin, page_gap, page_block_gap, page_background, page_background_image, page_body_alignment from erp.document_variants where tenant_id = $1 and document_id = $2 and channel = $3 order by locale, id for share",
     [selection.tenantId, document.id, document.channel]);
   const result: ContentTemplateVariant[] = [];
   for (const variant of variants) {

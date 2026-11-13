@@ -3,10 +3,10 @@
  * Paged document rendering: the closed vocabulary a print engine receives.
  *
  * A document is one flat, ordered list of blocks. A block sits in a region:
- * `body` blocks flow through the pages, `header` and `footer` blocks belong to
- * the named page layout in `layoutKey` and repeat on every page of a section
- * that uses that layout. A `SectionBreak` body block starts a new page and
- * selects the layout for everything up to the next break.
+ * `body` blocks flow through the pages, `header` and `footer` blocks repeat on
+ * every page of the document or included template they belong to. How the
+ * pages look is not a block: it is the page settings of that document or
+ * template (`PageLayouts`).
  */
 
 export const PAGE_REGIONS = ["body", "header", "footer"] as const;
@@ -57,7 +57,9 @@ export type PageSettings = Readonly<{
   margin: number;
   gap: number;
   blockGap: number;
-  /** Key into `PageDesign.colors`. */
+  /** The page's own size, when the document sets a format; else the page is the design's. */
+  page?: Readonly<{ width: number; height: number }>;
+  /** A CSS color: the theme's color the document named, or its own color code. */
   background?: string;
   /** Key into `PageDesign.assets`. */
   backgroundImage?: string;
@@ -101,6 +103,7 @@ export type PagedDocumentInput = Readonly<{
 
 export type PagedSection = Readonly<{
   layout: string;
+  page: Readonly<{ width: number; height: number }>;
   /** A complete, self-contained HTML document for one section. */
   html: string;
 }>;

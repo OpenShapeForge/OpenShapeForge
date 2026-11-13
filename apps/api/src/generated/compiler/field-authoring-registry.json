@@ -9865,8 +9865,7 @@
                 "TemplateBlock",
                 "TextColumns",
                 "ImageBlock",
-                "SpacerBlock",
-                "SectionBreak"
+                "SpacerBlock"
               ]
             }
           }
@@ -9900,8 +9899,7 @@
                 "TemplateBlock",
                 "TextColumns",
                 "ImageBlock",
-                "SpacerBlock",
-                "SectionBreak"
+                "SpacerBlock"
               ]
             }
           }
@@ -19285,6 +19283,90 @@
           }
         },
         {
+          "key": "pageFormat",
+          "label": {
+            "en": "Page format",
+            "nl": "Paginaformaat"
+          },
+          "description": {
+            "en": "Empty takes the format of the document theme, or A4 without a theme.",
+            "nl": "Leeg neemt het formaat van het documentthema, of A4 zonder thema."
+          },
+          "osfType": "string",
+          "required": false,
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "a4",
+                "label": {
+                  "en": "A4",
+                  "nl": "A4"
+                }
+              },
+              {
+                "value": "a5",
+                "label": {
+                  "en": "A5",
+                  "nl": "A5"
+                }
+              },
+              {
+                "value": "letter",
+                "label": {
+                  "en": "Letter",
+                  "nl": "Letter"
+                }
+              },
+              {
+                "value": "custom",
+                "label": {
+                  "en": "Custom size",
+                  "nl": "Eigen maat"
+                }
+              }
+            ]
+          },
+          "persisted": {
+            "column": "page_format",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "pageWidth",
+          "label": {
+            "en": "Page width (px)",
+            "nl": "Paginabreedte (px)"
+          },
+          "osfType": "number",
+          "required": false,
+          "validation": {
+            "min": 100,
+            "max": 5000
+          },
+          "persisted": {
+            "column": "page_width",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "pageHeight",
+          "label": {
+            "en": "Page height (px)",
+            "nl": "Paginahoogte (px)"
+          },
+          "osfType": "number",
+          "required": false,
+          "validation": {
+            "min": 100,
+            "max": 5000
+          },
+          "persisted": {
+            "column": "page_height",
+            "storageClass": "core"
+          }
+        },
+        {
           "key": "pageMargin",
           "label": {
             "en": "Page margin (px)",
@@ -19342,13 +19424,13 @@
             "nl": "Achtergrondkleur"
           },
           "description": {
-            "en": "Key of a color of the document theme. Empty leaves the page white.",
-            "nl": "Sleutel van een kleur uit het documentthema. Leeg laat de pagina wit."
+            "en": "A color code such as #becbd3, or the key of a color of the document theme. Empty leaves the page white.",
+            "nl": "Een kleurcode zoals #becbd3, of de sleutel van een kleur uit het documentthema. Leeg laat de pagina wit."
           },
           "osfType": "string",
           "required": false,
           "validation": {
-            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "pattern": "^(#[0-9A-Fa-f]{6}|[a-z][A-Za-z0-9-]{0,63})$",
             "maxLength": 64
           },
           "persisted": {
@@ -19444,8 +19526,7 @@
             "TemplateBlock",
             "TextColumns",
             "ImageBlock",
-            "SpacerBlock",
-            "SectionBreak"
+            "SpacerBlock"
           ],
           "relationship": {
             "inverse": "documentVariant",
@@ -37732,170 +37813,6 @@
         "display": "EntityReferenceDisplay"
       }
     },
-    "SectionBreak": {
-      "kind": "entity",
-      "entity": "SectionBreak",
-      "entityIdentity": false,
-      "baseType": "string",
-      "validation": {
-        "format": "uuid"
-      },
-      "label": {
-        "en": "Section break",
-        "nl": "Sectie-einde"
-      },
-      "pluralLabel": {
-        "en": "Section breaks",
-        "nl": "Sectie-einden"
-      },
-      "shape": [
-        {
-          "key": "layout",
-          "osfType": "string",
-          "required": true,
-          "defaultValue": "default",
-          "label": {
-            "en": "Page layout",
-            "nl": "Pagina-indeling"
-          },
-          "description": {
-            "en": "Key of the page layout for the pages after this break. Header and footer blocks carrying the same layout key repeat on each of those pages.",
-            "nl": "Sleutel van de pagina-indeling voor de pagina's na dit einde. Kop- en voetblokken met dezelfde sleutel herhalen op elk van die pagina's."
-          },
-          "validation": {
-            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
-            "maxLength": 64
-          }
-        },
-        {
-          "key": "margin",
-          "osfType": "number",
-          "required": false,
-          "defaultValue": 40,
-          "label": {
-            "en": "Page margin (px)",
-            "nl": "Paginamarge (px)"
-          },
-          "validation": {
-            "min": 0,
-            "max": 400
-          }
-        },
-        {
-          "key": "gap",
-          "osfType": "number",
-          "required": false,
-          "defaultValue": 24,
-          "label": {
-            "en": "Space between header, body and footer (px)",
-            "nl": "Ruimte tussen kop, inhoud en voet (px)"
-          },
-          "validation": {
-            "min": 0,
-            "max": 400
-          }
-        },
-        {
-          "key": "blockGap",
-          "osfType": "number",
-          "required": false,
-          "defaultValue": 16,
-          "label": {
-            "en": "Space between blocks (px)",
-            "nl": "Ruimte tussen blokken (px)"
-          },
-          "validation": {
-            "min": 0,
-            "max": 400
-          }
-        },
-        {
-          "key": "background",
-          "osfType": "string",
-          "required": false,
-          "label": {
-            "en": "Background color",
-            "nl": "Achtergrondkleur"
-          },
-          "description": {
-            "en": "Key of a color in the document theme's page design. Empty leaves the page white.",
-            "nl": "Sleutel van een kleur in het paginaontwerp van het documentthema. Leeg laat de pagina wit."
-          },
-          "validation": {
-            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
-            "maxLength": 64
-          }
-        },
-        {
-          "key": "backgroundImage",
-          "osfType": "string",
-          "required": false,
-          "label": {
-            "en": "Background image",
-            "nl": "Achtergrondbeeld"
-          },
-          "description": {
-            "en": "Key of an image asset in the document theme's page design, stretched over the whole page.",
-            "nl": "Sleutel van een beeld in het paginaontwerp van het documentthema, uitgerekt over de hele pagina."
-          },
-          "validation": {
-            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
-            "maxLength": 64
-          }
-        },
-        {
-          "key": "bodyAlignment",
-          "osfType": "string",
-          "required": false,
-          "defaultValue": "top",
-          "label": {
-            "en": "Body position",
-            "nl": "Positie van de inhoud"
-          },
-          "description": {
-            "en": "Where the body sits between header and footer on a page it does not fill. Above the middle ends the body one block gap above the middle of the page under the header, as a cover sets its title.",
-            "nl": "Waar de inhoud tussen kop en voet staat op een pagina die niet gevuld is. Boven het midden laat de inhoud eindigen op een blokafstand boven het midden van de pagina onder de kop, zoals een omslag zijn titel zet."
-          },
-          "options": {
-            "type": "static",
-            "items": [
-              {
-                "value": "top",
-                "label": {
-                  "en": "Top",
-                  "nl": "Boven"
-                }
-              },
-              {
-                "value": "center",
-                "label": {
-                  "en": "Center",
-                  "nl": "Midden"
-                }
-              },
-              {
-                "value": "bottom",
-                "label": {
-                  "en": "Bottom",
-                  "nl": "Onder"
-                }
-              },
-              {
-                "value": "aboveCenter",
-                "label": {
-                  "en": "Above the middle",
-                  "nl": "Boven het midden"
-                }
-              }
-            ]
-          }
-        }
-      ],
-      "render": {
-        "input": "EntityReferenceSelect",
-        "display": "EntityReferenceDisplay"
-      }
-    },
     "SlaPolicy": {
       "kind": "entity",
       "entity": "SlaPolicy",
@@ -41325,6 +41242,90 @@
           }
         },
         {
+          "key": "pageFormat",
+          "label": {
+            "en": "Page format",
+            "nl": "Paginaformaat"
+          },
+          "description": {
+            "en": "Empty takes the format of the document theme, or A4 without a theme.",
+            "nl": "Leeg neemt het formaat van het documentthema, of A4 zonder thema."
+          },
+          "osfType": "string",
+          "required": false,
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "a4",
+                "label": {
+                  "en": "A4",
+                  "nl": "A4"
+                }
+              },
+              {
+                "value": "a5",
+                "label": {
+                  "en": "A5",
+                  "nl": "A5"
+                }
+              },
+              {
+                "value": "letter",
+                "label": {
+                  "en": "Letter",
+                  "nl": "Letter"
+                }
+              },
+              {
+                "value": "custom",
+                "label": {
+                  "en": "Custom size",
+                  "nl": "Eigen maat"
+                }
+              }
+            ]
+          },
+          "persisted": {
+            "column": "page_format",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "pageWidth",
+          "label": {
+            "en": "Page width (px)",
+            "nl": "Paginabreedte (px)"
+          },
+          "osfType": "number",
+          "required": false,
+          "validation": {
+            "min": 100,
+            "max": 5000
+          },
+          "persisted": {
+            "column": "page_width",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "pageHeight",
+          "label": {
+            "en": "Page height (px)",
+            "nl": "Paginahoogte (px)"
+          },
+          "osfType": "number",
+          "required": false,
+          "validation": {
+            "min": 100,
+            "max": 5000
+          },
+          "persisted": {
+            "column": "page_height",
+            "storageClass": "core"
+          }
+        },
+        {
           "key": "pageMargin",
           "label": {
             "en": "Page margin (px)",
@@ -41382,13 +41383,13 @@
             "nl": "Achtergrondkleur"
           },
           "description": {
-            "en": "Key of a color of the document theme. Empty leaves the page white.",
-            "nl": "Sleutel van een kleur uit het documentthema. Leeg laat de pagina wit."
+            "en": "A color code such as #becbd3, or the key of a color of the document theme. Empty leaves the page white.",
+            "nl": "Een kleurcode zoals #becbd3, of de sleutel van een kleur uit het documentthema. Leeg laat de pagina wit."
           },
           "osfType": "string",
           "required": false,
           "validation": {
-            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "pattern": "^(#[0-9A-Fa-f]{6}|[a-z][A-Za-z0-9-]{0,63})$",
             "maxLength": 64
           },
           "persisted": {
@@ -41482,8 +41483,7 @@
             "TemplateBlock",
             "TextColumns",
             "ImageBlock",
-            "SpacerBlock",
-            "SectionBreak"
+            "SpacerBlock"
           ],
           "relationship": {
             "inverse": "variant",

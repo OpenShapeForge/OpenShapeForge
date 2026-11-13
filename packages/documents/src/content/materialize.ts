@@ -248,7 +248,7 @@ async function materializeContent(
         const bound = await bind(match[1]!, slot, "template", scope);
         let text: string;
         try {
-          text = printedDate(bound.offer.osfType, bound.value, request.locale) ?? variableText(bound.value);
+          text = printedValue(bound.offer.osfType, bound.value, request.locale) ?? variableText(bound.value);
         } catch (error) {
           contentVariableFailure(error);
         }
@@ -570,9 +570,14 @@ export function materializeDocumentContent(input: MaterializeDocumentContentInpu
  * of the document's locales use; a region the author chose (`en-US`) is kept.
  * A locale the platform does not know, or a value that is not a calendar
  * date, falls through to the stored text.
+ *
+ * An IBAN is stored without spaces and reads in groups of four, the way it is
+ * printed on paper: "NL77 RABO 0333 5802 14".
  */
-function printedDate(osfType: string | undefined, value: unknown, locale: string): string | undefined {
-  if (osfType !== "date" || typeof value !== "string") return undefined;
+function printedValue(osfType: string | undefined, value: unknown, locale: string): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (osfType === "iban") return value.replace(/\s+/g, "").replace(/(.{4})(?=.)/g, "$1 ");
+  if (osfType !== "date") return undefined;
   const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!parts) return undefined;
   const date = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])));

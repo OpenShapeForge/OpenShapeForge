@@ -33,6 +33,7 @@ export function assertEntityValueFieldPolicy(
   field: Readonly<Record<string, unknown>>,
   osfTypes: Readonly<Record<string, unknown>> = fieldSchemaRegistry.osfTypes,
   depth = 0,
+  organizationData = false,
 ): void {
   const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
   const invalid = (): never => { throw generatedCrudError("Guarded or malformed entity-value fields require a dedicated adapter.", "INVALID_DEFINITION"); };
@@ -52,7 +53,7 @@ export function assertEntityValueFieldPolicy(
       // authored classification wins over the type's, and only a sensitivity
       // that restricts nothing (`public`, `internal`) is storable here; a
       // restricting one still needs a column and an adapter of its own.
-      const effective = authored ?? inherited;
+      const effective = authored ?? (organizationData ? undefined : inherited);
       if (effective !== undefined && !(record(effective) && UNRESTRICTED.has(effective.sensitivity as string))) invalid();
       continue;
     }
@@ -66,12 +67,12 @@ export function assertEntityValueFieldPolicy(
       if (!Array.isArray(node[key])) invalid();
       for (const child of node[key] as unknown[]) {
         if (!record(child)) invalid();
-        assertEntityValueFieldPolicy(child as Record<string, unknown>, osfTypes, depth + 1);
+        assertEntityValueFieldPolicy(child as Record<string, unknown>, osfTypes, depth + 1, organizationData);
       }
     }
     if (node.item !== undefined) {
       if (!record(node.item)) invalid();
-      assertEntityValueFieldPolicy(node.item as Record<string, unknown>, osfTypes, depth + 1);
+      assertEntityValueFieldPolicy(node.item as Record<string, unknown>, osfTypes, depth + 1, organizationData);
     }
   }
 }

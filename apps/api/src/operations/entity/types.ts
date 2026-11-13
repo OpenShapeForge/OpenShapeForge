@@ -82,6 +82,8 @@ export type GeneratedCrudColumn = {
     definitionField: string;
     definitionColumn: string;
     encrypted?: boolean;
+    /** Every value is the organization's own data: a type's classification does not apply. */
+    organizationData?: boolean;
     documentField?: string;
     documentColumn?: string;
 

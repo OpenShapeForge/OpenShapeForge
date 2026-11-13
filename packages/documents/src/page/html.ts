@@ -180,6 +180,16 @@ export function variantPageValues(source: Readonly<Record<string, unknown>> | nu
   return values;
 }
 
+/**
+ * Page values with the chosen palette color (`standard:ocean`, `tenant:cover`) replaced by its color code, as
+ * `pageSettings` reads it. A color the palette no longer has is left out.
+ */
+export function withPaletteColors(values: Readonly<Record<string, unknown>>, palette: readonly Readonly<{ reference: string; value: string }>[]): Record<string, unknown> {
+  const { background, ...rest } = values;
+  const found = typeof background === "string" ? palette.find((color) => color.reference === background)?.value : undefined;
+  return found ? { ...rest, background: found } : rest;
+}
+
 type Section = PageSettings & { scope: string; body: PageBlock[] };
 
 /**
@@ -191,10 +201,10 @@ export const PAGE_FORMATS = { a4: { width: 794, height: 1123 }, a5: { width: 559
 
 export function pageSettings(values: Readonly<Record<string, unknown>> | undefined, design: PageDesign): PageSettings {
   const v = values ?? {};
-  // A color is one of the theme's by name, or a color code of its own. A name the theme does not have (the
-  // document has no theme, or another one than it was written for) leaves the page white rather than refusing it.
-  const named = typeof v.background === "string" ? v.background.trim() : "";
-  const background = /^#[0-9A-Fa-f]{6}$/.test(named) ? named : named && KEY.test(named) && Object.hasOwn(design.colors, named) ? design.colors[named] : undefined;
+  // The background is a color code: whoever reads the settings resolves the palette color the document chose
+  // (the organization's or a standard one) first. Anything else, such as a color that no longer exists, leaves
+  // the page white rather than refusing it; so does an image the theme does not have.
+  const background = typeof v.background === "string" && /^#[0-9A-Fa-f]{6}$/.test(v.background) ? v.background : undefined;
   const image = typeof v.backgroundImage === "string" && KEY.test(v.backgroundImage) && Object.hasOwn(design.assets, v.backgroundImage) ? v.backgroundImage : undefined;
   const format = typeof v.format === "string" ? v.format : "";
   const page = format === "custom" ? { width: px(v.width, "Page.width", 100, 5000, design.page.width), height: px(v.height, "Page.height", 100, 5000, design.page.height) }

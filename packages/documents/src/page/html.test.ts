@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { buildPagedDocument, layoutPagedSections, pageBlockCss, variantPageValues, pageSettings, renderPageBlock, PagedDocumentError, PAGED_FONTS_MARKER } from "./html.js";
+import { buildPagedDocument, layoutPagedSections, pageBlockCss, variantPageValues, withPaletteColors, pageSettings, renderPageBlock, PagedDocumentError, PAGED_FONTS_MARKER } from "./html.js";
 import type { PageBlock, PagedDocumentInput } from "./types.js";
 
 const design: PagedDocumentInput["design"] = {
@@ -28,7 +28,7 @@ describe("buildPagedDocument", () => {
       block("f2", "TextBlock", { markdown: "Confidential" }, "footer"),
       cover("b1", "TextBlock", { markdown: "Pentesting for Nova Harbor", style: "title" }),
       block("b2", "TextBlock", { markdown: "Dear reader" }),
-    ], { cover: { background: "surface", backgroundImage: "mark" }, "": { margin: 32 } });
+    ], { cover: { background: "#becbd3", backgroundImage: "mark" }, "": { margin: 32 } });
     expect(paged.page).toEqual({ width: 720, height: 913 });
     expect(paged.sections).toHaveLength(2);
     const [first, content] = paged.sections.map((section) => section.html);
@@ -60,7 +60,7 @@ describe("buildPagedDocument", () => {
       included("ib", "TextBlock", { markdown: "Cover title" }),
       { ...block("nested", "TextBlock", { markdown: "A clause the cover includes" }), scope: "include-1/clause" },
       block("ob", "TextBlock", { markdown: "Dear reader" }),
-    ], { "": { margin: 32 }, "include-1": { background: "surface" } });
+    ], { "": { margin: 32 }, "include-1": { background: "#becbd3" } });
     expect(paged.sections).toHaveLength(2);
     const [cover, letter] = paged.sections.map((section) => section.html);
     expect(cover).toContain("Cover header");
@@ -130,12 +130,14 @@ describe("buildPagedDocument", () => {
     expect(() => build([...blocks])).toThrow(PagedDocumentError);
   });
 
-  test("a page takes a theme color by name or a color code of its own, and a name the theme lacks leaves it white", () => {
-    const page = (layout: Record<string, unknown>) => build([block("b", "TextBlock", { markdown: "x" })], { "": layout }).sections[0]!.html;
-    expect(page({ background: "surface" })).toContain('class="bg" style="background:#becbd3"');
-    expect(page({ background: "#112233" })).toContain('class="bg" style="background:#112233"');
-    expect(page({ background: "missing", backgroundImage: "missing" })).toContain('<div class="bg"></div>');
-    expect(page({ background: "red;position:fixed" })).toContain('<div class="bg"></div>');
+  test("a page's background is the palette color the document chose; a color that is gone leaves it white", () => {
+    const palette = [{ reference: "standard:ocean", value: "#175BAA" }, { reference: "tenant:cover", value: "#BECBD3" }];
+    const page = (layout: Record<string, unknown>) => build([block("b", "TextBlock", { markdown: "x" })], { "": withPaletteColors(layout, palette) }).sections[0]!.html;
+    expect(page({ background: "tenant:cover", margin: 32 })).toContain('class="bg" style="background:#BECBD3"');
+    expect(page({ background: "standard:ocean" })).toContain('class="bg" style="background:#175BAA"');
+    expect(page({ background: "tenant:removed", backgroundImage: "missing" })).toContain('<div class="bg"></div>');
+    // Unresolved or hostile text never reaches the page.
+    expect(build([block("b", "TextBlock", { markdown: "x" })], { "": { background: "red;position:fixed" } }).sections[0]!.html).toContain('<div class="bg"></div>');
   });
 
   test("a document sets its own page format; without one the page is the theme's", () => {
@@ -149,7 +151,7 @@ describe("buildPagedDocument", () => {
   });
 
   test("a variant's fields read as page settings", () => {
-    expect(variantPageValues({ page_layout: "pages", page_margin: "32", page_background: "surface", page_body_alignment: null })).toEqual({ margin: 32, background: "surface" });
+    expect(variantPageValues({ page_layout: "pages", page_margin: "32", page_background: "tenant:cover", page_body_alignment: null })).toEqual({ margin: 32, background: "tenant:cover" });
     expect(variantPageValues({ pageLayout: "pages", pageFormat: "custom", pageWidth: "600", pageBodyAlignment: "center" })).toEqual({ format: "custom", width: 600, bodyAlignment: "center" });
     expect(variantPageValues({ pageLayout: "continuous", pageMargin: 32 })).toBeUndefined();
     expect(variantPageValues({ page_layout: null })).toBeNull();

@@ -27,7 +27,7 @@ const pageDesign = {
 
 type Pages = { documentId: string; themeId: string; compositionHash: string; page: { width: number; height: number }; sections: { layout: string; html: string }[] };
 
-async function seedPagedTemplate(themeId: string | null, background: string | null = "coverSurface") {
+async function seedPagedTemplate(themeId: string | null, background: string | null = "standard:blue") {
   const ids = { template: randomUUID(), variant: randomUUID() };
   await sql`insert into erp.templates (id, tenant_id, key, name, parameters, document_theme_id) values
     (${ids.template}::uuid, ${tenant}::uuid, ${`proposal-${ids.template.slice(0, 8)}`}, 'Proposal', ${jsonbLiteral([])}, ${themeId}::uuid)`.execute(privileged());
@@ -74,7 +74,7 @@ describe("document pages against PostgreSQL", () => {
     expect(page).toContain("Pentesting for Nova Harbor");
     expect(page).toContain('data-osf-region="header"');
     expect(page).toContain("www.example.com");
-    expect(page).toContain("background:#becbd3");
+    expect(page).toContain("background:#78A5DA");
     expect(page).toContain("--m:32px");
 
     // A reader of the document reads the same pages; the layout is read-only.
@@ -85,7 +85,7 @@ describe("document pages against PostgreSQL", () => {
     await sql`update erp.document_variants set page_layout = 'pages', page_margin = 20 where id = ${own}::uuid`.execute(privileged());
     const changed = ((await handlers.renderDocumentPages!(request, context)).value as Pages).sections[0]!.html;
     expect(changed).toContain("--m:20px");
-    expect(changed).not.toContain("background:#becbd3");
+    expect(changed).not.toContain("background:#78A5DA");
   });
 
   test("an included cover takes its own page with its own header and footer, and the including template resumes after it", async () => {
@@ -111,7 +111,7 @@ describe("document pages against PostgreSQL", () => {
     const versionColumn = (await sql<{ column_name: string }>`select column_name from information_schema.columns
       where table_schema = 'erp' and table_name = 'blocks' and column_name like 'ev_values_template_block_version_id%'`.execute(privileged())).rows[0]!.column_name;
 
-    const cover = await template("cover", ["title", "date"], "coverSurface", [
+    const cover = await template("cover", ["title", "date"], "standard:blue", [
       { definitionKey: "ImageBlock", values: { asset: "wordmark", width: 120, height: 24 }, region: "header" },
       { definitionKey: "TextColumns", values: { left: "www.example.com" }, region: "footer" },
       { definitionKey: "TextBlock", values: { markdown: "{{local.title}} on {{local.date}}", style: "title" } },
@@ -132,12 +132,12 @@ describe("document pages against PostgreSQL", () => {
     expect(coverPage).toMatch(/Pentesting for Nova Harbor on [^<]*2026/);
     expect(coverPage).not.toContain("{{");
     expect(coverPage).toContain("www.example.com");
-    expect(coverPage).toContain("background:#becbd3");
+    expect(coverPage).toContain("background:#78A5DA");
     expect(coverPage).not.toContain("Proposal header");
     expect(letter).toContain("Dear Elise,");
     expect(letter).toContain("Proposal header");
     expect(letter).not.toContain("www.example.com");
-    expect(letter).not.toContain("background:#becbd3");
+    expect(letter).not.toContain("background:#78A5DA");
   });
 
   test("a document whose theme has no page design, or that has no theme, lies on the default page", async () => {

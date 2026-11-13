@@ -59,7 +59,7 @@ export type PageSettings = Readonly<{
   blockGap: number;
   /** The page's own size, when the document sets a format; else the page is the design's. */
   page?: Readonly<{ width: number; height: number }>;
-  /** A CSS color: the theme's color the document named, or its own color code. */
+  /** A color code: the palette color the document chose, resolved by whoever read the settings. */
   background?: string;
   /** Key into `PageDesign.assets`. */
   backgroundImage?: string;

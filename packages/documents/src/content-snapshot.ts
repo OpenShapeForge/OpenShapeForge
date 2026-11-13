@@ -3,6 +3,7 @@ import { operationFailure } from "@openshapeforge/operations";
 import type { RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import { immutableContent, type JsonObject } from "./content/json.js";
 import type { ContentBlock, ContentReferenceValue, ContentTemplateVariant } from "./content/types.js";
+import { variantPageValues } from "./page/html.js";
 
 /**
  * Reads the frozen row tree that `@openshapeforge/versioning` writes into
@@ -148,10 +149,12 @@ export function templateSnapshotContent(snapshot: unknown, selection: TemplateSn
     const locale = candidate.row.locale;
     if (typeof locale !== "string" || !locale) invalid("The frozen variant has no locale.");
     if (candidate.row.tenant_id !== selection.tenantId || candidate.row[VARIANT_OWNER_COLUMN] !== selection.templateId) invalid("The frozen variant belongs to another template or tenant.");
+    const page = variantPageValues(candidate.row);
     const blocks = childRows(candidate, selection.carrier.table, "block").map((entry) => block(entry, variantId, selection));
     variants.push({
       id: variantId, channel: selection.channel, locale: locale as string, blocks, allowedDefinitions: [...selection.allowedDefinitions],
       ...(candidate.row[VARIANT_DEFAULT_COLUMN] === true ? { default: true } : {}),
+      ...(page ? { page: page as JsonObject } : {}),
     });
   }
   return { parameterFields: parameterFields as Record<string, unknown>[], variants };

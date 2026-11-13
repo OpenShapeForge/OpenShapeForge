@@ -303,7 +303,8 @@ export function validateContentVariants(variants: readonly ContentTemplateVarian
   const defaults = new Set<string>();
   for (const variant of variants) {
     assertContentRecord(variant, "variant");
-    exactKeys(variant, ["id", "channel", "locale", "default", "blocks", "allowedDefinitions"], "variant");
+    exactKeys(variant, ["id", "channel", "locale", "default", "blocks", "allowedDefinitions", "page"], "variant");
+    if (variant.page !== undefined) assertContentRecord(variant.page, "variant page settings");
     assertContentName(variant.id, "variant id");
     assertContentName(variant.channel, "variant channel");
     assertContentName(variant.locale, "variant locale");

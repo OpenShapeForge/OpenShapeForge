@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { buildPagedDocument, layoutPagedSections, pageBlockCss, pageSettings, renderPageBlock, PagedDocumentError, PAGED_FONTS_MARKER } from "./html.js";
+import { buildPagedDocument, layoutPagedSections, pageBlockCss, variantPageValues, pageSettings, renderPageBlock, PagedDocumentError, PAGED_FONTS_MARKER } from "./html.js";
 import type { PageBlock, PagedDocumentInput } from "./types.js";
 
 const design: PagedDocumentInput["design"] = {
@@ -16,55 +16,57 @@ const design: PagedDocumentInput["design"] = {
 const block = (id: string, definitionKey: string, values: Record<string, unknown>, region: PageBlock["region"] = "body", layoutKey?: string): PageBlock =>
   ({ id, definitionKey, values, region, ...(layoutKey ? { layoutKey } : {}) });
 
-const build = (blocks: PageBlock[]) => buildPagedDocument({ title: "Proposal", locale: "en", blocks, design, fonts: [] });
+const build = (blocks: PageBlock[], layouts?: PagedDocumentInput["layouts"]) => buildPagedDocument({ title: "Proposal", locale: "en", blocks, design, fonts: [], ...(layouts ? { layouts } : {}) });
 
 describe("buildPagedDocument", () => {
-  test("a cover section and an empty section give two pages with their own header and footer", () => {
+  test("a cover template included in a document gives each its own pages, header and footer", () => {
+    const cover = (id: string, definitionKey: string, values: Record<string, unknown>, region: PageBlock["region"] = "body"): PageBlock =>
+      ({ ...block(id, definitionKey, values, region), scope: "cover" });
     const paged = build([
-      block("h1", "ImageBlock", { asset: "mark", width: 120, height: 24 }, "header", "cover"),
-      block("f1", "TextColumns", { left: "left", center: "middle", right: "right", centerWidth: 140 }, "footer", "cover"),
-      block("f2", "TextBlock", { markdown: "Confidential" }, "footer", "content"),
-      block("s1", "SectionBreak", { layout: "cover", background: "surface", backgroundImage: "mark" }),
-      block("b1", "TextBlock", { markdown: "Pentesting for Nova Harbor", style: "title" }),
-      block("s2", "SectionBreak", { layout: "content", margin: 32 }),
-    ]);
+      cover("h1", "ImageBlock", { asset: "mark", width: 120, height: 24 }, "header"),
+      cover("f1", "TextColumns", { left: "left", center: "middle", right: "right", centerWidth: 140 }, "footer"),
+      block("f2", "TextBlock", { markdown: "Confidential" }, "footer"),
+      cover("b1", "TextBlock", { markdown: "Pentesting for Nova Harbor", style: "title" }),
+      block("b2", "TextBlock", { markdown: "Dear reader" }),
+    ], { cover: { background: "surface", backgroundImage: "mark" }, "": { margin: 32 } });
     expect(paged.page).toEqual({ width: 720, height: 913 });
-    expect(paged.sections.map((section) => section.layout)).toEqual(["cover", "content"]);
-    const [cover, content] = paged.sections.map((section) => section.html);
-    expect(cover).toContain("@page{size:720px 913px;margin:0}");
-    expect(cover).toContain('data-osf-region="header"');
-    expect(cover).toContain("background:#becbd3");
-    expect(cover).toContain("Pentesting for Nova Harbor");
-    expect(cover).not.toContain("Confidential");
+    expect(paged.sections).toHaveLength(2);
+    const [first, content] = paged.sections.map((section) => section.html);
+    expect(first).toContain("@page{size:720px 913px;margin:0}");
+    expect(first).toContain('data-osf-region="header"');
+    expect(first).toContain("background:#becbd3");
+    expect(first).toContain("Pentesting for Nova Harbor");
+    expect(first).not.toContain("Confidential");
     expect(content).toContain("Confidential");
+    expect(content).toContain("--m:32px");
     expect(content).not.toContain('data-osf-region="header"');
     expect(content).not.toContain("Pentesting");
-    expect(cover).toContain(PAGED_FONTS_MARKER);
+    expect(first).toContain(PAGED_FONTS_MARKER);
   });
 
-  test("blocks before the first break use the default layout and its header", () => {
+  test("a document without page settings lies on default pages with its header", () => {
     const paged = build([block("h", "TextBlock", { markdown: "Head" }, "header"), block("b", "TextBlock", { markdown: "Body" })]);
     expect(paged.sections).toHaveLength(1);
     expect(paged.sections[0]!.layout).toBe("default");
     expect(paged.sections[0]!.html).toContain("Head");
   });
 
-  test("an included template keeps its own layout and the including template resumes on a new page", () => {
-    const included = (id: string, definitionKey: string, values: Record<string, unknown>, region: PageBlock["region"] = "body", layoutKey?: string): PageBlock =>
-      ({ ...block(id, definitionKey, values, region, layoutKey), scope: "include-1" });
+  test("an included template keeps its own pages and the including document resumes on a new page", () => {
+    const included = (id: string, definitionKey: string, values: Record<string, unknown>, region: PageBlock["region"] = "body"): PageBlock =>
+      ({ ...block(id, definitionKey, values, region), scope: "include-1" });
     const paged = build([
       block("oh", "TextBlock", { markdown: "Outer header" }, "header"),
-      block("os", "SectionBreak", { layout: "default", margin: 32 }),
       included("ih", "TextBlock", { markdown: "Cover header" }, "header"),
-      included("is", "SectionBreak", { layout: "default", background: "surface" }),
       included("ib", "TextBlock", { markdown: "Cover title" }),
+      { ...block("nested", "TextBlock", { markdown: "A clause the cover includes" }), scope: "include-1/clause" },
       block("ob", "TextBlock", { markdown: "Dear reader" }),
-    ]);
-    // The outer template's first section has no content of its own, so it adds no page.
+    ], { "": { margin: 32 }, "include-1": { background: "surface" } });
     expect(paged.sections).toHaveLength(2);
     const [cover, letter] = paged.sections.map((section) => section.html);
     expect(cover).toContain("Cover header");
     expect(cover).toContain("Cover title");
+    // A continuous template inside the cover flows on the cover's pages.
+    expect(cover).toContain("A clause the cover includes");
     expect(cover).toContain("background:#becbd3");
     expect(cover).not.toContain("Outer header");
     expect(letter).toContain("Outer header");
@@ -75,18 +77,19 @@ describe("buildPagedDocument", () => {
 
   test("the sections are available as zones for a preview that draws them itself", () => {
     const sections = layoutPagedSections([
-      block("h", "TextBlock", { markdown: "Head" }, "header", "cover"),
-      block("s", "SectionBreak", { layout: "cover", margin: 32 }),
+      block("h", "TextBlock", { markdown: "Head" }, "header"),
+      block("old", "SectionBreak", { layout: "cover", margin: 99 }),
       block("b", "TextBlock", { markdown: "Body" }),
-      block("f", "TextBlock", { markdown: "Foot" }, "footer", "cover"),
-    ], design);
+      block("f", "TextBlock", { markdown: "Foot" }, "footer"),
+    ], design, { "": { margin: 32 } });
     expect(sections).toHaveLength(1);
-    expect(sections[0]!.settings).toMatchObject({ layout: "cover", margin: 32 });
+    // A section break left in older content places nothing and decides nothing.
+    expect(sections[0]!.settings).toMatchObject({ layout: "default", margin: 32 });
     expect([sections[0]!.header, sections[0]!.body, sections[0]!.footer].map((zone) => zone.map((entry) => entry.id))).toEqual([["h"], ["b"], ["f"]]);
   });
 
   test("a body above the middle ends one block gap above the middle of the page under the header", () => {
-    const html = build([block("s", "SectionBreak", { layout: "cover", bodyAlignment: "aboveCenter" }), block("b", "TextBlock", { markdown: "Title" })]).sections[0]!.html;
+    const html = build([block("b", "TextBlock", { markdown: "Title" })], { "": { bodyAlignment: "aboveCenter" } }).sections[0]!.html;
     expect(html).toContain("justify-content:flex-end;min-height:calc((var(--h) - var(--top) - var(--m)) / 2 - var(--bg))");
   });
 
@@ -122,13 +125,20 @@ describe("buildPagedDocument", () => {
   test.each([
     ["an unknown text style", [block("b", "TextBlock", { markdown: "x", style: "missing" })]],
     ["an unknown asset", [block("b", "ImageBlock", { asset: "missing", width: 1, height: 1 })]],
-    ["an unknown background color", [block("s", "SectionBreak", { layout: "cover", background: "missing" })]],
     ["an unsupported block type", [block("b", "YouTubeEmbed", { url: "x" })]],
-    ["a section break in a header", [block("s", "SectionBreak", { layout: "cover" }, "header", "cover")]],
     ["a style key that is not a key", [block("b", "TextBlock", { markdown: "x", style: 'x"}body{display:none' })]],
     ["a width that is not a number", [block("b", "TextBlock", { markdown: "x", maxWidth: "1px;position:fixed" })]],
   ] as const)("refuses %s", (_name, blocks) => {
     expect(() => build([...blocks])).toThrow(PagedDocumentError);
+  });
+
+  test("page settings that name an unknown color or image are refused, and a variant's fields read as settings", () => {
+    expect(() => build([block("b", "TextBlock", { markdown: "x" })], { "": { background: "missing" } })).toThrow(PagedDocumentError);
+    expect(() => build([block("b", "TextBlock", { markdown: "x" })], { "": { backgroundImage: "missing" } })).toThrow(PagedDocumentError);
+    expect(variantPageValues({ page_layout: "pages", page_margin: "32", page_background: "surface", page_body_alignment: null })).toEqual({ margin: 32, background: "surface" });
+    expect(variantPageValues({ pageLayout: "pages", pageBodyAlignment: "center" })).toEqual({ bodyAlignment: "center" });
+    expect(variantPageValues({ pageLayout: "continuous", pageMargin: 32 })).toBeUndefined();
+    expect(variantPageValues({ page_layout: null })).toBeNull();
   });
 
   test("block styles can be scoped for an editor and one block rendered on its own", () => {

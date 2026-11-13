@@ -11,6 +11,7 @@ import { databaseRole } from "./database-roles.js";
 import { actingRelationId, type ActingRelationSource } from "./acting-relation.js";
 import { withReadBarrierDatabase } from "./read-barrier.js";
 import { boundedReadTransaction } from "./bounded-read-transaction.js";
+import { RLS_BYPASS_REFUSED, rlsBypassToken } from "./rls-bypass.js";
 
 export type DbSessionScope = "tenant" | "group" | "self";
 
@@ -877,6 +878,26 @@ export async function withCredentialResolutionSession<TDatabase, TResult>(
 
 export const SYSTEM_BYPASS_ROLE = "Platform.SystemBypass";
 
+/**
+ * Lift row-level security for the rest of this transaction by presenting the
+ * operator credential (db/rls-bypass.ts), and confirm the database took it.
+ * A runtime role naming `'true'` is refused by `app.bypass_rls()`, so this is
+ * the only way a runtime process reaches a bypass session — and a process
+ * whose secret differs from the one `db:migrate` ran with fails here, with
+ * the remedy, instead of silently reading an empty database.
+ *
+ * The credential is a bound parameter, never SQL text: statement text is
+ * visible in `pg_stat_activity` to every session of the same role.
+ */
+async function raiseRlsBypass<TDatabase>(trx: Transaction<TDatabase>, previous = "false"): Promise<void> {
+  await sql`select set_config('app.bypass_rls', ${rlsBypassToken()}, true)`.execute(trx);
+  const accepted = await sql<{ accepted: boolean }>`select app.bypass_rls() as accepted`.execute(trx);
+  if (accepted.rows[0]?.accepted !== true) {
+    await sql`select set_config('app.bypass_rls', ${previous}, true)`.execute(trx);
+    throw new Error(RLS_BYPASS_REFUSED);
+  }
+}
+
 export type SystemSessionInput = {
   /**
    * The acting subject — typically a service-account user id from
@@ -967,7 +988,8 @@ export async function withSystemSession<TDatabase, TResult>(
       }
       await sql`select set_config('app.user_id', ${databaseActorId}, true), set_config('app.audit_actor_subject', ${input.databaseActorId ?? input.actorSubject}, true)`.execute(trx);
       await sql`select set_config('app.roles', ${input.roles.join(",")}, true)`.execute(trx);
-      await sql`select set_config('app.bypass_rls', 'true', true), set_config('app.shared_read_barrier', '', true)`.execute(trx);
+      await raiseRlsBypass(trx);
+      await sql`select set_config('app.shared_read_barrier', '', true)`.execute(trx);
       const audit = auditContext();
       const appliedAudit = await applyAuditSession(trx, audit ? { ...audit, actorKind: "system" } : null);
 
@@ -1038,7 +1060,7 @@ export async function withTenantBypassInTransaction<TDatabase, TResult>(
   }
   const previous = scoped.rows[0]?.bypass ?? "";
   const startedAt = new Date().toISOString();
-  await sql`select set_config('app.bypass_rls', 'true', true)`.execute(trx);
+  await raiseRlsBypass(trx, previous);
   try {
     const result = await work();
     await sql`insert into platform.system_bypass_audit (id, actor_subject, reason, started_at, ended_at, succeeded, tenant_id)

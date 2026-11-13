@@ -291,7 +291,12 @@ Provide credentials via an existing Secret (recommended) with keys
 `OPENSHAPEFORGE_APP_PASSWORD`, `OPENSHAPEFORGE_WORKER_PASSWORD` and
 `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET`. Add the optional
 `OPENSHAPEFORGE_ADMIN_DATABASE_URL` when the migrate role cannot create roles,
-and `OPENSHAPEFORGE_WORKER_DATABASE_URL` when a worker workload is deployed:
+`OPENSHAPEFORGE_WORKER_DATABASE_URL` when a worker workload is deployed, and
+`OPENSHAPEFORGE_RLS_BYPASS_SECRET` to give the row-level-security bypass
+credential a secret of its own (without it the credential is derived from
+`OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET`, which the web tier also holds; after
+changing either, the next upgrade's migrate Job re-keys the database and the
+pods restart with it):
 
 ```sh
 kubectl create secret generic openshapeforge-api \
@@ -301,7 +306,8 @@ kubectl create secret generic openshapeforge-api \
   --from-literal=OPENSHAPEFORGE_APP_PASSWORD='<strong-random>' \
   --from-literal=OPENSHAPEFORGE_WORKER_DATABASE_URL='postgres://openshapeforge_worker:...@host:5432/openshapeforge' \
   --from-literal=OPENSHAPEFORGE_WORKER_PASSWORD='<strong-random, different from the app role>' \
-  --from-literal=OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET='<strong-random>'
+  --from-literal=OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET='<strong-random>' \
+  --from-literal=OPENSHAPEFORGE_RLS_BYPASS_SECRET='<strong-random>'
 
 helm install openshapeforge deploy/helm/openshapeforge-api \
   --set database.existingSecret=openshapeforge-api \

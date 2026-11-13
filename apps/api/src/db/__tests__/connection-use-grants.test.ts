@@ -8,6 +8,8 @@ import { createDatabaseRuntime } from '../connection.js';
 import { runMigrationChain } from '../migration-chain.js';
 import { IDENTITY_LINK_ADMIN_ROLE } from '../../auth/organization-roles.js';
 import { provisionDatabaseRoles } from '../database-roles.js';
+import { rlsBypassToken } from '../rls-bypass.js';
+const credential = rlsBypassToken();
 const url = process.env.SCRATCH_ADMIN_DATABASE_URL ?? 'postgres://openshapeforge:openshapeforge@localhost:5434/postgres';
 const suffix = crypto.randomUUID().replaceAll('-', '');
 const database = `connection_grants_${suffix}`, role = "openshapeforge_app";
@@ -67,24 +69,31 @@ describe('owner-issued connection use grants', () => {
   test('service sees only the approved row through the exact operation and bypass is restored', async () => {
     await as(service,service,tenant,'calendar.availability',async tx => {
       expect(await tx`select * from integration.connections`).toHaveLength(0);
-      const [result] = await tx`select app.delegated_connection_row(${grant}::uuid,'calendar.availability') as value`;
+      const [result] = await tx`select app.delegated_connection_row(${grant}::uuid,'calendar.availability',false,${credential}) as value`;
       expect(result.value.id).toBe(connection);
       expect(result.value.owner_user_id).toBe(owner);
       expect(await tx`select * from integration.connections`).toHaveLength(0);
+      expect((await tx`select app.bypass_rls() as bypass`)[0].bypass).toBe(false);
+      // A wrong credential lifts nothing: the function reads as the caller. (This
+      // fixture is an administrator session acting as the app role, for which the
+      // literal 'true' is still honoured; rls-enforcement.test.ts proves a runtime
+      // LOGIN cannot use it.)
+      for (const forged of ['not-the-credential','','false']) expect((await tx`select app.delegated_connection_row(${grant}::uuid,'calendar.availability',false,${forged}) as value`)[0].value).toBeNull();
+      expect((await tx`select app.delegated_connection_token_update(${grant}::uuid,'calendar.availability','{"accessToken":"forged"}'::jsonb,'not-the-credential') as updated`)[0].updated).toBe(false);
       expect((await tx`select app.bypass_rls() as bypass`)[0].bypass).toBe(false);
     });
   });
   test('wrong tenant, operation and owner cannot use authority', async () => {
     for (const [organization,operation] of [[foreignTenant,'calendar.availability'],[tenant,'mail.send']]) {
-      await as(service,service,organization!,operation!,async tx => expect((await tx`select app.delegated_connection_row(${grant}::uuid,'calendar.availability') as value`)[0].value).toBeNull());
+      await as(service,service,organization!,operation!,async tx => expect((await tx`select app.delegated_connection_row(${grant}::uuid,'calendar.availability',false,${credential}) as value`)[0].value).toBeNull());
     }
     await db`update integration.connections set owner_user_id=${service}::uuid where id=${connection}::uuid`;
-    try { await as(service,service,tenant,'calendar.availability',async tx => expect((await tx`select app.delegated_connection_row(${grant}::uuid,'calendar.availability') as value`)[0].value).toBeNull()); }
+    try { await as(service,service,tenant,'calendar.availability',async tx => expect((await tx`select app.delegated_connection_row(${grant}::uuid,'calendar.availability',false,${credential}) as value`)[0].value).toBeNull()); }
     finally { await db`update integration.connections set owner_user_id=${owner}::uuid where id=${connection}::uuid`; }
   });
   test('token renewal updates only the granted connection, retaining caller identity', async () => {
     await as(service,service,tenant,'calendar.availability',async tx => {
-      expect((await tx`select app.delegated_connection_token_update(${grant}::uuid,'calendar.availability','{"accessToken":"renewed-ciphertext"}'::jsonb) as updated`)[0].updated).toBe(true);
+      expect((await tx`select app.delegated_connection_token_update(${grant}::uuid,'calendar.availability','{"accessToken":"renewed-ciphertext"}'::jsonb,${credential}) as updated`)[0].updated).toBe(true);
       expect((await tx`select app.current_user_id() as actor,app.current_relation_id() as party,app.bypass_rls() as bypass`)[0]).toMatchObject({actor:service,party:service,bypass:false});
     });
     expect((await db`select configuration_values from integration.connections where id=${connection}::uuid`)[0].configuration_values.accessToken).toBe('renewed-ciphertext');
@@ -92,16 +101,16 @@ describe('owner-issued connection use grants', () => {
   test('duplicate active grants are refused and bypass cannot cross the tenant fence',async()=>{
     await expect(as(owner,actor,tenant,'calendar.consent',tx=>issue(tx,crypto.randomUUID()))).rejects.toThrow('duplicate key');
     await as(service,service,foreignTenant,'calendar.availability',async tx=>{
-      await tx`select set_config('app.bypass_rls','true',true)`;
+      await tx`select set_config('app.bypass_rls',${credential},true)`;
       expect(await tx`select * from platform.connection_use_grants where id=${grant}::uuid`).toHaveLength(0);
-      expect((await tx`select app.delegated_connection_row(${grant}::uuid,'calendar.availability') as value`)[0].value).toBeNull();
+      expect((await tx`select app.delegated_connection_row(${grant}::uuid,'calendar.availability',false,${credential}) as value`)[0].value).toBeNull();
     });
   });
   test('revocation immediately refuses reads and token writes and cannot be undone', async () => {
     await as(owner,actor,tenant,'calendar.consent',async tx => { await tx`update platform.connection_use_grants set revoked_at=now() where id=${grant}::uuid`; });
     await as(service,service,tenant,'calendar.availability',async tx => {
-      expect((await tx`select app.delegated_connection_row(${grant}::uuid,'calendar.availability') as value`)[0].value).toBeNull();
-      expect((await tx`select app.delegated_connection_token_update(${grant}::uuid,'calendar.availability','{}'::jsonb) as updated`)[0].updated).toBe(false);
+      expect((await tx`select app.delegated_connection_row(${grant}::uuid,'calendar.availability',false,${credential}) as value`)[0].value).toBeNull();
+      expect((await tx`select app.delegated_connection_token_update(${grant}::uuid,'calendar.availability','{}'::jsonb,${credential}) as updated`)[0].updated).toBe(false);
     });
     await expect(as(owner,actor,tenant,'calendar.consent',async tx => { await tx`update platform.connection_use_grants set revoked_at=null where id=${grant}::uuid`; })).rejects.toThrow('scope is immutable');
   });
@@ -120,20 +129,20 @@ describe('owner-issued connection use grants', () => {
       const offboardingGrant=crypto.randomUUID();
       await as(owner,actor,tenant,'calendar.consent',tx=>issue(tx,offboardingGrant));
       await as(service,service,maintenance?'':tenant,'account.block',async tx=>{
-        await tx`select set_config('app.roles',${IDENTITY_LINK_ADMIN_ROLE},true),set_config('app.bypass_rls',${String(maintenance)},true)`;
+        await tx`select set_config('app.roles',${IDENTITY_LINK_ADMIN_ROLE},true),set_config('app.bypass_rls',${maintenance?credential:'false'},true)`;
         const changed = remove ? await tx`delete from platform.identity_relations where tenant_id=${tenant}::uuid and identity_id=${identity}::uuid returning identity_id`
           : await tx`update platform.identity_relations set access_blocked=true where tenant_id=${tenant}::uuid and identity_id=${identity}::uuid returning identity_id`;
         expect(changed).toHaveLength(1);
         expect((await tx`select app.current_tenant() as tenant,app.bypass_rls() as bypass,app.current_user_id() as actor`)[0]).toMatchObject({tenant:maintenance?null:tenant,bypass:maintenance,actor:service});
       });
-      await as(service,service,tenant,'calendar.availability',async tx=>expect((await tx`select app.delegated_connection_row(${offboardingGrant}::uuid,'calendar.availability') as value`)[0].value).toBeNull());
+      await as(service,service,tenant,'calendar.availability',async tx=>expect((await tx`select app.delegated_connection_row(${offboardingGrant}::uuid,'calendar.availability',false,${credential}) as value`)[0].value).toBeNull());
       await as(service,service,tenant,'account.unblock',async tx=>{
         await tx`select set_config('app.roles',${IDENTITY_LINK_ADMIN_ROLE},true)`;
         if(remove) await tx`insert into platform.identity_relations(identity_id,tenant_id,relation_id,status,linked_at,linked_by) values(${identity}::uuid,${tenant}::uuid,${owner}::uuid,'linked',now(),'jit')`;
         else await tx`update platform.identity_relations set access_blocked=false where tenant_id=${tenant}::uuid and identity_id=${identity}::uuid`;
       });
       expect((await db`select revoked_at from platform.connection_use_grants where id=${offboardingGrant}::uuid`)[0].revoked_at).not.toBeNull();
-      await as(service,service,tenant,'calendar.availability',async tx=>expect((await tx`select app.delegated_connection_row(${offboardingGrant}::uuid,'calendar.availability') as value`)[0].value).toBeNull());
+      await as(service,service,tenant,'calendar.availability',async tx=>expect((await tx`select app.delegated_connection_row(${offboardingGrant}::uuid,'calendar.availability',false,${credential}) as value`)[0].value).toBeNull());
     }
   });
   async function transaction<T>(person: string, organization: string, run: (trx: Transaction<DB>) => Promise<T>): Promise<T> {

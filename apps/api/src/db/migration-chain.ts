@@ -81,6 +81,7 @@ import { applyPublicColorPaletteMigration } from './migrations/color-palette.js'
 import { maintenanceJob, drainMaintenanceJobs, acknowledgeMaintenanceFailure } from "../modules/maintenance-jobs.js";
 import type { RunMaintenanceSeed } from "@openshapeforge/plugin-runtime";
 import { sql, type Kysely } from "kysely";
+import { rlsBypassToken } from "./rls-bypass.js";
 import { seedTenantOwnRelations } from "../control/tenant-own-relation.js";
 import { fileURLToPath } from "node:url";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../modules/field-schemas.js";
@@ -296,7 +297,7 @@ async function revalidateLinkedFields(db: Kysely<DB>): Promise<LinkedRevalidatio
   const tenants = await sql<{ tenant_id: string }>`select distinct tenant_id::text as tenant_id from platform.extension_field_definitions
     where is_current and kind in ('formula', 'lookup', 'rollup') and state in ('ready', 'updating') order by 1`.execute(db);
   return revalidateLinkedFieldsOfEveryTenant((tenantId, work) => db.transaction().execute(async (trx) => {
-    await sql`select set_config('app.tenant_id', ${tenantId}, true), set_config('app.bypass_rls', 'true', true)`.execute(trx);
+    await sql`select set_config('app.tenant_id', ${tenantId}, true), set_config('app.bypass_rls', ${rlsBypassToken()}, true)`.execute(trx);
     return work(trx);
   }), tenants.rows.map((row) => row.tenant_id), (fields, message) => console.error(JSON.stringify({ ...fields, message })));
 }

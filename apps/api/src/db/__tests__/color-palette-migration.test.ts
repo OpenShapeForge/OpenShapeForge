@@ -16,6 +16,7 @@ import {createDatabaseRuntime} from '../connection.js';
 import migration from '../migrations/versioned/0026_color-palette-references.js';
 import {readColorPalette} from '../../operations/color-palette.js';
 import {guardColorWrite,colorReferenceTables} from '../../operations/entity/color-references.js';
+import {applyAppHelpersMigration} from '../migrations/app-helpers.js';
 import {getGeneratedCrudTables} from '../../operations/entity/table-registry.js';
 
 test('migrates existing colors without losing appearance; palette reads and writes stay tenant scoped',async()=>{
@@ -39,9 +40,8 @@ test('migrates existing colors without losing appearance; palette reads and writ
   const actor={tenantId:tenant,userId:randomUUID(),roles:['Organization.All.ReadWrite'],groups:[]};
   // Exercise actual restricted API-role RLS, including a managed setting and a
   // hidden same-tenant reference. Admin is used only for fixture setup/inspection.
-  await sql`create schema app; create schema platform;
-    create function app.current_tenant() returns uuid language sql stable as $$select nullif(current_setting('app.tenant_id',true),'')::uuid$$;
-    create function app.bypass_rls() returns boolean language sql stable as $$select coalesce(current_setting('app.bypass_rls',true),'')='true'$$;
+  await applyAppHelpersMigration(db);
+  await sql`create schema platform;
     create table platform.system_bypass_audit(id uuid,actor_subject text,reason text,started_at timestamptz,ended_at timestamptz,succeeded boolean,tenant_id uuid);
   `.execute(db);
   await sql`grant usage on schema app,erp,platform to ${sql.id(APP_ROLE)}; grant execute on function app.current_tenant(),app.bypass_rls() to public;

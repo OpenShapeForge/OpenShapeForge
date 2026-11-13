@@ -2026,6 +2026,72 @@
             }
           }
         },
+        "groupPanel": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "title"
+          ],
+          "description": "Floating panel for the tree's own rows (the groups), opened from the group's name.",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Floating group panel",
+              "nl": "Zwevend groepspaneel"
+            }
+          },
+          "properties": {
+            "title": {
+              "$ref": "#/$defs/localizedText",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Panel title",
+                  "nl": "Paneeltitel"
+                }
+              }
+            },
+            "view": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Named record view of the collection's entity shown as the panel body.",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Record view",
+                  "nl": "Recordweergave"
+                }
+              }
+            },
+            "editing": {
+              "enum": [
+                "confirmed",
+                "direct"
+              ],
+              "description": "confirmed (default) opens read-only behind Edit, Save and Cancel; direct opens the panel view editable with one save action.",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Editing",
+                  "nl": "Bewerken"
+                }
+              }
+            },
+            "actions": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "edit",
+                  "openFull"
+                ]
+              },
+              "description": "Actions the panel offers; absent offers all of them.",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Actions",
+                  "nl": "Acties"
+                }
+              }
+            }
+          }
+        },
         "recordPanel": {
           "type": "object",
           "additionalProperties": false,

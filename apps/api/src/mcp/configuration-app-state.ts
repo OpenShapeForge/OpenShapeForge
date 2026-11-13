@@ -15,20 +15,19 @@ export async function retainConfigurationAppResult(
   db?: OpenShapeForgeDatabase,
 ): Promise<CallToolResult> {
   if (result.isError) return result;
-  const url = result._meta?.configurationUrl;
-  if (typeof url === "string") {
-    try { pendingTokens.set(owner, { token: new URL(url).pathname.split("/").at(-1)!, ...(typeof result._meta?.configurationId === "string" ? { id: result._meta.configurationId } : {}) }); }
-    catch { pendingTokens.delete(owner); }
+  const token = result._meta?.submissionToken;
+  if (typeof token === "string") {
+    pendingTokens.set(owner, { token, ...(typeof result._meta?.configurationId === "string" ? { id: result._meta.configurationId } : {}) });
     return result;
   }
   const held = pendingTokens.get(owner);
   if (!held) return result;
-  const { token, id } = held;
-  const pending = await peekConfiguration(token, db).catch(() => null);
+  const { token: heldToken, id } = held;
+  const pending = await peekConfiguration(heldToken, db).catch(() => null);
   if (!pending || pending.tenantId !== owner.tenantId || pending.userId !== owner.userId) {
     pendingTokens.delete(owner);
     return result;
   }
-  const metadata = configurationAppResult({}, token, pending.displayName, pending.definitions, pending.messagePrefix, id)._meta;
+  const metadata = configurationAppResult({}, heldToken, pending.displayName, pending.definitions, pending.messagePrefix, id, Boolean(pending.submissionCredential))._meta;
   return { ...result, _meta: { ...result._meta, ...metadata } };
 }

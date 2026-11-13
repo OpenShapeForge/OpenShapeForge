@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: BUSL-1.1
+import { hasSensitiveOutput, ENTITY_CONFIGURATION_APP_URI } from "@openshapeforge/operations";
 import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
 import inventory from "../generated/compiler/authorization-operations.json" with { type: "json" };
-// SPDX-License-Identifier: BUSL-1.1
 import { completeEntitySecureInput } from "../operations/entity/runtime.js";
 /**
  * Executing an entity CRUD tool: argument checks, the write guards that
@@ -320,7 +321,8 @@ export function projectCatalogOperationTool(
     title: tool.title,
     description: tool.description,
     inputSchema: tool.inputSchema as Tool["inputSchema"],
-    outputSchema: tool.outputSchema as Tool["outputSchema"],
+    outputSchema: hasSensitiveOutput(tool.outputSchema) ? { type: "object" } : tool.outputSchema as Tool["outputSchema"],
+    ...(hasSensitiveOutput(tool.outputSchema) ? { _meta: { ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } } : {}),
     annotations: { title: tool.title, ...tool.annotations },
   };
 }

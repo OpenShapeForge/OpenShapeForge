@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import {ControlDatabaseFixtureDriver} from "./control-database-fixture.js";
 /**
  * The control Operations on REST, through the canonical operation routes:
  * a control-realm bearer signed by a throwaway key served as a JWKS, one
@@ -12,7 +13,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createSign, generateKeyPairSync, type KeyObject } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
-import { DummyDriver, Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler } from "kysely";
+import { Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler } from "kysely";
 import type { DB } from "../../generated/db/types.js";
 import { registerOperationRestRoutes } from "../../operations/runtime.js";
 import { __resetControlVerifiersForTests, PLATFORM_OPERATOR_ROLE } from "../authorization.js";
@@ -58,7 +59,7 @@ function emptyDatabase() {
   return new Kysely<DB>({
     dialect: {
       createAdapter: () => new PostgresAdapter(),
-      createDriver: () => new DummyDriver(),
+      createDriver: () => new ControlDatabaseFixtureDriver(),
       createIntrospector: (database) => new PostgresIntrospector(database),
       createQueryCompiler: () => new PostgresQueryCompiler(),
     },

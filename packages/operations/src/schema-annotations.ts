@@ -235,6 +235,7 @@ export const operationVariablesKeyword = {
 export const operationFieldMetadataKeywords = [
   { keyword: "x-osf-derive-on-create", schemaType: "object" as const, valid: true },
   { keyword: "x-osf-currency", schemaType: "string" as const, valid: true, metaSchema: { type: "string", minLength: 1 } },
+  { keyword: "x-osf-classification", schemaType: "object" as const, metaSchema: { type: "object", required: ["sensitivity"], properties: { sensitivity: { const: "confidential" } }, additionalProperties: false }, valid: true },
   { keyword: "x-osf-presentation", schemaType: "object" as const, valid: true },
   { keyword: "x-osf-value-context", schemaType: "object" as const, valid: true },
   { keyword: "x-osf-typed-by", schemaType: "object" as const, valid: true },

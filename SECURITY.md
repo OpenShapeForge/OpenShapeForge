@@ -90,6 +90,10 @@ The remaining unchecked requirements below are the operator's responsibility.
   (`OPENSHAPEFORGE_API_VERIFY_BEARER_*`) — *the audience is enforced once a
   JWKS URI or issuer is set*,
 - set a strong, non-default `OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET` — *enforced*,
+- give `db:migrate`, the API and every worker the same
+  `OPENSHAPEFORGE_RLS_BYPASS_SECRET` — *enforced: a runtime database role cannot
+  lift row-level security without the credential derived from it; when unset
+  it is derived from the context secret above, which the web tier also holds*,
 - terminate TLS and require it at the identity provider — *not checked*,
 - never expose the local-dev compose ports or credentials — *not checked*.
 
@@ -104,3 +108,23 @@ publication (`nvm install && nvm use`). The `engines.node` range excludes releas
 affected by [CVE-2026-111497](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
 This metadata does not upgrade an existing process or the Node.js runtime bundled
 with GitHub Actions runners; update those runners separately.
+
+### Private configuration forms
+
+MCP Apps receive a single-form submission capability only in private tool-result
+`_meta`, never in model-visible `content` or `structuredContent`. This relies on
+conforming hosts preserving the MCP Apps model/UI separation; a host that exposes
+private UI metadata to its model or logs is unsuitable for this form. See the
+[MCP Apps specification](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/draft/apps.mdx).
+Browser recovery links contain only a public form ID and require ordinary sign-in.
+App submissions send the capability in the redacted Authorization header, not a URL.
+The route accepts no cookie authority and revalidates the encrypted, server-held
+issuing credential for its original resource, person and tenant before repeating
+canonical create admission. Handoffs expire no later than the issuing JWT. A
+successful save atomically consumes the handoff; validation failures roll back.
+
+The RLS bypass credential remains a bearer secret. SQL executing inside a trusted
+bypass transaction can read its transaction-local setting; do not hand that
+transaction to untrusted code. Keep PostgreSQL parameter logging disabled for
+statements using the credential. To rotate it, set a new dedicated bypass secret,
+run the migration with the same value, then restart all API and worker processes.

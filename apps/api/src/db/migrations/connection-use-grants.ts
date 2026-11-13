@@ -4,9 +4,9 @@ import type { OpenShapeForgeDatabase } from '../connection.js';
 import {databaseRole} from '../database-roles.js';
 const roleIdentifier=(name:string)=>'"'+name.replaceAll('"','""')+'"';
 export const CONNECTION_USE_GRANTS_PRIVILEGES_SQL = `
-revoke all on function app.delegated_connection_row(uuid,text,boolean), app.delegated_connection_token_update(uuid,text,jsonb) from public;
-revoke all on function app.delegated_connection_row(uuid,text,boolean), app.delegated_connection_token_update(uuid,text,jsonb) from ${roleIdentifier(databaseRole('worker').name)};
-grant execute on function app.delegated_connection_row(uuid,text,boolean), app.delegated_connection_token_update(uuid,text,jsonb) to ${roleIdentifier(databaseRole('app').name)};
+revoke all on function app.delegated_connection_row(uuid,text,boolean,text), app.delegated_connection_token_update(uuid,text,jsonb,text) from public;
+revoke all on function app.delegated_connection_row(uuid,text,boolean,text), app.delegated_connection_token_update(uuid,text,jsonb,text) from ${roleIdentifier(databaseRole('worker').name)};
+grant execute on function app.delegated_connection_row(uuid,text,boolean,text), app.delegated_connection_token_update(uuid,text,jsonb,text) to ${roleIdentifier(databaseRole('app').name)};
 `;
 
 export const CONNECTION_USE_GRANTS_SQL = String.raw`
@@ -78,7 +78,12 @@ create trigger connection_grants_membership_changed after update of status,acces
 
 -- One bounded lookup, after core admitted the stored consuming Operation.
 -- The helper never changes the user's identity or leaves RLS bypass enabled.
-create or replace function app.delegated_connection_row(grant_id uuid, operation_id text, lock_row boolean default false)
+-- The caller supplies the bypass credential (db/rls-bypass.ts): the function
+-- runs as the runtime role, which cannot lift RLS by naming 'true', so a
+-- statement that reaches SQL without that credential reads nothing here.
+drop function if exists app.delegated_connection_token_update(uuid,text,jsonb);
+drop function if exists app.delegated_connection_row(uuid,text,boolean);
+create or replace function app.delegated_connection_row(grant_id uuid, operation_id text, lock_row boolean, bypass_credential text)
 returns jsonb language plpgsql volatile parallel unsafe as $$
 declare
   permission platform.connection_use_grants%rowtype;
@@ -95,7 +100,7 @@ begin
   if current_setting('app.audit_operation',true) is distinct from operation_id then return null; end if;
   parts := string_to_array(permission.connection_table,'.');
   if cardinality(parts)<>2 or parts[1]!~'^[a-z_][a-z0-9_]*$' or parts[2]!~'^[a-z_][a-z0-9_]*$' then return null; end if;
-  perform set_config('app.bypass_rls','true',true);
+  perform set_config('app.bypass_rls',bypass_credential,true);
   execute format('select to_jsonb(c) from %I.%I c where c.id=$1 and c.tenant_id=$2 and c.owner_user_id=$3 %s',
     parts[1],parts[2],case when lock_row then 'for update' else '' end)
     into result using permission.connection_id,permission.tenant_id,permission.owner_relation_id;
@@ -113,7 +118,7 @@ exception when others then
   raise;
 end $$;
 
-create or replace function app.delegated_connection_token_update(grant_id uuid, operation_id text, token_values jsonb)
+create or replace function app.delegated_connection_token_update(grant_id uuid, operation_id text, token_values jsonb, bypass_credential text)
 returns boolean language plpgsql volatile parallel unsafe as $$
 declare
   permission platform.connection_use_grants%rowtype;
@@ -122,14 +127,14 @@ declare
   parts text[];
   changed bigint;
 begin
-  current_row := app.delegated_connection_row(grant_id,operation_id,true);
+  current_row := app.delegated_connection_row(grant_id,operation_id,true,bypass_credential);
   if current_row is null then return false; end if;
   select * into permission from platform.connection_use_grants g where g.id=grant_id and g.tenant_id=app.current_tenant()
     and g.consumer_operation=operation_id and g.revoked_at is null and app.connection_grant_owner_live(g.issued_identity_id,g.tenant_id,g.owner_relation_id) and (g.expires_at is null or g.expires_at>clock_timestamp());
   if permission.id is null or permission.values_column!~'^[a-z_][a-z0-9_]*$' then return false; end if;
   parts := string_to_array(permission.connection_table,'.');
   if cardinality(parts)<>2 or parts[1]!~'^[a-z_][a-z0-9_]*$' or parts[2]!~'^[a-z_][a-z0-9_]*$' then return false; end if;
-  perform set_config('app.bypass_rls','true',true);
+  perform set_config('app.bypass_rls',bypass_credential,true);
   execute format('update %I.%I set %I=$1 where id=$2 and tenant_id=$3 and owner_user_id=$4',parts[1],parts[2],permission.values_column)
     using token_values,permission.connection_id,permission.tenant_id,permission.owner_relation_id;
   get diagnostics changed = row_count;

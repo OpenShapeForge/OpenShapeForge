@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
+import { DATABASE_ROLES } from "../database-roles.js";
+import { rlsBypassTokenDigest } from "../rls-bypass.js";
 
 /**
  * Creates the `app` schema and the STABLE SQL functions used by every
@@ -13,6 +15,13 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
  * helpers (see apps/api/src/db/migrate.ts).
  */
 export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
+  const logins = DATABASE_ROLES.filter((role) => role.login).map((role) => role.name);
+  if (logins.length === 0) throw new Error("The generated manifest declares no runtime login role.");
+  const runtimeMembership = sql.join(
+    logins.map((name) => sql`pg_catalog.pg_has_role(r.oid, ${sql.lit(name)}, 'MEMBER')`),
+    sql` or `,
+  );
+  const declaredRoles = sql.join(DATABASE_ROLES.map((role) => sql.lit(role.name)));
   await sql`
     create schema if not exists app;
 
@@ -83,9 +92,83 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       select current_setting('app.scope', true) = target
     $$;
 
+    -- Whether this session may see past the tenant policies. See
+    -- db/rls-bypass.ts for the whole argument; the arms are:
+    --   * a value that is neither empty nor a boolean word is the operator
+    --     credential, admitted when its SHA-256 is the digest baked in here.
+    --     This is the only way a runtime process lifts RLS in its own SQL;
+    --   * the literal 'true' is honoured only where the runtime cannot have
+    --     put itself: on a connection that did not LOG IN as a runtime role
+    --     (session_user: an administrator's seed or fixture — SET ROLE does
+    --     not change it), or while acting as a role that is neither declared
+    --     nor a runtime login (current_user: the migrate role itself, and the
+    --     fixed-body SECURITY DEFINER functions it owns, which no runtime
+    --     role can create or become).
+    -- A runtime role naming 'true' in its own statement matches neither and
+    -- is refused with an error (app.refuse_literal_bypass).
+    -- Ordinary sessions carry 'false' and leave at an early arm, so the
+    -- digest is computed only inside a bypass session.
+    -- The body is inlined into every policy and so cannot pin a search_path;
+    -- every function, operator and type in it is schema-qualified instead, so
+    -- a caller's search_path or temporary objects cannot stand in for them.
+    -- Whether a role is a runtime login: one of the declared login roles or
+    -- any role that is a member of one (a per-workload login granted the app
+    -- role is the app role for this purpose). A superuser is not — the API
+    -- refuses to start as one, and row-level security does not bind it
+    -- anyway. An unknown role counts as runtime, the closed direction.
+    --
+    -- Every name is schema-qualified and pg_temp is pinned LAST: with a
+    -- search_path that omits pg_temp PostgreSQL searches it FIRST for
+    -- relations, so an unqualified pg_roles here could be answered by a
+    -- temporary table the runtime role created to call itself a superuser.
+    create or replace function app.role_is_runtime_login(role_name name) returns boolean
+    language sql stable parallel safe
+    set search_path = pg_catalog, pg_temp
+    as $$
+      select coalesce((
+        select not r.rolsuper and (${runtimeMembership})
+          from pg_catalog.pg_roles r
+         where r.rolname operator(pg_catalog.=) role_name
+      ), true)
+    $$;
+
+    -- Whether this connection LOGGED IN as one (session_user: SET ROLE and
+    -- SECURITY DEFINER do not change it).
+    create or replace function app.session_is_runtime_login() returns boolean
+    language sql stable parallel safe
+    set search_path = pg_catalog, pg_temp
+    as $$ select app.role_is_runtime_login(session_user) $$;
+
+    -- A runtime role that names the literal is refused LOUDLY rather than
+    -- answered with false: code that still raises 'true' — a runtime of an
+    -- older release during a rolling upgrade, a plugin that was not moved to
+    -- the credential — would otherwise run on, silently seeing no rows, and a
+    -- sweep that reads "nothing found" as "nothing exists" must not get that
+    -- answer. Never returns.
+    create or replace function app.refuse_literal_bypass() returns boolean
+    language plpgsql stable parallel safe
+    set search_path = pg_catalog, pg_temp
+    as $$
+    begin
+      raise exception 'app.bypass_rls = ''true'' is not accepted from a runtime database role'
+        using errcode = '42501',
+              hint = 'A runtime process lifts row-level security only through withSystemSession or withTenantBypassInTransaction, which present the operator credential.';
+    end
+    $$;
+
     create or replace function app.bypass_rls() returns boolean
     language sql stable parallel safe as $$
-      select coalesce(current_setting('app.bypass_rls', true) = 'true', false)
+      select case
+        when pg_catalog.current_setting('app.bypass_rls', true) is null then false
+        when pg_catalog.current_setting('app.bypass_rls', true) operator(pg_catalog.=) ''::pg_catalog.text then false
+        when pg_catalog.current_setting('app.bypass_rls', true) operator(pg_catalog.=) 'false'::pg_catalog.text then false
+        when pg_catalog.current_setting('app.bypass_rls', true) operator(pg_catalog.=) 'true'::pg_catalog.text then not app.session_is_runtime_login()
+          or (current_user::pg_catalog.text operator(pg_catalog.<>) all (array[${declaredRoles}]::pg_catalog.text[])
+              and not app.role_is_runtime_login(current_user))
+          or app.refuse_literal_bypass()
+        else pg_catalog.sha256(pg_catalog.convert_to(pg_catalog.current_setting('app.bypass_rls', true), 'UTF8'))
+          operator(pg_catalog.=) pg_catalog.decode(${sql.lit(rlsBypassTokenDigest())}, 'hex')
+      end
     $$;
 
     -- Whether the session holds any of the roles; the compiler's owner-axis

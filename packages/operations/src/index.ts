@@ -195,3 +195,4 @@ export { evaluateFieldCondition } from "./field-condition.js";
 export * from "./schema-regexp.js";
 
 export * from "./colors.js";
+export { PRIVATE_OUTPUT_TOOL_NAME, hasSensitiveOutput, assertSensitiveOutputSchema, splitSensitiveOutput, type SensitiveOutputField } from "./sensitive-output.js";

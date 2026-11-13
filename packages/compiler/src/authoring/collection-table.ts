@@ -65,6 +65,17 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     return { key: column.key, label: local(column.label), values: column.values.map(item => value(record, item)), ...(column.membershipValues ? { membershipValues: column.membershipValues.map(item => value(membership!, item)) } : {}) };
   });
   const panel = authored.recordPanel;
+  const groupPanel = authored.groupPanel;
+  if (groupPanel) {
+    if (!tree) throw new Error(`${name}: a group panel requires a tree.`);
+    if (groupPanel.actions?.some(action => !["edit", "openFull"].includes(action))) throw new Error(`${name}: invalid group panel action.`);
+    if (groupPanel.editing !== undefined && !["confirmed", "direct"].includes(groupPanel.editing)) throw new Error(`${name}: group panel editing must be confirmed or direct.`);
+    if (groupPanel.editing === "direct" && groupPanel.view === undefined) throw new Error(`${name}: direct editing requires a group panel view.`);
+    if (groupPanel.view !== undefined) {
+      const owner = all.get(source.contract.entity.name) ?? source;
+      if (owner.contract.interfaces?.web?.namedViews?.[groupPanel.view]?.kind !== 'record') throw new Error(`${name}: group panel view ${groupPanel.view} must name a record view of ${source.contract.entity.name}.`);
+    }
+  }
   if (panel?.actions?.some(action => !["edit", "openFull"].includes(action))) throw new Error(`${name}: invalid summary action.`);
   if (panel?.editing !== undefined && !["confirmed", "direct"].includes(panel.editing)) throw new Error(`${name}: record panel editing must be confirmed or direct.`);
   if ((panel?.editing === "direct" || panel?.saveLabel) && panel.view === undefined) throw new Error(`${name}: direct editing and a save label require a record panel view.`);

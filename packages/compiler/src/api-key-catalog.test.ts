@@ -13,6 +13,7 @@
  *      annotation in the web projection. The shared result view must mask
  *      those outputs before these placements are integrated into a host.
  */
+import {hasSensitiveOutput} from "@openshapeforge/operations";
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
@@ -185,15 +186,18 @@ describe("shipped integration and API-key catalog", () => {
       expect(operation.effects.external).toBe(
         operation.key === "api-keys.create-integration" ? "write" : "none",
       );
-      // Not an MCP tool and not a GraphQL field: the existing GraphQL surface
-      // already serves this feature, and an LLM transport has no business
-      // being offered an Operation whose sibling returns a live credential.
-      expect(operation.transports.mcp.enabled).toBe(false);
+      // MCP uses the shared private-output interaction for confidential fields.
+      expect(operation.transports.mcp.enabled).toBe(true);
       expect(operation.transports.graphql.enabled).toBe(false);
       expect(operation.transports.rest.path.startsWith("/api/api-key-integrations/")).toBe(true);
     }
   });
 
+  test("confidential output cannot enter an idempotency receipt", () => {
+    const catalog = structuredClone(apiKeyCatalog());
+    catalog.operations.createIntegration!.reliability.idempotency = { mode: "natural" };
+    expect(() => compiled(catalog)).toThrow("sensitive output cannot be persisted");
+  });
   test("names a credential only in the two minting contracts, never in a read", () => {
     for (const operation of compiled(apiKeyCatalog())) {
       const names = propertyNames(operation.outputSchema);
@@ -216,6 +220,7 @@ describe("shipped integration and API-key catalog", () => {
         properties?: Record<string, Record<string, unknown>>;
       }>).credential!;
       const secret = credential.properties!.secret!;
+      expect(hasSensitiveOutput(operation.outputSchema)).toBe(true);
       // The marker the shared web implementation is adding support for. It is
       // an EXISTING schema annotation, carried verbatim by the compiler — no
       // new authoring key, so nothing here depends on unsupported YAML.

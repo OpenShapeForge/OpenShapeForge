@@ -476,9 +476,11 @@ jobs:
         run: |
           cd apps/api
           bun test src/db
+          SCRATCH_ADMIN_DATABASE_URL=postgres://openshapeforge:openshapeforge@localhost:5434/postgres bun test src/db/__tests__/plugin-schema-transitions.test.ts
           bun test src/control/tenant-setting-defaults.db.test.ts
           bun test src/operations
           bun test src/mcp/__tests__/task-store.db.test.ts
+          SCRATCH_ADMIN_DATABASE_URL=postgres://openshapeforge:openshapeforge@localhost:5434/postgres bun test src/mcp/__tests__/private-output-db.test.ts
           bun test src/graphql/available-tenants-db.test.ts
           bun test src/auth/relation-group-memberships-db.test.ts src/platform/entity-change-stream.test.ts src/graphql/context-db.test.ts
           bun test src/auth/api-key/credential-no-store-db.test.ts src/auth/api-key/lifetime-existing-keys-db.test.ts

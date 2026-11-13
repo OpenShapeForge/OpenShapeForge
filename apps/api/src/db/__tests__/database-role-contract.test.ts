@@ -112,7 +112,7 @@ describe("database role contract", () => {
     await migrator.db.connection().execute((db) => verifyDatabaseRoles(db));
     const result = await migrator.db.connection().execute((db) => runMigrationChain(db));
     expect(result.pageConfigs).toBeDefined();
-    for (const signature of ['app.public_color_palette(uuid)', 'app.delegated_connection_row(uuid,text,boolean)', 'app.delegated_connection_token_update(uuid,text,jsonb)']) {
+    for (const signature of ['app.public_color_palette(uuid)', 'app.delegated_connection_row(uuid,text,boolean,text)', 'app.delegated_connection_token_update(uuid,text,jsonb,text)']) {
       const {rows:[privileges]}=await sql<{app:boolean;worker:boolean;public:boolean}>`
         select has_function_privilege(${databaseRole('app').name},${signature},'EXECUTE') as app,
           has_function_privilege(${databaseRole('worker').name},${signature},'EXECUTE') as worker,

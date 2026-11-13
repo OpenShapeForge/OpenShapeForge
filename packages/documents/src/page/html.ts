@@ -173,7 +173,7 @@ export function variantPageValues(source: Readonly<Record<string, unknown>> | nu
   const number = (value: unknown) => typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : value;
   const values: Record<string, unknown> = {};
   for (const [key, camel, snake] of [["margin", "pageMargin", "page_margin"], ["gap", "pageGap", "page_gap"], ["blockGap", "pageBlockGap", "page_block_gap"],
-    ["background", "pageBackground", "page_background"], ["backgroundImage", "pageBackgroundImage", "page_background_image"], ["bodyAlignment", "pageBodyAlignment", "page_body_alignment"]] as const) {
+    ["format", "pageFormat", "page_format"], ["width", "pageWidth", "page_width"], ["height", "pageHeight", "page_height"], ["background", "pageBackground", "page_background"], ["backgroundImage", "pageBackgroundImage", "page_background_image"], ["bodyAlignment", "pageBodyAlignment", "page_body_alignment"]] as const) {
     const value = read(camel, snake);
     if (value != null && value !== "") values[key] = number(value);
   }
@@ -186,19 +186,27 @@ type Section = PageSettings & { scope: string; body: PageBlock[] };
  * Reads a variant's page fields into page settings, with the defaults a
  * document without page settings gets.
  */
+/** Paper sizes in CSS pixels at 96 dpi. Without a format the page is the theme's, else the default page. */
+export const PAGE_FORMATS = { a4: { width: 794, height: 1123 }, a5: { width: 559, height: 794 }, letter: { width: 816, height: 1056 } } as const;
+
 export function pageSettings(values: Readonly<Record<string, unknown>> | undefined, design: PageDesign): PageSettings {
   const v = values ?? {};
-  const background = optionalKey(v.background, "Page.background");
-  if (background && !Object.hasOwn(design.colors, background)) fail(`Page.background names the unknown color "${background}".`);
-  const backgroundImage = optionalKey(v.backgroundImage, "Page.backgroundImage");
-  if (backgroundImage && !Object.hasOwn(design.assets, backgroundImage)) fail(`Page.backgroundImage names the unknown asset "${backgroundImage}".`);
+  // A color is one of the theme's by name, or a color code of its own. A name the theme does not have (the
+  // document has no theme, or another one than it was written for) leaves the page white rather than refusing it.
+  const named = typeof v.background === "string" ? v.background.trim() : "";
+  const background = /^#[0-9A-Fa-f]{6}$/.test(named) ? named : named && KEY.test(named) && Object.hasOwn(design.colors, named) ? design.colors[named] : undefined;
+  const image = typeof v.backgroundImage === "string" && KEY.test(v.backgroundImage) && Object.hasOwn(design.assets, v.backgroundImage) ? v.backgroundImage : undefined;
+  const format = typeof v.format === "string" ? v.format : "";
+  const page = format === "custom" ? { width: px(v.width, "Page.width", 100, 5000, design.page.width), height: px(v.height, "Page.height", 100, 5000, design.page.height) }
+    : Object.hasOwn(PAGE_FORMATS, format) ? PAGE_FORMATS[format as keyof typeof PAGE_FORMATS] : undefined;
   return {
     layout: optionalKey(v.layout, "Page.layout") ?? DEFAULT_PAGE_LAYOUT,
     margin: px(v.margin, "Page.margin", 0, 400, 40),
     gap: px(v.gap, "Page.gap", 0, 400, 24),
     blockGap: px(v.blockGap, "Page.blockGap", 0, 400, 16),
+    ...(page ? { page } : {}),
     ...(background ? { background } : {}),
-    ...(backgroundImage ? { backgroundImage } : {}),
+    ...(image ? { backgroundImage: image } : {}),
     bodyAlignment: option(v.bodyAlignment, "Page.bodyAlignment", ["top", "center", "bottom", "aboveCenter"] as const, "top"),
   };
 }
@@ -266,7 +274,7 @@ export const PAGED_MEASURE_SCRIPT = `(() => { for (const region of ["header", "f
 
 function sectionHtml(input: PagedDocumentInput, section: PageSettings, header: readonly PageBlock[], body: readonly PageBlock[], footer: readonly PageBlock[], css: string): string {
   const { design } = input;
-  const { width, height } = design.page;
+  const { width, height } = section.page ?? design.page;
   const vars = [
     `--w:${width}px`, `--h:${height}px`, `--m:${section.margin}px`, `--bg:${section.blockGap}px`,
     `--top:calc(${section.margin}px + var(--osf-header-height,0px) + ${header.length ? section.gap : 0}px)`,
@@ -275,7 +283,7 @@ function sectionHtml(input: PagedDocumentInput, section: PageSettings, header: r
   const justify = { top: "flex-start", center: "center", bottom: "flex-end", aboveCenter: "flex-end" }[section.bodyAlignment];
   // Above the middle: the body is as tall as half the page under the header, less one block gap, and its content sits at its foot.
   const bodyHeight = section.bodyAlignment === "aboveCenter" ? ";min-height:calc((var(--h) - var(--top) - var(--m)) / 2 - var(--bg))" : "";
-  const background = `<div class="bg"${section.background ? ` style="background:${design.colors[section.background]}"` : ""}>${section.backgroundImage ? `<img alt="" src="${assetUrl(design, section.backgroundImage, "Page.backgroundImage")}">` : ""}</div>`;
+  const background = `<div class="bg"${section.background ? ` style="background:${section.background}"` : ""}>${section.backgroundImage ? `<img alt="" src="${assetUrl(design, section.backgroundImage, "Page.backgroundImage")}">` : ""}</div>`;
   const region = (name: "header" | "footer", blocks: readonly PageBlock[]) => blocks.length ? `<div class="region ${name}" data-osf-region="${name}">${blocks.map((block) => renderBlock(block, design)).join("")}</div>` : "";
   return [
     `<!doctype html><html lang="${escapeHtml(input.locale)}"><head><meta charset="utf-8">`,
@@ -334,8 +342,6 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
   for (const block of blocks) {
     const scope = block.scope ?? "";
     if (scope.length > 4000 || /[\n]/.test(scope)) fail("A block scope is not valid.");
-    // A section break is a block of documents made before page settings moved to the document; it places nothing.
-    if (block.definitionKey === "SectionBreak") continue;
     const owned = owner(scope);
     if (block.region === "body") {
       if (sections.at(-1)?.scope !== owned) open(owned);
@@ -359,7 +365,9 @@ export function buildPagedDocument(input: PagedDocumentInput): PagedDocument {
   validateDesign(input.design, input.fonts);
   const css = designCss(input.design, input.fonts);
   const rendered: PagedSection[] = layoutPagedSections(input.blocks, input.design, input.layouts).map((section) => ({
-    layout: section.settings.layout, html: sectionHtml(input, section.settings, section.header, section.body, section.footer, css),
+    layout: section.settings.layout, page: { ...(section.settings.page ?? input.design.page) },
+    html: sectionHtml(input, section.settings, section.header, section.body, section.footer, css),
   }));
-  return { renderingVersion: "osf-paged-html-v1", page: { ...input.design.page }, sections: rendered };
+  // The document's page is its first section's; a section of another size says so itself.
+  return { renderingVersion: "osf-paged-html-v1", page: { ...(rendered[0]?.page ?? input.design.page) }, sections: rendered };
 }

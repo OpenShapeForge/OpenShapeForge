@@ -238,5 +238,7 @@ export type MaterializeDocumentContentInput = {
 export type MaterializedDocumentContent = Omit<MaterializedTemplateContent, "templateVersionId" | "compositionHashVersion"> & {
   readonly documentId: string;
   readonly documentVariantId: string;
+  /** The page settings of a document that follows no template, when it is laid out as pages. */
+  readonly page?: JsonObject;
   readonly compositionHashVersion: "osf-document-content-v1";
 };

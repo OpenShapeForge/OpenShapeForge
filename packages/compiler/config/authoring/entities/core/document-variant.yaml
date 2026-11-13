@@ -67,6 +67,33 @@ fields:
         - { value: continuous, label: { en: Continuous, nl: Doorlopend } }
         - { value: pages, label: { en: Pages, nl: "Pagina's" } }
     persisted: { column: page_layout, storageClass: core }
+  - key: pageFormat
+    label: { en: Page format, nl: Paginaformaat }
+    description:
+      en: Empty takes the format of the document theme, or A4 without a theme.
+      nl: Leeg neemt het formaat van het documentthema, of A4 zonder thema.
+    osfType: string
+    required: false
+    options:
+      type: static
+      items:
+        - { value: a4, label: { en: A4, nl: A4 } }
+        - { value: a5, label: { en: A5, nl: A5 } }
+        - { value: letter, label: { en: Letter, nl: Letter } }
+        - { value: custom, label: { en: Custom size, nl: Eigen maat } }
+    persisted: { column: page_format, storageClass: core }
+  - key: pageWidth
+    label: { en: Page width (px), nl: Paginabreedte (px) }
+    osfType: number
+    required: false
+    validation: { min: 100, max: 5000 }
+    persisted: { column: page_width, storageClass: core }
+  - key: pageHeight
+    label: { en: Page height (px), nl: Paginahoogte (px) }
+    osfType: number
+    required: false
+    validation: { min: 100, max: 5000 }
+    persisted: { column: page_height, storageClass: core }
   - key: pageMargin
     label: { en: Page margin (px), nl: Paginamarge (px) }
     osfType: number
@@ -88,11 +115,11 @@ fields:
   - key: pageBackground
     label: { en: Background color, nl: Achtergrondkleur }
     description:
-      en: Key of a color of the document theme. Empty leaves the page white.
-      nl: Sleutel van een kleur uit het documentthema. Leeg laat de pagina wit.
+      en: "A color code such as #becbd3, or the key of a color of the document theme. Empty leaves the page white."
+      nl: "Een kleurcode zoals #becbd3, of de sleutel van een kleur uit het documentthema. Leeg laat de pagina wit."
     osfType: string
     required: false
-    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+    validation: { pattern: "^(#[0-9A-Fa-f]{6}|[a-z][A-Za-z0-9-]{0,63})$", maxLength: 64 }
     persisted: { column: page_background, storageClass: core }
   - key: pageBackgroundImage
     label: { en: Background image, nl: Achtergrondbeeld }
@@ -209,14 +236,14 @@ interfaces:
           tabs:
             - id: variant
               label: { en: Variant, nl: Variant }
-              groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }, { title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }]
+              groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }, { title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]
             - id: blocks
               label: { en: Blocks, nl: Blokken }
               relationship: { name: blocks, view: previewStack }
         modes:
           create:
             title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }, { title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }]
+            groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }, { title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]
           update:
             title: { en: Edit, nl: Bewerken }
-            groups: [{ title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }]
+            groups: [{ title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]

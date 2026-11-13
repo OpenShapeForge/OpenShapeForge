@@ -3,7 +3,7 @@ import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import type { MaterializedContentBlock, MaterializedDocumentContent, MaterializedTemplateContent } from "./content/types.js";
 import { materializeDocument } from "./document-materialize.js";
-import { buildPagedDocument, PagedDocumentError, variantPageValues } from "./page/html.js";
+import { buildPagedDocument, PagedDocumentError } from "./page/html.js";
 import { pageDesignFromStored } from "./page-design.js";
 import { DEFAULT_PAGE_DESIGN, type PageBlock, type PageLayouts } from "./page/types.js";
 import { themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
@@ -52,16 +52,12 @@ export const renderDocumentPages: ModuleOperationHandler = async (input, context
     const theme = (await rows<{ id: string; page_design: unknown }>(trx, themeId
       ? "select id, page_design from erp.document_themes where tenant_id = $1 and id = $2 for share"
       : "select id, page_design from erp.document_themes where tenant_id = $1 and is_default for share", themeId ? [tenantId, themeId] : [tenantId]))[0];
-    // A document that follows no template is its own root: its variant says how it is laid out.
-    const variantId = "documentVariantId" in content ? content.documentVariantId : undefined;
-    const variant = variantId ? (await rows<Record<string, unknown>>(trx,
-      `select page_layout, page_margin, page_gap, page_block_gap, page_background, page_background_image, page_body_alignment
-         from erp.document_variants where tenant_id = $1 and id = $2 for share`, [tenantId, variantId]))[0] : undefined;
-    return { title: document!.title ?? "", themeId: theme?.id ?? null, pageDesign: theme?.page_design, own: variantPageValues(variant) };
+    return { title: document!.title ?? "", themeId: theme?.id ?? null, pageDesign: theme?.page_design };
   });
   const design = pageDesignFromStored(source.pageDesign) ?? DEFAULT_PAGE_DESIGN;
   const layouts: Record<string, Readonly<Record<string, unknown>>> = {};
-  if (source.own) layouts[""] = source.own;
+  // A document that follows no template carries its own page settings.
+  if ("page" in content && content.page) layouts[""] = content.page;
   // Every template the content was built from, the document's own first, under the scope its blocks carry.
   for (const template of content.templates) {
     const page = template.version.variants[0]?.page;

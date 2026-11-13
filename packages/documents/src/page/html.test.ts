@@ -78,12 +78,10 @@ describe("buildPagedDocument", () => {
   test("the sections are available as zones for a preview that draws them itself", () => {
     const sections = layoutPagedSections([
       block("h", "TextBlock", { markdown: "Head" }, "header"),
-      block("old", "SectionBreak", { layout: "cover", margin: 99 }),
       block("b", "TextBlock", { markdown: "Body" }),
       block("f", "TextBlock", { markdown: "Foot" }, "footer"),
     ], design, { "": { margin: 32 } });
     expect(sections).toHaveLength(1);
-    // A section break left in older content places nothing and decides nothing.
     expect(sections[0]!.settings).toMatchObject({ layout: "default", margin: 32 });
     expect([sections[0]!.header, sections[0]!.body, sections[0]!.footer].map((zone) => zone.map((entry) => entry.id))).toEqual([["h"], ["b"], ["f"]]);
   });
@@ -132,11 +130,27 @@ describe("buildPagedDocument", () => {
     expect(() => build([...blocks])).toThrow(PagedDocumentError);
   });
 
-  test("page settings that name an unknown color or image are refused, and a variant's fields read as settings", () => {
-    expect(() => build([block("b", "TextBlock", { markdown: "x" })], { "": { background: "missing" } })).toThrow(PagedDocumentError);
-    expect(() => build([block("b", "TextBlock", { markdown: "x" })], { "": { backgroundImage: "missing" } })).toThrow(PagedDocumentError);
+  test("a page takes a theme color by name or a color code of its own, and a name the theme lacks leaves it white", () => {
+    const page = (layout: Record<string, unknown>) => build([block("b", "TextBlock", { markdown: "x" })], { "": layout }).sections[0]!.html;
+    expect(page({ background: "surface" })).toContain('class="bg" style="background:#becbd3"');
+    expect(page({ background: "#112233" })).toContain('class="bg" style="background:#112233"');
+    expect(page({ background: "missing", backgroundImage: "missing" })).toContain('<div class="bg"></div>');
+    expect(page({ background: "red;position:fixed" })).toContain('<div class="bg"></div>');
+  });
+
+  test("a document sets its own page format; without one the page is the theme's", () => {
+    const paged = build([{ ...block("c", "TextBlock", { markdown: "Cover" }), scope: "cover" }, block("b", "TextBlock", { markdown: "Body" })],
+      { cover: {}, "": { format: "a4" } });
+    expect(paged.page).toEqual({ width: 720, height: 913 });
+    expect(paged.sections.map((section) => section.page)).toEqual([{ width: 720, height: 913 }, { width: 794, height: 1123 }]);
+    expect(paged.sections[1]!.html).toContain("@page{size:794px 1123px;margin:0}");
+    expect(pageSettings({ format: "custom", width: 600, height: 800 }, design).page).toEqual({ width: 600, height: 800 });
+    expect(() => pageSettings({ format: "custom", width: 20 }, design)).toThrow(PagedDocumentError);
+  });
+
+  test("a variant's fields read as page settings", () => {
     expect(variantPageValues({ page_layout: "pages", page_margin: "32", page_background: "surface", page_body_alignment: null })).toEqual({ margin: 32, background: "surface" });
-    expect(variantPageValues({ pageLayout: "pages", pageBodyAlignment: "center" })).toEqual({ bodyAlignment: "center" });
+    expect(variantPageValues({ pageLayout: "pages", pageFormat: "custom", pageWidth: "600", pageBodyAlignment: "center" })).toEqual({ format: "custom", width: 600, bodyAlignment: "center" });
     expect(variantPageValues({ pageLayout: "continuous", pageMargin: 32 })).toBeUndefined();
     expect(variantPageValues({ page_layout: null })).toBeNull();
   });

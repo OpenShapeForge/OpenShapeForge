@@ -476,6 +476,7 @@ jobs:
         run: |
           cd apps/api
           bun test src/db
+          SCRATCH_ADMIN_DATABASE_URL=postgres://openshapeforge:openshapeforge@localhost:5434/postgres bun test src/db/__tests__/plugin-schema-transitions.test.ts
           bun test src/control/tenant-setting-defaults.db.test.ts
           bun test src/operations
           bun test src/mcp/__tests__/task-store.db.test.ts

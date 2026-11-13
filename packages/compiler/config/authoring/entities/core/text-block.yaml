@@ -29,6 +29,29 @@ fields:
         organisatie of aan een ander veld van hetzelfde record; iedere leesactie lost die binding opnieuw op onder de
         toegang van de lezer en voegt het resultaat als data toe, niet als opmaak.
     validation: { minLength: 1, maxLength: 20000 }
+  - key: style
+    osfType: string
+    required: false
+    label: { en: Text style, nl: Tekststijl }
+    description:
+      en: Key of a text style in the document theme's page design. Empty uses the body style.
+      nl: Sleutel van een tekststijl in het paginaontwerp van het documentthema. Leeg gebruikt de broodtekststijl.
+    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+  - key: maxWidth
+    osfType: number
+    required: false
+    label: { en: Maximum width (px), nl: Maximale breedte (px) }
+    validation: { min: 1, max: 4000 }
+  - key: align
+    osfType: string
+    required: false
+    label: { en: Alignment, nl: Uitlijning }
+    options:
+      type: static
+      items:
+        - { value: left, label: { en: Left, nl: Links } }
+        - { value: center, label: { en: Center, nl: Midden } }
+        - { value: right, label: { en: Right, nl: Rechts } }
 operations:
   materialize:
     name: Materialize text
@@ -51,7 +74,7 @@ operations:
         properties:
           kind: { type: string, const: block }
           value:
-            x-osf-entityInput: { entity: TextBlock, fields: [markdown] }
+            x-osf-entityInput: { entity: TextBlock, fields: [markdown, style, maxWidth, align] }
     errors: []
     auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
     tenancy: { mode: required }

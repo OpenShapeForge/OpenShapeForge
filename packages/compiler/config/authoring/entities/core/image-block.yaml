@@ -1,0 +1,79 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: ImageBlock
+title: Image
+description: A block definition placing one image asset of the document theme at a fixed size.
+language: en
+labels: { en: Image, nl: Afbeelding }
+pluralLabels: { en: Images, nl: Afbeeldingen }
+domains: [documents]
+# The Block placement supplies identity. This definition supplies its fields.
+baseEntity: false
+displayTemplate: "{{asset}}"
+authorization:
+  roles:
+    read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
+fields:
+  - key: asset
+    osfType: string
+    required: true
+    label: { en: Asset, nl: Beeld }
+    description:
+      en: Key of an image asset in the document theme's page design.
+      nl: Sleutel van een beeld in het paginaontwerp van het documentthema.
+    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+  - key: width
+    osfType: number
+    required: true
+    label: { en: Width (px), nl: Breedte (px) }
+    validation: { min: 1, max: 4000 }
+  - key: height
+    osfType: number
+    required: true
+    label: { en: Height (px), nl: Hoogte (px) }
+    validation: { min: 1, max: 4000 }
+  - key: align
+    osfType: string
+    required: false
+    label: { en: Alignment, nl: Uitlijning }
+    options:
+      type: static
+      items:
+        - { value: left, label: { en: Left, nl: Links } }
+        - { value: center, label: { en: Center, nl: Midden } }
+        - { value: right, label: { en: Right, nl: Rechts } }
+operations:
+  materialize:
+    name: Materialize image
+    description: Validate resolved values against the active entity definition.
+    implementation: { type: plugin, plugin: documents, handler: materializeFields }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [definitionKey, values]
+        properties:
+          definitionKey: { type: string, const: ImageBlock }
+          values: { type: object }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [kind, value]
+        properties:
+          kind: { type: string, const: block }
+          value:
+            x-osf-entityInput: { entity: ImageBlock, fields: [asset, width, height, align] }
+    errors: []
+    auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest:
+    operations:
+      materialize: { method: POST, path: /api/content-blocks/image/materialize }
+  mcp: { tools: generic }

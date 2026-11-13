@@ -1,0 +1,110 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: SectionBreak
+title: Section break
+description: A block definition that starts a new page and selects the page layout for the blocks after it.
+language: en
+labels: { en: Section break, nl: Sectie-einde }
+pluralLabels: { en: Section breaks, nl: Sectie-einden }
+domains: [documents]
+# The Block placement supplies identity. This definition supplies its fields.
+baseEntity: false
+displayTemplate: "{{layout}}"
+authorization:
+  roles:
+    read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
+fields:
+  - key: layout
+    osfType: string
+    required: true
+    defaultValue: default
+    label: { en: Page layout, nl: Pagina-indeling }
+    description:
+      en: Key of the page layout for the pages after this break. Header and footer blocks carrying the same layout
+        key repeat on each of those pages.
+      nl: Sleutel van de pagina-indeling voor de pagina's na dit einde. Kop- en voetblokken met dezelfde sleutel
+        herhalen op elk van die pagina's.
+    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+  - key: margin
+    osfType: number
+    required: false
+    defaultValue: 40
+    label: { en: Page margin (px), nl: Paginamarge (px) }
+    validation: { min: 0, max: 400 }
+  - key: gap
+    osfType: number
+    required: false
+    defaultValue: 24
+    label: { en: "Space between header, body and footer (px)", nl: "Ruimte tussen kop, inhoud en voet (px)" }
+    validation: { min: 0, max: 400 }
+  - key: blockGap
+    osfType: number
+    required: false
+    defaultValue: 16
+    label: { en: Space between blocks (px), nl: Ruimte tussen blokken (px) }
+    validation: { min: 0, max: 400 }
+  - key: background
+    osfType: string
+    required: false
+    label: { en: Background color, nl: Achtergrondkleur }
+    description:
+      en: Key of a color in the document theme's page design. Empty leaves the page white.
+      nl: Sleutel van een kleur in het paginaontwerp van het documentthema. Leeg laat de pagina wit.
+    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+  - key: backgroundImage
+    osfType: string
+    required: false
+    label: { en: Background image, nl: Achtergrondbeeld }
+    description:
+      en: Key of an image asset in the document theme's page design, stretched over the whole page.
+      nl: Sleutel van een beeld in het paginaontwerp van het documentthema, uitgerekt over de hele pagina.
+    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+  - key: bodyAlignment
+    osfType: string
+    required: false
+    defaultValue: top
+    label: { en: Body position, nl: Positie van de inhoud }
+    description:
+      en: Where the body sits between header and footer on a page it does not fill.
+      nl: Waar de inhoud tussen kop en voet staat op een pagina die niet gevuld is.
+    options:
+      type: static
+      items:
+        - { value: top, label: { en: Top, nl: Boven } }
+        - { value: center, label: { en: Center, nl: Midden } }
+        - { value: bottom, label: { en: Bottom, nl: Onder } }
+operations:
+  materialize:
+    name: Materialize section break
+    description: Validate resolved values against the active entity definition.
+    implementation: { type: plugin, plugin: documents, handler: materializeFields }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [definitionKey, values]
+        properties:
+          definitionKey: { type: string, const: SectionBreak }
+          values: { type: object }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [kind, value]
+        properties:
+          kind: { type: string, const: block }
+          value:
+            x-osf-entityInput: { entity: SectionBreak, fields: [layout, margin, gap, blockGap, background, backgroundImage, bodyAlignment] }
+    errors: []
+    auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest:
+    operations:
+      materialize: { method: POST, path: /api/content-blocks/section-break/materialize }
+  mcp: { tools: generic }

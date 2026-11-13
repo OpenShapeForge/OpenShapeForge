@@ -68,7 +68,7 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // the two entities of the notebook example plugin's authoring layer.
   // Five authorization profile and operation-policy entities are included.
   // The optional CI record-action layer adds two more (accounted for below).
-  "core-entity.schema.json": 163,
+  "core-entity.schema.json": 170,
   // The platform's own administration (operations/control.yaml): the 23
   // control-realm Operations behind /api/control/v1 and the control MCP —
   // and the operator side of capability grants (operations/grants.yaml),

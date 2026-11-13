@@ -70,6 +70,10 @@ export type ContentBlock = {
   readonly schemaVersion: number;
   readonly values: JsonObject;
   readonly references: Readonly<Record<string, ContentReferenceValue>>;
+  /** Page region; absent means the block flows in the body. */
+  readonly region?: "header" | "footer";
+  /** Page layout a header or footer block belongs to; absent means the default layout. */
+  readonly layoutKey?: string;
 };
 
 export type TemplateParameter = ContentValueShape & { readonly defaultValue?: JsonValue; readonly relationship?: { readonly target: string } };
@@ -175,6 +179,10 @@ export type MaterializedContentBlock = {
     Record<string, ContentResolvedEntity | readonly ContentResolvedEntity[] | null>
   >;
   readonly materialization?: ContentBlockMaterialization;
+  /** Page region; absent means the block flows in the body. */
+  readonly region?: "header" | "footer";
+  /** Page layout a header or footer block belongs to; absent means the default layout. */
+  readonly layoutKey?: string;
 };
 
 export type MaterializedTemplateContent = {

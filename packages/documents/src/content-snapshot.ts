@@ -102,7 +102,26 @@ export function contentBlockFromRow(row: Record<string, unknown>, owner: { reado
   // Reference slots live in their own columns; a stray key in the JSON body
   // must not be able to smuggle a second binding for the same field.
   const values = Object.fromEntries(Object.entries(stored as Record<string, unknown>).filter(([key]) => !Object.hasOwn(bound, key)));
-  return { id, definitionKey: definitionKey as string, schemaVersion: version, values: immutableContent(values) as JsonObject, references: bound };
+  return { id, definitionKey: definitionKey as string, schemaVersion: version, values: immutableContent(values) as JsonObject, references: bound, ...placement(row, origin) };
+}
+
+const LAYOUT_KEY = /^[a-z][A-Za-z0-9-]{0,63}$/;
+
+/**
+ * Page placement of a block row. A body block adds nothing, so content that
+ * uses no header or footer keeps the hash it had before regions existed; a
+ * snapshot frozen before the columns existed reads as body.
+ */
+function placement(row: Record<string, unknown>, origin: string): Pick<ContentBlock, "region" | "layoutKey"> {
+  const region = row.region ?? "body";
+  if (region !== "body" && region !== "header" && region !== "footer") invalid(`The ${origin} block has an unknown page region.`);
+  const layoutKey = row.layout_key ?? null;
+  if (layoutKey !== null && (typeof layoutKey !== "string" || !LAYOUT_KEY.test(layoutKey))) invalid(`The ${origin} block has an invalid page layout key.`);
+  if (region === "body") {
+    if (layoutKey !== null) invalid(`The ${origin} body block names a page layout; only header and footer blocks do.`);
+    return {};
+  }
+  return { region, ...(layoutKey ? { layoutKey } : {}) };
 }
 
 function block(entry: SnapshotNode, variantId: string, selection: TemplateSnapshotSelection): ContentBlock {

@@ -269,6 +269,17 @@ export type WebCollectionTable = {
   viewSwitch?: boolean;
   /** Collection controls the web table offers; `false` hides one. Other channels keep their Operations. */
   toolbar?: { visible?: boolean; search?: boolean; create?: boolean };
+  /**
+   * Floating panel for a tree's own rows (the groups, such as teams), opened from the group's name.
+   * Member rows keep `recordPanel`. Without it a group's name only expands its row.
+   */
+  groupPanel?: {
+    title: LocalizedText;
+    /** Named record view of the collection's entity shown in the panel; its default record view otherwise. */
+    view?: string;
+    editing?: "confirmed" | "direct";
+    actions?: Array<"edit" | "openFull">;
+  };
   recordPanel?: {
     actions?: Array<"edit" | "openFull">;
     /** `direct` opens the panel view editable with one save action; `confirmed` (default) keeps Edit, Save and Cancel. */

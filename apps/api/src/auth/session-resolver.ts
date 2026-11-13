@@ -84,11 +84,16 @@ async function verifyBearerIdentity(
   credential: { tenantId: string; keycloakClientId: string },
   db: OpenShapeForgeDatabase,
 ) {
-  const verifier = getBearerVerifier();
+  // The stored credential names this dynamically provisioned service client;
+  // an interactive client's static azp allowlist is not its authority.
+  const verifier = getBearerVerifier(true);
   if (!verifier) {
     throw new Error("Bearer verifier is not configured.");
   }
   const { identity, claims } = await verifier(token);
+  if (claims.azp !== credential.keycloakClientId) {
+    throw new Error("API key token authorized party does not match its integration.");
+  }
   const tenantId = hostOrganizationContext()
     ? await resolveScopedServiceTenant(identity, claims, {
         tenantId: credential.tenantId, clientId: credential.keycloakClientId,

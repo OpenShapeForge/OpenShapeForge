@@ -34,7 +34,7 @@ export type ApiKeyResolverDeps = {
   keyring: SecretKeyring;
   issuer: string;
   tokenUrl?: string | undefined;
-  /** Verifies a Keycloak token exactly as the interactive bearer path does. */
+  /** Verifies the shared signature/issuer/API audience and binds azp to the stored credential. */
   verifyToken: (token: string, credential: { tenantId: string; keycloakClientId: string }) => Promise<{
     tenantId: string | null;
     userId: string | null;

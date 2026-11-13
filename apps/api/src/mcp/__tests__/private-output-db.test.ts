@@ -17,8 +17,9 @@ import versioningRuntime from "@openshapeforge/versioning/runtime";
 
 const definition: RuntimeOperationDefinition = {
   id: "example.issue-recovery-codes", key: "example_recovery_codes", intent: "invoke", name: "Issue recovery codes", description: "One-time recovery codes.",
-  input: { kind: "json-schema", schema: { type: "object", properties: {}, additionalProperties: false } },
+  input: { kind: "json-schema", schema: { type: "object", properties: { confirmed: { type: "boolean" } }, additionalProperties: false } },
   output: { kind: "json-schema", schema: { type: "object", properties: { id: { type: "string" }, codes: { type: "array", items: { type: "string", "x-osf-classification": { sensitivity: "confidential" } } } } } },
+  interaction: { confirmation: { mode: "acknowledgement" } },
   effects: { data: "write", external: "none" }, reliability: { idempotency: { mode: "none" } },
 };
 
@@ -43,7 +44,7 @@ test("real MCP private output is owner-bound, single-use and never present in mo
     platform.registerOperationProviders([{ name: "private-fixture", operationProviders: [{ id: "private-fixture",
       list: async session => available && session.roles.includes("Organization.All.ReadWrite") ? [definition] : [],
       get: async (session, id) => available && session.roles.includes("Organization.All.ReadWrite") && id === definition.id ? definition : undefined,
-      execute: async () => { minted++; if (throwSecret) throw Error("synthetic-secret-in-exception"); return { data: { id: "public-id", codes: ["synthetic-private-one", "synthetic-private-two"], unexpected: "synthetic-private-one" }, operations: [] }; },
+      execute: async (_context, request) => { expect(request.input?.confirmed).toBe(true); minted++; if (throwSecret) throw Error("synthetic-secret-in-exception"); return { data: { id: "public-id", codes: ["synthetic-private-one", "synthetic-private-two"], unexpected: "synthetic-private-one" }, operations: [] }; },
     }] }]);
     const tenantId = randomUUID(); const userId = randomUUID();
     const connect = async (tenant = tenantId, user = userId, roles = ["Organization.All.ReadWrite"], app = true) => {

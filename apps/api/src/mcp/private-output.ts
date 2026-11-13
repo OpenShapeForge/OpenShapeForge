@@ -29,7 +29,7 @@ export async function startPrivateOutput(ctx: DirectCallScope, definition: Runti
   if (!supportsMcpApp(ctx.server)) throw new HttpError(409, "INTERACTION_REQUIRED", "This Operation needs an MCP client supporting private apps. Nothing was created.");
   if (!ctx.session.tenantId || !ctx.session.userId || !ctx.modulePlatform) throw new HttpError(403, "FORBIDDEN", "A signed-in tenant user is required.");
   assertSensitiveOutputSchema(definition.output.schema as Record<string, unknown>);
-  if (definition.reliability.idempotency.mode !== "none" || definition.nativeMcpTool || definition.interaction?.secureInput) {
+  if (definition.reliability.idempotency.mode !== "none" || definition.nativeMcpTool || definition.interaction?.secureInput || definition.interaction?.confirmation?.mode === "challenge") {
     throw new HttpError(409, "INTERACTION_REQUIRED", "This private output requires a direct, non-replayable Operation without private input.");
   }
   const keyring = elicitedKeyring();
@@ -61,7 +61,10 @@ export async function completePrivateOutput(ctx: DirectCallScope): Promise<ToolR
     // Consume before side effects. A transport loss must never mint a second credential.
     executionStarted = true;
     const result = await ctx.modulePlatform.services.operations.execute(ctx.moduleSession, {
-      operation: { id: definition.id, intent: definition.intent }, input: held.payload.input,
+      operation: { id: definition.id, intent: definition.intent },
+      // The person's submit click supplies the canonical acknowledgement, as a web form does.
+      input: definition.interaction?.confirmation?.mode === "acknowledgement"
+        ? { ...held.payload.input, confirmed: true } : held.payload.input,
       expectedContractFingerprint: held.payload.fingerprint,
     }, ctx.signal ? { signal: ctx.signal } : {});
     if ("error" in result) return { ...ok({ error: { code: "PRIVATE_OPERATION_FAILED", message: "Private Operation failed. Check its state before starting again.", retryable: false } }), isError: true };

@@ -9,7 +9,7 @@ MCP discovery exposes the same canonical Operation and its private-output
 interaction. The secure executor prepares a ten-minute handoff in the existing
 encrypted `platform.mcp_handoffs` store. It creates no credential. The private
 app displays the proposed ordinary input and submits the handoff only on the
-person's click. The app-only completion tool rechecks live availability and
+person's click. The click supplies the canonical acknowledgement when one is declared. The app-only completion tool rechecks live availability and
 contract identity and uses the same canonical dispatcher as REST. Requests are
 bound to both tenant and actor; an atomic claim prevents concurrent replay.
 
@@ -33,7 +33,7 @@ array items, up to 32 levels and 20,000 schema nodes. Confidential nodes must be
 strings (optionally nullable); a collection of recovery codes classifies its
 string items. Conditional schemas, references and unplaceable classifications
 are refused before execution. Confidential Operations must declare idempotency
-`none`: no replay receipt may retain the result. Combined secure-input/output
+`none`: no replay receipt may retain the result. Challenge confirmations, combined secure-input/output
 and asynchronous confidential results are not supported by this first slice.
 
 If a response is lost after submission, the result is uncertain and cannot be

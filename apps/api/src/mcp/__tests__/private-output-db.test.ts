@@ -67,7 +67,7 @@ test("real MCP private output is owner-bound, single-use and never present in mo
     const dedicated=await connect(tenantId,userId,undefined,true,"dedicated");
     const dedicatedTool=(await dedicated.listTools()).tools.find(tool=>tool.name===definition.key);
     expect(dedicatedTool).toBeDefined();
-    const dedicatedPending=await dedicated.callTool({name:definition.key,arguments:{}});
+    const dedicatedPending=await dedicated.callTool({name:definition.key!,arguments:{}});
     expect(dedicatedPending._meta?.privateOperation).toBeDefined();expect(minted).toBe(0);
     const pending = await start(); expect(pending.isError).toBeFalsy(); expect(minted).toBe(0);
     const handoffId = (pending._meta?.privateOperation as { handoffId: string }).handoffId;

@@ -7,6 +7,7 @@ import { sql } from 'kysely';
 import { createDatabaseRuntime, type DatabaseRuntime } from '../db/connection.js';
 import { withSystemSession, SYSTEM_BYPASS_ROLE } from '../db/session.js';
 import { encryptSecret, keyringFromEnv } from '@openshapeforge/plugin-runtime/secrets';
+import {applyAppHelpersMigration} from '../db/migrations/app-helpers.js';
 import { applyPublicColorPaletteMigration } from '../db/migrations/color-palette.js';
 import { databaseRole } from '../db/database-roles.js';
 import { backfillTenantSettingDefaults, ensureTenantSettingDefaults, tenantSettingDefaultsOf } from './tenant-setting-defaults.js';
@@ -52,6 +53,7 @@ beforeAll(async () => {
     alter table erp.tenant_settings force row level security;
     create policy tenant_scope on erp.tenant_settings using(app.bypass_rls() or tenant_id=app.current_tenant()) with check(app.bypass_rls() or tenant_id=app.current_tenant());
   `).execute(runtime.db);
+  await applyAppHelpersMigration(runtime.db);
   await applyPublicColorPaletteMigration(runtime.db);
 }, 30000);
 afterAll(async () => {

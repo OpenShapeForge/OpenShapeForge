@@ -66,14 +66,17 @@ fields:
     defaultValue: top
     label: { en: Body position, nl: Positie van de inhoud }
     description:
-      en: Where the body sits between header and footer on a page it does not fill.
-      nl: Waar de inhoud tussen kop en voet staat op een pagina die niet gevuld is.
+      en: Where the body sits between header and footer on a page it does not fill. Above the middle ends the body
+        one block gap above the middle of the page under the header, as a cover sets its title.
+      nl: Waar de inhoud tussen kop en voet staat op een pagina die niet gevuld is. Boven het midden laat de inhoud
+        eindigen op een blokafstand boven het midden van de pagina onder de kop, zoals een omslag zijn titel zet.
     options:
       type: static
       items:
         - { value: top, label: { en: Top, nl: Boven } }
         - { value: center, label: { en: Center, nl: Midden } }
         - { value: bottom, label: { en: Bottom, nl: Onder } }
+        - { value: aboveCenter, label: { en: Above the middle, nl: Boven het midden } }
 operations:
   materialize:
     name: Materialize section break

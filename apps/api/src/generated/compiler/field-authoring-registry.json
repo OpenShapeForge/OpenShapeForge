@@ -40975,7 +40975,7 @@
             "reference": "version",
             "field": "parameters"
           },
-          "variables": "template",
+          "variables": "both",
           "defaultValue": {},
           "label": {
             "en": "Local values",

@@ -30,8 +30,9 @@ fields:
     osfType: object
     valueFieldsFrom: { reference: version, field: parameters }
     # A value may name a variable of the including template, so a proposal's
-    # own title can be handed on to the cover it includes.
-    variables: template
+    # own title can be handed on to the cover it includes: as text among other
+    # text, or as the whole value, which keeps its type (a date stays a date).
+    variables: both
     defaultValue: {}
     label: { en: Local values, nl: Lokale waarden }
     description:

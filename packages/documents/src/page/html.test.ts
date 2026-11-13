@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { buildPagedDocument, pageBlockCss, pageSettings, renderPageBlock, PagedDocumentError, PAGED_FONTS_MARKER } from "./html.js";
+import { buildPagedDocument, layoutPagedSections, pageBlockCss, pageSettings, renderPageBlock, PagedDocumentError, PAGED_FONTS_MARKER } from "./html.js";
 import type { PageBlock, PagedDocumentInput } from "./types.js";
 
 const design: PagedDocumentInput["design"] = {
@@ -71,6 +71,18 @@ describe("buildPagedDocument", () => {
     expect(letter).toContain("Dear reader");
     expect(letter).toContain("--m:32px");
     expect(letter).not.toContain("Cover header");
+  });
+
+  test("the sections are available as zones for a preview that draws them itself", () => {
+    const sections = layoutPagedSections([
+      block("h", "TextBlock", { markdown: "Head" }, "header", "cover"),
+      block("s", "SectionBreak", { layout: "cover", margin: 32 }),
+      block("b", "TextBlock", { markdown: "Body" }),
+      block("f", "TextBlock", { markdown: "Foot" }, "footer", "cover"),
+    ], design);
+    expect(sections).toHaveLength(1);
+    expect(sections[0]!.settings).toMatchObject({ layout: "cover", margin: 32 });
+    expect([sections[0]!.header, sections[0]!.body, sections[0]!.footer].map((zone) => zone.map((entry) => entry.id))).toEqual([["h"], ["b"], ["f"]]);
   });
 
   test("an included template without page settings flows inside the including page", () => {

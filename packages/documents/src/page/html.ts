@@ -61,11 +61,17 @@ function text(value: unknown, name: string): string {
   return value;
 }
 
-/** Inline emphasis only. Everything else in the source stays literal text. */
+/**
+ * Inline emphasis only. Everything else in the source stays literal text. A
+ * backslash-escaped punctuation mark is that mark, never markup: resolved
+ * variable values arrive escaped this way so they cannot become emphasis.
+ */
 function inline(source: string): string {
-  return escapeHtml(source)
+  const literal = source.replace(/\\([!-/:-@[-`{-~])/g, (_match, char: string) => String.fromCharCode(0xe000 + char.charCodeAt(0)));
+  return escapeHtml(literal)
     .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+    .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
+    .replace(/[\ue021-\ue07e]/g, (char) => escapeHtml(String.fromCharCode(char.charCodeAt(0) - 0xe000)));
 }
 
 /** Blank line separates paragraphs; a single line break stays a line break. */

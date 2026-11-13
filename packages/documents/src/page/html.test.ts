@@ -60,6 +60,11 @@ describe("buildPagedDocument", () => {
     expect(html).toContain("<strong>bold</strong>");
   });
 
+  test("an escaped mark in a resolved value is that mark, not markup", () => {
+    const html = build([block("b", "TextBlock", { markdown: "11\\/05\\/2026 grey\\-box \\*not bold\\* \\<b\\>" })]).sections[0]!.html;
+    expect(html).toContain("<p>11/05/2026 grey-box *not bold* &lt;b&gt;</p>");
+  });
+
   test("the page never fetches: a strict policy and inlined assets only", () => {
     const html = build([block("i", "ImageBlock", { asset: "mark", width: 10, height: 10 })]).sections[0]!.html;
     expect(html).toContain("default-src 'none'");

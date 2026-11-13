@@ -85,6 +85,11 @@ describe("buildPagedDocument", () => {
     expect([sections[0]!.header, sections[0]!.body, sections[0]!.footer].map((zone) => zone.map((entry) => entry.id))).toEqual([["h"], ["b"], ["f"]]);
   });
 
+  test("a body above the middle ends one block gap above the middle of the page under the header", () => {
+    const html = build([block("s", "SectionBreak", { layout: "cover", bodyAlignment: "aboveCenter" }), block("b", "TextBlock", { markdown: "Title" })]).sections[0]!.html;
+    expect(html).toContain("justify-content:flex-end;min-height:calc((var(--h) - var(--top) - var(--m)) / 2 - var(--bg))");
+  });
+
   test("an included template without page settings flows inside the including page", () => {
     const paged = build([block("a", "TextBlock", { markdown: "Before" }), { ...block("c", "TextBlock", { markdown: "Clause" }), scope: "include-1" }, block("b", "TextBlock", { markdown: "After" })]);
     expect(paged.sections).toHaveLength(1);

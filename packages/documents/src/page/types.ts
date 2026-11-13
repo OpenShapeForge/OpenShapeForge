@@ -61,7 +61,8 @@ export type PageSettings = Readonly<{
   background?: string;
   /** Key into `PageDesign.assets`. */
   backgroundImage?: string;
-  bodyAlignment: "top" | "center" | "bottom";
+  /** `aboveCenter` ends the body one block gap above the middle of the page under the header. */
+  bodyAlignment: "top" | "center" | "bottom" | "aboveCenter";
 }>;
 
 export type PageDesign = Readonly<{

@@ -178,7 +178,7 @@ export function pageSettings(values: Readonly<Record<string, unknown>> | undefin
     blockGap: px(v.blockGap, "SectionBreak.blockGap", 0, 400, 16),
     ...(background ? { background } : {}),
     ...(backgroundImage ? { backgroundImage } : {}),
-    bodyAlignment: option(v.bodyAlignment, "SectionBreak.bodyAlignment", ["top", "center", "bottom"] as const, "top"),
+    bodyAlignment: option(v.bodyAlignment, "SectionBreak.bodyAlignment", ["top", "center", "bottom", "aboveCenter"] as const, "top"),
   };
 }
 
@@ -251,7 +251,9 @@ function sectionHtml(input: PagedDocumentInput, section: PageSettings, header: r
     `--top:calc(${section.margin}px + var(--osf-header-height,0px) + ${header.length ? section.gap : 0}px)`,
     `--bottom:calc(${section.margin}px + var(--osf-footer-height,0px) + ${footer.length ? section.gap : 0}px)`,
   ].join(";");
-  const justify = { top: "flex-start", center: "center", bottom: "flex-end" }[section.bodyAlignment];
+  const justify = { top: "flex-start", center: "center", bottom: "flex-end", aboveCenter: "flex-end" }[section.bodyAlignment];
+  // Above the middle: the body is as tall as half the page under the header, less one block gap, and its content sits at its foot.
+  const bodyHeight = section.bodyAlignment === "aboveCenter" ? ";min-height:calc((var(--h) - var(--top) - var(--m)) / 2 - var(--bg))" : "";
   const background = `<div class="bg"${section.background ? ` style="background:${design.colors[section.background]}"` : ""}>${section.backgroundImage ? `<img alt="" src="${assetUrl(design, section.backgroundImage, "SectionBreak.backgroundImage")}">` : ""}</div>`;
   const region = (name: "header" | "footer", blocks: readonly PageBlock[]) => blocks.length ? `<div class="region ${name}" data-osf-region="${name}">${blocks.map((block) => renderBlock(block, design)).join("")}</div>` : "";
   return [
@@ -262,7 +264,7 @@ function sectionHtml(input: PagedDocumentInput, section: PageSettings, header: r
     background, region("header", header), region("footer", footer),
     `<table class="flow"><thead><tr><td><div class="space-top"></div></td></tr></thead>`,
     `<tfoot><tr><td><div class="space-bottom"></div></td></tr></tfoot>`,
-    `<tbody><tr><td><div class="body" style="justify-content:${justify}">${body.map((block) => renderBlock(block, design)).join("")}</div></td></tr></tbody></table>`,
+    `<tbody><tr><td><div class="body" style="justify-content:${justify}${bodyHeight}">${body.map((block) => renderBlock(block, design)).join("")}</div></td></tr></tbody></table>`,
     `</body></html>`,
   ].join("");
 }

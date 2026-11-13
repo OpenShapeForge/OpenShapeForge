@@ -102,7 +102,10 @@ export function assertTypedDefinitionSupported(
       const { classification: _classification, ...plain } = definition;
       checked = plain;
     }
-    assertEntityValueFieldPolicy({ key: field, osfType: "object", children: [checked] });
+    // A column of organization data takes a type for what it says about the
+    // value's form; the classification that type carries for a person's data
+    // is not this value's. An authored policy is still refused.
+    assertEntityValueFieldPolicy({ key: field, osfType: "object", children: [checked] }, undefined, 0, policy?.organizationData === true);
     if (hasDeferredValueDefinition(definition)) throw new Error("A concrete value definition is required.");
   } catch {
     throw origin === "submitted"

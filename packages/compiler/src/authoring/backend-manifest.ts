@@ -1610,6 +1610,7 @@ export function compileAuthoringBackendManifest(
       value.typedBy = {
         definitionField: field.typedBy.definitionField, definitionColumn: definition.name,
         ...(field.typedBy.encrypted ? { encrypted: true } : {}),
+        ...(field.typedBy.organizationData ? { organizationData: true } : {}),
         ...(document ? { documentField: field.typedBy.documentField, documentColumn: document.name } : {}),
       };
     }

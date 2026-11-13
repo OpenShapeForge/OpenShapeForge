@@ -248,7 +248,7 @@ async function materializeContent(
         const bound = await bind(match[1]!, slot, "template", scope);
         let text: string;
         try {
-          text = variableText(bound.value);
+          text = printedValue(bound.offer.osfType, bound.value, request.locale) ?? variableText(bound.value);
         } catch (error) {
           contentVariableFailure(error);
         }
@@ -297,8 +297,8 @@ async function materializeContent(
   async function compositionParameterShape(
     definition: CompiledContentBlockDefinition,
     references: ContentBlock["references"],
+    composition: CompiledContentBlockDefinition["composition"],
   ): Promise<ContentValueShape | undefined> {
-    const composition = definition.composition;
     if (!composition?.parametersField) return undefined;
     const field = Object.hasOwn(definition.fields, composition.parametersField)
       ? definition.fields[composition.parametersField]
@@ -436,11 +436,13 @@ async function materializeContent(
         Object.entries(definition.fields).filter(([, field]) => !field.relationship),
       );
       // Markdown fields get their filled variables escaped; every other field keeps the raw value.
-      const parametersShape = await compositionParameterShape(definition, block.references);
+      // Static metadata where a definition carries it, else what the host knows about the definition's inclusion fields.
+      const composition = definition.composition ?? resolvers.compositionContract?.(block.definitionKey);
+      const parametersShape = await compositionParameterShape(definition, block.references, composition);
       const values: Record<string, JsonValue> = Object.create(null);
       for (const key of Object.keys(block.values).sort()) {
         const field = Object.hasOwn(definition.fields, key) ? definition.fields[key] : undefined;
-        const shape = key === definition.composition?.parametersField ? parametersShape : field;
+        const shape = key === composition?.parametersField ? parametersShape : field;
         values[key] = await interpolate(block.values[key]!, shape, `block values.${key}`, scope, field?.osfType === "markdown");
       }
       validateContentValues(values, valueFields, "block values");
@@ -480,6 +482,9 @@ async function materializeContent(
       if (inclusion) assertContentName(inclusion.referenceField, "template reference field");
       const templateReferenceField = inclusion?.referenceField ?? definition.composition?.templateVersionField;
       if (templateReferenceField) {
+        if ((block.region ?? "body") !== "body" || block.layoutKey) {
+          contentError("DEPENDENCY_INVALID", "A template inclusion must be a body block; header and footer inclusions are not supported.");
+        }
         if (!Object.hasOwn(definition.fields, templateReferenceField) ||
             definition.fields[templateReferenceField]?.relationship?.target !== "TemplateVersion")
           contentError("DEPENDENCY_INVALID", "Template inclusion must select a declared template-version relationship.");
@@ -515,16 +520,21 @@ async function materializeContent(
           values,
           references,
           ...(materialization ? { materialization } : {}),
+          ...(block.region ? { region: block.region } : {}),
+          ...(block.layoutKey ? { layoutKey: block.layoutKey } : {}),
         });
       }
     }
   }
 
+  let ownPage: JsonObject | undefined;
   let identity: {templateVersionId:string;compositionHashVersion:"osf-template-content-v1"} | {documentId:string;documentVariantId:string;compositionHashVersion:"osf-document-content-v1"};
   if ("documentId" in request) {
     const variant=selectContentTemplateVariant({variants:request.variants},request.channel,request.locale);
     await visitBlocks(variant,{catalogue:contentVariableCatalogue({}),parameters:{}},{},[],[]);
     identity={documentId:request.documentId,documentVariantId:variant.id,compositionHashVersion:"osf-document-content-v1"};
+    // A document that follows no template is its own root: its variant's page settings travel with its content.
+    ownPage=variant.page;
   } else {
     await visit(request.templateVersionId, request.parameters ?? {}, [], []);
     identity={templateVersionId:request.templateVersionId,compositionHashVersion:"osf-template-content-v1"};
@@ -535,6 +545,7 @@ async function materializeContent(
     ...identity,
     channel: request.channel,
     locale: request.locale,
+    ...(ownPage ? { page: ownPage } : {}),
     blocks,
     compositions,
     templates,
@@ -554,4 +565,33 @@ export function materializeTemplateContent(input: MaterializeTemplateContentInpu
 }
 export function materializeDocumentContent(input: MaterializeDocumentContentInput, registry: CompiledContentBlockRegistry, resolvers: ContentResolvers): Promise<MaterializedDocumentContent> {
   return materializeContent(input,registry,resolvers) as Promise<MaterializedDocumentContent>;
+}
+
+/**
+ * A date as a reader meets it in running text: "11 mei 2026", "11 May 2026".
+ *
+ * Only a `date` variable spliced into a template is printed this way. A whole
+ * binding keeps the typed ISO value, because the field it fills is a date. A
+ * datetime keeps its ISO spelling: printing one needs a time zone the content
+ * engine does not have. A bare `en` reads day-month-year, the order the rest
+ * of the document's locales use; a region the author chose (`en-US`) is kept.
+ * A locale the platform does not know, or a value that is not a calendar
+ * date, falls through to the stored text.
+ *
+ * An IBAN is stored without spaces and reads in groups of four, the way it is
+ * printed on paper: "NL77 RABO 0333 5802 14".
+ */
+function printedValue(osfType: string | undefined, value: unknown, locale: string): string | undefined {
+  if (typeof value !== "string") return undefined;
+  if (osfType === "iban") return value.replace(/\s+/g, "").replace(/(.{4})(?=.)/g, "$1 ");
+  if (osfType !== "date") return undefined;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!parts) return undefined;
+  const date = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])));
+  if (date.toISOString().slice(0, 10) !== value) return undefined;
+  try {
+    return new Intl.DateTimeFormat(locale === "en" ? "en-GB" : locale, { dateStyle: "long", timeZone: "UTC" }).format(date);
+  } catch {
+    return undefined;
+  }
 }

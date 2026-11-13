@@ -303,7 +303,8 @@ export function validateContentVariants(variants: readonly ContentTemplateVarian
   const defaults = new Set<string>();
   for (const variant of variants) {
     assertContentRecord(variant, "variant");
-    exactKeys(variant, ["id", "channel", "locale", "default", "blocks", "allowedDefinitions"], "variant");
+    exactKeys(variant, ["id", "channel", "locale", "default", "blocks", "allowedDefinitions", "page"], "variant");
+    if (variant.page !== undefined) assertContentRecord(variant.page, "variant page settings");
     assertContentName(variant.id, "variant id");
     assertContentName(variant.channel, "variant channel");
     assertContentName(variant.locale, "variant locale");
@@ -334,7 +335,14 @@ export function validateContentVariants(variants: readonly ContentTemplateVarian
     const blockIds = new Set<string>();
     for (const block of variant.blocks) {
       assertContentRecord(block, "block");
-      exactKeys(block, ["id", "definitionKey", "schemaVersion", "values", "references"], "block");
+      exactKeys(block, ["id", "definitionKey", "schemaVersion", "values", "references", "region", "layoutKey"], "block");
+      if (block.region !== undefined && block.region !== "header" && block.region !== "footer")
+        contentError("INVALID_VALUE", "block region must be header or footer when present.");
+      if (block.layoutKey !== undefined) {
+        if (block.region === undefined) contentError("INVALID_VALUE", "Only a header or footer block names a page layout.");
+        if (typeof block.layoutKey !== "string" || !/^[a-z][A-Za-z0-9-]{0,63}$/.test(block.layoutKey))
+          contentError("INVALID_VALUE", "block layoutKey is not a valid page layout key.");
+      }
       assertContentName(block.id, "block id");
       assertContentName(block.definitionKey, "block definition");
       if (

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import { createEntityValueRegistry } from "../../modules/entity-value-registry.js";
-import { assertEntityValueFieldPolicy, projectEntityValueRow } from "./entity-value-io.js";
+import { assertEntityValueFieldPolicy, projectEntityValueRow, validateFrozenParameterValues } from "./entity-value-io.js";
 import type { GeneratedCrudTable } from "./types.js";
 
 for (const [policy, value] of Object.entries({ classification: { sensitivity: "pii" }, authorization: { roles: ["Fixture.Read"] }, permissions: { read: ["Fixture.Read"] }, writtenBy: ["fixture"], secureInput: {}, immutable: true })) {
@@ -21,6 +21,19 @@ test("entityValue permits immutable:false, but never false-valued authorization 
   expect(() => assertEntityValueFieldPolicy({ key: "text", osfType: "string", immutable: false }, {})).not.toThrow();
   for (const key of ["authorization", "permissions", "classification", "writtenBy", "secureInput"]) {
     expect(() => assertEntityValueFieldPolicy({ key: "text", osfType: "string", [key]: false }, {})).toThrow();
+  }
+});
+test("a definition may declassify a typed value as organisation data; a restricting sensitivity stays refused", () => {
+  const types = { email: { baseType: "string", classification: { sensitivity: "pii" } } };
+  expect(() => assertEntityValueFieldPolicy({ key: "mail", osfType: "email" }, types)).toThrow("Guarded or malformed");
+  for (const sensitivity of ["public", "internal"]) {
+    expect(() => assertEntityValueFieldPolicy({ key: "mail", osfType: "email", classification: { sensitivity } }, types)).toThrow("Guarded or malformed");
+    expect(() => assertEntityValueFieldPolicy({ key: "box", osfType: "object", children: [{ key: "mail", osfType: "email", classification: { sensitivity } }] }, types)).toThrow("Guarded or malformed");
+    expect(() => assertEntityValueFieldPolicy({ key: "mail", osfType: "email", classification: { sensitivity } }, types, 0, true)).not.toThrow();
+    expect(() => assertEntityValueFieldPolicy({ key: "box", osfType: "object", children: [{ key: "mail", osfType: "email", classification: { sensitivity } }] }, types, 0, true)).not.toThrow();
+  }
+  for (const classification of [{ sensitivity: "confidential" }, { sensitivity: "bsn" }, {}, { sensitivity: ["public"] }, "public"]) {
+    expect(() => assertEntityValueFieldPolicy({ key: "mail", osfType: "email", classification }, types)).toThrow("Guarded or malformed");
   }
 });
 test("entityValue rejects malformed/deep field shapes without treating JSON defaults as metadata", () => {
@@ -61,4 +74,11 @@ test("entityValue reads preserve persisted fields from an older definition while
   expect(() => projectEntityValueRow(table, {
     definition_key: "Copy", payload: { legacy: "kept" }, ev_source_id: "bad",
   }, registry)).toThrow("stored typed relationship is invalid");
+});
+
+test("frozen parameters preserve bound known keys but refuse unknown bound keys at write", () => {
+ const fields=[{key:"amount",osfType:"number",required:true}];
+ expect(()=>validateFrozenParameterValues(fields,{amount:"{{local.value}}"},true)).not.toThrow();
+ expect(()=>validateFrozenParameterValues(fields,{amount:2,notAParameter:"{{local.value}}"},true)).toThrow();
+ expect(()=>validateFrozenParameterValues(fields,{amount:"{{local.value}}"},false)).toThrow();
 });

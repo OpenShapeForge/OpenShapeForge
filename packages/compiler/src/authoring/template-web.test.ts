@@ -6,7 +6,7 @@ import { compile } from "./compiler/index.js";
 import { buildWebManifest } from "./web-manifest.js";
 
 const directory = join(import.meta.dir, "../../config/authoring");
-const slugs = ["template", "template-version", "template-variant", "block", "text-block", "youtube-embed", "template-block"];
+const slugs = ["template", "template-version", "template-variant", "block", "text-block", "youtube-embed", "template-block", "text-columns", "image-block", "spacer-block"];
 
 test("template editors can read the records they are allowed to create", () => {
   for (const slug of slugs) {

@@ -426,6 +426,21 @@ describe("template variants and local/global variables", () => {
     expect(raw.blocks[0]!.values.body).toBe("Rich Bouw*Groep*");
   });
 
+  test("a date spliced into text reads as a date in the content's language; a whole binding keeps the ISO value", async () => {
+    const f = fixture([text("line", "Dated {{local.day}}"), text("whole", "{{local.day}}")]);
+    f.registry.TextSection = { ...f.registry.TextSection!, fields: { body: { baseType: "string", required: true, variables: "template" } } };
+    f.versions.root = { ...f.versions.root!, parameters: { day: { osfType: "date", baseType: "string" } } };
+    const print = async (locale: string, day = "2026-05-11") => {
+      f.versions.root = { ...f.versions.root!, variants: f.versions.root!.variants.map((variant) => ({ ...variant, locale })) };
+      return (await materializeTemplateContent({ ...f.request, locale, parameters: { day } }, f.registry, f.resolvers)).blocks.map((block) => block.values.body);
+    };
+    expect(await print("en")).toEqual(["Dated 11 May 2026", "11 May 2026"]);
+    expect(await print("nl")).toEqual(["Dated 11 mei 2026", "11 mei 2026"]);
+    expect(await print("en-US")).toEqual(["Dated May 11, 2026", "May 11, 2026"]);
+    f.versions.root = { ...f.versions.root!, parameters: { day: { osfType: "iban", baseType: "string" } } };
+    expect(await print("nl", "NL77RABO0333580214")).toEqual(["Dated NL77 RABO 0333 5802 14", "NL77 RABO 0333 5802 14"]);
+  });
+
   test("a Markdown field escapes every construct a value could open, not only emphasis", async () => {
     const f = fixture([text("md", "See {{local.name}}")]);
     f.registry.TextSection = { ...f.registry.TextSection!, fields: { body: { osfType: "markdown", baseType: "string", required: true, variables: "template" } } };
@@ -898,6 +913,17 @@ describe("canonical block materialization", () => {
 });
 
 describe("template composition", () => {
+  test("refuses stored header/footer inclusions instead of silently losing their placement", async () => {
+    for (const region of ["header", "footer"] as const) {
+      const f = fixture([{ ...include("nested", "child"), region }]);
+      f.versions.child = version("child", [text("child-text")]);
+      await expect(materializeTemplateContent(f.request, f.registry, f.resolvers)).rejects.toThrow("template inclusion must be a body");
+    }
+    const f = fixture([include("nested", "child")]);
+    f.versions.child = version("child", [text("child-text")]);
+    expect((await materializeTemplateContent(f.request, f.registry, f.resolvers)).blocks).toHaveLength(1);
+  });
+
   test("expands nested templates in order and pins local/global values and source versions", async () => {
     const f = fixture([
       text("before", "Before"),

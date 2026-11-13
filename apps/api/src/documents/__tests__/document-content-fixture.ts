@@ -8,6 +8,7 @@
  * the Operation dispatcher).
  */
 import { expect } from "bun:test";
+import { resolvePalette } from "@openshapeforge/operations";
 import { createHash, randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql, type Transaction } from "kysely";
@@ -78,6 +79,9 @@ const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest(
 export type Staged = { artifactId: string; version: number; fileName: string; mediaType: string; sha256: string; byteSize: number; bytes: Uint8Array };
 export type Handlers = Record<string, (input: Record<string, unknown>, context: ModuleOperationContext) => Promise<{ value: unknown }>>;
 
+/** Block definitions whose values are plain fields, each with its own materialize Operation. */
+const FIELD_BLOCKS = ["TextBlock", "TextColumns", "ImageBlock", "SpacerBlock"] as const;
+
 export function platformFor(who: Session) {
   let active: Transaction<DB> | undefined;
   const events: { eventType: string; aggregateType: string; aggregateId: string; payload: Record<string, unknown> }[] = [];
@@ -87,9 +91,12 @@ export function platformFor(who: Session) {
   const operations = [
     operation("Document.get", "Document", "get", "read", { type: "object" }),
     operation("DocumentVariant.get", "DocumentVariant", "get", "read", { type: "object" }),
+    operation("TemplateVersion.get", "TemplateVersion", "get", "read", { type: "object" }),
     operation("Document.insertVariant", "Document", "invoke", "write", { type: "object" }),
     operation("DocumentVariant.insertBlock", "DocumentVariant", "invoke", "write", { type: "object" }),
-    operation("TextBlock.materialize", "TextBlock", "invoke", "read", { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: "TextBlock" }, values: { type: "object" } } }),
+    operation("TemplateBlock.materialize", "TemplateBlock", "invoke", "read", { type: "object", required: ["definitionKey", "values", "references", "referenceField", "parametersField"], properties: {
+      definitionKey: { const: "TemplateBlock" }, values: { type: "object" }, references: { type: "object" }, referenceField: { const: "version" }, parametersField: { const: "parameters" } } }),
+    ...FIELD_BLOCKS.map((entity) => operation(`${entity}.materialize`, entity, "invoke", "read", { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: entity }, values: { type: "object" } } })),
     operation("DocumentVersion.create", "DocumentVersion", "create", "write", { type: "object" }),
     operation("DocumentVersion.get", "DocumentVersion", "get", "read", { type: "object" }),
   ];
@@ -126,6 +133,11 @@ export function platformFor(who: Session) {
       async get(_session: unknown, id: string) { return operations.find((entry) => entry.id === id); },
       async execute(_session: unknown, request: { operation: { id: string }; input: Record<string, unknown> }) {
         try {
+          if (request.operation.id === "TemplateVersion.get") {
+            const row = (await sql<Record<string, unknown>>`select id, tenant_id as "tenantId", template_id as template, version_number as "versionNumber", snapshot, to_jsonb(updated_at) #>> '{}' as "updatedAt"
+              from erp.template_versions where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
+            return { data: row ?? null };
+          }
           if (request.operation.id === "Document.get" || request.operation.id === "DocumentVariant.get") {
             const table = request.operation.id === "Document.get" ? "documents" : "document_variants";
             const row = (await sql<Record<string, unknown>>`select id, to_jsonb(updated_at) #>> '{}' as "updatedAt" from ${sql.id("erp", table)} where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
@@ -139,13 +151,16 @@ export function platformFor(who: Session) {
             const row = (await sql<{ updatedAt: string }>`select to_jsonb(updated_at) #>> '{}' as "updatedAt" from ${sql.id("erp", table)} where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
             return { data: { ...result, parent: { updatedAt: row!.updatedAt } } };
           }
-          if (request.operation.id === "TextBlock.materialize") return { data: (await handlers.materializeFields!(request.input, context)).value };
+          if (FIELD_BLOCKS.some((entity) => request.operation.id === `${entity}.materialize`)) return { data: (await handlers.materializeFields!(request.input, context)).value };
+          if (request.operation.id === "TemplateBlock.materialize") return { data: (await handlers.composeTemplate!(request.input, context)).value };
           if (request.operation.id === "DocumentVersion.create") return { data: (await handlers.createDocumentVersion!(request.input, context)).value };
           if (request.operation.id === "DocumentVersion.get") {
             const row = (await sql<Record<string, unknown>>`select id, document_id as "documentId", artifact_id as "artifactId", artifact_version::int as "artifactVersion",
               checksum, mime_type as "mimeType", byte_size::int as "byteSize", file_name as "fileName" from erp.document_versions where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
             return { data: row ?? null };
           }
+          // The palette a page color is read from: the standard colors, no tenant colors.
+          if (request.operation.id === "colors.list") return { data: { colors: resolvePalette([]) } };
           throw new Error(`Unexpected Operation ${request.operation.id}`);
         } catch (error) {
           const failure = (error as { operationError?: unknown }).operationError;

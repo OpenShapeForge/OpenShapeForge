@@ -166,6 +166,21 @@ describe("the policy boundary of a definition that arrives at runtime", () => {
       .toThrow(/not a value type this runtime can protect/);
   });
 
+  test("a column of organization data takes a classified type, never an authored policy", () => {
+    const own = { definitionField: "definition", definitionColumn: "definition", organizationData: true };
+    for (const osfType of ["email", "phone", "iban"]) {
+      const definition = { key: "value", osfType, required: false };
+      expect(() => assertTypedDefinitionSupported(definition, "definition", "submitted", own)).not.toThrow();
+      expect(() => assertTypedDefinitionSupported(definition, "definition", "stored", own)).not.toThrow();
+      expect(() => assertTypedDefinitionSupported(definition, "definition", "stored")).toThrow(/cannot protect|can protect/);
+    }
+    expect(() => assertTypedDefinitionSupported({ key: "value", osfType: "object", children: [{ key: "mail", osfType: "email" }] }, "definition", "stored", own)).not.toThrow();
+    for (const guarded of [{ classification: { sensitivity: "pii" } }, { authorization: { roles: { read: ["Secret.Read"] } } }, { immutable: true }]) {
+      expect(() => assertTypedDefinitionSupported({ key: "value", osfType: "email", ...guarded }, "definition", "stored", own)).toThrow();
+    }
+    expect(() => assertTypedDefinitionSupported({ key: "value", osfType: "Relation" }, "definition", "stored", own)).toThrow();
+  });
+
   test("a supported definition passes both halves of the boundary", () => {
     for (const definition of [text, money, flag, tags]) {
       expect(() => assertTypedDefinitionSupported(definition, "definition", "submitted")).not.toThrow();

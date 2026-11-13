@@ -1,3 +1,4 @@
+import { guardDocumentPageWrite } from "./document-page-values.js";
 import { guardColorWrite } from "./color-references.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { applyDefaultTemplates } from "./default-template.js";
@@ -323,6 +324,7 @@ async function insertGeneratedRowInTransaction(
   const identified = prepareProtectedFieldWrites(table, session, defaulted, "create", undefined, false);
   const entityPrepared = await prepareEntityValueWriteInTransaction(trx, session, table, identified, "create", undefined, entityValues);
   const prepared = await prepareTypedValueWrite(trx, session, table, entityPrepared);
+  guardDocumentPageWrite(table, prepared);
   await guardColorWrite(trx, session, table, prepared);
   // A value typed by a stored FieldDefinition is checked against it here, so
   // the pair holds however the write arrived.
@@ -594,6 +596,7 @@ async function applyGeneratedRowUpdate(
     const protectedValues = prepareProtectedFieldWrites(table, session, values, "update", current ?? undefined, caller, trustedFields);
     const entityPrepared = await prepareEntityValueWriteInTransaction(trx, session, table, protectedValues, "update", current ?? undefined, entityValues);
     let prepared = await prepareTypedValueWrite(trx, session, table, entityPrepared, current ?? undefined);
+    guardDocumentPageWrite(table, prepared, current ?? undefined);
     await guardColorWrite(trx, session, table, prepared, current ?? undefined);
     // Either half of a typed-value pair may be the one that changes; the row
     // under the lock supplies the other.

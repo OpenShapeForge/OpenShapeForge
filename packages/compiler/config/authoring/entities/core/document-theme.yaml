@@ -77,6 +77,18 @@ fields:
       items: &documentFonts
         - { value: dm-sans, label: { en: DM Sans, nl: DM Sans } }
         - { value: noto-sans, label: { en: Noto Sans, nl: Noto Sans } }
+  - key: pageDesign
+    osfType: object
+    required: false
+    defaultValue: {}
+    label: { en: Page design, nl: Paginaontwerp }
+    description:
+      en: Design tokens for paged documents - the page size in pixels, named colors, named text styles and inlined
+        image assets that blocks select by key. Empty means this theme has no page design.
+      nl: Ontwerptokens voor gepagineerde documenten - het paginaformaat in pixels, benoemde kleuren, benoemde
+        tekststijlen en ingesloten beelden die blokken en sectie-einden op sleutel kiezen. Leeg betekent dat dit
+        thema geen paginaontwerp heeft.
+    persisted: { column: page_design, storageClass: core }
   - key: typography
     osfType: object
     required: true
@@ -221,6 +233,14 @@ operations:
         additionalProperties: false
         required: [theme, resolution]
         properties:
+          templatePages:
+            type: object
+            x-osf-i18n: { title: { en: Template page settings, nl: Pagina-instellingen van het template } }
+            description: For a document - the page settings its template version froze for each variant laid out as pages, keyed by channel/locale. A document variant that sets no layout of its own uses these.
+          pageDesign:
+            type: ["object", "null"]
+            x-osf-i18n: { title: { en: Page design, nl: Paginaontwerp } }
+            description: The theme's design tokens for paged documents - page size, colors, text styles and inlined images - or null when the theme has none.
           theme:
             type: ["object", "null"]
             additionalProperties: false

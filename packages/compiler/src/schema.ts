@@ -356,6 +356,7 @@ export type ColumnDefinition = {
     definitionField: string;
     definitionColumn: string;
     encrypted?: boolean;
+    organizationData?: boolean;
     documentField?: string;
     documentColumn?: string;
 

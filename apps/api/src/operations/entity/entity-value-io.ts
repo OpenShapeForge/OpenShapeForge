@@ -26,10 +26,14 @@ export type EntityValueIOContext = {
 /** Same unsupported policies as the compiler, including inherited/nested fields. */
 const BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime", "object"]);
 
+/** The sensitivities that restrict nothing; `confidential`, `pii` and `bsn` do. */
+const UNRESTRICTED = new Set(["public", "internal"]);
+
 export function assertEntityValueFieldPolicy(
   field: Readonly<Record<string, unknown>>,
   osfTypes: Readonly<Record<string, unknown>> = fieldSchemaRegistry.osfTypes,
   depth = 0,
+  organizationData = false,
 ): void {
   const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
   const invalid = (): never => { throw generatedCrudError("Guarded or malformed entity-value fields require a dedicated adapter.", "INVALID_DEFINITION"); };
@@ -43,6 +47,17 @@ export function assertEntityValueFieldPolicy(
   if (depth > 0 && (field.relationship !== undefined || record(semantic) && semantic.kind === "entity")) invalid();
   for (const key of ["classification", "authorization", "permissions", "writtenBy", "secureInput", "immutable"]) {
     const authored = field[key], inherited = record(semantic) ? semantic[key] : undefined;
+    if (key === "classification") {
+      // A definition may say what its value is not: an organisation's own
+      // e-mail address is typed `email` and is nobody's personal data. Only columns explicitly marked as organisation data may
+      // override the type's inherited classification, and only a sensitivity
+      // that restricts nothing (`public`, `internal`) is storable here; a
+      // restricting one still needs a column and an adapter of its own.
+      if (authored !== undefined && !(record(authored) && UNRESTRICTED.has(authored.sensitivity as string))) invalid();
+      const effective = organizationData ? authored : inherited;
+      if (effective !== undefined && !(record(effective) && UNRESTRICTED.has(effective.sensitivity as string))) invalid();
+      continue;
+    }
     if (key === "immutable" ? authored === true || inherited === true : authored !== undefined || inherited !== undefined) invalid();
   }
   // The target shape of an entity reference is not embedded content. Its record
@@ -53,12 +68,12 @@ export function assertEntityValueFieldPolicy(
       if (!Array.isArray(node[key])) invalid();
       for (const child of node[key] as unknown[]) {
         if (!record(child)) invalid();
-        assertEntityValueFieldPolicy(child as Record<string, unknown>, osfTypes, depth + 1);
+        assertEntityValueFieldPolicy(child as Record<string, unknown>, osfTypes, depth + 1, organizationData);
       }
     }
     if (node.item !== undefined) {
       if (!record(node.item)) invalid();
-      assertEntityValueFieldPolicy(node.item as Record<string, unknown>, osfTypes, depth + 1);
+      assertEntityValueFieldPolicy(node.item as Record<string, unknown>, osfTypes, depth + 1, organizationData);
     }
   }
 }
@@ -125,7 +140,7 @@ export async function prepareEntityValueWriteInTransaction(
 ): Promise<Map<GeneratedCrudColumn, unknown>> {
   const result = new Map(values);
   const references: Array<{ entityName: string; id: string; schema: string; table: string }> = [];
-  const dynamicValues: Array<{ entityName: string; id: string; headEntity: string; snapshotColumn: string; values: unknown }> = [];
+  const dynamicValues: Array<{ entityName: string; id: string; headEntity: string; snapshotColumn: string; values: unknown; wholeBindings: boolean }> = [];
   for (const carrier of entityValueCarriers(table, context.registry)) {
     const valueColumn = table.columns.find((column) => column.name === carrier.valuesColumn)!;
     const definitionColumn = table.columns.find((column) => column.name === carrier.definitionColumn)!;
@@ -152,7 +167,7 @@ export async function prepareEntityValueWriteInTransaction(
       // Parameter-bound references resolve later when the enclosing template is materialized.
       if (!reference) continue;
       dynamicValues.push({ entityName: reference.entityName, id: reference.id, headEntity: binding.headEntity,
-        snapshotColumn: binding.snapshotColumn, values: split.values[field.key] ?? {} });
+        snapshotColumn: binding.snapshotColumn, values: split.values[field.key] ?? {}, wholeBindings: field.variables === "whole" || field.variables === "both" });
     }
   }
   // Stable order bounds ordinary multi-reference deadlocks. The DB remains the
@@ -184,8 +199,7 @@ export async function prepareEntityValueWriteInTransaction(
     const head = snapshot?.head?.row;
     const fields = head?.[dynamic.snapshotColumn] === null ? [] : head?.[dynamic.snapshotColumn];
     if (snapshot?.schemaVersion !== 1 || snapshot.entity !== dynamic.headEntity || !head || !Object.hasOwn(head, dynamic.snapshotColumn) || !Array.isArray(fields)) throw generatedCrudError("The frozen field definitions are unavailable.", "INVALID_DEFINITION");
-    const valid = generatedRuntimeFieldSchemas.validateObject(fields, dynamic.values);
-    if (!valid.valid) throw operationFailure(valid.error);
+    validateFrozenParameterValues(fields, dynamic.values, dynamic.wholeBindings);
   }
   return result;
 }
@@ -201,4 +215,17 @@ export function projectEntityValueRow(table: GeneratedCrudTable, row: GeneratedE
   }
   for (const name of entityValuePhysicalColumns(table, registry)) delete result[name];
   return result;
+}
+
+/** Bound known parameters defer value validation; unknown keys never disappear. */
+export function validateFrozenParameterValues(fields: readonly Readonly<Record<string, unknown>>[], values: unknown, wholeBindings: boolean): void {
+  const known = new Set(fields.flatMap(field => field && typeof field === "object" && typeof (field as {key?:unknown}).key === "string" ? [(field as {key:string}).key] : []));
+  // Where the field permits it, a value that is exactly one `{{…}}` token is a binding, not a value: the variable
+  // it names is resolved, and checked against this field's type, when the enclosing content is materialized.
+  const bound = new Set(wholeBindings && values && typeof values === "object" && !Array.isArray(values)
+      ? Object.entries(values as Record<string, unknown>).filter(([name, value]) => known.has(name) && typeof value === "string" && /^\{\{[^{}]+\}\}$/.test(value.trim())).map(([name]) => name) : []);
+  const checkedFields = bound.size ? fields.filter((field) => !(field && typeof field === "object" && bound.has(String((field as { key?: unknown }).key)))) : fields;
+  const checkedValues = bound.size ? Object.fromEntries(Object.entries(values as Record<string, unknown>).filter(([name]) => !bound.has(name))) : values;
+  const valid = generatedRuntimeFieldSchemas.validateObject(checkedFields, checkedValues);
+  if (!valid.valid) throw operationFailure(valid.error);
 }

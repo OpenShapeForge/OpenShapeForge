@@ -224,7 +224,7 @@ describe("web manifest projection", () => {
     expect(projected.views.record?.routes).toEqual({read:"/chips/:id",create:"/chips/new"});
     expect(projected.views.record?.formGroups?.create?.[0]?.fields).toContain("definition");
     expect(projected.views.record?.formGroups?.create?.[0]?.fields).toContain("value");
-    expect(projected.fields.value!.typedBy).toEqual({definitionField:"definition"});
+    expect(projected.fields.value!.typedBy).toEqual({definitionField:"definition", organizationData:true});
     expect(projected.fields.definition!.osfType).toBe("fieldDefinition");
     expect(projected.fields.definition!.presentation?.component).toBe("FieldDefinitionEditor");
     expect(projected.fields.definition!.authoring).toEqual({profile:"fullFieldDefinition",lockedKeys:["key"]});

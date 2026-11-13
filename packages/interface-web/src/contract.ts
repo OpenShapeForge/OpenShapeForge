@@ -190,7 +190,7 @@ export type WebFieldProjection = {
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
   valueFieldsFrom?: { reference: string; field: string };
-  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
+  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean; organizationData?: boolean };
   allowedDefinitions?: string[];
   relationship?: {
     targetEntityId: string;

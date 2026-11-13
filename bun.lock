@@ -183,7 +183,7 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.2.56",
+      "version": "0.2.57",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },
@@ -205,7 +205,7 @@
     },
     "packages/documents": {
       "name": "@openshapeforge/documents",
-      "version": "0.2.28",
+      "version": "0.2.29",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "@openshapeforge/versioning": "workspace:*",
@@ -230,7 +230,7 @@
     },
     "packages/interface-web": {
       "name": "@openshapeforge/interface-web",
-      "version": "0.2.30",
+      "version": "0.2.31",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
       },

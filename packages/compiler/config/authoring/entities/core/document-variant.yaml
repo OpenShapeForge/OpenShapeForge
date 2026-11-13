@@ -54,6 +54,96 @@ fields:
   # The owned, sortable, lock-aware `blocks` collection is derived from
   # Block.documentVariant (entities/core/block.yaml), where its
   # allowedDefinitions, childAuthorization and childLock are declared.
+  - key: pageLayout
+    label: { en: Layout, nl: Indeling }
+    description:
+      en: Continuous is one flowing text without zones, as a knowledge base article. Pages gives every page a header, content and footer zone. Empty follows the template.
+      nl: Doorlopend is één doorlopende tekst zonder zones, zoals een kennisbankartikel. Pagina's geeft elke pagina een koptekst, inhoud en voettekst. Leeg volgt het template.
+    osfType: string
+    required: false
+    options:
+      type: static
+      items:
+        - { value: continuous, label: { en: Continuous, nl: Doorlopend } }
+        - { value: pages, label: { en: Pages, nl: "Pagina's" } }
+    persisted: { column: page_layout, storageClass: core }
+  - key: pageFormat
+    label: { en: Page format, nl: Paginaformaat }
+    description:
+      en: Empty takes the format of the document theme, or A4 without a theme.
+      nl: Leeg neemt het formaat van het documentthema, of A4 zonder thema.
+    osfType: string
+    required: false
+    options:
+      type: static
+      items:
+        - { value: a4, label: { en: A4, nl: A4 } }
+        - { value: a5, label: { en: A5, nl: A5 } }
+        - { value: letter, label: { en: Letter, nl: Letter } }
+        - { value: custom, label: { en: Custom size, nl: Eigen maat } }
+    persisted: { column: page_format, storageClass: core }
+  - key: pageWidth
+    label: { en: Page width (px), nl: Paginabreedte (px) }
+    osfType: number
+    required: false
+    validation: { min: 100, max: 5000 }
+    persisted: { column: page_width, storageClass: core }
+  - key: pageHeight
+    label: { en: Page height (px), nl: Paginahoogte (px) }
+    osfType: number
+    required: false
+    validation: { min: 100, max: 5000 }
+    persisted: { column: page_height, storageClass: core }
+  - key: pageMargin
+    label: { en: Page margin (px), nl: Paginamarge (px) }
+    osfType: number
+    required: false
+    validation: { min: 0, max: 400 }
+    persisted: { column: page_margin, storageClass: core }
+  - key: pageGap
+    label: { en: "Space between header, content and footer (px)", nl: "Ruimte tussen kop, inhoud en voet (px)" }
+    osfType: number
+    required: false
+    validation: { min: 0, max: 400 }
+    persisted: { column: page_gap, storageClass: core }
+  - key: pageBlockGap
+    label: { en: Space between blocks (px), nl: Ruimte tussen blokken (px) }
+    osfType: number
+    required: false
+    validation: { min: 0, max: 400 }
+    persisted: { column: page_block_gap, storageClass: core }
+  - key: pageBackground
+    label: { en: Background color, nl: Achtergrondkleur }
+    description:
+      en: A color of the organization's palette or one of the standard colors. Empty leaves the page white.
+      nl: Een kleur uit het palet van de organisatie of een van de standaardkleuren. Leeg laat de pagina wit.
+    osfType: color
+    required: false
+    persisted: { column: page_background, storageClass: core }
+  - key: pageBackgroundImage
+    label: { en: Background image, nl: Achtergrondbeeld }
+    description:
+      en: Key of an image of the document theme, stretched over the whole page.
+      nl: Sleutel van een beeld uit het documentthema, uitgerekt over de hele pagina.
+    osfType: string
+    required: false
+    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+    persisted: { column: page_background_image, storageClass: core }
+  - key: pageBodyAlignment
+    label: { en: Content position, nl: Plaats van de inhoud }
+    description:
+      en: Where the content stands between header and footer on a page it does not fill.
+      nl: Waar de inhoud staat tussen kop en voet op een pagina die ze niet vult.
+    osfType: string
+    required: false
+    options:
+      type: static
+      items:
+        - { value: top, label: { en: Top, nl: Bovenaan } }
+        - { value: aboveCenter, label: { en: Above the middle, nl: Boven het midden } }
+        - { value: center, label: { en: Middle, nl: Midden } }
+        - { value: bottom, label: { en: Bottom, nl: Onderaan } }
+    persisted: { column: page_body_alignment, storageClass: core }
 operations:
   insertBlock:
     name: { en: Add block, nl: Blok toevoegen }
@@ -145,11 +235,14 @@ interfaces:
           tabs:
             - id: variant
               label: { en: Variant, nl: Variant }
-              groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }]
+              groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }, { title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]
             - id: blocks
               label: { en: Blocks, nl: Blokken }
               relationship: { name: blocks, view: previewStack }
         modes:
           create:
             title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }]
+            groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }, { title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]
+          update:
+            title: { en: Edit, nl: Bewerken }
+            groups: [{ title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]

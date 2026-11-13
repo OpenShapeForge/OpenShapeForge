@@ -617,6 +617,52 @@ operations:
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
+  renderPages:
+    name: Lay out document pages
+    description: >-
+      Returns the document's current editable content laid out as pages, without changing any stored content: one
+      self-contained HTML document per section, for a print engine to turn into a PDF. Blocks flow in order; the
+      variant's page settings determine its pages, with supported header and footer blocks repeated on each page
+      of that section. Colors, text styles and images come from the page design of the document's theme. Fonts are
+      not included; the host that prints supplies them.
+    implementation: { type: plugin, plugin: documents, handler: renderDocumentPages }
+    target: { scope: record, inputField: id }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, channel, locale]
+        properties:
+          id:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Document }
+            x-osf-i18n: { title: { en: Document, nl: Document } }
+          channel:
+            type: string
+            enum: [document, email, whatsapp]
+            x-osf-i18n:
+              title: { en: Channel, nl: Kanaal }
+              enum:
+                {
+                  document: { en: Document, nl: Document },
+                  email: { en: Email, nl: E-mail },
+                  whatsapp: { en: WhatsApp, nl: WhatsApp }
+                }
+          locale:
+            type: string
+            pattern: "^[a-z]{2}(-[A-Z]{2})?$"
+            x-osf-i18n: { title: { en: Language, nl: Taal } }
+    output: { schema: { type: object } }
+    errors:
+      - { status: 403, code: FORBIDDEN, description: The document or its template version is not accessible. }
+      - { status: 404, code: NOT_FOUND, description: The document does not exist. }
+      - { status: 409, code: INVALID_STATE, description: Local document parameters require a linked template definition. }
+    auth: { mode: session, roles: [CaseFile.All.Read, CaseFile.All.ReadWrite, Organization.All.Read, Organization.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
   update:
     name: { en: Update document, nl: Document wijzigen }
     description: Updates the document metadata without changing its version pointer.
@@ -638,6 +684,7 @@ interfaces:
     operations:
       linkTemplate: { method: POST, path: "/api/document-content/:id/link-template" }
       materialize: { method: POST, path: "/api/document-content/:id/materialize" }
+      renderPages: { method: POST, path: "/api/document-content/:id/pages" }
   graphql: {}
   mcp: {}
   web:

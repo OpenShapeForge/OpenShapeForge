@@ -70,6 +70,10 @@ export type ContentBlock = {
   readonly schemaVersion: number;
   readonly values: JsonObject;
   readonly references: Readonly<Record<string, ContentReferenceValue>>;
+  /** Page region; absent means the block flows in the body. */
+  readonly region?: "header" | "footer";
+  /** Page layout a header or footer block belongs to; absent means the default layout. */
+  readonly layoutKey?: string;
 };
 
 export type TemplateParameter = ContentValueShape & { readonly defaultValue?: JsonValue; readonly relationship?: { readonly target: string } };
@@ -83,6 +87,11 @@ export type ContentTemplateVariant = {
   /** The owning collection's order is authoritative. No second position property exists. */
   readonly blocks: readonly ContentBlock[];
   readonly allowedDefinitions?: readonly string[];
+  /**
+   * The variant's page settings when its content is laid out as pages; absent
+   * for continuous content. A document's own setting, else its template's.
+   */
+  readonly page?: JsonObject;
 };
 
 export type ContentTemplateVersion = {
@@ -146,6 +155,14 @@ export type ContentResolvers = {
     version: ContentTemplateVersion,
     values: JsonObject,
   ) => MaybePromise<void>;
+  /**
+   * Which fields of a block definition form a template inclusion, when the
+   * definition does not carry that as static metadata: the reference to the
+   * included version and the field holding its local values. With it the
+   * engine types those values by the included template's own parameters, so a
+   * value may name a variable of the including template.
+   */
+  readonly compositionContract?: (definitionKey: string) => { readonly templateVersionField: string; readonly parametersField: string } | undefined;
   readonly validateBlockValues?: (definitionKey: string, values: JsonObject) => MaybePromise<void>;
   readonly materializeBlock?: (input: {
     readonly definitionKey: string;
@@ -175,6 +192,10 @@ export type MaterializedContentBlock = {
     Record<string, ContentResolvedEntity | readonly ContentResolvedEntity[] | null>
   >;
   readonly materialization?: ContentBlockMaterialization;
+  /** Page region; absent means the block flows in the body. */
+  readonly region?: "header" | "footer";
+  /** Page layout a header or footer block belongs to; absent means the default layout. */
+  readonly layoutKey?: string;
 };
 
 export type MaterializedTemplateContent = {
@@ -217,5 +238,7 @@ export type MaterializeDocumentContentInput = {
 export type MaterializedDocumentContent = Omit<MaterializedTemplateContent, "templateVersionId" | "compositionHashVersion"> & {
   readonly documentId: string;
   readonly documentVariantId: string;
+  /** The page settings of a document that follows no template, when it is laid out as pages. */
+  readonly page?: JsonObject;
   readonly compositionHashVersion: "osf-document-content-v1";
 };

@@ -331,6 +331,18 @@ export function contentResolvers(context: ModuleOperationContext, trx: unknown, 
       if (!valid.valid) throw operationFailure(valid.error);
     },
     validateBlockValues(name, values) { validatedValues(context, name, values); },
+    // A field that takes its value fields from a template-version reference is an inclusion's local values.
+    compositionContract(name) {
+      const entry = Object.hasOwn(carrier.definitions, name) ? carrier.definitions[name] : undefined;
+      for (const field of entry?.fields ?? []) {
+        const source = field.valueFieldsFrom;
+        if (!isObject(source) || typeof source.reference !== "string" || typeof field.key !== "string") continue;
+        if (entry!.references.some((reference) => reference.fieldKey === source.reference && reference.targetEntity === "TemplateVersion")) {
+          return { templateVersionField: source.reference, parametersField: field.key };
+        }
+      }
+      return undefined;
+    },
     materializeBlock: blockMaterializer(context, carrier, channel, locale),
   };
 }

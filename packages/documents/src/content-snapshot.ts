@@ -3,6 +3,7 @@ import { operationFailure } from "@openshapeforge/operations";
 import type { RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import { immutableContent, type JsonObject } from "./content/json.js";
 import type { ContentBlock, ContentReferenceValue, ContentTemplateVariant } from "./content/types.js";
+import { variantPageValues } from "./page/html.js";
 
 /**
  * Reads the frozen row tree that `@openshapeforge/versioning` writes into
@@ -102,7 +103,26 @@ export function contentBlockFromRow(row: Record<string, unknown>, owner: { reado
   // Reference slots live in their own columns; a stray key in the JSON body
   // must not be able to smuggle a second binding for the same field.
   const values = Object.fromEntries(Object.entries(stored as Record<string, unknown>).filter(([key]) => !Object.hasOwn(bound, key)));
-  return { id, definitionKey: definitionKey as string, schemaVersion: version, values: immutableContent(values) as JsonObject, references: bound };
+  return { id, definitionKey: definitionKey as string, schemaVersion: version, values: immutableContent(values) as JsonObject, references: bound, ...placement(row, origin) };
+}
+
+const LAYOUT_KEY = /^[a-z][A-Za-z0-9-]{0,63}$/;
+
+/**
+ * Page placement of a block row. A body block adds nothing, so content that
+ * uses no header or footer keeps the hash it had before regions existed; a
+ * snapshot frozen before the columns existed reads as body.
+ */
+function placement(row: Record<string, unknown>, origin: string): Pick<ContentBlock, "region" | "layoutKey"> {
+  const region = row.region ?? "body";
+  if (region !== "body" && region !== "header" && region !== "footer") invalid(`The ${origin} block has an unknown page region.`);
+  const layoutKey = row.layout_key ?? null;
+  if (layoutKey !== null && (typeof layoutKey !== "string" || !LAYOUT_KEY.test(layoutKey))) invalid(`The ${origin} block has an invalid page layout key.`);
+  if (region === "body") {
+    if (layoutKey !== null) invalid(`The ${origin} body block names a page layout; only header and footer blocks do.`);
+    return {};
+  }
+  return { region, ...(layoutKey ? { layoutKey } : {}) };
 }
 
 function block(entry: SnapshotNode, variantId: string, selection: TemplateSnapshotSelection): ContentBlock {
@@ -129,10 +149,12 @@ export function templateSnapshotContent(snapshot: unknown, selection: TemplateSn
     const locale = candidate.row.locale;
     if (typeof locale !== "string" || !locale) invalid("The frozen variant has no locale.");
     if (candidate.row.tenant_id !== selection.tenantId || candidate.row[VARIANT_OWNER_COLUMN] !== selection.templateId) invalid("The frozen variant belongs to another template or tenant.");
+    const page = variantPageValues(candidate.row);
     const blocks = childRows(candidate, selection.carrier.table, "block").map((entry) => block(entry, variantId, selection));
     variants.push({
       id: variantId, channel: selection.channel, locale: locale as string, blocks, allowedDefinitions: [...selection.allowedDefinitions],
       ...(candidate.row[VARIANT_DEFAULT_COLUMN] === true ? { default: true } : {}),
+      ...(page ? { page: page as JsonObject } : {}),
     });
   }
   return { parameterFields: parameterFields as Record<string, unknown>[], variants };

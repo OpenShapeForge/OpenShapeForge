@@ -98,6 +98,9 @@ fields:
     required: true
     typedBy:
       definitionField: definition
+      # A chip is the organization's own data (its e-mail address, phone number,
+      # IBAN), so it takes those types without their personal-data classification.
+      organizationData: true
     label:
       en: Value
       nl: Waarde

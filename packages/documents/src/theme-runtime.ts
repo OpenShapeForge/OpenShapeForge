@@ -13,7 +13,9 @@ import {
   type DocumentTypography,
   type ResolvedDocumentTheme,
 } from "./theme-tokens.js";
-import { themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
+import { themeIdFromTemplateSnapshot, themeIdValue, pagesFromTemplateSnapshot } from "./theme-resolution.js";
+import { pageDesignFromStored } from "./page-design.js";
+import { variantPageValues } from "./page/html.js";
 import { object, refuse, uuid } from "./validation.js";
 
 type ThemeRow = Readonly<{
@@ -26,6 +28,7 @@ type ThemeRow = Readonly<{
   accentColor: string;
   fontFamily: string;
   typography: unknown;
+  pageDesign: unknown;
   updatedAt: string;
 }>;
 
@@ -33,7 +36,7 @@ const SOURCE_FIELDS = ["documentId", "templateId", "templateVersionId"] as const
 const STYLE_FIELDS = new Set(["fontFamily", "fontSize", "lineHeight", "fontWeight", "colorRole", "spaceBefore"]);
 const TYPOGRAPHY_FIELDS = new Set(["body", "heading1", "heading2", "heading3", "quote", "list"]);
 const THEME_SELECT = `id, key, name, is_default as "isDefault", surface_color as "surfaceColor", text_color as "textColor",
-  accent_color as "accentColor", font_family as "fontFamily", typography, updated_at::text as "updatedAt"`;
+  accent_color as "accentColor", font_family as "fontFamily", typography, page_design as "pageDesign", updated_at::text as "updatedAt"`;
 
 function sourceField(input: Record<string, unknown>): (typeof SOURCE_FIELDS)[number] {
   const present = SOURCE_FIELDS.filter((field) => input[field] != null);
@@ -132,6 +135,7 @@ export const resolveDocumentTheme: ModuleOperationHandler = async (input, contex
   const palette = (paletteResult.data as { colors: ResolvedColor[] }).colors;
   const resolved = await platform.db.withSession(session, async (trx) => {
     let storedThemeId: string | null = null;
+    let templatePages: Record<string, Record<string, unknown>> = {};
     let kind: DocumentThemeResolutionKind = field === "documentId" ? "document" : field === "templateId" ? "template" : "template-version";
     if (field === "templateId") {
       const template = (await rows<{ document_theme_id: string | null }>(trx,
@@ -153,6 +157,7 @@ export const resolveDocumentTheme: ModuleOperationHandler = async (input, contex
           "select snapshot from erp.template_versions where tenant_id = $1 and id = $2 for share", [tenantId, versionId]))[0];
         if (!version) refuse("NOT_FOUND", "The document's template version no longer exists.");
         storedThemeId = themeIdFromTemplateSnapshot(version.snapshot);
+        templatePages = pagesFromTemplateSnapshot(version.snapshot, variantPageValues);
         kind = storedThemeId ? "template-version" : "document";
       }
     }
@@ -162,6 +167,11 @@ export const resolveDocumentTheme: ModuleOperationHandler = async (input, contex
     return {
       theme: theme ? projectTheme(theme, palette) : null,
       resolution: { kind, sourceId, themeId: theme?.id ?? null },
+      // Beside the theme rather than inside it: readers that know only the
+      // closed text theme keep working, and a paged editor finds its tokens.
+      pageDesign: theme ? pageDesignFromStored(theme.pageDesign) : null,
+      // What a document that sets no layout of its own inherits: its template's page settings, by channel/locale.
+      templatePages,
     };
   });
   return { value: resolved };

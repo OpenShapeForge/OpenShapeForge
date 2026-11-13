@@ -277,7 +277,7 @@ export interface FieldDefinition {
   entityValue?: { definitionField: string; parameterBindings?: boolean };
   valueFieldsFrom?: { reference: string; field: string };
   /** This value's contract is the FieldDefinition stored in the named sibling field. */
-  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
+  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean; organizationData?: boolean };
   /** Allowed entity-value definitions on this relationship collection. */
   allowedDefinitions?: string[];
   /**

@@ -170,3 +170,9 @@ describe("buildPagedDocument", () => {
     expect(() => buildPagedDocument({ title: "t", locale: "en", blocks: [], fonts: [], design: { ...design, colors: { foreground: "red;} body{display:none" } } })).toThrow(PagedDocumentError);
   });
 });
+
+test("paged rendering refuses an unselected legacy header layout explicitly, but preserves selected legacy layouts", () => {
+ const blocks=[block("head","TextBlock",{markdown:"Header"},"header","cover"),block("body","TextBlock",{markdown:"Body"})];
+ expect(()=>build(blocks)).toThrow("does not select");
+ expect(build(blocks,{"":{layout:"cover"}}).sections[0]!.html).toContain("Header");
+});

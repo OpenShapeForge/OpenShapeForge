@@ -84,7 +84,7 @@ fields:
     label: { en: Page design, nl: Paginaontwerp }
     description:
       en: Design tokens for paged documents - the page size in pixels, named colors, named text styles and inlined
-        image assets that blocks and section breaks select by key. Empty means this theme has no page design.
+        image assets that blocks select by key. Empty means this theme has no page design.
       nl: Ontwerptokens voor gepagineerde documenten - het paginaformaat in pixels, benoemde kleuren, benoemde
         tekststijlen en ingesloten beelden die blokken en sectie-einden op sleutel kiezen. Leeg betekent dat dit
         thema geen paginaontwerp heeft.

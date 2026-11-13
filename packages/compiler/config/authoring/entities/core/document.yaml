@@ -621,8 +621,8 @@ operations:
     name: Lay out document pages
     description: >-
       Returns the document's current editable content laid out as pages, without changing any stored content: one
-      self-contained HTML document per section, for a print engine to turn into a PDF. Blocks flow in order; a
-      section break starts a new page and selects a page layout, whose header and footer blocks repeat on every page
+      self-contained HTML document per section, for a print engine to turn into a PDF. Blocks flow in order; the
+      variant's page settings determine its pages, with supported header and footer blocks repeated on each page
       of that section. Colors, text styles and images come from the page design of the document's theme. Fonts are
       not included; the host that prints supplies them.
     implementation: { type: plugin, plugin: documents, handler: renderDocumentPages }

@@ -49,11 +49,12 @@ export function assertEntityValueFieldPolicy(
     const authored = field[key], inherited = record(semantic) ? semantic[key] : undefined;
     if (key === "classification") {
       // A definition may say what its value is not: an organisation's own
-      // e-mail address is typed `email` and is nobody's personal data. The
-      // authored classification wins over the type's, and only a sensitivity
+      // e-mail address is typed `email` and is nobody's personal data. Only columns explicitly marked as organisation data may
+      // override the type's inherited classification, and only a sensitivity
       // that restricts nothing (`public`, `internal`) is storable here; a
       // restricting one still needs a column and an adapter of its own.
-      const effective = authored ?? (organizationData ? undefined : inherited);
+      if (authored !== undefined && !(record(authored) && UNRESTRICTED.has(authored.sensitivity as string))) invalid();
+      const effective = organizationData ? authored : inherited;
       if (effective !== undefined && !(record(effective) && UNRESTRICTED.has(effective.sensitivity as string))) invalid();
       continue;
     }
@@ -198,14 +199,7 @@ export async function prepareEntityValueWriteInTransaction(
     const head = snapshot?.head?.row;
     const fields = head?.[dynamic.snapshotColumn] === null ? [] : head?.[dynamic.snapshotColumn];
     if (snapshot?.schemaVersion !== 1 || snapshot.entity !== dynamic.headEntity || !head || !Object.hasOwn(head, dynamic.snapshotColumn) || !Array.isArray(fields)) throw generatedCrudError("The frozen field definitions are unavailable.", "INVALID_DEFINITION");
-    // Where the field permits it, a value that is exactly one `{{…}}` token is a binding, not a value: the variable
-    // it names is resolved, and checked against this field's type, when the enclosing content is materialized.
-    const bound = new Set(dynamic.wholeBindings && dynamic.values && typeof dynamic.values === "object" && !Array.isArray(dynamic.values)
-      ? Object.entries(dynamic.values as Record<string, unknown>).filter(([, value]) => typeof value === "string" && /^\{\{[^{}]+\}\}$/.test(value.trim())).map(([name]) => name) : []);
-    const checkedFields = bound.size ? fields.filter((field) => !(field && typeof field === "object" && bound.has(String((field as { key?: unknown }).key)))) : fields;
-    const checkedValues = bound.size ? Object.fromEntries(Object.entries(dynamic.values as Record<string, unknown>).filter(([name]) => !bound.has(name))) : dynamic.values;
-    const valid = generatedRuntimeFieldSchemas.validateObject(checkedFields, checkedValues);
-    if (!valid.valid) throw operationFailure(valid.error);
+    validateFrozenParameterValues(fields, dynamic.values, dynamic.wholeBindings);
   }
   return result;
 }
@@ -221,4 +215,17 @@ export function projectEntityValueRow(table: GeneratedCrudTable, row: GeneratedE
   }
   for (const name of entityValuePhysicalColumns(table, registry)) delete result[name];
   return result;
+}
+
+/** Bound known parameters defer value validation; unknown keys never disappear. */
+export function validateFrozenParameterValues(fields: readonly Readonly<Record<string, unknown>>[], values: unknown, wholeBindings: boolean): void {
+  const known = new Set(fields.flatMap(field => field && typeof field === "object" && typeof (field as {key?:unknown}).key === "string" ? [(field as {key:string}).key] : []));
+  // Where the field permits it, a value that is exactly one `{{…}}` token is a binding, not a value: the variable
+  // it names is resolved, and checked against this field's type, when the enclosing content is materialized.
+  const bound = new Set(wholeBindings && values && typeof values === "object" && !Array.isArray(values)
+      ? Object.entries(values as Record<string, unknown>).filter(([name, value]) => known.has(name) && typeof value === "string" && /^\{\{[^{}]+\}\}$/.test(value.trim())).map(([name]) => name) : []);
+  const checkedFields = bound.size ? fields.filter((field) => !(field && typeof field === "object" && bound.has(String((field as { key?: unknown }).key)))) : fields;
+  const checkedValues = bound.size ? Object.fromEntries(Object.entries(values as Record<string, unknown>).filter(([name]) => !bound.has(name))) : values;
+  const valid = generatedRuntimeFieldSchemas.validateObject(checkedFields, checkedValues);
+  if (!valid.valid) throw operationFailure(valid.error);
 }

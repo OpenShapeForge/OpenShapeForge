@@ -10120,8 +10120,8 @@
             "nl": "Pagina-indeling"
           },
           "description": {
-            "en": "Key of the page layout a header or footer block belongs to, as selected by a section break. Empty on a body block; an empty key on a header or footer block means the default layout.",
-            "nl": "Sleutel van de pagina-indeling waar een kop- of voetblok bij hoort, zoals een sectie-einde die kiest. Leeg op een inhoudsblok; een lege sleutel op een kop- of voetblok betekent de standaardindeling."
+            "en": "Key of the page layout a header or footer block belongs to, where an existing renderer selects that layout. Paged rendering refuses an unselected key explicitly. Empty on a body block; an empty key on a header or footer block means the default layout.",
+            "nl": "Sleutel van de pagina-indeling waar een kop- of voetblok bij hoort, waar een bestaande renderer die indeling selecteert. Gepagineerd renderen weigert een niet-geselecteerde sleutel expliciet. Leeg op een inhoudsblok; een lege sleutel op een kop- of voetblok betekent de standaardindeling."
           },
           "osfType": "string",
           "required": false,
@@ -17878,7 +17878,7 @@
             "nl": "Paginaontwerp"
           },
           "description": {
-            "en": "Design tokens for paged documents - the page size in pixels, named colors, named text styles and inlined image assets that blocks and section breaks select by key. Empty means this theme has no page design.",
+            "en": "Design tokens for paged documents - the page size in pixels, named colors, named text styles and inlined image assets that blocks select by key. Empty means this theme has no page design.",
             "nl": "Ontwerptokens voor gepagineerde documenten - het paginaformaat in pixels, benoemde kleuren, benoemde tekststijlen en ingesloten beelden die blokken en sectie-einden op sleutel kiezen. Leeg betekent dat dit thema geen paginaontwerp heeft."
           },
           "persisted": {

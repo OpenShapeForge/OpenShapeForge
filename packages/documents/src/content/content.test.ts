@@ -426,6 +426,19 @@ describe("template variants and local/global variables", () => {
     expect(raw.blocks[0]!.values.body).toBe("Rich Bouw*Groep*");
   });
 
+  test("a date spliced into text reads as a date in the content's language; a whole binding keeps the ISO value", async () => {
+    const f = fixture([text("line", "Dated {{local.day}}"), text("whole", "{{local.day}}")]);
+    f.registry.TextSection = { ...f.registry.TextSection!, fields: { body: { baseType: "string", required: true, variables: "template" } } };
+    f.versions.root = { ...f.versions.root!, parameters: { day: { osfType: "date", baseType: "string" } } };
+    const print = async (locale: string, day = "2026-05-11") => {
+      f.versions.root = { ...f.versions.root!, variants: f.versions.root!.variants.map((variant) => ({ ...variant, locale })) };
+      return (await materializeTemplateContent({ ...f.request, locale, parameters: { day } }, f.registry, f.resolvers)).blocks.map((block) => block.values.body);
+    };
+    expect(await print("en")).toEqual(["Dated 11 May 2026", "11 May 2026"]);
+    expect(await print("nl")).toEqual(["Dated 11 mei 2026", "11 mei 2026"]);
+    expect(await print("en-US")).toEqual(["Dated May 11, 2026", "May 11, 2026"]);
+  });
+
   test("a Markdown field escapes every construct a value could open, not only emphasis", async () => {
     const f = fixture([text("md", "See {{local.name}}")]);
     f.registry.TextSection = { ...f.registry.TextSection!, fields: { body: { osfType: "markdown", baseType: "string", required: true, variables: "template" } } };

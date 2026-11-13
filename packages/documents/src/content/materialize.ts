@@ -248,7 +248,7 @@ async function materializeContent(
         const bound = await bind(match[1]!, slot, "template", scope);
         let text: string;
         try {
-          text = variableText(bound.value);
+          text = printedDate(bound.offer.osfType, bound.value, request.locale) ?? variableText(bound.value);
         } catch (error) {
           contentVariableFailure(error);
         }
@@ -558,4 +558,28 @@ export function materializeTemplateContent(input: MaterializeTemplateContentInpu
 }
 export function materializeDocumentContent(input: MaterializeDocumentContentInput, registry: CompiledContentBlockRegistry, resolvers: ContentResolvers): Promise<MaterializedDocumentContent> {
   return materializeContent(input,registry,resolvers) as Promise<MaterializedDocumentContent>;
+}
+
+/**
+ * A date as a reader meets it in running text: "11 mei 2026", "11 May 2026".
+ *
+ * Only a `date` variable spliced into a template is printed this way. A whole
+ * binding keeps the typed ISO value, because the field it fills is a date. A
+ * datetime keeps its ISO spelling: printing one needs a time zone the content
+ * engine does not have. A bare `en` reads day-month-year, the order the rest
+ * of the document's locales use; a region the author chose (`en-US`) is kept.
+ * A locale the platform does not know, or a value that is not a calendar
+ * date, falls through to the stored text.
+ */
+function printedDate(osfType: string | undefined, value: unknown, locale: string): string | undefined {
+  if (osfType !== "date" || typeof value !== "string") return undefined;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!parts) return undefined;
+  const date = new Date(Date.UTC(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3])));
+  if (date.toISOString().slice(0, 10) !== value) return undefined;
+  try {
+    return new Intl.DateTimeFormat(locale === "en" ? "en-GB" : locale, { dateStyle: "long", timeZone: "UTC" }).format(date);
+  } catch {
+    return undefined;
+  }
 }

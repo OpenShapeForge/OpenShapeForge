@@ -23,6 +23,17 @@ test("entityValue permits immutable:false, but never false-valued authorization 
     expect(() => assertEntityValueFieldPolicy({ key: "text", osfType: "string", [key]: false }, {})).toThrow();
   }
 });
+test("a definition may declassify a typed value as organisation data; a restricting sensitivity stays refused", () => {
+  const types = { email: { baseType: "string", classification: { sensitivity: "pii" } } };
+  expect(() => assertEntityValueFieldPolicy({ key: "mail", osfType: "email" }, types)).toThrow("Guarded or malformed");
+  for (const sensitivity of ["public", "internal"]) {
+    expect(() => assertEntityValueFieldPolicy({ key: "mail", osfType: "email", classification: { sensitivity } }, types)).not.toThrow();
+    expect(() => assertEntityValueFieldPolicy({ key: "box", osfType: "object", children: [{ key: "mail", osfType: "email", classification: { sensitivity } }] }, types)).not.toThrow();
+  }
+  for (const classification of [{ sensitivity: "confidential" }, { sensitivity: "bsn" }, {}, { sensitivity: ["public"] }, "public"]) {
+    expect(() => assertEntityValueFieldPolicy({ key: "mail", osfType: "email", classification }, types)).toThrow("Guarded or malformed");
+  }
+});
 test("entityValue rejects malformed/deep field shapes without treating JSON defaults as metadata", () => {
   for (const field of [{ key: "bad", osfType: "object", children: {} }, { key: "bad", osfType: "object", item: [] }, { key: "bad", osfType: {} }, { key: "bad", osfType: "Missing" }, { key: "bad" }]) {
     expect(() => assertEntityValueFieldPolicy(field, {})).toThrow();

@@ -26,6 +26,9 @@ export type EntityValueIOContext = {
 /** Same unsupported policies as the compiler, including inherited/nested fields. */
 const BASE_TYPES = new Set(["string", "integer", "number", "boolean", "date", "datetime", "object"]);
 
+/** The sensitivities that restrict nothing; `confidential`, `pii` and `bsn` do. */
+const UNRESTRICTED = new Set(["public", "internal"]);
+
 export function assertEntityValueFieldPolicy(
   field: Readonly<Record<string, unknown>>,
   osfTypes: Readonly<Record<string, unknown>> = fieldSchemaRegistry.osfTypes,
@@ -43,6 +46,16 @@ export function assertEntityValueFieldPolicy(
   if (depth > 0 && (field.relationship !== undefined || record(semantic) && semantic.kind === "entity")) invalid();
   for (const key of ["classification", "authorization", "permissions", "writtenBy", "secureInput", "immutable"]) {
     const authored = field[key], inherited = record(semantic) ? semantic[key] : undefined;
+    if (key === "classification") {
+      // A definition may say what its value is not: an organisation's own
+      // e-mail address is typed `email` and is nobody's personal data. The
+      // authored classification wins over the type's, and only a sensitivity
+      // that restricts nothing (`public`, `internal`) is storable here; a
+      // restricting one still needs a column and an adapter of its own.
+      const effective = authored ?? inherited;
+      if (effective !== undefined && !(record(effective) && UNRESTRICTED.has(effective.sensitivity as string))) invalid();
+      continue;
+    }
     if (key === "immutable" ? authored === true || inherited === true : authored !== undefined || inherited !== undefined) invalid();
   }
   // The target shape of an entity reference is not embedded content. Its record

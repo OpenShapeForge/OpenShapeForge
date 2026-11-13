@@ -7,6 +7,10 @@ import { runMigrationChain } from "../../db/migration-chain.js";
 import { registerOperationExecutionPolicies } from "../execution-policy.js";
 import { completeEntitySecureInput, getEntityOperationContracts } from "./runtime.js";
 import { getGeneratedCrudTables } from "./catalog.js";
+import Fastify, { type FastifyRequest } from "fastify";
+import { withConfigurationCredential } from "../../mcp/configuration-credential.js";
+import { mintConfiguration, peekConfiguration } from "../../mcp/configuration-handoff.js";
+import { registerConfigurationHandoffRoutes } from "../../mcp/configuration-handoff-routes.js";
 
 const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 const name = `security_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -127,4 +131,31 @@ test("secure completion attributes only verified principal kinds in tenant audit
     `.execute(privileged.db);
     expect(events.rows).toEqual([{tenant_id:session.tenantId, actor_kind:expected}]);
   }
+});
+
+test("private app save validates, creates once and rolls back a refused attempt", async () => {
+  const beforeKey = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+  process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = `test:${Buffer.alloc(32, 11).toString("base64")}`;
+  const session = { ...actor, tenantId: crypto.randomUUID() };
+  const request = {method:"POST",url:"/api/mcp",hostname:"localhost",protocol:"http",headers:{authorization:"Bearer synthetic"}} as FastifyRequest;
+  let issued = session;
+  const app = Fastify({routerOptions:{maxParamLength:512}});
+  await registerConfigurationHandoffRoutes({instance:app,options:{db:runtime.db},requireMcpSession:async req => {
+    expect(req.headers.authorization).toBe("Bearer synthetic"); return { db:runtime.db, session:issued, resource:"/api/mcp" } as never;
+  }});
+  try {
+    const pending=await withConfigurationCredential(request,()=>mintConfiguration({db:runtime.db,session,
+      tenantId:session.tenantId,userId:session.userId,table:table.name,elicit:{...operation.interaction.secureInput!,sourceTable:table.name},
+      modelValues:values,definitions:[{key:"label",osfType:"string",required:true}],displayName:"Synthetic"}));
+    const post=(payload:string)=>app.inject({method:"POST",url:`/api/entity-configuration/app/${pending.token}`,headers:{"content-type":"application/x-www-form-urlencoded"},payload});
+    expect((await post("")).statusCode).toBe(400);
+    expect(await peekConfiguration(pending.token,runtime.db)).not.toBeNull();
+    issued={...session,userId:crypto.randomUUID()};
+    expect((await post("label=synthetic")).statusCode).toBe(403);
+    issued=session;
+    const saved=await post("label=synthetic"); expect(saved.statusCode).toBe(200); expect(saved.json()).toMatchObject({saved:true,id:expect.any(String)});
+    expect((await post("label=duplicate")).statusCode).toBe(404);
+    const rows=await sql<{metadata:unknown}>`select metadata from erp.tasks where tenant_id=${session.tenantId}::uuid`.execute(privileged.db);
+    expect(rows.rows).toEqual([{metadata:{label:"synthetic"}}]);
+  } finally { await app.close(); if(beforeKey===undefined)delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;else process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS=beforeKey; }
 });

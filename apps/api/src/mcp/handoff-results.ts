@@ -39,6 +39,8 @@ export function configurationAppResult(
     ],
     _meta: {
       configurationUrl,
+      submissionUrl: `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/app/${token}`,
+      ...(externalUrl ? { externalUrl } : {}),
       displayName,
       ...(configurationId ? { configurationId } : {}),
       ...(definitions !== undefined ? { configuration: {

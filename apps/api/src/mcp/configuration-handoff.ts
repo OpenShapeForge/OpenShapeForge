@@ -23,6 +23,7 @@
  * lookup. The in-memory store below exists only for dependency-free unit tests.
  */
 import { randomBytes, randomUUID } from "node:crypto";
+import { configurationCredential, type ConfigurationCredential } from "./configuration-credential.js";
 import { type ElicitOnCreateEntry } from "./elicitation.js";
 
 export {
@@ -61,6 +62,8 @@ export type StoredFieldDefinition = {
 };
 
 export type PendingConfiguration = {
+  /** Server-held issuing credential; encrypted at rest and revalidated on app submission. */
+  submissionCredential?: ConfigurationCredential;
   id?: string;
   confirmed?: boolean;
   token: string;
@@ -110,7 +113,9 @@ export async function mintConfiguration(
   sweep();
   const id = randomUUID();
   const expiresAtMs = Date.now() + TOKEN_TTL_MS;
-  const { db, session, ...payload } = input;
+  const { db, session, ...fields } = input;
+  const credential = configurationCredential();
+  const payload = { ...fields, ...(credential ? { submissionCredential: credential } : {}) };
   let token: string;
   if (db) {
     const keyring = keyringFromEnv(process.env[KEYRING_ENV]);

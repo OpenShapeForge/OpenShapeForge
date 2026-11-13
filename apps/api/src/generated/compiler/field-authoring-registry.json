@@ -39488,6 +39488,282 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "Tag": {
+      "kind": "entity",
+      "entity": "Tag",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Tag",
+        "nl": "Tag"
+      },
+      "pluralLabel": {
+        "en": "Tags",
+        "nl": "Tags"
+      },
+      "shape": [
+        {
+          "key": "groupId",
+          "osfType": "TagGroup",
+          "required": true,
+          "label": {
+            "en": "Group",
+            "nl": "Groep"
+          },
+          "persisted": {
+            "column": "group_id",
+            "storageClass": "core"
+          },
+          "relationship": {
+            "ownership": "reference",
+            "inverse": {
+              "key": "tags",
+              "label": {
+                "en": "Tags",
+                "nl": "Tags"
+              }
+            }
+          }
+        },
+        {
+          "key": "key",
+          "osfType": "string",
+          "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
+          "label": {
+            "en": "Key",
+            "nl": "Sleutel"
+          },
+          "persisted": {
+            "column": "key",
+            "storageClass": "core"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        {
+          "key": "name",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Name",
+            "nl": "Naam"
+          },
+          "persisted": {
+            "column": "name",
+            "storageClass": "core"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        {
+          "key": "description",
+          "osfType": "multilineText",
+          "required": false,
+          "label": {
+            "en": "Description",
+            "nl": "Omschrijving"
+          },
+          "persisted": {
+            "column": "description",
+            "storageClass": "core"
+          },
+          "validation": {
+            "maxLength": 4000
+          }
+        },
+        {
+          "key": "active",
+          "osfType": "boolean",
+          "required": true,
+          "label": {
+            "en": "Active",
+            "nl": "Actief"
+          },
+          "description": {
+            "en": "Whether the tag can still be chosen; existing uses stay.",
+            "nl": "Of de tag nog gekozen kan worden; bestaand gebruik blijft staan."
+          },
+          "persisted": {
+            "column": "active",
+            "storageClass": "core"
+          },
+          "defaultValue": true
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "tagId": {
+      "kind": "entityId",
+      "entity": "Tag",
+      "baseType": "string",
+      "label": {
+        "en": "Tag",
+        "nl": "Tag"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "Tag",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "TagGroup": {
+      "kind": "entity",
+      "entity": "TagGroup",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Tag group",
+        "nl": "Taggroep"
+      },
+      "pluralLabel": {
+        "en": "Tag groups",
+        "nl": "Taggroepen"
+      },
+      "shape": [
+        {
+          "key": "key",
+          "osfType": "string",
+          "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
+          "label": {
+            "en": "Key",
+            "nl": "Sleutel"
+          },
+          "persisted": {
+            "column": "key",
+            "storageClass": "core"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        {
+          "key": "name",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Name",
+            "nl": "Naam"
+          },
+          "persisted": {
+            "column": "name",
+            "storageClass": "core"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        {
+          "key": "description",
+          "osfType": "multilineText",
+          "required": false,
+          "label": {
+            "en": "Description",
+            "nl": "Omschrijving"
+          },
+          "persisted": {
+            "column": "description",
+            "storageClass": "core"
+          },
+          "validation": {
+            "maxLength": 4000
+          }
+        },
+        {
+          "key": "active",
+          "osfType": "boolean",
+          "required": true,
+          "label": {
+            "en": "Active",
+            "nl": "Actief"
+          },
+          "description": {
+            "en": "Whether the tag can still be chosen; existing uses stay.",
+            "nl": "Of de tag nog gekozen kan worden; bestaand gebruik blijft staan."
+          },
+          "persisted": {
+            "column": "active",
+            "storageClass": "core"
+          },
+          "defaultValue": true
+        },
+        {
+          "key": "tags",
+          "label": {
+            "en": "Tags",
+            "nl": "Tags"
+          },
+          "osfType": "Tag",
+          "cardinality": "collection",
+          "relationship": {
+            "inverse": "groupId",
+            "ownership": "reference"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "tagGroupId": {
+      "kind": "entityId",
+      "entity": "TagGroup",
+      "baseType": "string",
+      "label": {
+        "en": "Tag group",
+        "nl": "Taggroep"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "TagGroup",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Task": {
       "kind": "entity",
       "entity": "Task",

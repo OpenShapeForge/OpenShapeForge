@@ -4,9 +4,9 @@ import type { OpenShapeForgeDatabase } from '../connection.js';
 import {databaseRole} from '../database-roles.js';
 const roleIdentifier=(name:string)=>'"'+name.replaceAll('"','""')+'"';
 export const CONNECTION_USE_GRANTS_PRIVILEGES_SQL = `
-revoke all on function app.delegated_connection_row(uuid,text,boolean), app.delegated_connection_token_update(uuid,text,jsonb) from public;
-revoke all on function app.delegated_connection_row(uuid,text,boolean), app.delegated_connection_token_update(uuid,text,jsonb) from ${roleIdentifier(databaseRole('worker').name)};
-grant execute on function app.delegated_connection_row(uuid,text,boolean), app.delegated_connection_token_update(uuid,text,jsonb) to ${roleIdentifier(databaseRole('app').name)};
+revoke all on function app.delegated_connection_row(uuid,text,boolean,text), app.delegated_connection_token_update(uuid,text,jsonb,text) from public;
+revoke all on function app.delegated_connection_row(uuid,text,boolean,text), app.delegated_connection_token_update(uuid,text,jsonb,text) from ${roleIdentifier(databaseRole('worker').name)};
+grant execute on function app.delegated_connection_row(uuid,text,boolean,text), app.delegated_connection_token_update(uuid,text,jsonb,text) to ${roleIdentifier(databaseRole('app').name)};
 `;
 
 export const CONNECTION_USE_GRANTS_SQL = String.raw`

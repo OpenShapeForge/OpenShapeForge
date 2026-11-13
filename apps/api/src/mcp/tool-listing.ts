@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { hasSensitiveOutput } from "@openshapeforge/operations";
+import { privateOutputTool, needsPrivateOutput, PRIVATE_OUTPUT_TOOL } from "./private-output.js";
 /**
  * The tool list of one session. Split out of session-surface.ts, verbatim.
  */
@@ -203,14 +205,20 @@ export function createToolListing(scope: ServerScope) {
     ] as Tool[];
     if (searchable && searchableOperationToolNames.secureExecute) {
       const { definitions } = searchable;
-      const secureIds = definitions.filter((definition) => definition.interaction?.secureInput).map((definition) => definition.id);
+      const secureIds = definitions.filter((definition) => definition.interaction?.secureInput || needsPrivateOutput(definition)).map((definition) => definition.id);
       const executor = coreTools.find((tool) => tool.name === searchableOperationToolNames.execute);
       if (executor && secureIds.length) coreTools.push(secureOperationTool(
         executor, searchableOperationToolNames.secureExecute,
         supportsMcpApp(server) && publicOriginIsHttps(),
       ));
     }
+    const hasPrivateOutput = searchable
+      ? searchable.definitions.some(needsPrivateOutput)
+      : runtimeOperationTools.some(({ definition }) => needsPrivateOutput(definition)) ||
+        catalog.operationTools.some(tool => operations.has(tool.key) && operationMayInvoke(tool, session) && hasSensitiveOutput(tool.outputSchema));
+    if (hasPrivateOutput && supportsMcpApp(server)) coreTools.push(privateOutputTool);
     const sourceOf = (name: string): McpToolCallSource => {
+      if (name === PRIVATE_OUTPUT_TOOL) return "operation";
       if (name === SESSION_INFO_TOOL_NAME) return "operation"; // session-info
       // The second step of the generic projection is a core tool over the
       // CRUD catalogue, not a row-defined one: classified as such here so the

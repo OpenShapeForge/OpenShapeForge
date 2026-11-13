@@ -38,7 +38,7 @@ export async function createHandoff(input: {
   id?: string;
   db: OpenShapeForgeDatabase;
   keyring: SecretKeyring;
-  kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
+  kind: "entity_oauth" | "entity_configuration" | "artifact_upload" | "operation_output";
   tenantId: string;
   userId: string;
   /** Preserve a canonical caller's live database context; never replace it. */
@@ -82,7 +82,7 @@ export async function createHandoff(input: {
 export async function readHandoff<T extends Record<string, unknown>>(input: {
   db: OpenShapeForgeDatabase;
   keyring: SecretKeyring;
-  kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
+  kind: "entity_oauth" | "entity_configuration" | "artifact_upload" | "operation_output";
   token: unknown;
   consume: boolean;
 }): Promise<T | null> {
@@ -152,7 +152,7 @@ export async function readLatestHandoffForSession<
 >(input: {
   db: OpenShapeForgeDatabase;
   keyring: SecretKeyring;
-  kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
+  kind: "entity_oauth" | "entity_configuration" | "artifact_upload" | "operation_output";
   session: DbSessionInput;
   id?: string;
 }): Promise<{ id: string; payload: T } | null> {
@@ -194,7 +194,7 @@ export async function readLatestHandoffForSession<
 /** Consume an authenticated person's handoff by its non-secret database id. */
 export async function consumeHandoffForSession(input: {
   db: OpenShapeForgeDatabase;
-  kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
+  kind: "entity_oauth" | "entity_configuration" | "artifact_upload" | "operation_output";
   id: unknown;
   session: DbSessionInput;
 }): Promise<boolean> {
@@ -214,7 +214,7 @@ export async function consumeHandoffForSession(input: {
 
 export async function consumeHandoff(input: {
   db: OpenShapeForgeDatabase;
-  kind: "entity_oauth" | "entity_configuration" | "artifact_upload";
+  kind: "entity_oauth" | "entity_configuration" | "artifact_upload" | "operation_output";
   token: unknown;
   session?: DbSessionInput;
 }): Promise<boolean> {

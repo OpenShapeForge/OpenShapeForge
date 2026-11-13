@@ -8,6 +8,7 @@
  * the Operation dispatcher).
  */
 import { expect } from "bun:test";
+import { resolvePalette } from "@openshapeforge/operations";
 import { createHash, randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql, type Transaction } from "kysely";
@@ -158,6 +159,8 @@ export function platformFor(who: Session) {
               checksum, mime_type as "mimeType", byte_size::int as "byteSize", file_name as "fileName" from erp.document_versions where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
             return { data: row ?? null };
           }
+          // The palette a page color is read from: the standard colors, no tenant colors.
+          if (request.operation.id === "colors.list") return { data: { colors: resolvePalette([]) } };
           throw new Error(`Unexpected Operation ${request.operation.id}`);
         } catch (error) {
           const failure = (error as { operationError?: unknown }).operationError;

@@ -3,7 +3,7 @@ import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import type { MaterializedContentBlock, MaterializedDocumentContent, MaterializedTemplateContent } from "./content/types.js";
 import { materializeDocument } from "./document-materialize.js";
-import { buildPagedDocument, PagedDocumentError } from "./page/html.js";
+import { buildPagedDocument, PagedDocumentError, withPaletteColors } from "./page/html.js";
 import { pageDesignFromStored } from "./page-design.js";
 import { DEFAULT_PAGE_DESIGN, type PageBlock, type PageLayouts } from "./page/types.js";
 import { themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
@@ -62,6 +62,13 @@ export const renderDocumentPages: ModuleOperationHandler = async (input, context
   for (const template of content.templates) {
     const page = template.version.variants[0]?.page;
     if (page) layouts[template.path.join("/")] = page;
+  }
+  // A page's background is a color of the organization's palette or a standard one, read live like the theme's.
+  if (Object.values(layouts).some((layout) => typeof layout.background === "string")) {
+    const listed = await platform.operations.execute(session, { operation: { id: "colors.list", intent: "invoke" }, input: {} });
+    if ("error" in listed) refuse("INVALID_STATE", "The document color palette is unavailable.");
+    const palette = (listed.data as { colors: { reference: string; value: string }[] }).colors;
+    for (const scope of Object.keys(layouts)) layouts[scope] = withPaletteColors(layouts[scope]!, palette);
   }
   try {
     const paged = buildPagedDocument({

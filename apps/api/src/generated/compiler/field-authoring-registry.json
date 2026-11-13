@@ -19424,15 +19424,11 @@
             "nl": "Achtergrondkleur"
           },
           "description": {
-            "en": "A color code such as #becbd3, or the key of a color of the document theme. Empty leaves the page white.",
-            "nl": "Een kleurcode zoals #becbd3, of de sleutel van een kleur uit het documentthema. Leeg laat de pagina wit."
+            "en": "A color of the organization's palette or one of the standard colors. Empty leaves the page white.",
+            "nl": "Een kleur uit het palet van de organisatie of een van de standaardkleuren. Leeg laat de pagina wit."
           },
-          "osfType": "string",
+          "osfType": "color",
           "required": false,
-          "validation": {
-            "pattern": "^(#[0-9A-Fa-f]{6}|[a-z][A-Za-z0-9-]{0,63})$",
-            "maxLength": 64
-          },
           "persisted": {
             "column": "page_background",
             "storageClass": "core"
@@ -41383,15 +41379,11 @@
             "nl": "Achtergrondkleur"
           },
           "description": {
-            "en": "A color code such as #becbd3, or the key of a color of the document theme. Empty leaves the page white.",
-            "nl": "Een kleurcode zoals #becbd3, of de sleutel van een kleur uit het documentthema. Leeg laat de pagina wit."
+            "en": "A color of the organization's palette or one of the standard colors. Empty leaves the page white.",
+            "nl": "Een kleur uit het palet van de organisatie of een van de standaardkleuren. Leeg laat de pagina wit."
           },
-          "osfType": "string",
+          "osfType": "color",
           "required": false,
-          "validation": {
-            "pattern": "^(#[0-9A-Fa-f]{6}|[a-z][A-Za-z0-9-]{0,63})$",
-            "maxLength": 64
-          },
           "persisted": {
             "column": "page_background",
             "storageClass": "core"

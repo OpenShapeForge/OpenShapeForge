@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { buildPagedDocument, PagedDocumentError, PAGED_FONTS_MARKER } from "./html.js";
+import { buildPagedDocument, pageBlockCss, pageSettings, renderPageBlock, PagedDocumentError, PAGED_FONTS_MARKER } from "./html.js";
 import type { PageBlock, PagedDocumentInput } from "./types.js";
 
 const design: PagedDocumentInput["design"] = {
@@ -49,6 +49,36 @@ describe("buildPagedDocument", () => {
     expect(paged.sections[0]!.html).toContain("Head");
   });
 
+  test("an included template keeps its own layout and the including template resumes on a new page", () => {
+    const included = (id: string, definitionKey: string, values: Record<string, unknown>, region: PageBlock["region"] = "body", layoutKey?: string): PageBlock =>
+      ({ ...block(id, definitionKey, values, region, layoutKey), scope: "include-1" });
+    const paged = build([
+      block("oh", "TextBlock", { markdown: "Outer header" }, "header"),
+      block("os", "SectionBreak", { layout: "default", margin: 32 }),
+      included("ih", "TextBlock", { markdown: "Cover header" }, "header"),
+      included("is", "SectionBreak", { layout: "default", background: "surface" }),
+      included("ib", "TextBlock", { markdown: "Cover title" }),
+      block("ob", "TextBlock", { markdown: "Dear reader" }),
+    ]);
+    // The outer template's first section has no content of its own, so it adds no page.
+    expect(paged.sections).toHaveLength(2);
+    const [cover, letter] = paged.sections.map((section) => section.html);
+    expect(cover).toContain("Cover header");
+    expect(cover).toContain("Cover title");
+    expect(cover).toContain("background:#becbd3");
+    expect(cover).not.toContain("Outer header");
+    expect(letter).toContain("Outer header");
+    expect(letter).toContain("Dear reader");
+    expect(letter).toContain("--m:32px");
+    expect(letter).not.toContain("Cover header");
+  });
+
+  test("an included template without page settings flows inside the including page", () => {
+    const paged = build([block("a", "TextBlock", { markdown: "Before" }), { ...block("c", "TextBlock", { markdown: "Clause" }), scope: "include-1" }, block("b", "TextBlock", { markdown: "After" })]);
+    expect(paged.sections).toHaveLength(1);
+    expect(paged.sections[0]!.html).toMatch(/Before.*Clause.*After/s);
+  });
+
   test("a document without blocks is one blank page", () => {
     expect(build([]).sections).toHaveLength(1);
   });
@@ -82,6 +112,15 @@ describe("buildPagedDocument", () => {
     ["a width that is not a number", [block("b", "TextBlock", { markdown: "x", maxWidth: "1px;position:fixed" })]],
   ] as const)("refuses %s", (_name, blocks) => {
     expect(() => build([...blocks])).toThrow(PagedDocumentError);
+  });
+
+  test("block styles can be scoped for an editor and one block rendered on its own", () => {
+    const css = pageBlockCss(design, ".page ");
+    expect(css).toContain(".page .s-title{");
+    expect(css).toContain(".page .cols{display:flex}");
+    expect(renderPageBlock(block("i", "ImageBlock", { asset: "mark", width: 10, height: 10 }), design)).toContain('src="data:image/svg+xml;base64,PHN2Zy8+"');
+    expect(() => pageBlockCss(design, ".page{}body")).toThrow(PagedDocumentError);
+    expect(pageSettings(undefined, design)).toEqual({ layout: "default", margin: 40, gap: 24, blockGap: 16, bodyAlignment: "top" });
   });
 
   test("refuses a design color that is not a color", () => {

@@ -297,8 +297,8 @@ async function materializeContent(
   async function compositionParameterShape(
     definition: CompiledContentBlockDefinition,
     references: ContentBlock["references"],
+    composition: CompiledContentBlockDefinition["composition"],
   ): Promise<ContentValueShape | undefined> {
-    const composition = definition.composition;
     if (!composition?.parametersField) return undefined;
     const field = Object.hasOwn(definition.fields, composition.parametersField)
       ? definition.fields[composition.parametersField]
@@ -436,11 +436,13 @@ async function materializeContent(
         Object.entries(definition.fields).filter(([, field]) => !field.relationship),
       );
       // Markdown fields get their filled variables escaped; every other field keeps the raw value.
-      const parametersShape = await compositionParameterShape(definition, block.references);
+      // Static metadata where a definition carries it, else what the host knows about the definition's inclusion fields.
+      const composition = definition.composition ?? resolvers.compositionContract?.(block.definitionKey);
+      const parametersShape = await compositionParameterShape(definition, block.references, composition);
       const values: Record<string, JsonValue> = Object.create(null);
       for (const key of Object.keys(block.values).sort()) {
         const field = Object.hasOwn(definition.fields, key) ? definition.fields[key] : undefined;
-        const shape = key === definition.composition?.parametersField ? parametersShape : field;
+        const shape = key === composition?.parametersField ? parametersShape : field;
         values[key] = await interpolate(block.values[key]!, shape, `block values.${key}`, scope, field?.osfType === "markdown");
       }
       validateContentValues(values, valueFields, "block values");

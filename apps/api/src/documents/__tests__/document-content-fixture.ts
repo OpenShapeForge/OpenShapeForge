@@ -90,8 +90,11 @@ export function platformFor(who: Session) {
   const operations = [
     operation("Document.get", "Document", "get", "read", { type: "object" }),
     operation("DocumentVariant.get", "DocumentVariant", "get", "read", { type: "object" }),
+    operation("TemplateVersion.get", "TemplateVersion", "get", "read", { type: "object" }),
     operation("Document.insertVariant", "Document", "invoke", "write", { type: "object" }),
     operation("DocumentVariant.insertBlock", "DocumentVariant", "invoke", "write", { type: "object" }),
+    operation("TemplateBlock.materialize", "TemplateBlock", "invoke", "read", { type: "object", required: ["definitionKey", "values", "references", "referenceField", "parametersField"], properties: {
+      definitionKey: { const: "TemplateBlock" }, values: { type: "object" }, references: { type: "object" }, referenceField: { const: "version" }, parametersField: { const: "parameters" } } }),
     ...FIELD_BLOCKS.map((entity) => operation(`${entity}.materialize`, entity, "invoke", "read", { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: entity }, values: { type: "object" } } })),
     operation("DocumentVersion.create", "DocumentVersion", "create", "write", { type: "object" }),
     operation("DocumentVersion.get", "DocumentVersion", "get", "read", { type: "object" }),
@@ -129,6 +132,11 @@ export function platformFor(who: Session) {
       async get(_session: unknown, id: string) { return operations.find((entry) => entry.id === id); },
       async execute(_session: unknown, request: { operation: { id: string }; input: Record<string, unknown> }) {
         try {
+          if (request.operation.id === "TemplateVersion.get") {
+            const row = (await sql<Record<string, unknown>>`select id, tenant_id as "tenantId", template_id as template, version_number as "versionNumber", snapshot, to_jsonb(updated_at) #>> '{}' as "updatedAt"
+              from erp.template_versions where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
+            return { data: row ?? null };
+          }
           if (request.operation.id === "Document.get" || request.operation.id === "DocumentVariant.get") {
             const table = request.operation.id === "Document.get" ? "documents" : "document_variants";
             const row = (await sql<Record<string, unknown>>`select id, to_jsonb(updated_at) #>> '{}' as "updatedAt" from ${sql.id("erp", table)} where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
@@ -143,6 +151,7 @@ export function platformFor(who: Session) {
             return { data: { ...result, parent: { updatedAt: row!.updatedAt } } };
           }
           if (FIELD_BLOCKS.some((entity) => request.operation.id === `${entity}.materialize`)) return { data: (await handlers.materializeFields!(request.input, context)).value };
+          if (request.operation.id === "TemplateBlock.materialize") return { data: (await handlers.composeTemplate!(request.input, context)).value };
           if (request.operation.id === "DocumentVersion.create") return { data: (await handlers.createDocumentVersion!(request.input, context)).value };
           if (request.operation.id === "DocumentVersion.get") {
             const row = (await sql<Record<string, unknown>>`select id, document_id as "documentId", artifact_id as "artifactId", artifact_version::int as "artifactVersion",

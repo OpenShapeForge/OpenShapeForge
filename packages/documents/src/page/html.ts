@@ -243,7 +243,7 @@ const BASE_CSS = [
 /** The print engine evaluates this once, after fonts load and before printing. */
 export const PAGED_MEASURE_SCRIPT = `(() => { for (const region of ["header", "footer"]) { const node = document.querySelector('[data-osf-region="' + region + '"]'); document.documentElement.style.setProperty("--osf-" + region + "-height", (node ? node.getBoundingClientRect().height : 0) + "px"); } })()`;
 
-function sectionHtml(input: PagedDocumentInput, section: Section, header: readonly PageBlock[], footer: readonly PageBlock[], css: string): string {
+function sectionHtml(input: PagedDocumentInput, section: PageSettings, header: readonly PageBlock[], body: readonly PageBlock[], footer: readonly PageBlock[], css: string): string {
   const { design } = input;
   const { width, height } = design.page;
   const vars = [
@@ -262,7 +262,7 @@ function sectionHtml(input: PagedDocumentInput, section: Section, header: readon
     background, region("header", header), region("footer", footer),
     `<table class="flow"><thead><tr><td><div class="space-top"></div></td></tr></thead>`,
     `<tfoot><tr><td><div class="space-bottom"></div></td></tr></tfoot>`,
-    `<tbody><tr><td><div class="body" style="justify-content:${justify}">${section.body.map((block) => renderBlock(block, design)).join("")}</div></td></tr></tbody></table>`,
+    `<tbody><tr><td><div class="body" style="justify-content:${justify}">${body.map((block) => renderBlock(block, design)).join("")}</div></td></tr></tbody></table>`,
     `</body></html>`,
   ].join("");
 }
@@ -270,9 +270,11 @@ function sectionHtml(input: PagedDocumentInput, section: Section, header: readon
 const scopedKey = (scope: string, layout: string) => `${scope}\n${layout}`;
 const within = (scope: string, owner: string) => owner === "" || scope === owner || scope.startsWith(`${owner}/`);
 
+/** One section of a paged document: its page settings and the blocks of its three zones. */
+export type PagedSectionLayout = Readonly<{ settings: PageSettings; header: readonly PageBlock[]; body: readonly PageBlock[]; footer: readonly PageBlock[] }>;
+
 /**
- * Splits the ordered body blocks into sections and renders one HTML document
- * per section.
+ * Splits the ordered blocks into sections.
  *
  * A `SectionBreak` starts a section with its own page settings and layout.
  * Body blocks before the first break use the default layout. An included
@@ -282,26 +284,24 @@ const within = (scope: string, owner: string) => owner === "" || scope === owner
  * template last had. A section without body blocks is left out unless it is
  * the last one, which still yields a page.
  */
-export function buildPagedDocument(input: PagedDocumentInput): PagedDocument {
-  if (input.blocks.length > MAX_BLOCKS) fail(`A paged document holds at most ${MAX_BLOCKS} blocks.`);
-  if (!/^[a-z]{2}(-[A-Z]{2})?$/.test(input.locale)) fail("The locale is not valid.");
-  validateDesign(input.design, input.fonts);
+export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDesign): PagedSectionLayout[] {
+  if (blocks.length > MAX_BLOCKS) fail(`A paged document holds at most ${MAX_BLOCKS} blocks.`);
   const regions = { header: new Map<string, PageBlock[]>(), footer: new Map<string, PageBlock[]>() };
   const sections: Section[] = [];
   const lastSettings = new Map<string, PageSettings>();
   const open = (scope: string, settings: PageSettings) => { sections.push({ ...settings, scope, body: [] }); lastSettings.set(scope, settings); };
-  for (const block of input.blocks) {
+  for (const block of blocks) {
     const scope = block.scope ?? "";
     if (scope.length > 4000 || /[\n]/.test(scope)) fail("A block scope is not valid.");
     if (block.region === "body") {
-      if (block.definitionKey === "SectionBreak") { open(scope, pageSettings(block.values, input.design)); continue; }
+      if (block.definitionKey === "SectionBreak") { open(scope, pageSettings(block.values, design)); continue; }
       const current = sections.at(-1);
-      if (!current) open("", pageSettings(undefined, input.design));
+      if (!current) open("", pageSettings(undefined, design));
       else if (!within(scope, current.scope)) {
         // The inclusion that owned the current section has ended: resume the nearest enclosing template's pages.
         let resume = scope;
         while (resume && !lastSettings.has(resume)) resume = resume.includes("/") ? resume.slice(0, resume.lastIndexOf("/")) : "";
-        open(resume, lastSettings.get(resume) ?? pageSettings(undefined, input.design));
+        open(resume, lastSettings.get(resume) ?? pageSettings(undefined, design));
       }
       sections.at(-1)!.body.push(block);
       continue;
@@ -312,11 +312,19 @@ export function buildPagedDocument(input: PagedDocumentInput): PagedDocument {
     list.push(block);
     regions[block.region].set(key, list);
   }
-  if (!sections.length) open("", pageSettings(undefined, input.design));
+  if (!sections.length) open("", pageSettings(undefined, design));
+  return sections.filter((section, index) => section.body.length || index === sections.length - 1).map(({ scope, body, ...settings }) => ({
+    settings, body, header: regions.header.get(scopedKey(scope, settings.layout)) ?? [], footer: regions.footer.get(scopedKey(scope, settings.layout)) ?? [],
+  }));
+}
+
+/** Renders one self-contained HTML document per section of `layoutPagedSections`, for a print engine. */
+export function buildPagedDocument(input: PagedDocumentInput): PagedDocument {
+  if (!/^[a-z]{2}(-[A-Z]{2})?$/.test(input.locale)) fail("The locale is not valid.");
+  validateDesign(input.design, input.fonts);
   const css = designCss(input.design, input.fonts);
-  const rendered: PagedSection[] = sections.filter((section, index) => section.body.length || index === sections.length - 1).map((section) => ({
-    layout: section.layout,
-    html: sectionHtml(input, section, regions.header.get(scopedKey(section.scope, section.layout)) ?? [], regions.footer.get(scopedKey(section.scope, section.layout)) ?? [], css),
+  const rendered: PagedSection[] = layoutPagedSections(input.blocks, input.design).map((section) => ({
+    layout: section.settings.layout, html: sectionHtml(input, section.settings, section.header, section.body, section.footer, css),
   }));
   return { renderingVersion: "osf-paged-html-v1", page: { ...input.design.page }, sections: rendered };
 }

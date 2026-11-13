@@ -273,13 +273,17 @@ export async function registerConfigurationHandoffRoutes(
 
   // The private app gets only this form-specific capability, never the issuer's
   // OAuth credential. No cookies or model/tool arguments authorize a save.
-  instance.post(`${ENTITY_CONFIGURATION_PATH}/app/:token`, async (request, reply) => {
+  instance.options(`${ENTITY_CONFIGURATION_PATH}/app`, async (_request, reply) => reply
+    .header("access-control-allow-origin", "*").header("access-control-allow-methods", "POST")
+    .header("access-control-allow-headers", "authorization,content-type").header("cache-control", "no-store").status(204).send());
+  instance.post(`${ENTITY_CONFIGURATION_PATH}/app`, async (request, reply) => {
     reply.header("access-control-allow-origin", "*").header("cache-control", "no-store").header("referrer-policy", "no-referrer");
-    const pending = await peekConfiguration((request.params as { token?: string }).token, options.db);
+    const token = request.headers.authorization?.match(/^Form ([A-Za-z0-9_.-]+)$/)?.[1];
+    const pending = await peekConfiguration(token, options.db);
     if (!pending?.submissionCredential) throw new HttpError(404, "NOT_FOUND", "This secure form is unavailable or expired. Open a new form.");
     const { session } = await requireMcpSession(configurationCredentialRequest(pending.submissionCredential));
     if (session.tenantId !== pending.tenantId || session.userId !== pending.userId) throw new HttpError(403, "FORBIDDEN", "This secure form is unavailable.");
-    if (request.headers["content-type"]?.split(";")[0] !== "application/x-www-form-urlencoded") throw new HttpError(415, "UNSUPPORTED_MEDIA_TYPE", "Submit the secure form as form data.");
+    if (request.headers["content-type"]?.split(";")[0]?.trim().toLowerCase() !== "application/x-www-form-urlencoded") throw new HttpError(415, "UNSUPPORTED_MEDIA_TYPE", "Submit the secure form as form data.");
     const outcome = await submitAtomically(pending, typeof request.body === "string" ? request.body : "", session,
       () => consumeConfiguration(pending.token, options.db, session));
     if (!outcome.ok) return reply.status(400).send({ error: { code: "INVALID_CONFIGURATION", message: outcome.errorBanner ?? "Correct the highlighted fields.", fields: outcome.errors } });

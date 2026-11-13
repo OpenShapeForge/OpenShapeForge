@@ -33,3 +33,13 @@ export function configurationCredentialRequest(credential: ConfigurationCredenti
     headers: { authorization: credential.authorization, "content-type": "application/json", host: credential.hostname },
   } as FastifyRequest;
 }
+
+/** This can only shorten the handoff; admission still verifies the JWT. */
+export function configurationCredentialExpiry(credential: ConfigurationCredential | undefined, maximum: number): number {
+  try {
+    const payload = credential?.authorization.slice(7).split(".")[1];
+    if (!payload) return maximum;
+    const exp = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")).exp;
+    return typeof exp === "number" && Number.isFinite(exp) ? Math.min(maximum, exp * 1000) : maximum;
+  } catch { return maximum; }
+}

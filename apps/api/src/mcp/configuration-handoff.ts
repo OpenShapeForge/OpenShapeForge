@@ -23,7 +23,7 @@
  * lookup. The in-memory store below exists only for dependency-free unit tests.
  */
 import { randomBytes, randomUUID } from "node:crypto";
-import { configurationCredential, type ConfigurationCredential } from "./configuration-credential.js";
+import { configurationCredential, configurationCredentialExpiry, type ConfigurationCredential } from "./configuration-credential.js";
 import { type ElicitOnCreateEntry } from "./elicitation.js";
 
 export {
@@ -112,9 +112,9 @@ export async function mintConfiguration(
 ): Promise<{ id: string; token: string; expiresInSeconds: number }> {
   sweep();
   const id = randomUUID();
-  const expiresAtMs = Date.now() + TOKEN_TTL_MS;
   const { db, session, ...fields } = input;
   const credential = configurationCredential();
+  const expiresAtMs = configurationCredentialExpiry(credential, Date.now() + TOKEN_TTL_MS);
   const payload = { ...fields, ...(credential ? { submissionCredential: credential } : {}) };
   let token: string;
   if (db) {
@@ -135,7 +135,7 @@ export async function mintConfiguration(
     token = base64url(randomBytes(24));
     pendingByToken.set(token, { ...payload, id, token, expiresAtMs });
   }
-  return { id, token, expiresInSeconds: TOKEN_TTL_MS / 1000 };
+  return { id, token, expiresInSeconds: Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 1000)) };
 }
 
 /** Non-consuming lookup: the person may reload the form or fix a mistake. */

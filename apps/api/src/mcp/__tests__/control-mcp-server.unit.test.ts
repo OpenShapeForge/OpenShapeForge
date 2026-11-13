@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import {ControlDatabaseFixtureDriver} from "../../control/__tests__/control-database-fixture.js";
 /**
  * The platform administrator MCP over the bound control Operations: the tool
  * list a session sees is decided by the Operations' roles, tool names come
@@ -12,7 +13,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
-import { DummyDriver, Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler } from "kysely";
+import { Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler } from "kysely";
 import { controlSessionFor, type ControlSessionContext } from "../../control/control-session.js";
 import type { ControlRuntime } from "../../control/runtime.js";
 import { controlOperationContracts } from "../../control/__tests__/control-operation-fixtures.js";
@@ -35,7 +36,7 @@ const administrator = {
 const db = new Kysely<DB>({
   dialect: {
     createAdapter: () => new PostgresAdapter(),
-    createDriver: () => new DummyDriver(),
+    createDriver: () => new ControlDatabaseFixtureDriver(),
     createIntrospector: (database) => new PostgresIntrospector(database),
     createQueryCompiler: () => new PostgresQueryCompiler(),
   },

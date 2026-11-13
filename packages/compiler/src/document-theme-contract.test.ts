@@ -39,7 +39,7 @@ test("document themes are tenant-owned, selected on templates, and projected gen
   const fields = Object.fromEntries(contract.model.fields.map((field) => [field.key, field]));
   expect(fields.isDefault?.defaultValue).toBe(false);
   expect(fields.isDefault?.readOnly).toBe(true);
-  expect(fields.surfaceColor?.validation?.pattern).toBe("^(standard|tenant):[a-z][a-z0-9-]{0,63}$");
+  expect(fields.surfaceColor?.validation?.pattern).toBe("^(standard|tenant):[a-z][a-z0-9\\-]{0,63}$");
   for (const key of ["surfaceColor", "textColor", "accentColor"]) {
     expect(fields[key]?.osfType).toBe("color");
     expect(fields[key]?.baseType).toBe("string");

@@ -17,7 +17,7 @@ const expected = {
   quote: {
     entity: "Quote",
     fields: [
-      "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
+      "id", "createdAt", "updatedAt", "color", "icon", "externalId", "sourceAuthority",
       "sourceOrganization", "sourceAdministration", "sourceAdministrationName", "sourceVersion", "quoteStatus", "quoteNumber",
       "issueDate", "expiresAt", "currencyCode", "amountBase", "amountVat",
       "amountTotal", "description", "externalCode",
@@ -28,7 +28,7 @@ const expected = {
   "quote-line": {
     entity: "QuoteLine",
     fields: [
-      "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
+      "id", "createdAt", "updatedAt", "color", "icon", "externalId", "sourceAuthority",
       "sourceOrganization", "sourceAdministration", "sourceAdministrationName", "sourceVersion", "lineNumber", "description",
       "quantity", "unitId", "unitPrice", "amountBase", "amountVat", "amountTotal",
     ],
@@ -41,7 +41,7 @@ const expected = {
   agreement: {
     entity: "Agreement",
     fields: [
-      "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
+      "id", "createdAt", "updatedAt", "color", "icon", "externalId", "sourceAuthority",
       "sourceOrganization", "sourceAdministration", "sourceAdministrationName", "sourceVersion", "code", "role", "agreementType",
       "agreementSubType", "status", "startDate", "endDate", "billingStartDate",
       "billingEndDate", "conceptSentAt", "sentAt", "dispatchStatus", "noticeDate",
@@ -60,7 +60,7 @@ const expected = {
   "agreement-milestone": {
     entity: "AgreementMilestone",
     fields: [
-      "id", "createdAt", "updatedAt", "externalId", "sourceAuthority",
+      "id", "createdAt", "updatedAt", "color", "icon", "externalId", "sourceAuthority",
       "sourceOrganization", "sourceAdministration", "sourceAdministrationName", "sourceVersion", "description", "basisAmount",
       "percentOfBasis", "amount", "status", "expectedAt", "triggeredAt", "triggeredBy",
     ],

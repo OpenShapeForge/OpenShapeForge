@@ -476,6 +476,7 @@ describe("canonical operation runtime", () => {
     expect(bound.has("entityTypes.list")).toBe(true);
     expect(bound.has("application.search")).toBe(true);
     expect(bound.has("collection.options")).toBe(true);
+    expect(bound.has("colors.list")).toBe(true);
     expect(bound.has("control.list-tenants")).toBe(true);
     expect(bound.has("grants.revoke")).toBe(true);
     expect(bound.has("api-keys.list-integrations")).toBe(true);
@@ -490,6 +491,7 @@ describe("canonical operation runtime", () => {
         operation.implementation?.type === "entity-type-list" ||
         operation.implementation?.type === "application-search" ||
         operation.implementation?.type === "collection-options" ||
+        operation.implementation?.type === "color-palette" ||
         operation.implementation?.type === "constrained-reference-create" ||
         operation.plugin === "accounts" ||
         operation.plugin === "osf-api-keys" ||
@@ -2290,6 +2292,16 @@ test("REST binds integer path parameters for write operations without coercing t
   expect(operationRestInput(request("12"), operation)).toEqual({ code: "001", version: 12 });
   expect(operationRestInput(request("01"), operation)).toEqual({ code: "001", version: "01" });
   expect(operationRestInput(request("9007199254740992"), operation)).toEqual({ code: "001", version: "9007199254740992" });
+  expect(operationRestInput(request("-0"), operation)).toEqual({ code: "001", version: "-0" });
+});
+
+test("REST read/delete integer paths cannot regain noncanonical values through query coercion",()=>{
+ for(const method of ['GET','DELETE']){
+  const operation={inputSchema:{type:'object',properties:{version:{type:'integer'},enabled:{type:'boolean'}},additionalProperties:false},idempotency:{mode:'none'},transports:{rest:{method,path:'/api/versions/:version'}}} as unknown as OperationContract;
+  const request=(version:string)=>({query:{enabled:'true'},params:{version},headers:{}}) as never;
+  expect(operationRestInput(request('12'),operation)).toEqual({version:12,enabled:true});
+  for(const invalid of ['-0','01','9007199254740992'])expect(()=>operationRestInput(request(invalid),operation)).toThrow('canonical safe integer');
+ }
 });
 
 test("REST binds server-supplied input (a grant's record target) before a GET query is validated", () => {

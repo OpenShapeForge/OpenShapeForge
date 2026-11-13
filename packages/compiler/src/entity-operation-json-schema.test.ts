@@ -147,6 +147,19 @@ const adapterContract = {
 } as unknown as CompiledEntityContract;
 
 describe("canonical entity Operation JSON Schemas", () => {
+  test('named collection grouping and summaries share canonical list input and output contracts', () => {
+    const configured = { ...contract, interfaces: { web: { namedViews: {
+      grouped: { kind: 'collection', table: { groupBy: 'title', summary: { field: 'stableCode' } } },
+    } } } } as unknown as CompiledEntityContract;
+    const list = entityOperationJsonSchemas(configured, entityOperations.list!, contracts, {});
+    expect(list.inputSchema.properties).toHaveProperty('includeCollectionGroups');
+    expect(list.inputSchema.properties).toHaveProperty('includeCollectionSummary');
+    expect(list.outputSchema.properties).toHaveProperty('collectionGroups');
+    expect(list.outputSchema.properties).toHaveProperty('collectionSummary');
+    configured.interfaces!.web!.namedViews!.other = { kind: 'collection', table: { summary: { field: 'title' } } } as never;
+    expect(() => entityOperationJsonSchemas(configured, entityOperations.list!, contracts, {})).toThrow('same summary field');
+  });
+
   test("exposes board totals only for an authored board aggregate", () => {
     const ordinary = entityOperationJsonSchemas(contract, entityOperations.list!, contracts, {});
     expect(ordinary.inputSchema.properties).not.toHaveProperty("includeBoardTotals");

@@ -124,6 +124,35 @@ export function assertTypedDefinitionSupported(
   }
 }
 
+function validatedTypedValueSchema(stored: unknown, valueField: string, definitionField: string): Record<string, unknown> {
+  if (!isRecord(stored)) {
+    throw operationFailure({
+      code: "VALIDATION",
+      message: `${definitionField} must be a field definition.`,
+      detail: `${valueField} is typed by ${definitionField}, so a write of either needs that definition.`,
+      violations: [{ field: definitionField, code: "INVALID_TYPE", message: `${definitionField} must be a field definition.` }],
+      retryable: false,
+    });
+  }
+  if (stored.key !== valueField) {
+    throw operationFailure({
+      code: "VALIDATION",
+      message: `${definitionField} must describe ${valueField}.`,
+      detail: `Its key must be ${JSON.stringify(valueField)}.`,
+      violations: [{ field: definitionField, code: "INVALID_VALUE", message: `${definitionField} must describe ${valueField}.` }],
+      retryable: false,
+    });
+  }
+  let schema: Record<string, unknown>;
+  try {
+    schema = generatedRuntimeFieldSchemas.object([stored]);
+  } catch {
+    throw operationFailure({ code: "VALIDATION", message: `${definitionField} must be a valid field definition.`,
+      violations: [{ field: definitionField, code: "INVALID_TYPE", message: `${definitionField} must be a valid field definition.` }], retryable: false });
+  }
+  return schema;
+}
+
 /**
  * Validate every typed value the write touches against the definition that
  * types it. On create both halves come from the submitted values; on update
@@ -145,32 +174,8 @@ export function assertTypedValuesValid(
     const hasDefinition = Object.hasOwn(values, definitionField);
     if (!hasValue && !hasDefinition) continue;
     const stored = hasDefinition ? values[definitionField] : current?.[definition.name];
-    if (!isRecord(stored)) {
-      throw operationFailure({
-        code: "VALIDATION",
-        message: `${definitionField} must be a field definition.`,
-        detail: `${valueField} is typed by ${definitionField}, so a write of either needs that definition.`,
-        violations: [{ field: definitionField, code: "INVALID_TYPE", message: `${definitionField} must be a field definition.` }],
-        retryable: false,
-      });
-    }
-    if (stored.key !== valueField) {
-      throw operationFailure({
-        code: "VALIDATION",
-        message: `${definitionField} must describe ${valueField}.`,
-        detail: `Its key must be ${JSON.stringify(valueField)}.`,
-        violations: [{ field: definitionField, code: "INVALID_VALUE", message: `${definitionField} must describe ${valueField}.` }],
-        retryable: false,
-      });
-    }
-    let schema: Record<string, unknown>;
-    try {
-      schema = generatedRuntimeFieldSchemas.object([stored]);
-    } catch {
-      throw operationFailure({ code: "VALIDATION", message: `${definitionField} must be a valid field definition.`,
-        violations: [{ field: definitionField, code: "INVALID_TYPE", message: `${definitionField} must be a valid field definition.` }], retryable: false });
-    }
-    assertTypedDefinitionSupported(stored, definitionField, hasDefinition ? "submitted" : "stored", value.typedBy);
+    const schema = validatedTypedValueSchema(stored, valueField, definitionField);
+    assertTypedDefinitionSupported(stored as Record<string, unknown>, definitionField, hasDefinition ? "submitted" : "stored", value.typedBy);
     const candidate = hasValue ? values[valueField] : current?.[value.name];
     // A NOT NULL column holds no null, whatever the definition says about its
     // own `required`: the write would otherwise be refused by the database
@@ -283,8 +288,8 @@ export async function prepareTypedValueWrite(
   }
   for (const { value, definition } of pairs) {
     const stored = output.has(definition) ? output.get(definition) : current?.[definition.name];
-    if (!output.has(value) || !isRecord(stored)) continue;
-    const schema = generatedRuntimeFieldSchemas.object([stored]);
+    if (!output.has(value)) continue;
+    const schema = validatedTypedValueSchema(stored, fieldNameForColumn(value), fieldNameForColumn(definition));
     const properties = schema.properties as Record<string, Record<string, unknown>>;
     output.set(value, deriveTypedValue(properties[fieldNameForColumn(value)]!, output.get(value), validationCurrent?.[value.name]));
   }

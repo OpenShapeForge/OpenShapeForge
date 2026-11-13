@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { backfillTenantSettingDefaults } from "../control/tenant-setting-defaults.js";
+import { applyPublicColorPaletteMigration } from './migrations/color-palette.js';
 /**
  * The ordered chain that builds a database from the compiled manifest,
  * shared by db:migrate, db:reset and the empty-database bootstrap
@@ -96,7 +97,7 @@ import { applyOrganizationAccessMigration } from "./migrations/organization-acce
 import { applyIdentityLinkMigration } from "./migrations/identity-link.js";
 import { applyMemberAccessStateMigration } from "./migrations/member-access-state.js";
 import { applyEmployeeInvitationsMigration } from "./migrations/employee-invitations.js";
-import { applyConnectionUseGrantsMigration } from './migrations/connection-use-grants.js';
+import { applyConnectionUseGrantsMigration, applyConnectionUseGrantsPrivileges } from './migrations/connection-use-grants.js';
 import { applyCapabilityGrantsMigration } from "./migrations/capability-grants.js";
 import { applyApiKeysMigration } from "./migrations/api-keys.js";
 import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
@@ -228,6 +229,7 @@ export async function runMigrationChain(
   // EXECUTE on every function in `app` to the worker, and the worker may hold
   // only the inbound liveness lookup — not the tenant resolution beside it.
   await applyInboundGrants(db);
+  await applyConnectionUseGrantsPrivileges(db);
   // LAST of the privilege steps, and deliberately so. The two sweeps above
   // grant EXECUTE on every function in `app` to the app and worker roles and
   // set a default privilege that would catch a later one too; the
@@ -237,6 +239,8 @@ export async function runMigrationChain(
   // the entities that declared an action from the manifest.
   await applyRecordActionsMigration(db);
   await applyAuthorizationProfilesMigration(db);
+  // Revoke the worker/default function sweep for this API-only public projection.
+  await applyPublicColorPaletteMigration(db);
   const pageConfigs = await applyEntityPageConfigsSeed(db);
   await backfillTenantSettingDefaults(db, options.maintenanceModules);
   const moduleSeeds: Record<string, CatalogSeedResult> = {};

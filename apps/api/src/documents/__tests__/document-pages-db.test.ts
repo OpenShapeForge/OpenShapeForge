@@ -87,6 +87,55 @@ describe("document pages against PostgreSQL", () => {
     expect(((await reader.handlers.renderDocumentPages!(request, reader.context)).value as Pages).compositionHash).toBe(pages.compositionHash);
   });
 
+  test("an included cover takes its own page with its own header and footer, and the including template resumes after it", async () => {
+    const { context, handlers } = platformFor(editor);
+    const themeId = randomUUID();
+    await sql`insert into erp.document_themes (id, tenant_id, key, name, page_design) values (${themeId}::uuid, ${tenant}::uuid, 'include', 'Include', ${jsonbLiteral(pageDesign)})`.execute(privileged());
+    const parameter = (key: string) => ({ key, osfType: "string", required: true, label: { en: key, nl: key } });
+    const template = async (key: string, parameters: string[], blocks: { definitionKey: string; values: Record<string, unknown>; region?: string; layoutKey?: string; version?: string }[]) => {
+      const ids = { template: randomUUID(), variant: randomUUID() };
+      await sql`insert into erp.templates (id, tenant_id, key, name, parameters, document_theme_id) values
+        (${ids.template}::uuid, ${tenant}::uuid, ${`${key}-${ids.template.slice(0, 8)}`}, ${key}, ${jsonbLiteral(parameters.map(parameter))}, ${themeId}::uuid)`.execute(privileged());
+      await sql`insert into erp.template_variants (id, tenant_id, template_id, channel, locale) values (${ids.variant}::uuid, ${tenant}::uuid, ${ids.template}::uuid, 'document', 'nl')`.execute(privileged());
+      let position = 0;
+      for (const block of blocks) {
+        // An inclusion's version is a reference slot with its own column, not a key of the JSON values.
+        const reference = block.version ? sql`${block.version}::uuid` : sql`null`;
+        await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, "values", region, layout_key, ${sql.ref(versionColumn)}) values
+          (${randomUUID()}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, ${position++}, ${block.definitionKey}, ${jsonbLiteral(block.values)}, ${block.region ?? "body"}, ${block.layoutKey ?? null}, ${reference})`.execute(privileged());
+      }
+      return publishTemplate(context, ids.template);
+    };
+    const versionColumn = (await sql<{ column_name: string }>`select column_name from information_schema.columns
+      where table_schema = 'erp' and table_name = 'blocks' and column_name like 'ev_values_template_block_version_id%'`.execute(privileged())).rows[0]!.column_name;
+
+    const cover = await template("cover", ["title"], [
+      { definitionKey: "ImageBlock", values: { asset: "wordmark", width: 120, height: 24 }, region: "header", layoutKey: "cover" },
+      { definitionKey: "TextColumns", values: { left: "www.example.com" }, region: "footer", layoutKey: "cover" },
+      { definitionKey: "SectionBreak", values: { layout: "cover", background: "coverSurface" } },
+      { definitionKey: "TextBlock", values: { markdown: "{{local.title}}", style: "title" } },
+    ]);
+    const proposal = await template("proposal", ["title", "client"], [
+      { definitionKey: "TextBlock", values: { markdown: "Proposal header" }, region: "header" },
+      { definitionKey: "TemplateBlock", values: { parameters: { title: "{{local.title}}" } }, version: cover },
+      { definitionKey: "TextBlock", values: { markdown: "Dear {{local.client}}," } },
+    ]);
+    const documentId = await createDocument();
+    await linked(handlers, context, { id: documentId, templateVersionId: proposal, parameters: { title: "Pentesting for Nova Harbor", client: "Elise" } });
+
+    const pages = (await handlers.renderDocumentPages!({ id: documentId, channel: "document", locale: "nl" }, context)).value as Pages;
+    expect(pages.sections.map((section) => section.layout)).toEqual(["cover", "default"]);
+    const [coverPage, letter] = pages.sections.map((section) => section.html);
+    expect(coverPage).toContain("Pentesting for Nova Harbor");
+    expect(coverPage).toContain("www.example.com");
+    expect(coverPage).toContain("background:#becbd3");
+    expect(coverPage).not.toContain("Proposal header");
+    expect(letter).toContain("Dear Elise,");
+    expect(letter).toContain("Proposal header");
+    expect(letter).not.toContain("www.example.com");
+    expect(letter).not.toContain("background:#becbd3");
+  });
+
   test("a document whose theme has no page design is refused", async () => {
     const { context, handlers } = platformFor(editor);
     const themeId = randomUUID();

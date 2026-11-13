@@ -14,6 +14,7 @@ import {
   type ResolvedDocumentTheme,
 } from "./theme-tokens.js";
 import { themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
+import { pageDesignFromStored } from "./page-design.js";
 import { object, refuse, uuid } from "./validation.js";
 
 type ThemeRow = Readonly<{
@@ -26,6 +27,7 @@ type ThemeRow = Readonly<{
   accentColor: string;
   fontFamily: string;
   typography: unknown;
+  pageDesign: unknown;
   updatedAt: string;
 }>;
 
@@ -33,7 +35,7 @@ const SOURCE_FIELDS = ["documentId", "templateId", "templateVersionId"] as const
 const STYLE_FIELDS = new Set(["fontFamily", "fontSize", "lineHeight", "fontWeight", "colorRole", "spaceBefore"]);
 const TYPOGRAPHY_FIELDS = new Set(["body", "heading1", "heading2", "heading3", "quote", "list"]);
 const THEME_SELECT = `id, key, name, is_default as "isDefault", surface_color as "surfaceColor", text_color as "textColor",
-  accent_color as "accentColor", font_family as "fontFamily", typography, updated_at::text as "updatedAt"`;
+  accent_color as "accentColor", font_family as "fontFamily", typography, page_design as "pageDesign", updated_at::text as "updatedAt"`;
 
 function sourceField(input: Record<string, unknown>): (typeof SOURCE_FIELDS)[number] {
   const present = SOURCE_FIELDS.filter((field) => input[field] != null);
@@ -162,6 +164,9 @@ export const resolveDocumentTheme: ModuleOperationHandler = async (input, contex
     return {
       theme: theme ? projectTheme(theme, palette) : null,
       resolution: { kind, sourceId, themeId: theme?.id ?? null },
+      // Beside the theme rather than inside it: readers that know only the
+      // closed text theme keep working, and a paged editor finds its tokens.
+      pageDesign: theme ? pageDesignFromStored(theme.pageDesign) : null,
     };
   });
   return { value: resolved };

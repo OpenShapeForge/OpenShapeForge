@@ -150,6 +150,14 @@ export type ContentResolvers = {
     version: ContentTemplateVersion,
     values: JsonObject,
   ) => MaybePromise<void>;
+  /**
+   * Which fields of a block definition form a template inclusion, when the
+   * definition does not carry that as static metadata: the reference to the
+   * included version and the field holding its local values. With it the
+   * engine types those values by the included template's own parameters, so a
+   * value may name a variable of the including template.
+   */
+  readonly compositionContract?: (definitionKey: string) => { readonly templateVersionField: string; readonly parametersField: string } | undefined;
   readonly validateBlockValues?: (definitionKey: string, values: JsonObject) => MaybePromise<void>;
   readonly materializeBlock?: (input: {
     readonly definitionKey: string;

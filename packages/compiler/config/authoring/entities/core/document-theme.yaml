@@ -233,6 +233,10 @@ operations:
         additionalProperties: false
         required: [theme, resolution]
         properties:
+          pageDesign:
+            type: ["object", "null"]
+            x-osf-i18n: { title: { en: Page design, nl: Paginaontwerp } }
+            description: The theme's design tokens for paged documents - page size, colors, text styles and inlined images - or null when the theme has none.
           theme:
             type: ["object", "null"]
             additionalProperties: false

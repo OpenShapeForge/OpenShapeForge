@@ -21,6 +21,12 @@ export type PageBlock = Readonly<{
   region: PageRegion;
   /** Layout a header or footer block belongs to. Body blocks carry none. */
   layoutKey?: string;
+  /**
+   * The template inclusion this block arrived through: the path of including
+   * blocks, joined by "/", and empty for the document's own blocks. Layout keys
+   * are names inside one template, so they are matched within a scope.
+   */
+  scope?: string;
 }>;
 
 /** Sizes are CSS pixels; the page box itself is declared in the same unit. */
@@ -33,12 +39,29 @@ export type PageTextStyle = Readonly<{
   /** Key into `PageDesign.colors`. */
   color: string;
   spaceBefore?: number;
+  /** Name an author sees when choosing this style. */
+  label?: string;
 }>;
 
 export type PageAsset = Readonly<{
   mediaType: "image/svg+xml" | "image/png" | "image/jpeg";
   /** Base64 of the asset bytes. Assets are inlined; a page never fetches. */
   data: string;
+  /** Name an author sees when choosing this image. */
+  label?: string;
+}>;
+
+/** What a section break decides for the pages after it. */
+export type PageSettings = Readonly<{
+  layout: string;
+  margin: number;
+  gap: number;
+  blockGap: number;
+  /** Key into `PageDesign.colors`. */
+  background?: string;
+  /** Key into `PageDesign.assets`. */
+  backgroundImage?: string;
+  bodyAlignment: "top" | "center" | "bottom";
 }>;
 
 export type PageDesign = Readonly<{

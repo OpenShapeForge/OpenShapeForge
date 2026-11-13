@@ -4,65 +4,18 @@ import { contextServices, rows } from "./commands.js";
 import type { MaterializedContentBlock, MaterializedDocumentContent, MaterializedTemplateContent } from "./content/types.js";
 import { materializeDocument } from "./document-materialize.js";
 import { buildPagedDocument, PagedDocumentError } from "./page/html.js";
-import type { PageAsset, PageBlock, PageDesign, PageTextStyle } from "./page/types.js";
+import { pageDesignFromStored } from "./page-design.js";
+import type { PageBlock } from "./page/types.js";
 import { themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
-import { isObject, refuse, uuid } from "./validation.js";
-
-const MAX_ASSET_BASE64 = 2_800_000;
-
-function record(value: unknown, name: string): Record<string, unknown> {
-  if (!isObject(value)) refuse("INVALID_STATE", `The document theme's page design has an invalid ${name}.`);
-  return value as Record<string, unknown>;
-}
-
-function number(value: unknown, name: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) refuse("INVALID_STATE", `The document theme's page design has an invalid ${name}.`);
-  return value as number;
-}
-
-function string(value: unknown, name: string): string {
-  if (typeof value !== "string" || !value) refuse("INVALID_STATE", `The document theme's page design has an invalid ${name}.`);
-  return value as string;
-}
-
-/**
- * Reads the stored `DocumentTheme.pageDesign` object into the closed shape the
- * page builder takes. The builder checks every key, color and asset again, so
- * this only establishes the structure.
- */
-export function pageDesignFromTheme(stored: unknown): PageDesign {
-  if (!isObject(stored) || !Object.keys(stored).length) refuse("INVALID_STATE", "The document's theme has no page design, so it cannot be laid out as pages.");
-  const design = stored as Record<string, unknown>;
-  const page = record(design.page, "page size");
-  const colors: Record<string, string> = {};
-  for (const [key, value] of Object.entries(record(design.colors ?? {}, "color list"))) colors[key] = string(value, `color "${key}"`);
-  const textStyles: Record<string, PageTextStyle> = {};
-  for (const [key, value] of Object.entries(record(design.textStyles ?? {}, "text style list"))) {
-    const style = record(value, `text style "${key}"`);
-    textStyles[key] = {
-      fontFamily: string(style.fontFamily, `text style "${key}"`),
-      fontSize: number(style.fontSize, `text style "${key}"`),
-      lineHeight: number(style.lineHeight, `text style "${key}"`),
-      fontWeight: number(style.fontWeight, `text style "${key}"`),
-      color: string(style.color, `text style "${key}"`),
-      ...(style.letterSpacing == null ? {} : { letterSpacing: number(style.letterSpacing, `text style "${key}"`) }),
-    };
-  }
-  const assets: Record<string, PageAsset> = {};
-  for (const [key, value] of Object.entries(record(design.assets ?? {}, "asset list"))) {
-    const asset = record(value, `asset "${key}"`);
-    const data = string(asset.data, `asset "${key}"`);
-    if (data.length > MAX_ASSET_BASE64) refuse("INVALID_STATE", `The page design asset "${key}" is too large.`);
-    assets[key] = { mediaType: string(asset.mediaType, `asset "${key}"`) as PageAsset["mediaType"], data };
-  }
-  return { page: { width: number(page.width, "page width"), height: number(page.height, "page height") }, colors, textStyles, assets };
-}
+import { refuse, uuid } from "./validation.js";
 
 function pageBlock(block: MaterializedContentBlock): PageBlock {
   const values = block.materialization?.result.kind === "block" ? block.materialization.result.value : block.values;
   return {
     id: block.id, definitionKey: block.definitionKey, values: values as Record<string, unknown>,
     region: block.region ?? "body", ...(block.layoutKey ? { layoutKey: block.layoutKey } : {}),
+    // Every block an inclusion expands to carries the including blocks before its own id.
+    ...(block.path.length > 1 ? { scope: block.path.slice(0, -1).join("/") } : {}),
   };
 }
 
@@ -99,9 +52,11 @@ export const renderDocumentPages: ModuleOperationHandler = async (input, context
     if (!theme) refuse("INVALID_STATE", "The document has no theme, so it cannot be laid out as pages.");
     return { title: document!.title ?? "", themeId: theme!.id, pageDesign: theme!.page_design };
   });
+  const design = pageDesignFromStored(source.pageDesign);
+  if (!design) refuse("INVALID_STATE", "The document's theme has no page design, so it cannot be laid out as pages.");
   try {
     const paged = buildPagedDocument({
-      title: source.title, locale: content.locale, blocks: content.blocks.map(pageBlock), design: pageDesignFromTheme(source.pageDesign), fonts: [],
+      title: source.title, locale: content.locale, blocks: content.blocks.map(pageBlock), design, fonts: [],
     });
     return { value: { documentId, themeId: source.themeId, compositionHash: content.compositionHash, ...paged } };
   } catch (error) {

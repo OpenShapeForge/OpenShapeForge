@@ -11,7 +11,7 @@
  * Nothing here trusts block content: text is escaped, keys are checked against
  * the design, and every asset and font is inlined so the page never fetches.
  */
-import { DEFAULT_PAGE_LAYOUT, type PageAsset, type PageBlock, type PageDesign, type PageFont, type PagedDocument, type PagedDocumentInput, type PagedSection } from "./types.js";
+import { DEFAULT_PAGE_LAYOUT, type PageAsset, type PageBlock, type PageDesign, type PageFont, type PageSettings, type PagedDocument, type PagedDocumentInput, type PagedSection } from "./types.js";
 
 const KEY = /^[a-z][A-Za-z0-9-]{0,63}$/;
 const FONT_FAMILY = /^[A-Za-z][A-Za-z0-9 -]{0,63}$/;
@@ -80,6 +80,11 @@ function paragraphs(markdown: string): string {
     .map((part) => `<p>${part.split("\n").map((line) => inline(line.trim())).join("<br>")}</p>`).join("");
 }
 
+/** The `data:` URL of a page design image. */
+export function pageAssetUrl(design: PageDesign, key: string, name = "The page"): string {
+  return assetUrl(design, key, name);
+}
+
 function assetUrl(design: PageDesign, key: string, name: string): string {
   const asset: PageAsset | undefined = Object.hasOwn(design.assets, key) ? design.assets[key] : undefined;
   if (!asset) fail(`${name} names the unknown asset "${key}".`);
@@ -133,6 +138,17 @@ function spacerBlock(block: PageBlock): string {
   return `<div class="b" style="height:${px(block.values.height, "Spacer.height", 0, 4000)}px;flex:none"></div>`;
 }
 
+/** Block types the paged renderer lays out itself. A section break is not one: it decides the page, it is not on it. */
+export const PAGE_BLOCK_KEYS = ["TextBlock", "TextColumns", "ImageBlock", "SpacerBlock"] as const;
+
+/**
+ * One block as the HTML both the print engine and an editor preview show.
+ * Text is escaped and every key is checked, so the result is safe to insert.
+ */
+export function renderPageBlock(block: PageBlock, design: PageDesign): string {
+  return renderBlock(block, design);
+}
+
 function renderBlock(block: PageBlock, design: PageDesign): string {
   switch (block.definitionKey) {
     case "TextBlock": return textBlock(block, design);
@@ -143,19 +159,14 @@ function renderBlock(block: PageBlock, design: PageDesign): string {
   }
 }
 
-type Section = {
-  layout: string;
-  margin: number;
-  gap: number;
-  blockGap: number;
-  background?: string;
-  backgroundImage?: string;
-  bodyAlignment: "top" | "center" | "bottom";
-  body: PageBlock[];
-};
+type Section = PageSettings & { scope: string; body: PageBlock[] };
 
-function sectionFromBreak(block: PageBlock | undefined, design: PageDesign): Section {
-  const v = block?.values ?? {};
+/**
+ * Reads a section break's values into page settings, with the defaults a
+ * document without any section break gets.
+ */
+export function pageSettings(values: Readonly<Record<string, unknown>> | undefined, design: PageDesign): PageSettings {
+  const v = values ?? {};
   const background = optionalKey(v.background, "SectionBreak.background");
   if (background && !Object.hasOwn(design.colors, background)) fail(`SectionBreak.background names the unknown color "${background}".`);
   const backgroundImage = optionalKey(v.backgroundImage, "SectionBreak.backgroundImage");
@@ -168,7 +179,6 @@ function sectionFromBreak(block: PageBlock | undefined, design: PageDesign): Sec
     ...(background ? { background } : {}),
     ...(backgroundImage ? { backgroundImage } : {}),
     bodyAlignment: option(v.bodyAlignment, "SectionBreak.bodyAlignment", ["top", "center", "bottom"] as const, "top"),
-    body: [],
   };
 }
 
@@ -191,16 +201,36 @@ function validateDesign(design: PageDesign, fonts: readonly PageFont[]): void {
  */
 export const PAGED_FONTS_MARKER = "/*osf-paged-fonts*/";
 
+function textStyleRules(design: PageDesign, scope: string): string {
+  return Object.entries(design.textStyles).map(([key, style]) => `${scope}.s-${key}{font-family:"${style.fontFamily}",sans-serif;font-size:${px(style.fontSize, `${key}.fontSize`, 4, 400)}px;line-height:${px(style.lineHeight, `${key}.lineHeight`, 4, 600)}px;font-weight:${px(style.fontWeight, `${key}.fontWeight`, 100, 1000)};letter-spacing:${px(style.letterSpacing, `${key}.letterSpacing`, -20, 20, 0)}px;color:${design.colors[style.color]}}`).join("");
+}
+
+function blockRules(scope: string): string {
+  return [
+    ".b{flex:none;width:100%}", ".cols{display:flex}", ".col{display:flex}", ".col.end{justify-content:flex-end}", ".image{display:flex}", ".image img{display:block}",
+    ".text{overflow-wrap:break-word}", ".text p{margin:0}", ".text p+p{margin-top:1em}",
+  ].map((rule) => scope + rule).join("");
+}
+
+/**
+ * The style rules of the blocks and of the design's text styles, each
+ * selector prefixed with `scope` (for example ".page "), so an editor can show
+ * blocks inside its own page exactly as the print engine lays them out.
+ */
+export function pageBlockCss(design: PageDesign, scope: string): string {
+  if (!/^[A-Za-z0-9 ._#>-]*$/.test(scope)) fail("The style scope is not a plain selector.");
+  validateDesign(design, []);
+  return blockRules(scope) + textStyleRules(design, scope);
+}
+
 function designCss(design: PageDesign, fonts: readonly PageFont[]): string {
   const faces = fonts.map((font) => `@font-face{font-family:"${font.family}";font-weight:${font.weight};font-style:normal;src:url(data:font/${font.format === "woff2" ? "woff2" : "ttf"};base64,${font.data}) format("${font.format}")}`).join("");
-  const styles = Object.entries(design.textStyles).map(([key, style]) => `.s-${key}{font-family:"${style.fontFamily}",sans-serif;font-size:${px(style.fontSize, `${key}.fontSize`, 4, 400)}px;line-height:${px(style.lineHeight, `${key}.lineHeight`, 4, 600)}px;font-weight:${px(style.fontWeight, `${key}.fontWeight`, 100, 1000)};letter-spacing:${px(style.letterSpacing, `${key}.letterSpacing`, -20, 20, 0)}px;color:${design.colors[style.color]}}`).join("");
-  return (fonts.length ? faces : PAGED_FONTS_MARKER) + styles;
+  return (fonts.length ? faces : PAGED_FONTS_MARKER) + blockRules("") + textStyleRules(design, "");
 }
 
 const BASE_CSS = [
   "*{box-sizing:border-box}",
   "html,body{margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}",
-  "p{margin:0}p+p{margin-top:1em}",
   ".bg{position:fixed;left:0;top:0;width:var(--w);height:var(--h);overflow:hidden}",
   ".bg img{position:absolute;left:0;top:0;width:100%;height:100%}",
   ".region{position:fixed;left:var(--m);width:calc(var(--w) - 2*var(--m));display:flex;flex-direction:column;gap:var(--bg)}",
@@ -208,8 +238,6 @@ const BASE_CSS = [
   "table.flow{width:var(--w);border-collapse:collapse;border-spacing:0}table.flow td{padding:0;vertical-align:top}",
   ".space-top{height:var(--top)}.space-bottom{height:var(--bottom)}",
   ".body{position:relative;display:flex;flex-direction:column;gap:var(--bg);padding:0 var(--m);min-height:calc(var(--h) - var(--top) - var(--bottom))}",
-  ".b{flex:none;width:100%}.cols{display:flex}.col{display:flex}.col.end{justify-content:flex-end}.image{display:flex}.image img{display:block}",
-  ".text{overflow-wrap:break-word}",
 ].join("");
 
 /** The print engine evaluates this once, after fonts load and before printing. */
@@ -239,10 +267,20 @@ function sectionHtml(input: PagedDocumentInput, section: Section, header: readon
   ].join("");
 }
 
+const scopedKey = (scope: string, layout: string) => `${scope}\n${layout}`;
+const within = (scope: string, owner: string) => owner === "" || scope === owner || scope.startsWith(`${owner}/`);
+
 /**
- * Splits the ordered body blocks into sections at each `SectionBreak` and
- * renders one HTML document per section. Body blocks before the first break
- * use the default layout. A section without body blocks still yields a page.
+ * Splits the ordered body blocks into sections and renders one HTML document
+ * per section.
+ *
+ * A `SectionBreak` starts a section with its own page settings and layout.
+ * Body blocks before the first break use the default layout. An included
+ * template keeps its own layout: its blocks arrive with their own scope, its
+ * section break opens a section in that scope, and when the including
+ * template's blocks resume they continue on a new page with the settings that
+ * template last had. A section without body blocks is left out unless it is
+ * the last one, which still yields a page.
  */
 export function buildPagedDocument(input: PagedDocumentInput): PagedDocument {
   if (input.blocks.length > MAX_BLOCKS) fail(`A paged document holds at most ${MAX_BLOCKS} blocks.`);
@@ -250,26 +288,35 @@ export function buildPagedDocument(input: PagedDocumentInput): PagedDocument {
   validateDesign(input.design, input.fonts);
   const regions = { header: new Map<string, PageBlock[]>(), footer: new Map<string, PageBlock[]>() };
   const sections: Section[] = [];
+  const lastSettings = new Map<string, PageSettings>();
+  const open = (scope: string, settings: PageSettings) => { sections.push({ ...settings, scope, body: [] }); lastSettings.set(scope, settings); };
   for (const block of input.blocks) {
+    const scope = block.scope ?? "";
+    if (scope.length > 4000 || /[\n]/.test(scope)) fail("A block scope is not valid.");
     if (block.region === "body") {
-      if (block.definitionKey === "SectionBreak") sections.push(sectionFromBreak(block, input.design));
-      else {
-        if (!sections.length) sections.push(sectionFromBreak(undefined, input.design));
-        sections.at(-1)!.body.push(block);
+      if (block.definitionKey === "SectionBreak") { open(scope, pageSettings(block.values, input.design)); continue; }
+      const current = sections.at(-1);
+      if (!current) open("", pageSettings(undefined, input.design));
+      else if (!within(scope, current.scope)) {
+        // The inclusion that owned the current section has ended: resume the nearest enclosing template's pages.
+        let resume = scope;
+        while (resume && !lastSettings.has(resume)) resume = resume.includes("/") ? resume.slice(0, resume.lastIndexOf("/")) : "";
+        open(resume, lastSettings.get(resume) ?? pageSettings(undefined, input.design));
       }
+      sections.at(-1)!.body.push(block);
       continue;
     }
     if (block.definitionKey === "SectionBreak") fail("A section break belongs in the body.");
-    const layout = optionalKey(block.layoutKey, "Block.layoutKey") ?? DEFAULT_PAGE_LAYOUT;
-    const list = regions[block.region].get(layout) ?? [];
+    const key = scopedKey(scope, optionalKey(block.layoutKey, "Block.layoutKey") ?? DEFAULT_PAGE_LAYOUT);
+    const list = regions[block.region].get(key) ?? [];
     list.push(block);
-    regions[block.region].set(layout, list);
+    regions[block.region].set(key, list);
   }
-  if (!sections.length) sections.push(sectionFromBreak(undefined, input.design));
+  if (!sections.length) open("", pageSettings(undefined, input.design));
   const css = designCss(input.design, input.fonts);
-  const rendered: PagedSection[] = sections.map((section) => ({
+  const rendered: PagedSection[] = sections.filter((section, index) => section.body.length || index === sections.length - 1).map((section) => ({
     layout: section.layout,
-    html: sectionHtml(input, section, regions.header.get(section.layout) ?? [], regions.footer.get(section.layout) ?? [], css),
+    html: sectionHtml(input, section, regions.header.get(scopedKey(section.scope, section.layout)) ?? [], regions.footer.get(scopedKey(section.scope, section.layout)) ?? [], css),
   }));
   return { renderingVersion: "osf-paged-html-v1", page: { ...input.design.page }, sections: rendered };
 }

@@ -13,8 +13,9 @@ import {
   type DocumentTypography,
   type ResolvedDocumentTheme,
 } from "./theme-tokens.js";
-import { themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
+import { themeIdFromTemplateSnapshot, themeIdValue, pagesFromTemplateSnapshot } from "./theme-resolution.js";
 import { pageDesignFromStored } from "./page-design.js";
+import { variantPageValues } from "./page/html.js";
 import { object, refuse, uuid } from "./validation.js";
 
 type ThemeRow = Readonly<{
@@ -134,6 +135,7 @@ export const resolveDocumentTheme: ModuleOperationHandler = async (input, contex
   const palette = (paletteResult.data as { colors: ResolvedColor[] }).colors;
   const resolved = await platform.db.withSession(session, async (trx) => {
     let storedThemeId: string | null = null;
+    let templatePages: Record<string, Record<string, unknown>> = {};
     let kind: DocumentThemeResolutionKind = field === "documentId" ? "document" : field === "templateId" ? "template" : "template-version";
     if (field === "templateId") {
       const template = (await rows<{ document_theme_id: string | null }>(trx,
@@ -155,6 +157,7 @@ export const resolveDocumentTheme: ModuleOperationHandler = async (input, contex
           "select snapshot from erp.template_versions where tenant_id = $1 and id = $2 for share", [tenantId, versionId]))[0];
         if (!version) refuse("NOT_FOUND", "The document's template version no longer exists.");
         storedThemeId = themeIdFromTemplateSnapshot(version.snapshot);
+        templatePages = pagesFromTemplateSnapshot(version.snapshot, variantPageValues);
         kind = storedThemeId ? "template-version" : "document";
       }
     }
@@ -167,6 +170,8 @@ export const resolveDocumentTheme: ModuleOperationHandler = async (input, contex
       // Beside the theme rather than inside it: readers that know only the
       // closed text theme keep working, and a paged editor finds its tokens.
       pageDesign: theme ? pageDesignFromStored(theme.pageDesign) : null,
+      // What a document that sets no layout of its own inherits: its template's page settings, by channel/locale.
+      templatePages,
     };
   });
   return { value: resolved };

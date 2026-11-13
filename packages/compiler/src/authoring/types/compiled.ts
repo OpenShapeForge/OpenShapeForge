@@ -97,7 +97,7 @@ export interface CompiledField {
   entityValue?: { definitionField: string; parameterBindings?: boolean };
   valueFieldsFrom?: { reference: string; field: string; snapshotColumn?: string; headEntity?: string };
   /** The sibling field whose stored FieldDefinition types this value. */
-  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
+  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean; organizationData?: boolean };
   allowedDefinitions?: string[];
   childAuthorization?: "owner";
   childLock?: string;

@@ -437,6 +437,8 @@ describe("template variants and local/global variables", () => {
     expect(await print("en")).toEqual(["Dated 11 May 2026", "11 May 2026"]);
     expect(await print("nl")).toEqual(["Dated 11 mei 2026", "11 mei 2026"]);
     expect(await print("en-US")).toEqual(["Dated May 11, 2026", "May 11, 2026"]);
+    f.versions.root = { ...f.versions.root!, parameters: { day: { osfType: "iban", baseType: "string" } } };
+    expect(await print("nl", "NL77RABO0333580214")).toEqual(["Dated NL77 RABO 0333 5802 14", "NL77 RABO 0333 5802 14"]);
   });
 
   test("a Markdown field escapes every construct a value could open, not only emphasis", async () => {

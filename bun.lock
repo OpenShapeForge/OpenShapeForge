@@ -268,7 +268,7 @@
     },
     "packages/operations": {
       "name": "@openshapeforge/operations",
-      "version": "0.2.23",
+      "version": "0.2.24",
       "dependencies": {
         "re2js": "2.9.1",
       },

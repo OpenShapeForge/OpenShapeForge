@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from 'kysely';
-import { rlsBypassToken } from "../../rls-bypass.js";
 import { STANDARD_COLORS, parseTenantColors } from '@openshapeforge/operations';
 import type { VersionedMigration } from '../versioned-runner.js';
 import { colorReferenceTables } from '../../../operations/entity/color-references.js';
 const migration: VersionedMigration = {
-  version:'0025_color-palette-references', fileUrl:import.meta.url,
+  version:'0026_color-palette-references', fileUrl:import.meta.url,
   async up(db) {
-    await sql`select set_config('app.bypass_rls',${rlsBypassToken()},true)`.execute(db);
+    await sql`select set_config('app.bypass_rls','true',true)`.execute(db);
     const tenants=await sql<{id:string}>`select id from erp.tenants`.execute(db);
     for(const tenant of tenants.rows) {
       const rows=await sql<{id:string;value:unknown}>`select id,value from erp.tenant_settings where tenant_id=${tenant.id}::uuid and namespace='appearance' and key='colors' for update`.execute(db);
@@ -31,7 +30,9 @@ const migration: VersionedMigration = {
           await sql`update ${sql.id(table.schema,table.table)} set ${sql.id(column.name)}=${reference} where tenant_id=${tenant.id}::uuid and ${sql.id(column.name)}=${value}`.execute(db);
         }
       }
-      const value=JSON.stringify({colors});
+      let value:string;
+      try { value=JSON.stringify({colors:parseTenantColors({colors})}); }
+      catch(error) { throw new Error(`Color palette migration cannot preserve the legacy colors in a valid palette: ${error instanceof Error?error.message:'Invalid palette.'} Resolve legacy color usage before retrying.`); }
       if(rows.rows[0])await sql`update erp.tenant_settings set value=${value}::text::jsonb where id=${rows.rows[0].id}::uuid and tenant_id=${tenant.id}::uuid`.execute(db);
       else await sql`insert into erp.tenant_settings(id,tenant_id,namespace,key,definition,value,description) values(gen_random_uuid(),${tenant.id}::uuid,'appearance','colors','{"key":"value","osfType":"colorPalette","label":{"en":"Custom colors","nl":"Eigen kleuren"}}'::jsonb,${value}::text::jsonb,'Eigen kleuren / Custom colors')`.execute(db);
     }

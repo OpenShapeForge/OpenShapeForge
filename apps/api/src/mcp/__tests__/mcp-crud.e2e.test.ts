@@ -22,6 +22,9 @@ import {
   foreignKeyTargets,
   nextMarker,
   contractSample,
+  createReferenceRow,
+  textColumnFor,
+  isMutableColumn,
   tables,
   tablesByName,
   untrackRow,
@@ -249,7 +252,8 @@ describe("generated MCP server", () => {
   });
 
   test("returns invalid expectedVersion as a canonical field validation error", async () => {
-    const refused = await callTool(tenantA, "relation_update", {
+    const refused = await callTool(tenantA, "osf_update", {
+      entity: "Relation",
       id: randomUUID(),
       values: {},
       expectedVersion: "2026-02-30T12:00:00.000Z",
@@ -269,7 +273,8 @@ describe("generated MCP server", () => {
   });
 
   test("returns invalid mutation control types as canonical field validation errors", async () => {
-    const refused = await callTool(tenantA, "relation_delete", {
+    const refused = await callTool(tenantA, "osf_delete", {
+      entity: "Relation",
       id: randomUUID(),
       expectedVersion: new Date().toISOString(),
       leaseToken: "not-used-because-control-validation-runs-first",
@@ -294,8 +299,8 @@ describe("generated MCP server", () => {
     )!;
     const created = await callTool(
       tenantA,
-      "relation_create",
-      await buildCreateArgs(relation, tenantA),
+      "osf_create",
+      {entity:"Relation", ...await buildCreateArgs(relation, tenantA)},
     );
     expect(toolError(created.body)).toBeUndefined();
     const envelope = toolEnvelope(created.body);
@@ -471,7 +476,7 @@ describe("generated MCP server", () => {
   });
 
   test("refuses a tool the session may not invoke", async () => {
-    const { body } = await callTool(readOnly, "relation_create", { displayName: "nope" });
+    const { body } = await callTool(readOnly, "osf_create", { entity:"Relation", displayName: "nope" });
     expect(toolError(body)).toMatch(/NOT_FOUND/);
   });
 
@@ -538,23 +543,22 @@ describe("generated MCP server", () => {
       expect(Array.isArray(listed.items)).toBe(true);
       expect(listed.totalCount).toBeGreaterThan(0);
 
-      const textColumn = table.columns.find(
-        (column) =>
-          column.type === "text" &&
-          !column.primaryKey &&
-          !["tenant_id", "created_at", "updated_at"].includes(column.name),
-      );
+      // Marker text belongs in an unconstrained text contract. Entities that
+      // expose only typed palette fields still exercise a real valid update.
+      const textColumn = textColumnFor(table) ?? table.columns.find(column =>
+        column.colorReference && isMutableColumn(column, "update"));
+      const nextValue = textColumn?.colorReference ? "standard:forest" : `updated-${seed}`;
       if (textColumn) {
         const controls = await acquireLease(table, tenantA, row, "update");
         const updatedCall = await call(tenantA, "update", {
           id: row.id,
-          values: { [fieldName(textColumn)]: `updated-${seed}` },
+          values: { [fieldName(textColumn)]: nextValue },
           ...controls,
         });
         expectCanonicalToolOutput(table, "update", updatedCall.body);
         expect(toolError(updatedCall.body)).toBeUndefined();
         const updated = toolPayload(updatedCall.body);
-        expect(updated[fieldName(textColumn)]).toBe(`updated-${seed}`);
+        expect(updated[fieldName(textColumn)]).toBe(nextValue);
         row = updated;
       }
 
@@ -759,7 +763,7 @@ describe("generated MCP server", () => {
       });
 
       test(`${prefix}: accepts ${key} on create and filters the list by it`, async () => {
-        const targetId = await createMcpRow(targetTable, tenantA);
+        const targetId = column.document ? await createReferenceRow(targetTable, tenantA, column) : await createMcpRow(targetTable, tenantA);
         const created = await call(tenantA, "create", await createArgs(table, tenantA, { [key]: targetId }));
         expect(toolError(created.body)).toBeUndefined();
         const row = toolPayload(created.body);
@@ -773,7 +777,7 @@ describe("generated MCP server", () => {
         for (const item of listed.items) expect(item[key]).toBe(targetId);
 
         if (!column.immutable) {
-          const otherId = await createMcpRow(targetTable, tenantA);
+          const otherId = column.document ? await createReferenceRow(targetTable, tenantA, column) : await createMcpRow(targetTable, tenantA);
           const controls = await acquireLease(table, tenantA, row, "update");
           const updated = toolPayload(
             (
@@ -805,7 +809,7 @@ describe("generated MCP server", () => {
         // The filter is not an oracle across tenants: the value is another
         // tenant's real key, and row security answers with nothing, exactly as
         // a list without the filter would.
-        const foreignTargetId = await createMcpRow(targetTable, tenantB);
+        const foreignTargetId = column.document ? await createReferenceRow(targetTable, tenantB, column) : await createMcpRow(targetTable, tenantB);
         const created = await call(
           tenantB,
           "create",

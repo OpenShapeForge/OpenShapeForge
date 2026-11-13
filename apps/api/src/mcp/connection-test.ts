@@ -258,6 +258,8 @@ export async function testElicitedRow(
           (effectiveAuth as JsonRecord | null)?.scheme ===
           "oauth2ClientCredentials"
             ? "The token endpoint accepted the client credentials and issued a token."
+            : (effectiveAuth as JsonRecord | null)?.scheme === "googleServiceAccount"
+              ? "The token endpoint accepted the signed service-account assertion and issued a token."
             : (effectiveAuth as JsonRecord | null)?.scheme === "session"
               ? "The login endpoint accepted the credential and issued a session."
               : "The credentials resolve into request authentication.",

@@ -12,6 +12,7 @@ import { expect } from "bun:test";
 import { describe, registerSuiteLifecycle, tenantA, test } from "./e2e/harness.js";
 import {
   createRow,
+  createReferenceRow,
   fieldName,
   foreignKeyTargets,
   isMutableColumn,
@@ -78,11 +79,11 @@ for (const table of tables) {
         });
       } else if (relationship.resolve === "belongsTo") {
         test(`belongsTo ${relationship.name} -> ${relationship.target}`, async () => {
-          const targetId = await createRow(targetTable, tenantA);
           const fkColumn = table.columns.find(
             (column) => column.name === relationship.foreignKey,
           );
           expect(fkColumn).toBeTruthy();
+          const targetId = await createReferenceRow(targetTable, tenantA, fkColumn);
           const id = await createRow(table, tenantA, { [fieldName(fkColumn!)]: targetId });
           const row = await fetchRecord(tenantA, table, id, `id ${relationship.name} { id }`);
           expect(row[relationship.name]?.id).toBe(targetId);
@@ -102,11 +103,11 @@ for (const table of tables) {
         });
       } else if (relationship.resolve === "hasMany") {
         test(`hasMany ${relationship.name} -> ${relationship.target}`, async () => {
-          const parentId = await createRow(table, tenantA);
           const childFkColumn = targetTable.columns.find(
             (column) => column.name === relationship.foreignKey,
           );
           expect(childFkColumn).toBeTruthy();
+          const parentId = await createReferenceRow(table, tenantA, childFkColumn);
           const childId = await createRow(targetTable, tenantA, {
             [fieldName(childFkColumn!)]: parentId,
           });

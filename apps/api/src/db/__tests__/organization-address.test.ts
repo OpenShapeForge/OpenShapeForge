@@ -56,7 +56,10 @@ beforeAll(async () => {
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = "http://127.0.0.1:9/realms/e2e";
   delete process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT;
   __resetSessionResolverForTests();
-  app = createApiApp({ cors: false, databaseUrl: databaseUrl(), modules: await loadRuntimeModules() });
+  const runtimeUrl = new URL(process.env.DATABASE_URL ??
+    "postgres://openshapeforge_app:openshapeforge_app@localhost:5434/openshapeforge_dev");
+  runtimeUrl.pathname = `/${name}`;
+  app = createApiApp({ cors: false, databaseUrl: runtimeUrl.toString(), modules: await loadRuntimeModules() });
   await app.ready();
 }, TEST_TIMEOUT);
 

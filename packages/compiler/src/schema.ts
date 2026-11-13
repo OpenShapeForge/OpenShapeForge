@@ -303,6 +303,8 @@ export type ColumnDefinition = {
   references?: ReferenceDefinition;
   sourceField?: string;
   colorReference?: boolean;
+  /** Stored canonical FieldDefinition position, projected from osfType. */
+  storedFieldDefinition?: "single" | "collection";
   fieldPolicy?: import("@openshapeforge/operations").FieldValuePolicy;
   /**
    * Data-classification tier propagated from the authoring field's

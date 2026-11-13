@@ -1293,6 +1293,7 @@
               "required": [
                 "fields"
               ],
+              "not": { "required": ["actions"] },
               "x-osf-i18n": {
                 "title": {
                   "en": "Fields",
@@ -1353,7 +1354,7 @@
                 }
               }
             },
-            "actions": { "type": "array", "uniqueItems": true, "items": { "const": "update" }, "description": "Make the fields in this view's layout editable through the canonical update Operation.", "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } } },
+            "actions": { "type": "array", "uniqueItems": true, "items": { "const": "update", "x-osf-i18n": { "title": { "en": "Action", "nl": "Actie" } } }, "description": "Make the fields in this view's layout editable through the canonical update Operation.", "x-osf-i18n": { "title": { "en": "Actions", "nl": "Acties" } } },
             "layout": {
               "$ref": "#/$defs/webViewsV2/properties/record/properties/layout",
               "x-osf-i18n": {
@@ -1783,6 +1784,7 @@
             }
           },
           "properties": {
+            "visible": {"type": "boolean", "x-osf-i18n": {"title": {"en": "Show toolbar", "nl": "Werkbalk tonen"}}},
             "search": {
               "type": "boolean",
               "x-osf-i18n": {
@@ -2185,6 +2187,8 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "orderBy": { "type": "string", "minLength": 1 },
+                  "presentation": { "enum": ["options", "rows"] },
                   "relationship": {
                     "type": "string",
                     "minLength": 1
@@ -2499,7 +2503,7 @@
                 "children": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Children collection", "nl": "Collectie met onderdelen" } } },
                 "label": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group label field", "nl": "Groepslabelveld" } } },
                 "count": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Group count field", "nl": "Groepstellingsveld" } } },
-                "parent": {"$ref": "#/$defs/fieldKey"},
+                "parent": {"$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": {"title": {"en": "Parent field", "nl": "Bovenliggend veld"}}},
                 "through": {"$ref": "#/$defs/webCollectionTreeThrough"}
               }
             },

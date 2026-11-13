@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import {hasSensitiveOutput} from "@openshapeforge/operations";
 import { PRIVATE_OUTPUT_TOOL, completePrivateOutput, startPrivateOutput, needsPrivateOutput } from "./private-output.js";
 import { ARTIFACT_UPLOAD_TOOL_NAME, artifactUploadToolResult, mintArtifactUpload } from "./artifact-upload.js";
 import { callEditLeaseTool } from "./edit-lease-tools.js";
@@ -288,9 +289,12 @@ export async function staticToolCall(
       assertParentInvocationActive?.();
       assertInterceptorActive?.();
       const bound = operations.get(operationTool.key)!;
-      const { definitions } = await searchableSessionOperations(ctx);
-      const definition = definitions.find(d => d.id === operationTool.key);
-      if (definition && needsPrivateOutput(definition)) return await startPrivateOutput(ctx, definition, request.params.arguments ?? {});
+      if(hasSensitiveOutput(operationTool.outputSchema)) {
+        const { definitions } = await searchableSessionOperations(ctx);
+        const definition = definitions.find(d => d.id === operationTool.key);
+        if(!definition || !needsPrivateOutput(definition))throw new HttpError(409,"INTERACTION_REQUIRED","The confidential Operation has no matching private execution contract.");
+        return await startPrivateOutput(ctx, definition, request.params.arguments ?? {});
+      }
       const invoke = (effectiveSignal?: AbortSignal) => invokeOperation(
         bound,
         request.params.arguments ?? {},

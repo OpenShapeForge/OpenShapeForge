@@ -21,3 +21,11 @@ test('ambiguous slots, plaintext secrets and invalid typed defaults fail before 
   expect(() => tenantSettingDefaultsOf([{ tenantSettingDefaults: [{ namespace: 'example', key: 'flag', definition: { key: 'value', osfType: 'boolean' }, value: 'yes' }] }])).toThrow('Invalid typed');
   expect(() => tenantSettingDefaultsOf([{ tenantSettingDefaults: [{ ...secret, definition: { key: 'wrong', osfType: 'string' } }] }])).toThrow('Invalid typed');
 });
+
+test('unset defaults obey the canonical typed-definition policy before persistence', () => {
+  for (const child of [
+    { key: 'nested', osfType: 'string', classification: { sensitivity: 'confidential' } },
+    { key: 'nested', osfType: 'string', authorization: { read: ['Organization.All.Read'] } },
+    { key: 'nested', osfType: 'string', secureInput: true },
+  ]) expect(() => tenantSettingDefaultsOf([{ tenantSettingDefaults: [{ namespace: 'example', key: 'guarded', definition: { key: 'value', osfType: 'object', children: [child] } }] }])).toThrow('Invalid typed default');
+});

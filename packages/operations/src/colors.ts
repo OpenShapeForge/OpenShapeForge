@@ -4,6 +4,7 @@ export type PaletteColor = { key: string; name: string; value: string; active: b
 export type ResolvedColor = PaletteColor & { reference: string; source: 'standard' | 'tenant' };
 export const COLOR_SETTINGS_NAMESPACE = 'appearance';
 export const COLOR_SETTINGS_KEY = 'colors';
+export const COLOR_PALETTE_MAX_COLORS = 100;
 export const COLOR_REFERENCE_PATTERN = '^(standard|tenant):[a-z][a-z0-9-]{0,63}$';
 export const COLOR_VALUE_PATTERN = '^#[0-9A-Fa-f]{6}$';
 export const STANDARD_COLORS: readonly PaletteColor[] = Object.freeze([
@@ -27,7 +28,7 @@ export const STANDARD_COLORS: readonly PaletteColor[] = Object.freeze([
 export function parseTenantColors(value: unknown): PaletteColor[] {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => key !== 'colors')) throw new Error('Invalid color palette.');
   const colors = (value as { colors?: unknown }).colors;
-  if (!Array.isArray(colors) || colors.length > 100) throw new Error('A palette contains at most 100 colors.');
+  if (!Array.isArray(colors) || colors.length > COLOR_PALETTE_MAX_COLORS) throw new Error(`A palette contains at most ${COLOR_PALETTE_MAX_COLORS} colors.`);
   const keys = new Set<string>();
   return colors.map(item => {
     if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some(key => !['key','name','value','active'].includes(key)) ||

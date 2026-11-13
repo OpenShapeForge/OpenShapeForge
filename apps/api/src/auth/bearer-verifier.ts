@@ -52,8 +52,9 @@ export function getBearerVerifier(allowResourceClient = false, organizationBound
     ...(authorizedParties ? { authorizedParties } : {}),
   });
   // Dynamic OAuth clients cannot appear in a static azp allowlist. This
-  // verifier is used ONLY when the caller also requires an exact resource aud;
-  // signature, issuer and configured API audience checks still apply.
+  // verifier requires a separate exact resource-audience binding, or the API
+  // key path's exact azp binding to its trusted stored credential. Signature,
+  // issuer and configured API audience checks still apply.
   cachedResourceVerifier = createBearerVerifier({
     jwksUri,
     issuer,

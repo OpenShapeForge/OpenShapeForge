@@ -178,7 +178,7 @@ describe("MCP App capability negotiation", () => {
       const result = configurationAppResult(
         { status: "awaiting_person" },
         "private-token",
-        "Provider",
+        "Provider",undefined,undefined,undefined,true,
       );
       const first = result.content[0];
       expect(first?.type).toBe("text");
@@ -188,7 +188,9 @@ describe("MCP App capability negotiation", () => {
       expect(JSON.stringify(result.structuredContent)).not.toContain("private-token");
       expect(result._meta).toEqual({
         configurationUrl:
-          "https://api.example.test/api/entity-configuration/private-token",
+          "https://api.example.test/api/entity-configuration/pending/",
+        submissionUrl: "https://api.example.test/api/entity-configuration/app",
+        submissionToken: "private-token",
         displayName: "Provider",
       });
     } finally {

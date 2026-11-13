@@ -2330,9 +2330,27 @@ test("a collection tree names a stored collection of the entity and fields for i
   expect(build().entities.BundleItem!.views.collection.tree).toBeUndefined();
   product.contract.interfaces!.web!.collectionTree = { children: "displayName" };
   expect(build).toThrow("Product: collection tree children displayName must be a stored collection relationship of Product.");
+  product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", parent: "displayName" };
+  expect(build).toThrow("must be a stored belongsTo relationship");
   product.contract.interfaces!.web!.collectionTree = { children: "bundleItems", count: "missing" };
   expect(build).toThrow("Product: collection tree count missing is not a field of Product.");
 });
+
+test("the real Team subtype can inherit a stored parent reference to RelationGroup", async () => {
+  const active = await loadActivePlatformCompile(join(import.meta.dir, "../../../.."));
+  const entities = structuredClone(active.entities);
+  const team = entities.find(entry => entry.contract.entity.name === "Team")!;
+  const base = entities.find(entry => entry.contract.entity.name === "RelationGroup")!;
+  expect(team.contract.subtype?.base.name).toBe("RelationGroup");
+  // A composed base patch is inherited without inventing a second entity-value type.
+  for (const entry of [base, team]) {
+    entry.contract.model.fields.push(field("parentTeamId", { osfType: "RelationGroup" }));
+    entry.contract.model.relationships.push({ key: "parentTeamId", fieldKey: "parentTeamId", kind: "belongsTo", target: "RelationGroup", foreignKey: "parent_team_id", ownership: "reference" });
+  }
+  team.contract.interfaces!.web!.collectionTree = { children: "memberships", parent: "parentTeamId" };
+  const result = buildWebManifest(entities, {}, corpusWebOperations(authoringDir));
+  expect(result.entities.Team!.views.collection.tree).toMatchObject({ children: "memberships", parent: "parentTeamId" });
+}, 30_000);
 
 describe('declarative collection tables', () => {
   const fixture = () => {
@@ -2387,6 +2405,18 @@ describe('declarative collection tables', () => {
     expect(build).toThrow('select: one'); value.select = 'one';
     expect(build().entities.Product!.views.collection.table?.columns[0]?.values[0]?.path?.cardinality).toBe('many');
   });
+
+  test('explicit single-result selection applies to conditional paths without erasing their cardinality', () => {
+    const { product, build } = fixture();
+    const value = { text: text('Primary'), when: { path: 'parts.role', equals: 'main' } } as { text: ReturnType<typeof text>; select?: 'one'; when: { path: string; equals: string } };
+    product.contract.interfaces!.web!.collectionTable!.columns[0]!.values = [value];
+    expect(build).toThrow('select: one');
+    value.select = 'one';
+    const compiled = build().entities.Product!.views.collection.table?.columns[0]?.values[0];
+    expect(compiled?.select).toBe('one');
+    expect(compiled?.when?.path.cardinality).toBe('many');
+    expect(compiled?.when?.path.targetEntityId).toBe('Membership');
+  });
   test('keeps money and currency on the same readable record', () => {
     const { product, build } = fixture();
     product.contract.interfaces!.web!.collectionTable!.columns[0]!.membershipValues = [{ path: 'amount', currency: 'currency', format: 'money' }];
@@ -2440,4 +2470,32 @@ test('default collection filters survive authoring compilation and remain local 
  const manifest=buildWebManifest([{slug:'chip',contract}]);
  expect(manifest.entities.Chip!.views.collection.filter).toEqual(filter);
  expect(matchWebRoute(manifest,'/chips/all')?.entity.views.collection.filter).toBeUndefined();
+});
+
+test('same-entity flat and routed panels select a named editable record with canonical writable fields', () => {
+  const product = entity('Product','products',[field('id',{immutable:true}),field('displayName'),field('caption')],coreView());
+  const web=product.contract.interfaces!.web!;
+  web.namedViews={
+    panel:{kind:'record',actions:['update'],detail:{...coreView().detail!,groups:{render:{component:'TabBar'},items:[{id:'details',fields:['caption','id']}]}}},
+  };
+  web.collectionTable={heading:{title:text('Products')},views:{tree:text('Grouped'),flat:text('All')},label:text('Product'),columns:[{key:'name',label:text('Name'),values:[{path:'displayName'}]}],recordPanel:{title:text('Details'),view:'panel',includeRecord:false}};
+  web.namedViews.routed={kind:'collection',collectionLayout:'table',route:'/all-products',table:web.collectionTable};
+  const build=()=>buildWebManifest([product]).entities.Product!;
+  const result=build();
+  expect(result.views.collection.table!.recordPanel!.view).toBe('panel');
+  expect(result.views.named!.routed).toMatchObject({kind:'collection',table:{recordPanel:{view:'panel'}}});
+  expect(result.views.named!.panel).toMatchObject({modes:['read','update'],operations:{update:{id:'Product.update'}},formGroups:{update:[{fields:['caption']}]},layout:{tabs:[{groups:[{fields:['caption','id']}]}]}});
+  expect(result.fields.caption!.supports.update).toBe(true);
+  expect(result.fields.id!.supports.update).toBe(false);
+  expect(result.views.record!.formGroups!.update!.flatMap(group=>group.fields)).not.toContain('caption');
+  web.collectionTable.recordPanel!.view='missing';
+  expect(build).toThrow('must name a record view');
+  web.collectionTable.recordPanel!.view='panel';
+  web.collectionTable.recordPanel!.includeRecord=true;
+  expect(build).toThrow('replaces the inline record body');
+  web.collectionTable.recordPanel!.includeRecord=false;
+  web.namedViews.panel={kind:'record',actions:['update'],detail:{...coreView().detail!,groups:{render:{component:'TabBar'},items:[{id:'identity',fields:['id']}]}}};
+  expect(build).toThrow('requires writable layout fields');
+  delete product.contract.entityOperations.update;
+  expect(build).toThrow("requires the entity's update Operation");
 });

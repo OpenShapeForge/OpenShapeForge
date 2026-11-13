@@ -13,7 +13,7 @@ import { readBoundedResponse } from "../modules/outbound-response.js";
  *
  *   provider row:   transport ("rest"), baseUrlTemplate, optional
  *                   baseUrlTemplates, auth
- *                   { scheme: basic|bearer|header|oauth2ClientCredentials|
+ *                   { scheme: basic|bearer|header|oauth2ClientCredentials|googleServiceAccount|
  *                     session, usernameTemplate, passwordFrom, headerName,
  *                     tokenFrom, loginUrl, loginParam, credentialFrom,
  *                     loginResponseFormat, sessionPath, sessionParam,

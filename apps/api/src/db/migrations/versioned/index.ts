@@ -1,4 +1,4 @@
-import m0025ColorPaletteReferences from "./0025_color-palette-references.js";
+import m0026ColorPaletteReferences from "./0026_color-palette-references.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Explicit, ordered registry of versioned migrations.
@@ -20,6 +20,7 @@ import { migrationFileChecksum, type VersionedMigration } from "../versioned-run
 import { sql } from "kysely";
 import m0020LegacySealedTenantSettings, { upgradeLegacySealedTenantSettings } from "./0020_legacy-sealed-tenant-settings.js";
 // migration-registry:imports — `bun run db:migration:new` inserts imports below this line.
+import m0025CheckStoredFieldPatterns from "./0025_check-stored-field-patterns.js";
 import m0024RemoveTaskForm from "./0024_remove-task-form.js";
 import m0023UniqueConfigurationCodes from "./0023_unique-configuration-codes.js";
 import m0022MembershipRelationNullability from "./0022_membership-relation-nullability.js";
@@ -48,6 +49,7 @@ export const versionedMigrations: VersionedMigration[] = [
   m0022MembershipRelationNullability,
   m0023UniqueConfigurationCodes,
   m0024RemoveTaskForm,
-  m0025ColorPaletteReferences,
+  m0025CheckStoredFieldPatterns,
+  m0026ColorPaletteReferences,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

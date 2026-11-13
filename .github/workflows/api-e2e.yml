@@ -126,11 +126,13 @@ jobs:
       - name: Provision database roles
         env:
           OPENSHAPEFORGE_MIGRATE_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev
+          SCRATCH_ADMIN_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/postgres
         run: bun run db:provision-roles
 
       - name: Apply migrations
         env:
           OPENSHAPEFORGE_MIGRATE_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev
+          SCRATCH_ADMIN_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/postgres
           DATABASE_URL: postgres://openshapeforge_app:openshapeforge_app@localhost:5434/openshapeforge_dev
         run: bun run db:migrate
 
@@ -171,6 +173,7 @@ jobs:
         env:
           DATABASE_URL: postgres://openshapeforge_app:openshapeforge_app@localhost:5434/openshapeforge_dev
           OPENSHAPEFORGE_MIGRATE_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/openshapeforge_dev
+          SCRATCH_ADMIN_DATABASE_URL: postgres://openshapeforge:openshapeforge@localhost:5434/postgres
           OPENSHAPEFORGE_API_VERIFY_BEARER_JWKS_URI: http://localhost:8181/realms/openshapeforge/protocol/openid-connect/certs
           OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER: http://localhost:8181/realms/openshapeforge
           OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE: erp-provider

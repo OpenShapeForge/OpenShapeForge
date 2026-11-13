@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { PRIVATE_OUTPUT_TOOL_NAME } from "@openshapeforge/operations";
 /**
  * What one session is SHOWN of the catalogue: which entity tools it may
  * invoke, which classified fields are withheld from its schemas, which
@@ -275,6 +276,7 @@ export function coreStaticToolNames(
     ...catalogDiscoveryTools.map((tool) => tool.name),
     ...catalogTestTools.map((tool) => tool.name),
     ...connectorMcpTools(listConnectorContracts()).map((tool) => tool.name),
+    PRIVATE_OUTPUT_TOOL_NAME,
     SESSION_INFO_TOOL_NAME, // session-info (whoami / osf://session)
     GENERIC_DESCRIBE_TOOL_NAME, // the second step of the generic osf_* projection
     ...ONBOARDING_TOOL_NAMES, // first-use onboarding (mcp/onboarding.ts)

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { hasSensitiveOutput, ENTITY_CONFIGURATION_APP_URI } from "@openshapeforge/operations";
 /**
  * Rows of catalogue entities as the runtime hands them on: serialised by
  * field name, connection scopes read from an Adapter's auth block, and the
@@ -198,7 +199,8 @@ export function projectRuntimeOperationTool(
         definition.id,
         "input",
       ) as Tool["inputSchema"],
-      outputSchema: runtimeOperationEnvelopeSchema(definition) as Tool["outputSchema"],
+      outputSchema: hasSensitiveOutput(definition.output.schema as Record<string, unknown>) ? { type: "object" } : runtimeOperationEnvelopeSchema(definition) as Tool["outputSchema"],
+      ...(hasSensitiveOutput(definition.output.schema as Record<string, unknown>) ? { _meta: { ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } } : {}),
       annotations: {
         title,
         readOnlyHint:

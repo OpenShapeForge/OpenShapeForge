@@ -1,6 +1,7 @@
+// SPDX-License-Identifier: BUSL-1.1
+import { assertSensitiveOutputSchema, hasSensitiveOutput } from "@openshapeforge/operations";
 import { collectionOptionsDefinition, collectionOptionSources } from "./collection-options.js";
 import { applicationSearchDefinition, applicationSearchSources, catalogApplicationSearchSources } from "./application-search.js";
-// SPDX-License-Identifier: BUSL-1.1
 import { Ajv2020 } from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
 import { operationFieldMetadataKeywords, valueInvariantKeywords, operationChoiceKeyword, operationCollectionKeyword, operationExactNumericKeyword, operationReferenceKeyword, operationI18nKeyword, operationInputFieldsKeyword, operationTypeKeyword, operationVariablesKeyword } from "@openshapeforge/operations";
@@ -339,6 +340,10 @@ function validateOperation(plugin: string, operation: PluginOperationContract, a
   const ajv = operationSchemaValidator();
   assertSchema(ajv, operation.inputSchema, `${where} inputSchema`);
   assertSchema(ajv, operation.outputSchema, `${where} outputSchema`);
+  assertSensitiveOutputSchema(operation.outputSchema);
+  if (hasSensitiveOutput(operation.outputSchema) && operation.idempotency.mode !== "none") {
+    throw new Error(`${where} sensitive output cannot be persisted in a replay receipt; idempotency must be none.`);
+  }
   if (operation.inputSchema.type !== "object" ||
       !operation.inputSchema.properties ||
       typeof operation.inputSchema.properties !== "object" ||

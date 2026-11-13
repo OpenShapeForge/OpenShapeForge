@@ -185,15 +185,18 @@ describe("shipped integration and API-key catalog", () => {
       expect(operation.effects.external).toBe(
         operation.key === "api-keys.create-integration" ? "write" : "none",
       );
-      // Not an MCP tool and not a GraphQL field: the existing GraphQL surface
-      // already serves this feature, and an LLM transport has no business
-      // being offered an Operation whose sibling returns a live credential.
-      expect(operation.transports.mcp.enabled).toBe(false);
+      // MCP uses the shared private-output interaction for confidential fields.
+      expect(operation.transports.mcp.enabled).toBe(true);
       expect(operation.transports.graphql.enabled).toBe(false);
       expect(operation.transports.rest.path.startsWith("/api/api-key-integrations/")).toBe(true);
     }
   });
 
+  test("confidential output cannot enter an idempotency receipt", () => {
+    const catalog = structuredClone(apiKeyCatalog());
+    catalog.operations.createIntegration!.reliability.idempotency = { mode: "natural" };
+    expect(() => compiled(catalog)).toThrow("sensitive output cannot be persisted");
+  });
   test("names a credential only in the two minting contracts, never in a read", () => {
     for (const operation of compiled(apiKeyCatalog())) {
       const names = propertyNames(operation.outputSchema);

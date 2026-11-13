@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { PRIVATE_OUTPUT_TOOL, completePrivateOutput, startPrivateOutput, needsPrivateOutput } from "./private-output.js";
 import { ARTIFACT_UPLOAD_TOOL_NAME, artifactUploadToolResult, mintArtifactUpload } from "./artifact-upload.js";
 import { callEditLeaseTool } from "./edit-lease-tools.js";
 import { HttpError } from "../rest/http-error.js";
@@ -73,6 +74,7 @@ export async function staticToolCall(
     sessionInfo,
     signal,
   } = ctx;
+  if (name === PRIVATE_OUTPUT_TOOL) return completePrivateOutput(ctx);
   // --- session-info (whoami / osf://session): no arguments, no roles ---
   if (name === SESSION_INFO_TOOL_NAME) {
     try {
@@ -179,6 +181,7 @@ export async function staticToolCall(
         throw new HttpError(404, "NOT_FOUND", "The requested Operation is not available.");
       }
       assertOperationExecutionRoute(definition, name === searchableOperationToolNames.secureExecute, searchableOperationToolNames);
+      if (needsPrivateOutput(definition)) return await startPrivateOutput(ctx, definition, parsed.input);
       const entity = entities.get(definition.id);
       if (entity) {
         // Enter the same adapter as the dedicated/generic tool, including
@@ -234,6 +237,10 @@ export async function staticToolCall(
     }
   }
   if (current?.runtimeOperation) {
+    if (needsPrivateOutput(current.runtimeOperation)) {
+      try { return await startPrivateOutput(ctx, current.runtimeOperation, request.params.arguments ?? {}); }
+      catch (error) { return failed(error); }
+    }
     if (!modulePlatform) {
       return failed(
         new HttpError(
@@ -281,6 +288,9 @@ export async function staticToolCall(
       assertParentInvocationActive?.();
       assertInterceptorActive?.();
       const bound = operations.get(operationTool.key)!;
+      const { definitions } = await searchableSessionOperations(ctx);
+      const definition = definitions.find(d => d.id === operationTool.key);
+      if (definition && needsPrivateOutput(definition)) return await startPrivateOutput(ctx, definition, request.params.arguments ?? {});
       const invoke = (effectiveSignal?: AbortSignal) => invokeOperation(
         bound,
         request.params.arguments ?? {},

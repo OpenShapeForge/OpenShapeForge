@@ -20,13 +20,8 @@
 # The derived Keycloak clientId and the service account's user id are therefore
 # never exposed: they change, and they are realm internals.
 #
-# The secret is returned by `issueCredential` and nowhere else, exactly once.
-# That Operation has NO web projection: a generic entity form shows whatever its
-# Operation returns, and this repository has no sensitive-output contract for a
-# projected result (there is `interaction.secureInput` for input, and field
-# `classification.sensitivity` for entity fields — neither covers an Operation's
-# output). Projecting it would print the credential into the generic UI. See the
-# task report for the exact gap.
+# Confidential output is disclosed only in the private Operation app on MCP.
+# Presentation remains FieldSecret; x-osf-classification owns disclosure.
 schemaVersion: 1
 kind: operationCatalog
 plugin: osf-api-keys
@@ -446,6 +441,7 @@ operations:
                   description:
                     en: Copy this key now. You cannot view it again after closing.
                     nl: Kopieer deze sleutel nu. Na het sluiten kun je hem niet opnieuw bekijken.
+                x-osf-classification: { sensitivity: confidential }
                 x-osf-presentation: { component: FieldSecret }
               expiresAt:
                 type: string
@@ -592,6 +588,7 @@ operations:
     confirmation: { mode: acknowledgement }
     errors: *catalogErrors
 interfaces:
+  mcp: {}
   rest:
     operations:
       listIntegrations: { method: POST, path: /api/api-key-integrations/list, response: { status: 200, kind: json } }

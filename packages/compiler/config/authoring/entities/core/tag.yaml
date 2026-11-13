@@ -1,0 +1,162 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: Tag
+title: Tag
+description: "A managed term in one tag group, assigned to records by the entities that carry tags. It is not a computed LabelRule badge or an authorization role."
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels: { en: Tag, nl: Tag }
+pluralLabels: { en: Tags, nl: Tags }
+domains:
+  - core
+authorization:
+  roles:
+    read:
+      - Organization.All.Read
+      - Organization.All.ReadWrite
+      - KnowledgeBase.Articles.Read
+      - KnowledgeBase.All
+    create: &write
+      - Organization.All.ReadWrite
+      - KnowledgeBase.All
+    update: *write
+    delete: *write
+  rowAccess:
+    enabled: true
+    empty: public
+indexes:
+  - name: tag_key_uidx
+    fields: [tenantId, key]
+    unique: true
+fields:
+  - key: groupId
+    osfType: TagGroup
+    required: true
+    label: { en: Group, nl: Groep }
+    persisted: { column: group_id, storageClass: core }
+    relationship:
+      ownership: reference
+      inverse:
+        key: tags
+        label: { en: Tags, nl: Tags }
+  - key: key
+    osfType: string
+    required: true
+    deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
+    label: { en: Key, nl: Sleutel }
+    persisted: { column: key, storageClass: core }
+    validation: { minLength: 1, maxLength: 120 }
+  - key: name
+    osfType: string
+    required: true
+    label: { en: Name, nl: Naam }
+    persisted: { column: name, storageClass: core }
+    validation: { minLength: 1, maxLength: 200 }
+  - key: description
+    osfType: multilineText
+    required: false
+    label: { en: Description, nl: Omschrijving }
+    persisted: { column: description, storageClass: core }
+    validation: { maxLength: 4000 }
+  - key: active
+    osfType: boolean
+    required: true
+    label: { en: Active, nl: Actief }
+    description: { en: "Whether the tag can still be chosen; existing uses stay.", nl: "Of de tag nog gekozen kan worden; bestaand gebruik blijft staan." }
+    persisted: { column: active, storageClass: core }
+    defaultValue: true
+operations:
+  list:
+    name: { en: List tag, nl: List tag }
+    description: >-
+      Returns a bounded page of tags.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get tag, nl: Get tag }
+    description: >-
+      Returns one tag by canonical id.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: { en: Create tag, nl: Create tag }
+    description: >-
+      Registers one tag. It grants no access and changes no calculation.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: { en: Update tag, nl: Update tag }
+    description: >-
+      Changes the tag while holding its current version and server-issued edit lease.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+  delete:
+    name: { en: Delete tag, nl: Delete tag }
+    description: >-
+      Permanently removes one tag after a server-issued, version-bound confirmation challenge. Records that carry it block the delete until the tag is removed from them.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation:
+      mode: challenge
+      challenge:
+        kind: type-current-field
+        field: name
+        issuedBy: server
+        bindTo: [subject, tenant, operation, target.id, target.version]
+        expiresAfter: PT5M
+        singleUse: true
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic
+  web:
+    views:
+      collection:
+        route: /tags
+        title: { en: Tags, nl: Tags }
+        columns:
+          - { key: name, sortable: true }
+          - { key: groupId, sortable: true }
+          - { key: active, sortable: true }
+        defaultSort: { key: name, direction: asc }
+      record:
+        routes:
+          read: /tags/:id
+          create: /tags/new
+        title: "{{name}}"
+        actions: [update, delete]
+        layout:
+          preset: main-context
+          tabs:
+            - id: details
+              label: { en: Details, nl: Gegevens }
+              groups: &groups
+                - title: { en: Tag, nl: Tag }
+                  fields: [groupId, name, key, description, active]
+        modes:
+          create:
+            title: { en: Create tag, nl: Tag aanmaken }
+            groups: *groups
+          update:
+            title: { en: Edit tag, nl: Tag wijzigen }
+            groups:
+              - title: { en: Tag, nl: Tag }
+                fields: [name, description, active]

@@ -1,0 +1,154 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: TagGroup
+title: Tag group
+description: "A tenant-managed group of tags, such as Country, Region or Topic. Tags describe records; they grant no access and never allocate or duplicate amounts."
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels: { en: Tag group, nl: Taggroep }
+pluralLabels: { en: Tag groups, nl: Taggroepen }
+domains:
+  - core
+authorization:
+  roles:
+    read:
+      - Organization.All.Read
+      - Organization.All.ReadWrite
+      - KnowledgeBase.Articles.Read
+      - KnowledgeBase.All
+    create: &write
+      - Organization.All.ReadWrite
+      - KnowledgeBase.All
+    update: *write
+    delete: *write
+  rowAccess:
+    enabled: true
+    empty: public
+indexes:
+  - name: tag_group_key_uidx
+    fields: [tenantId, key]
+    unique: true
+fields:
+  - key: key
+    osfType: string
+    required: true
+    deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
+    label: { en: Key, nl: Sleutel }
+    persisted: { column: key, storageClass: core }
+    validation: { minLength: 1, maxLength: 120 }
+  - key: name
+    osfType: string
+    required: true
+    label: { en: Name, nl: Naam }
+    persisted: { column: name, storageClass: core }
+    validation: { minLength: 1, maxLength: 200 }
+  - key: description
+    osfType: multilineText
+    required: false
+    label: { en: Description, nl: Omschrijving }
+    persisted: { column: description, storageClass: core }
+    validation: { maxLength: 4000 }
+  - key: active
+    osfType: boolean
+    required: true
+    label: { en: Active, nl: Actief }
+    description: { en: "Whether the tag can still be chosen; existing uses stay.", nl: "Of de tag nog gekozen kan worden; bestaand gebruik blijft staan." }
+    persisted: { column: active, storageClass: core }
+    defaultValue: true
+operations:
+  list:
+    name: { en: List tag group, nl: List tag group }
+    description: >-
+      Returns a bounded page of tag groups.
+    implementation: { type: entity, action: list }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  get:
+    name: { en: Get tag group, nl: Get tag group }
+    description: >-
+      Returns one tag group by canonical id.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  create:
+    name: { en: Create tag group, nl: Create tag group }
+    description: >-
+      Registers one tag group. It grants no access and changes no calculation.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  update:
+    name: { en: Update tag group, nl: Update tag group }
+    description: >-
+      Changes the tag group while holding its current version and server-issued edit lease.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+  delete:
+    name: { en: Delete tag group, nl: Delete tag group }
+    description: >-
+      Permanently removes one tag group after a server-issued, version-bound confirmation challenge. Tags that belong to it block the delete until they are removed.
+    implementation: { type: entity, action: delete }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation:
+      mode: challenge
+      challenge:
+        kind: type-current-field
+        field: name
+        issuedBy: server
+        bindTo: [subject, tenant, operation, target.id, target.version]
+        expiresAfter: PT5M
+        singleUse: true
+    concurrency:
+      version: { mode: required, field: updatedAt }
+      editLease: { mode: required, expiresAfterInactivity: PT15M }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp:
+    tools: generic
+  web:
+    views:
+      collection:
+        route: /tag-groups
+        title: { en: Tag groups, nl: Taggroepen }
+        columns:
+          - { key: name, sortable: true }
+          - { key: active, sortable: true }
+        defaultSort: { key: name, direction: asc }
+      record:
+        routes:
+          read: /tag-groups/:id
+          create: /tag-groups/new
+        title: "{{name}}"
+        actions: [update, delete]
+        layout:
+          preset: main-context
+          tabs:
+            - id: details
+              label: { en: Details, nl: Gegevens }
+              groups: &groups
+                - title: { en: Group, nl: Groep }
+                  fields: [name, key, description, active]
+            - id: tags
+              label: { en: Tags, nl: Tags }
+              relationship: tags
+        modes:
+          create:
+            title: { en: Create tag group, nl: Taggroep aanmaken }
+            groups: *groups
+          update:
+            title: { en: Edit tag group, nl: Taggroep wijzigen }
+            groups:
+              - title: { en: Group, nl: Groep }
+                fields: [name, description, active]

@@ -91,7 +91,7 @@ describe("document pages against PostgreSQL", () => {
     const { context, handlers } = platformFor(editor);
     const themeId = randomUUID();
     await sql`insert into erp.document_themes (id, tenant_id, key, name, page_design) values (${themeId}::uuid, ${tenant}::uuid, 'include', 'Include', ${jsonbLiteral(pageDesign)})`.execute(privileged());
-    const parameter = (key: string) => ({ key, osfType: "string", required: true, label: { en: key, nl: key } });
+    const parameter = (key: string) => ({ key, osfType: key === "date" ? "date" : "string", required: true, label: { en: key, nl: key } });
     const template = async (key: string, parameters: string[], blocks: { definitionKey: string; values: Record<string, unknown>; region?: string; layoutKey?: string; version?: string }[]) => {
       const ids = { template: randomUUID(), variant: randomUUID() };
       await sql`insert into erp.templates (id, tenant_id, key, name, parameters, document_theme_id) values
@@ -109,24 +109,27 @@ describe("document pages against PostgreSQL", () => {
     const versionColumn = (await sql<{ column_name: string }>`select column_name from information_schema.columns
       where table_schema = 'erp' and table_name = 'blocks' and column_name like 'ev_values_template_block_version_id%'`.execute(privileged())).rows[0]!.column_name;
 
-    const cover = await template("cover", ["title"], [
+    const cover = await template("cover", ["title", "date"], [
       { definitionKey: "ImageBlock", values: { asset: "wordmark", width: 120, height: 24 }, region: "header", layoutKey: "cover" },
       { definitionKey: "TextColumns", values: { left: "www.example.com" }, region: "footer", layoutKey: "cover" },
       { definitionKey: "SectionBreak", values: { layout: "cover", background: "coverSurface" } },
-      { definitionKey: "TextBlock", values: { markdown: "{{local.title}}", style: "title" } },
+      { definitionKey: "TextBlock", values: { markdown: "{{local.title}} on {{local.date}}", style: "title" } },
     ]);
-    const proposal = await template("proposal", ["title", "client"], [
+    const proposal = await template("proposal", ["title", "client", "date"], [
       { definitionKey: "TextBlock", values: { markdown: "Proposal header" }, region: "header" },
-      { definitionKey: "TemplateBlock", values: { parameters: { title: "{{local.title}}" } }, version: cover },
+      // The date is handed on as the whole value, so it reaches the cover as a date and is written out there.
+      { definitionKey: "TemplateBlock", values: { parameters: { title: "{{local.title}}", date: "{{local.date}}" } }, version: cover },
       { definitionKey: "TextBlock", values: { markdown: "Dear {{local.client}}," } },
     ]);
     const documentId = await createDocument();
-    await linked(handlers, context, { id: documentId, templateVersionId: proposal, parameters: { title: "Pentesting for Nova Harbor", client: "Elise" } });
+    await linked(handlers, context, { id: documentId, templateVersionId: proposal, parameters: { title: "Pentesting for Nova Harbor", client: "Elise", date: "2026-05-11" } });
 
     const pages = (await handlers.renderDocumentPages!({ id: documentId, channel: "document", locale: "nl" }, context)).value as Pages;
     expect(pages.sections.map((section) => section.layout)).toEqual(["cover", "default"]);
     const [coverPage, letter] = pages.sections.map((section) => section.html);
-    expect(coverPage).toContain("Pentesting for Nova Harbor");
+    expect(coverPage).toContain("Pentesting for Nova Harbor on ");
+    expect(coverPage).toMatch(/Pentesting for Nova Harbor on [^<]*2026/);
+    expect(coverPage).not.toContain("{{");
     expect(coverPage).toContain("www.example.com");
     expect(coverPage).toContain("background:#becbd3");
     expect(coverPage).not.toContain("Proposal header");

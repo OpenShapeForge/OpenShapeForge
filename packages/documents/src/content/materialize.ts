@@ -482,6 +482,9 @@ async function materializeContent(
       if (inclusion) assertContentName(inclusion.referenceField, "template reference field");
       const templateReferenceField = inclusion?.referenceField ?? definition.composition?.templateVersionField;
       if (templateReferenceField) {
+        if ((block.region ?? "body") !== "body" || block.layoutKey) {
+          contentError("DEPENDENCY_INVALID", "A template inclusion must be a body block; header and footer inclusions are not supported.");
+        }
         if (!Object.hasOwn(definition.fields, templateReferenceField) ||
             definition.fields[templateReferenceField]?.relationship?.target !== "TemplateVersion")
           contentError("DEPENDENCY_INVALID", "Template inclusion must select a declared template-version relationship.");

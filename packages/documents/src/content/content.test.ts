@@ -913,6 +913,17 @@ describe("canonical block materialization", () => {
 });
 
 describe("template composition", () => {
+  test("refuses stored header/footer inclusions instead of silently losing their placement", async () => {
+    for (const region of ["header", "footer"] as const) {
+      const f = fixture([{ ...include("nested", "child"), region }]);
+      f.versions.child = version("child", [text("child-text")]);
+      await expect(materializeTemplateContent(f.request, f.registry, f.resolvers)).rejects.toThrow("template inclusion must be a body");
+    }
+    const f = fixture([include("nested", "child")]);
+    f.versions.child = version("child", [text("child-text")]);
+    expect((await materializeTemplateContent(f.request, f.registry, f.resolvers)).blocks).toHaveLength(1);
+  });
+
   test("expands nested templates in order and pins local/global values and source versions", async () => {
     const f = fixture([
       text("before", "Before"),

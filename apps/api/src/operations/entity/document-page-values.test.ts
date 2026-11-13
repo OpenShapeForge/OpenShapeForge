@@ -15,3 +15,13 @@ test('theme writes accept exactly the shared stored-page-design parser including
  for(const page_design of [{colors:{}},{page:{width:'720',height:913}},{page:{width:720,height:913},colors:{bad:'url(x)'}}])expect(()=>guardDocumentPageWrite(table('DocumentTheme'),values({page_design}))).toThrow('valid page design');
  expect(()=>guardDocumentPageWrite(table('Other'),values({page_design:{colors:{}}}))).not.toThrow();
 });
+
+test('template-inclusion placement is refused on create and partial update; ordinary body inclusion remains valid',()=>{
+ for(const region of ['header','footer']) {
+  expect(()=>guardDocumentPageWrite(table('Block'),values({definition_key:'TemplateBlock',region}))).toThrow('template inclusion must be a body');
+  expect(()=>guardDocumentPageWrite(table('Block'),values({region}),{definition_key:'TemplateBlock',region:'body'})).toThrow('template inclusion must be a body');
+  expect(()=>guardDocumentPageWrite(table('Block'),values({definition_key:'TemplateBlock'}),{definition_key:'TextBlock',region})).toThrow('template inclusion must be a body');
+ }
+ expect(()=>guardDocumentPageWrite(table('Block'),values({definition_key:'TemplateBlock',region:'body'}))).not.toThrow();
+ expect(()=>guardDocumentPageWrite(table('Block'),values({definition_key:'TextBlock',region:'header'}))).not.toThrow();
+});

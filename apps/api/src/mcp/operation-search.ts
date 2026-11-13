@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { hasSensitiveOutput } from "@openshapeforge/operations";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import type { Tool } from "@modelcontextprotocol/server";
 import {
@@ -102,22 +103,22 @@ export function secureOperationTool(executor: Tool, name: string, appSupported: 
   return {
     ...executor,
     name,
-    title: "Enter secure Operation input",
-    annotations: { ...executor.annotations, title: "Enter secure Operation input" },
-    description: "Execute a canonical Operation declaring interaction.secureInput. Opens its private form when supported. Never pass secrets in input; enter them only in the private form. Use the ordinary executor for every other Operation.",
+    title: "Private Operation interaction",
+    annotations: { ...executor.annotations, title: "Private Operation interaction" },
+    description: "Execute a canonical Operation requiring private input or confidential output. Opens its private app. Never pass secrets in input; enter them only in the private form. Use the ordinary executor for every other Operation.",
     inputSchema: {
       ...executor.inputSchema,
-      properties: { ...executor.inputSchema.properties, operationId: { type: "string", minLength: 1, description: "Exact available canonical Operation id declaring interaction.secureInput." } },
+      properties: { ...executor.inputSchema.properties, operationId: { type: "string", minLength: 1, description: "Exact available canonical Operation id requiring private input or confidential output." } },
     },
     ...(appSupported ? { _meta: { ui: { resourceUri: ENTITY_CONFIGURATION_APP_URI } } } : {}),
   };
 }
 
 export function assertOperationExecutionRoute(definition: RuntimeOperationDefinition, secureRoute: boolean, names: SearchableOperationToolNames): void {
-  const requiresSecureInput = Boolean(definition.interaction?.secureInput);
+  const requiresSecureInput = Boolean(definition.interaction?.secureInput) || hasSensitiveOutput(definition.output.schema as Record<string, unknown>);
   if (secureRoute !== requiresSecureInput) {
     throw new HttpError(400, "BAD_USER_INPUT", requiresSecureInput
-      ? `Use ${names.secureExecute ?? `${names.execute}_secure`} for this Operation's private input form. Never send secrets through the ordinary executor.`
+      ? `Use ${names.secureExecute ?? `${names.execute}_secure`} for this Operation's private interaction. Never send secrets through the ordinary executor.`
       : `Use ${names.execute} for this Operation; it does not need a private input form.`);
   }
 }
@@ -398,8 +399,9 @@ function operationContract(definition: RuntimeOperationDefinition, name: string,
     ...(definition.concurrency
       ? { concurrency: structuredClone(definition.concurrency) }
       : {}),
-    ...(definition.interaction
-      ? { interaction: structuredClone(definition.interaction) }
+    ...((definition.interaction || hasSensitiveOutput(definition.output.schema))
+      ? { interaction: { ...structuredClone(definition.interaction ?? {}),
+        ...(hasSensitiveOutput(definition.output.schema) ? { secureOutput: { type: "secureOutput", delivery: "mcp-app" } } : {}) } }
       : {}),
     ...(definition.prerequisites
       ? { prerequisites: structuredClone(definition.prerequisites) }

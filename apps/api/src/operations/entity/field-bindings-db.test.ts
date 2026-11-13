@@ -167,6 +167,7 @@ describe("a typed global value, stored and read back", () => {
     // The JSON number form of the same type is equally acceptable.
     expect(await stored("rate.number", { key: "value", osfType: "money", required: true }, 12.5)).toBe(12.5);
     // false, zero, an empty text and an empty collection are values.
+    expect(await stored("company.email", { key: "value", osfType: "email", required: true }, "info@example.test")).toBe("info@example.test");
     expect(await stored("flag.off", { key: "value", osfType: "boolean", required: true }, false)).toBe(false);
     expect(await stored("count.zero", { key: "value", osfType: "integer", required: true }, 0)).toBe(0);
     expect(await stored("note.empty", { key: "value", osfType: "string" }, "")).toBe("");
@@ -188,10 +189,9 @@ describe("a typed global value, stored and read back", () => {
     expect(await refused({ ...text(), key: "amount" }, "x"))
       .toMatchObject({ code: "VALIDATION", violations: [{ field: "definition" }] });
     expect(await refused({ key: "value" }, "x")).toMatchObject({ code: "VALIDATION" });
-    // A definition carrying policy this runtime cannot enforce inside one
-    // json column — here inherited from the `email` osf type, which is pii —
-    // is refused rather than stored unprotected.
-    expect(await refused({ key: "value", osfType: "email", required: true }, "someone@example.test"))
+    // Explicitly protected authored data remains refused even for organizationData.
+    // The flag permits organizational email types, never an authored PII override.
+    expect(await refused({ key: "value", osfType: "email", required: true, classification: { sensitivity: "pii" } }, "someone@example.test"))
       .toMatchObject({ code: "BAD_USER_INPUT" });
     // And so is an entity reference, whose target would need a real
     // authorized read that a value in a json column never gets.
@@ -232,7 +232,7 @@ describe("a typed global value, stored and read back", () => {
 
   test("get and list refuse an already-stored protected typed definition without returning its value", async () => {
     const chip = await tenantGlobal(editor, "invalid.stored.type", text(), "Secret fixture value");
-    await sql`update erp.chips set definition = ${{ key: "value", osfType: "email", required: true }}
+    await sql`update erp.chips set definition = ${{ key: "value", osfType: "email", required: true, classification: { sensitivity: "pii" } }}
       where id = ${String(chip.id)}::uuid`.execute(privileged.db);
     for (const result of [
       await run(viewer, "Chip.get", { id: String(chip.id) }),

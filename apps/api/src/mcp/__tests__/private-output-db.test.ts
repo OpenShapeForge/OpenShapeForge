@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { expect, test } from "bun:test";
+import { expect, test, spyOn } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql } from "kysely";
@@ -24,6 +24,8 @@ const definition: RuntimeOperationDefinition = {
 };
 
 test("real MCP private output is owner-bound, single-use and never present in model-visible results", async () => {
+  const logs:string[]=[];
+  const captured=(["error","warn","log","info","debug"] as const).map(level=>spyOn(console,level).mockImplementation((...args:unknown[])=>{logs.push(args.map(String).join(" "));}));
   const originalKeyring = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
   process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = `test:${Buffer.alloc(32, 17).toString("base64")}`;
   const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL;
@@ -47,11 +49,11 @@ test("real MCP private output is owner-bound, single-use and never present in mo
       execute: async (_context, request) => { expect(request.input?.confirmed).toBe(true); minted++; if (throwSecret) throw Error("synthetic-secret-in-exception"); return { data: { id: "public-id", codes: ["synthetic-private-one", "synthetic-private-two"], unexpected: "synthetic-private-one" }, operations: [] }; },
     }] }]);
     const tenantId = randomUUID(); const userId = randomUUID();
-    const connect = async (tenant = tenantId, user = userId, roles = ["Organization.All.ReadWrite"], app = true) => {
+    const connect = async (tenant = tenantId, user = userId, roles = ["Organization.All.ReadWrite"], app = true, mode:"searchable"|"dedicated"="searchable") => {
       const server = __buildGeneratedMcpServerForTests({ db: dbRuntime!.db, modulePlatform: platform,
         session: { tenantId: tenant, userId: user, roles, groups: [], scope: "self", credential: "trusted-context" } as never,
         modules: [accountsRuntime, documentsRuntime as never, versioningRuntime as never, { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }), deliverToNotebook: async () => ({ value: undefined }) } }],
-        operationToolProjection: { mode: "searchable", search: "osf_search_operations", execute: "osf_execute_operation" } });
+        operationToolProjection: { mode, search: "osf_search_operations", execute: "osf_execute_operation" } });
       const client = new Client({ name: "private-output-test", version: "1" }, { capabilities: app ? { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } } : {} });
       const [ct, st] = InMemoryTransport.createLinkedPair(); await server.connect(st); await client.connect(ct);
       sessions.push({ client, close: async () => { platform.unregisterServer(server); await client.close(); await server.close(); } }); return client;
@@ -62,6 +64,11 @@ test("real MCP private output is owner-bound, single-use and never present in mo
     const start = () => owner.callTool({ name: "osf_execute_operation_secure", arguments: { operationId: definition.id, input: {} } });
     const ordinary = await owner.callTool({ name: "osf_execute_operation", arguments: { operationId: definition.id, input: {} } });
     expect(ordinary.isError).toBe(true); expect(minted).toBe(0);
+    const dedicated=await connect(tenantId,userId,undefined,true,"dedicated");
+    const dedicatedTool=(await dedicated.listTools()).tools.find(tool=>tool.name===definition.key);
+    expect(dedicatedTool).toBeDefined();
+    const dedicatedPending=await dedicated.callTool({name:definition.key,arguments:{}});
+    expect(dedicatedPending._meta?.privateOperation).toBeDefined();expect(minted).toBe(0);
     const pending = await start(); expect(pending.isError).toBeFalsy(); expect(minted).toBe(0);
     const handoffId = (pending._meta?.privateOperation as { handoffId: string }).handoffId;
     expect(JSON.stringify(pending.structuredContent)).not.toContain(handoffId);
@@ -81,6 +88,9 @@ test("real MCP private output is owner-bound, single-use and never present in mo
     const revoked = await start(); available = false;
     expect((await complete(owner, (revoked._meta?.privateOperation as { handoffId: string }).handoffId)).isError).toBe(true);
     expect(minted).toBe(1); available = true;
+    const expired=await start();const expiredId=(expired._meta?.privateOperation as {handoffId:string}).handoffId;
+    await withDbSession(dbRuntime.db,{tenantId,userId,roles:[],groups:[],scope:"self"},trx=>sql`update platform.mcp_handoffs set expires_at=now()-interval '1 second' where id=${expiredId}::uuid`.execute(trx));
+    expect((await complete(owner,expiredId)).isError).toBe(true);expect(minted).toBe(1);
     const failed = await start(); throwSecret = true;
     const failure = await complete(owner, (failed._meta?.privateOperation as { handoffId: string }).handoffId);
     expect(failure.isError).toBe(true); expect(JSON.stringify(failure)).not.toContain("synthetic-secret-in-exception");
@@ -92,7 +102,14 @@ test("real MCP private output is owner-bound, single-use and never present in mo
     }));
     expect(persisted.every(value => JSON.parse(value).operationId === definition.id)).toBe(true);
     expect(persisted.join("")).not.toContain("synthetic-private");
+    const inspect=new URL(adminUrl);inspect.pathname='/'+scratch;const inspection=new SQL(inspect.href,{max:1});
+    try{
+      const tables=await inspection`select table_schema,table_name from information_schema.tables where table_schema in ('platform','audit') and table_type='BASE TABLE' and table_name ~ '(audit|operation|receipt)'`;
+      for(const table of tables){if(!/^[a-z_]+$/.test(table.table_schema+table.table_name))throw Error('Unexpected audit table identifier');const persisted=await inspection.unsafe(`select coalesce(json_agg(to_jsonb(t)), '[]'::json)::text as content from "${table.table_schema}"."${table.table_name}" t`);expect(persisted[0].content).not.toMatch(/synthetic-(?:private|secret)/);}
+    }finally{await inspection.close();}
+    expect(logs.join("\n")).not.toMatch(/synthetic-(?:private|secret)/);
   } finally {
+    for(const capture of captured)capture.mockRestore();
     for (const session of sessions) await session.close();
     await dbRuntime?.close();
     await admin.unsafe(`drop database if exists "${scratch}" with (force)`); await admin.close();

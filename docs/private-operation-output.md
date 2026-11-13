@@ -43,3 +43,5 @@ issue another explicitly. The server never stores output to make it recoverable.
 The primary catalog examples are integration creation and additional credential
 issuance. The MCP/database test also exercises recovery codes, cross-actor and
 cross-tenant refusal, concurrent submission, revocation and sanitized failures.
+
+The explicit acknowledgement also relies on the MCP host enforcing app-only tool visibility and keeping private `_meta` out of the model context. The host can see the private result.

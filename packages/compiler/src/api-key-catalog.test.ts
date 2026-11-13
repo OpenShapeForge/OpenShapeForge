@@ -13,6 +13,7 @@
  *      annotation in the web projection. The shared result view must mask
  *      those outputs before these placements are integrated into a host.
  */
+import {hasSensitiveOutput} from "@openshapeforge/operations";
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { loadOperationCatalogs } from "./authoring/operation-catalog.js";
@@ -219,6 +220,7 @@ describe("shipped integration and API-key catalog", () => {
         properties?: Record<string, Record<string, unknown>>;
       }>).credential!;
       const secret = credential.properties!.secret!;
+      expect(hasSensitiveOutput(operation.outputSchema)).toBe(true);
       // The marker the shared web implementation is adding support for. It is
       // an EXISTING schema annotation, carried verbatim by the compiler — no
       // new authoring key, so nothing here depends on unsupported YAML.

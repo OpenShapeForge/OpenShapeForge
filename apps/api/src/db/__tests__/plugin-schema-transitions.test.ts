@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import {test,expect} from 'bun:test';import{SQL}from'bun';import{sql}from'kysely';
-import{createDatabaseRuntime}from'../connection.js';import{pluginSchemaTransitions}from'../migrations/generated-plugin-migrations.js';
+import{createDatabaseRuntime}from'../connection.js';import{applyGeneratedPluginMigrations,pluginSchemaTransitions}from'../migrations/generated-plugin-migrations.js';
 import{applyVersionedMigrations,versionedMigrationBaseline,validateVersionedRegistry}from'../migrations/versioned-runner.js';import{GENERATED_SCHEMA_MIGRATION_VERSION}from'../schema-drift.js';
 const adminUrl=process.env.SCRATCH_ADMIN_DATABASE_URL;
 (adminUrl?test:test.skip)('namespaced plugin transitions carry rows forward once, enforce checksums and roll failures back',async()=>{
@@ -15,6 +15,6 @@ const adminUrl=process.env.SCRATCH_ADMIN_DATABASE_URL;
  expect((await applyVersionedMigrations(db,registry)).skipped).toHaveLength(2);
  await expect(applyVersionedMigrations(db,pluginSchemaTransitions([{...entries[0]!,sql:'select 1;'}]))).rejects.toThrow('immutable');
  const bad=pluginSchemaTransitions([{plugin:'third',version:'0016_atomic-failure',phase:'beforeGenerated',sql:'insert into public.records values(2,99);select 1/0;'}]);await expect(applyVersionedMigrations(db,bad)).rejects.toThrow('rolled back');expect((await sql`select id from public.records where id=2`.execute(db)).rows).toHaveLength(0);expect((await sql`select version from platform.schema_migrations where version like 'plugin:third:%'`.execute(db)).rows).toHaveLength(0);
- expect((await sql`select current_setting('app.bypass_rls',true) as value`.execute(db)).rows[0]?.value).toBe('before');expect(()=>validateVersionedRegistry([...registry,registry[0]!])).toThrow('out of order');expect(pluginSchemaTransitions([{plugin:'first',version:'0001_invariant',sql:'select 1;'}])).toEqual([]);
+ expect((await sql`select current_setting('app.bypass_rls',true) as value`.execute(db)).rows[0]?.value).toBe('before');await applyGeneratedPluginMigrations(db,[{plugin:'post',version:'0001_restore',sql:entries[1]!.sql}]);expect((await sql`select current_setting('app.bypass_rls',true) as value`.execute(db)).rows[0]?.value).toBe('before');await expect(applyGeneratedPluginMigrations(db,[{plugin:'post',version:'0002_failure',sql:'select 1/0;'}])).rejects.toThrow('rolled back');expect((await sql`select current_setting('app.bypass_rls',true) as value`.execute(db)).rows[0]?.value).toBe('before');expect(()=>validateVersionedRegistry([...registry,registry[0]!])).toThrow('out of order');expect(pluginSchemaTransitions([{plugin:'first',version:'0001_invariant',sql:'select 1;'}])).toEqual([]);
  });}finally{await runtime?.close();await admin.unsafe(`drop database if exists "${name}" with(force)`);await admin.close();}
 });

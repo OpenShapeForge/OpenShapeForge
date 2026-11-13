@@ -24,12 +24,12 @@ const definition: RuntimeOperationDefinition = {
 };
 
 test("real MCP private output is owner-bound, single-use and never present in model-visible results", async () => {
+  const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL;
+  if (!adminUrl) throw Error("SCRATCH_ADMIN_DATABASE_URL is required for private output evidence.");
   const logs:string[]=[];
   const captured=(["error","warn","log","info","debug"] as const).map(level=>spyOn(console,level).mockImplementation((...args:unknown[])=>{logs.push(args.map(String).join(" "));}));
   const originalKeyring = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
   process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = `test:${Buffer.alloc(32, 17).toString("base64")}`;
-  const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL;
-  if (!adminUrl) throw Error("SCRATCH_ADMIN_DATABASE_URL is required for private output evidence.");
   const scratch = `private_output_${randomUUID().replaceAll("-", "")}`;
   const admin = new SQL(adminUrl, { max: 1 });
   const url = new URL(adminUrl); url.pathname = `/${scratch}`;

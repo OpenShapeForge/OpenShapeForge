@@ -515,6 +515,8 @@ async function materializeContent(
           values,
           references,
           ...(materialization ? { materialization } : {}),
+          ...(block.region ? { region: block.region } : {}),
+          ...(block.layoutKey ? { layoutKey: block.layoutKey } : {}),
         });
       }
     }

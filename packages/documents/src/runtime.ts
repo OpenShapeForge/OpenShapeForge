@@ -8,6 +8,7 @@ import { renderSnapshot } from "./render-runtime.js";
 import { followTemplatePublish } from "./document-follow.js";
 import { linkTemplate } from "./document-link.js";
 import { materializeDocument } from "./document-materialize.js";
+import { renderDocumentPages } from "./document-pages.js";
 import { resolveDocumentTheme, setDefaultDocumentTheme } from "./theme-runtime.js";
 
 let unregisterFollower: (() => void) | undefined;
@@ -36,6 +37,7 @@ const module = {
     renderSnapshot,
     linkTemplate,
     materializeDocument,
+    renderDocumentPages,
     resolveDocumentTheme,
     setDefaultDocumentTheme,
   },

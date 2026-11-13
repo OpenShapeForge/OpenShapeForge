@@ -4603,43 +4603,43 @@
   "PROJECTPHASESTATUS": [
     {
       "value": "planned",
+      "color": "standard:neutral",
       "label": {
         "nl": "Gepland",
         "en": "Planned"
-      },
-      "color": "standard:neutral"
+      }
     },
     {
       "value": "active",
+      "color": "standard:blue",
       "label": {
         "nl": "Actief",
         "en": "Active"
-      },
-      "color": "standard:blue"
+      }
     },
     {
       "value": "on_hold",
+      "color": "standard:orange",
       "label": {
         "nl": "Gepauzeerd",
         "en": "On hold"
-      },
-      "color": "standard:orange"
+      }
     },
     {
       "value": "completed",
+      "color": "standard:green",
       "label": {
         "nl": "Afgerond",
         "en": "Completed"
-      },
-      "color": "standard:green"
+      }
     },
     {
       "value": "cancelled",
+      "color": "standard:red",
       "label": {
         "nl": "Geannuleerd",
         "en": "Cancelled"
-      },
-      "color": "standard:red"
+      }
     }
   ],
   "PROJECTROLE": [

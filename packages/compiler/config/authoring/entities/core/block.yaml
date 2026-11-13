@@ -61,6 +61,10 @@ fields:
           - TextBlock
           - YouTubeEmbed
           - TemplateBlock
+          - TextColumns
+          - ImageBlock
+          - SpacerBlock
+          - SectionBreak
   - key: documentVariant
     label: { en: Document variant, nl: Documentvariant }
     description:
@@ -91,6 +95,10 @@ fields:
           - TextBlock
           - YouTubeEmbed
           - TemplateBlock
+          - TextColumns
+          - ImageBlock
+          - SpacerBlock
+          - SectionBreak
   - key: definitionKey
     osfType: string
     required: true
@@ -172,6 +180,34 @@ fields:
     required: true
     defaultValue: false
     persisted: { column: locked, storageClass: core }
+  - key: region
+    label: { en: Page region, nl: Paginagebied }
+    description:
+      en: Where this block sits on the page. Body blocks flow through the pages in order. Header and footer blocks
+        belong to the page layout named in layoutKey and repeat on every page of a section that uses that layout.
+      nl: Waar dit blok op de pagina staat. Inhoudsblokken lopen in volgorde door de pagina's. Kop- en voetblokken
+        horen bij de pagina-indeling in layoutKey en herhalen op iedere pagina van een sectie met die indeling.
+    osfType: string
+    required: true
+    defaultValue: body
+    persisted: { column: region, storageClass: core }
+    options:
+      type: static
+      items:
+        - { value: body, label: { en: Body, nl: Inhoud } }
+        - { value: header, label: { en: Header, nl: Koptekst } }
+        - { value: footer, label: { en: Footer, nl: Voettekst } }
+  - key: layoutKey
+    label: { en: Page layout, nl: Pagina-indeling }
+    description:
+      en: Key of the page layout a header or footer block belongs to, as selected by a section break. Empty on a
+        body block; an empty key on a header or footer block means the default layout.
+      nl: Sleutel van de pagina-indeling waar een kop- of voetblok bij hoort, zoals een sectie-einde die kiest. Leeg
+        op een inhoudsblok; een lege sleutel op een kop- of voetblok betekent de standaardindeling.
+    osfType: string
+    required: false
+    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+    persisted: { column: layout_key, storageClass: core }
 operations:
   list:
     name: List block
@@ -240,11 +276,11 @@ interfaces:
           tabs:
             - id: values
               label: { en: Content, nl: Inhoud }
-              groups: [{ title: { en: Block, nl: Blok }, fields: [variant, documentVariant, definitionKey, values, origin, diverged, locked] }]
+              groups: [{ title: { en: Block, nl: Blok }, fields: [variant, documentVariant, definitionKey, values, region, layoutKey, origin, diverged, locked] }]
         modes:
           create:
             title: { en: Add block, nl: Blok toevoegen }
-            groups: [{ title: { en: Block, nl: Blok }, fields: [variant, documentVariant, definitionKey, values, locked] }]
+            groups: [{ title: { en: Block, nl: Blok }, fields: [variant, documentVariant, definitionKey, values, region, layoutKey, locked] }]
           update:
             title: { en: Edit block, nl: Blok bewerken }
-            groups: [{ title: { en: Content, nl: Inhoud }, fields: [values, locked] }]
+            groups: [{ title: { en: Content, nl: Inhoud }, fields: [values, region, layoutKey, locked] }]

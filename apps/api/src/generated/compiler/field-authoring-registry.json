@@ -197,6 +197,11 @@
               "key": "key",
               "osfType": "string",
               "required": true,
+              "deriveOnCreate": {
+                "from": "name",
+                "transform": "slug",
+                "onConflict": "suffix"
+              },
               "label": {
                 "en": "Stable key",
                 "nl": "Vaste sleutel"
@@ -9857,7 +9862,11 @@
               "allowedDefinitions": [
                 "TextBlock",
                 "YouTubeEmbed",
-                "TemplateBlock"
+                "TemplateBlock",
+                "TextColumns",
+                "ImageBlock",
+                "SpacerBlock",
+                "SectionBreak"
               ]
             }
           }
@@ -9888,7 +9897,11 @@
               "allowedDefinitions": [
                 "TextBlock",
                 "YouTubeEmbed",
-                "TemplateBlock"
+                "TemplateBlock",
+                "TextColumns",
+                "ImageBlock",
+                "SpacerBlock",
+                "SectionBreak"
               ]
             }
           }
@@ -10055,6 +10068,71 @@
           "defaultValue": false,
           "persisted": {
             "column": "locked",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "region",
+          "label": {
+            "en": "Page region",
+            "nl": "Paginagebied"
+          },
+          "description": {
+            "en": "Where this block sits on the page. Body blocks flow through the pages in order. Header and footer blocks belong to the page layout named in layoutKey and repeat on every page of a section that uses that layout.",
+            "nl": "Waar dit blok op de pagina staat. Inhoudsblokken lopen in volgorde door de pagina's. Kop- en voetblokken horen bij de pagina-indeling in layoutKey en herhalen op iedere pagina van een sectie met die indeling."
+          },
+          "osfType": "string",
+          "required": true,
+          "defaultValue": "body",
+          "persisted": {
+            "column": "region",
+            "storageClass": "core"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "body",
+                "label": {
+                  "en": "Body",
+                  "nl": "Inhoud"
+                }
+              },
+              {
+                "value": "header",
+                "label": {
+                  "en": "Header",
+                  "nl": "Koptekst"
+                }
+              },
+              {
+                "value": "footer",
+                "label": {
+                  "en": "Footer",
+                  "nl": "Voettekst"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "layoutKey",
+          "label": {
+            "en": "Page layout",
+            "nl": "Pagina-indeling"
+          },
+          "description": {
+            "en": "Key of the page layout a header or footer block belongs to, as selected by a section break. Empty on a body block; an empty key on a header or footer block means the default layout.",
+            "nl": "Sleutel van de pagina-indeling waar een kop- of voetblok bij hoort, zoals een sectie-einde die kiest. Leeg op een inhoudsblok; een lege sleutel op een kop- of voetblok betekent de standaardindeling."
+          },
+          "osfType": "string",
+          "required": false,
+          "validation": {
+            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "maxLength": 64
+          },
+          "persisted": {
+            "column": "layout_key",
             "storageClass": "core"
           }
         }
@@ -17792,6 +17870,24 @@
           }
         },
         {
+          "key": "pageDesign",
+          "osfType": "object",
+          "required": false,
+          "defaultValue": {},
+          "label": {
+            "en": "Page design",
+            "nl": "Paginaontwerp"
+          },
+          "description": {
+            "en": "Design tokens for paged documents - the page size in pixels, named colors, named text styles and inlined image assets that blocks and section breaks select by key. Empty means this theme has no page design.",
+            "nl": "Ontwerptokens voor gepagineerde documenten - het paginaformaat in pixels, benoemde kleuren, benoemde tekststijlen en ingesloten beelden die blokken en sectie-einden op sleutel kiezen. Leeg betekent dat dit thema geen paginaontwerp heeft."
+          },
+          "persisted": {
+            "column": "page_design",
+            "storageClass": "core"
+          }
+        },
+        {
           "key": "typography",
           "osfType": "object",
           "required": true,
@@ -19165,7 +19261,11 @@
           "allowedDefinitions": [
             "TextBlock",
             "YouTubeEmbed",
-            "TemplateBlock"
+            "TemplateBlock",
+            "TextColumns",
+            "ImageBlock",
+            "SpacerBlock",
+            "SectionBreak"
           ],
           "relationship": {
             "inverse": "documentVariant",
@@ -21488,6 +21588,107 @@
       "displayTemplate": "{{code}}",
       "filterField": "code",
       "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "ImageBlock": {
+      "kind": "entity",
+      "entity": "ImageBlock",
+      "entityIdentity": false,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Image",
+        "nl": "Afbeelding"
+      },
+      "pluralLabel": {
+        "en": "Images",
+        "nl": "Afbeeldingen"
+      },
+      "shape": [
+        {
+          "key": "asset",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Asset",
+            "nl": "Beeld"
+          },
+          "description": {
+            "en": "Key of an image asset in the document theme's page design.",
+            "nl": "Sleutel van een beeld in het paginaontwerp van het documentthema."
+          },
+          "validation": {
+            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "maxLength": 64
+          }
+        },
+        {
+          "key": "width",
+          "osfType": "number",
+          "required": true,
+          "label": {
+            "en": "Width (px)",
+            "nl": "Breedte (px)"
+          },
+          "validation": {
+            "min": 1,
+            "max": 4000
+          }
+        },
+        {
+          "key": "height",
+          "osfType": "number",
+          "required": true,
+          "label": {
+            "en": "Height (px)",
+            "nl": "Hoogte (px)"
+          },
+          "validation": {
+            "min": 1,
+            "max": 4000
+          }
+        },
+        {
+          "key": "align",
+          "osfType": "string",
+          "required": false,
+          "label": {
+            "en": "Alignment",
+            "nl": "Uitlijning"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "left",
+                "label": {
+                  "en": "Left",
+                  "nl": "Links"
+                }
+              },
+              {
+                "value": "center",
+                "label": {
+                  "en": "Center",
+                  "nl": "Midden"
+                }
+              },
+              {
+                "value": "right",
+                "label": {
+                  "en": "Right",
+                  "nl": "Rechts"
+                }
+              }
+            ]
+          }
+        }
+      ],
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -37351,6 +37552,163 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "SectionBreak": {
+      "kind": "entity",
+      "entity": "SectionBreak",
+      "entityIdentity": false,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Section break",
+        "nl": "Sectie-einde"
+      },
+      "pluralLabel": {
+        "en": "Section breaks",
+        "nl": "Sectie-einden"
+      },
+      "shape": [
+        {
+          "key": "layout",
+          "osfType": "string",
+          "required": true,
+          "defaultValue": "default",
+          "label": {
+            "en": "Page layout",
+            "nl": "Pagina-indeling"
+          },
+          "description": {
+            "en": "Key of the page layout for the pages after this break. Header and footer blocks carrying the same layout key repeat on each of those pages.",
+            "nl": "Sleutel van de pagina-indeling voor de pagina's na dit einde. Kop- en voetblokken met dezelfde sleutel herhalen op elk van die pagina's."
+          },
+          "validation": {
+            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "maxLength": 64
+          }
+        },
+        {
+          "key": "margin",
+          "osfType": "number",
+          "required": false,
+          "defaultValue": 40,
+          "label": {
+            "en": "Page margin (px)",
+            "nl": "Paginamarge (px)"
+          },
+          "validation": {
+            "min": 0,
+            "max": 400
+          }
+        },
+        {
+          "key": "gap",
+          "osfType": "number",
+          "required": false,
+          "defaultValue": 24,
+          "label": {
+            "en": "Space between header, body and footer (px)",
+            "nl": "Ruimte tussen kop, inhoud en voet (px)"
+          },
+          "validation": {
+            "min": 0,
+            "max": 400
+          }
+        },
+        {
+          "key": "blockGap",
+          "osfType": "number",
+          "required": false,
+          "defaultValue": 16,
+          "label": {
+            "en": "Space between blocks (px)",
+            "nl": "Ruimte tussen blokken (px)"
+          },
+          "validation": {
+            "min": 0,
+            "max": 400
+          }
+        },
+        {
+          "key": "background",
+          "osfType": "string",
+          "required": false,
+          "label": {
+            "en": "Background color",
+            "nl": "Achtergrondkleur"
+          },
+          "description": {
+            "en": "Key of a color in the document theme's page design. Empty leaves the page white.",
+            "nl": "Sleutel van een kleur in het paginaontwerp van het documentthema. Leeg laat de pagina wit."
+          },
+          "validation": {
+            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "maxLength": 64
+          }
+        },
+        {
+          "key": "backgroundImage",
+          "osfType": "string",
+          "required": false,
+          "label": {
+            "en": "Background image",
+            "nl": "Achtergrondbeeld"
+          },
+          "description": {
+            "en": "Key of an image asset in the document theme's page design, stretched over the whole page.",
+            "nl": "Sleutel van een beeld in het paginaontwerp van het documentthema, uitgerekt over de hele pagina."
+          },
+          "validation": {
+            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "maxLength": 64
+          }
+        },
+        {
+          "key": "bodyAlignment",
+          "osfType": "string",
+          "required": false,
+          "defaultValue": "top",
+          "label": {
+            "en": "Body position",
+            "nl": "Positie van de inhoud"
+          },
+          "description": {
+            "en": "Where the body sits between header and footer on a page it does not fill.",
+            "nl": "Waar de inhoud tussen kop en voet staat op een pagina die niet gevuld is."
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "top",
+                "label": {
+                  "en": "Top",
+                  "nl": "Boven"
+                }
+              },
+              {
+                "value": "center",
+                "label": {
+                  "en": "Center",
+                  "nl": "Midden"
+                }
+              },
+              {
+                "value": "bottom",
+                "label": {
+                  "en": "Bottom",
+                  "nl": "Onder"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "SlaPolicy": {
       "kind": "entity",
       "entity": "SlaPolicy",
@@ -37855,6 +38213,42 @@
       "displayTemplate": "{{code}} {{name}}",
       "filterField": "code",
       "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "SpacerBlock": {
+      "kind": "entity",
+      "entity": "SpacerBlock",
+      "entityIdentity": false,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Spacer",
+        "nl": "Witruimte"
+      },
+      "pluralLabel": {
+        "en": "Spacers",
+        "nl": "Witruimtes"
+      },
+      "shape": [
+        {
+          "key": "height",
+          "osfType": "number",
+          "required": true,
+          "label": {
+            "en": "Height (px)",
+            "nl": "Hoogte (px)"
+          },
+          "validation": {
+            "min": 0,
+            "max": 4000
+          }
+        }
+      ],
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -39483,6 +39877,282 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "Tag": {
+      "kind": "entity",
+      "entity": "Tag",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Tag",
+        "nl": "Tag"
+      },
+      "pluralLabel": {
+        "en": "Tags",
+        "nl": "Tags"
+      },
+      "shape": [
+        {
+          "key": "groupId",
+          "osfType": "TagGroup",
+          "required": true,
+          "label": {
+            "en": "Group",
+            "nl": "Groep"
+          },
+          "persisted": {
+            "column": "group_id",
+            "storageClass": "core"
+          },
+          "relationship": {
+            "ownership": "reference",
+            "inverse": {
+              "key": "tags",
+              "label": {
+                "en": "Tags",
+                "nl": "Tags"
+              }
+            }
+          }
+        },
+        {
+          "key": "key",
+          "osfType": "string",
+          "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
+          "label": {
+            "en": "Key",
+            "nl": "Sleutel"
+          },
+          "persisted": {
+            "column": "key",
+            "storageClass": "core"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        {
+          "key": "name",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Name",
+            "nl": "Naam"
+          },
+          "persisted": {
+            "column": "name",
+            "storageClass": "core"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        {
+          "key": "description",
+          "osfType": "multilineText",
+          "required": false,
+          "label": {
+            "en": "Description",
+            "nl": "Omschrijving"
+          },
+          "persisted": {
+            "column": "description",
+            "storageClass": "core"
+          },
+          "validation": {
+            "maxLength": 4000
+          }
+        },
+        {
+          "key": "active",
+          "osfType": "boolean",
+          "required": true,
+          "label": {
+            "en": "Active",
+            "nl": "Actief"
+          },
+          "description": {
+            "en": "Whether the tag can still be chosen; existing uses stay.",
+            "nl": "Of de tag nog gekozen kan worden; bestaand gebruik blijft staan."
+          },
+          "persisted": {
+            "column": "active",
+            "storageClass": "core"
+          },
+          "defaultValue": true
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "tagId": {
+      "kind": "entityId",
+      "entity": "Tag",
+      "baseType": "string",
+      "label": {
+        "en": "Tag",
+        "nl": "Tag"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "Tag",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "TagGroup": {
+      "kind": "entity",
+      "entity": "TagGroup",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Tag group",
+        "nl": "Taggroep"
+      },
+      "pluralLabel": {
+        "en": "Tag groups",
+        "nl": "Taggroepen"
+      },
+      "shape": [
+        {
+          "key": "key",
+          "osfType": "string",
+          "required": true,
+          "deriveOnCreate": {
+            "from": "name",
+            "transform": "slug",
+            "onConflict": "suffix"
+          },
+          "label": {
+            "en": "Key",
+            "nl": "Sleutel"
+          },
+          "persisted": {
+            "column": "key",
+            "storageClass": "core"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        {
+          "key": "name",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Name",
+            "nl": "Naam"
+          },
+          "persisted": {
+            "column": "name",
+            "storageClass": "core"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        {
+          "key": "description",
+          "osfType": "multilineText",
+          "required": false,
+          "label": {
+            "en": "Description",
+            "nl": "Omschrijving"
+          },
+          "persisted": {
+            "column": "description",
+            "storageClass": "core"
+          },
+          "validation": {
+            "maxLength": 4000
+          }
+        },
+        {
+          "key": "active",
+          "osfType": "boolean",
+          "required": true,
+          "label": {
+            "en": "Active",
+            "nl": "Actief"
+          },
+          "description": {
+            "en": "Whether the tag can still be chosen; existing uses stay.",
+            "nl": "Of de tag nog gekozen kan worden; bestaand gebruik blijft staan."
+          },
+          "persisted": {
+            "column": "active",
+            "storageClass": "core"
+          },
+          "defaultValue": true
+        },
+        {
+          "key": "tags",
+          "label": {
+            "en": "Tags",
+            "nl": "Tags"
+          },
+          "osfType": "Tag",
+          "cardinality": "collection",
+          "relationship": {
+            "inverse": "groupId",
+            "ownership": "reference"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "tagGroupId": {
+      "kind": "entityId",
+      "entity": "TagGroup",
+      "baseType": "string",
+      "label": {
+        "en": "Tag group",
+        "nl": "Taggroep"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "optionSource": {
+        "type": "entity",
+        "source": "TagGroup",
+        "valueField": "id"
+      },
+      "displayTemplate": "{{name}}",
+      "filterField": "name",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "Task": {
       "kind": "entity",
       "entity": "Task",
@@ -40441,7 +41111,11 @@
           "allowedDefinitions": [
             "TextBlock",
             "YouTubeEmbed",
-            "TemplateBlock"
+            "TemplateBlock",
+            "TextColumns",
+            "ImageBlock",
+            "SpacerBlock",
+            "SectionBreak"
           ],
           "relationship": {
             "inverse": "variant",
@@ -41115,6 +41789,280 @@
           "validation": {
             "minLength": 1,
             "maxLength": 20000
+          }
+        },
+        {
+          "key": "style",
+          "osfType": "string",
+          "required": false,
+          "label": {
+            "en": "Text style",
+            "nl": "Tekststijl"
+          },
+          "description": {
+            "en": "Key of a text style in the document theme's page design. Empty uses the body style.",
+            "nl": "Sleutel van een tekststijl in het paginaontwerp van het documentthema. Leeg gebruikt de broodtekststijl."
+          },
+          "validation": {
+            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "maxLength": 64
+          }
+        },
+        {
+          "key": "maxWidth",
+          "osfType": "number",
+          "required": false,
+          "label": {
+            "en": "Maximum width (px)",
+            "nl": "Maximale breedte (px)"
+          },
+          "validation": {
+            "min": 1,
+            "max": 4000
+          }
+        },
+        {
+          "key": "align",
+          "osfType": "string",
+          "required": false,
+          "label": {
+            "en": "Alignment",
+            "nl": "Uitlijning"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "left",
+                "label": {
+                  "en": "Left",
+                  "nl": "Links"
+                }
+              },
+              {
+                "value": "center",
+                "label": {
+                  "en": "Center",
+                  "nl": "Midden"
+                }
+              },
+              {
+                "value": "right",
+                "label": {
+                  "en": "Right",
+                  "nl": "Rechts"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "TextColumns": {
+      "kind": "entity",
+      "entity": "TextColumns",
+      "entityIdentity": false,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Text columns",
+        "nl": "Tekstkolommen"
+      },
+      "pluralLabel": {
+        "en": "Text columns",
+        "nl": "Tekstkolommen"
+      },
+      "shape": [
+        {
+          "key": "left",
+          "osfType": "markdown",
+          "required": false,
+          "variables": "template",
+          "label": {
+            "en": "Left text",
+            "nl": "Tekst links"
+          },
+          "validation": {
+            "maxLength": 20000
+          }
+        },
+        {
+          "key": "leftStyle",
+          "osfType": "string",
+          "required": false,
+          "label": {
+            "en": "Left text style",
+            "nl": "Tekststijl links"
+          },
+          "validation": {
+            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "maxLength": 64
+          }
+        },
+        {
+          "key": "leftWidth",
+          "osfType": "number",
+          "required": false,
+          "label": {
+            "en": "Left width (px)",
+            "nl": "Breedte links (px)"
+          },
+          "validation": {
+            "min": 1,
+            "max": 4000
+          }
+        },
+        {
+          "key": "center",
+          "osfType": "markdown",
+          "required": false,
+          "variables": "template",
+          "label": {
+            "en": "Center text",
+            "nl": "Tekst midden"
+          },
+          "validation": {
+            "maxLength": 20000
+          }
+        },
+        {
+          "key": "centerStyle",
+          "osfType": "string",
+          "required": false,
+          "label": {
+            "en": "Center text style",
+            "nl": "Tekststijl midden"
+          },
+          "validation": {
+            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "maxLength": 64
+          }
+        },
+        {
+          "key": "centerWidth",
+          "osfType": "number",
+          "required": false,
+          "label": {
+            "en": "Center width (px)",
+            "nl": "Breedte midden (px)"
+          },
+          "validation": {
+            "min": 1,
+            "max": 4000
+          }
+        },
+        {
+          "key": "right",
+          "osfType": "markdown",
+          "required": false,
+          "variables": "template",
+          "label": {
+            "en": "Right text",
+            "nl": "Tekst rechts"
+          },
+          "validation": {
+            "maxLength": 20000
+          }
+        },
+        {
+          "key": "rightStyle",
+          "osfType": "string",
+          "required": false,
+          "label": {
+            "en": "Right text style",
+            "nl": "Tekststijl rechts"
+          },
+          "validation": {
+            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "maxLength": 64
+          }
+        },
+        {
+          "key": "rightWidth",
+          "osfType": "number",
+          "required": false,
+          "label": {
+            "en": "Right width (px)",
+            "nl": "Breedte rechts (px)"
+          },
+          "validation": {
+            "min": 1,
+            "max": 4000
+          }
+        },
+        {
+          "key": "distribution",
+          "osfType": "string",
+          "required": false,
+          "defaultValue": "fill",
+          "label": {
+            "en": "Distribution",
+            "nl": "Verdeling"
+          },
+          "description": {
+            "en": "Fill shares the row between the columns and pushes the right column to the edge. Fit lets the left column take the room the other columns leave.",
+            "nl": "Vullen verdeelt de rij over de kolommen en zet de rechterkolom tegen de rand. Passend geeft de linkerkolom de ruimte die de andere kolommen overlaten."
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "fill",
+                "label": {
+                  "en": "Fill",
+                  "nl": "Vullen"
+                }
+              },
+              {
+                "value": "fit",
+                "label": {
+                  "en": "Fit",
+                  "nl": "Passend"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "verticalAlign",
+          "osfType": "string",
+          "required": false,
+          "defaultValue": "top",
+          "label": {
+            "en": "Vertical alignment",
+            "nl": "Verticale uitlijning"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "top",
+                "label": {
+                  "en": "Top",
+                  "nl": "Boven"
+                }
+              },
+              {
+                "value": "center",
+                "label": {
+                  "en": "Center",
+                  "nl": "Midden"
+                }
+              },
+              {
+                "value": "bottom",
+                "label": {
+                  "en": "Bottom",
+                  "nl": "Onder"
+                }
+              }
+            ]
           }
         }
       ],
@@ -48517,6 +49465,7 @@
       "items": [
         {
           "value": "planned",
+          "color": "standard:neutral",
           "label": {
             "nl": "Gepland",
             "en": "Planned"
@@ -48524,6 +49473,7 @@
         },
         {
           "value": "active",
+          "color": "standard:blue",
           "label": {
             "nl": "Actief",
             "en": "Active"
@@ -48531,6 +49481,7 @@
         },
         {
           "value": "on_hold",
+          "color": "standard:orange",
           "label": {
             "nl": "Gepauzeerd",
             "en": "On hold"
@@ -48538,6 +49489,7 @@
         },
         {
           "value": "completed",
+          "color": "standard:green",
           "label": {
             "nl": "Afgerond",
             "en": "Completed"
@@ -48545,6 +49497,7 @@
         },
         {
           "value": "cancelled",
+          "color": "standard:red",
           "label": {
             "nl": "Geannuleerd",
             "en": "Cancelled"

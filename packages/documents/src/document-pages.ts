@@ -3,9 +3,9 @@ import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import type { MaterializedContentBlock, MaterializedDocumentContent, MaterializedTemplateContent } from "./content/types.js";
 import { materializeDocument } from "./document-materialize.js";
-import { buildPagedDocument, PagedDocumentError } from "./page/html.js";
+import { buildPagedDocument, PagedDocumentError, variantPageValues } from "./page/html.js";
 import { pageDesignFromStored } from "./page-design.js";
-import type { PageBlock } from "./page/types.js";
+import { DEFAULT_PAGE_DESIGN, type PageBlock, type PageLayouts } from "./page/types.js";
 import { themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
 import { refuse, uuid } from "./validation.js";
 
@@ -23,10 +23,13 @@ function pageBlock(block: MaterializedContentBlock): PageBlock {
  * Document.renderPages: the editable head of a document laid out as pages.
  *
  * Read-only. It materializes the document exactly as Document.materialize
- * does, reads the page design of the theme the document resolves to (the
- * pinned template version's theme, else the organization's default theme) and
- * returns one self-contained HTML document per section for a print engine.
- * Fonts are not included: the host that prints supplies them.
+ * does and returns one self-contained HTML document per section for a print
+ * engine. The page settings are the document's own (its variant's, else its
+ * template's) and those of every included template that has pages of its own.
+ * The theme the document resolves to (the pinned template version's, else the
+ * organization's default) supplies only the look; without one the document
+ * gets the default page. Fonts are not included: the host that prints
+ * supplies them.
  */
 export const renderDocumentPages: ModuleOperationHandler = async (input, context) => {
   const materialized = await materializeDocument(input, context);
@@ -49,14 +52,24 @@ export const renderDocumentPages: ModuleOperationHandler = async (input, context
     const theme = (await rows<{ id: string; page_design: unknown }>(trx, themeId
       ? "select id, page_design from erp.document_themes where tenant_id = $1 and id = $2 for share"
       : "select id, page_design from erp.document_themes where tenant_id = $1 and is_default for share", themeId ? [tenantId, themeId] : [tenantId]))[0];
-    if (!theme) refuse("INVALID_STATE", "The document has no theme, so it cannot be laid out as pages.");
-    return { title: document!.title ?? "", themeId: theme!.id, pageDesign: theme!.page_design };
+    // A document that follows no template is its own root: its variant says how it is laid out.
+    const variantId = "documentVariantId" in content ? content.documentVariantId : undefined;
+    const variant = variantId ? (await rows<Record<string, unknown>>(trx,
+      `select page_layout, page_margin, page_gap, page_block_gap, page_background, page_background_image, page_body_alignment
+         from erp.document_variants where tenant_id = $1 and id = $2 for share`, [tenantId, variantId]))[0] : undefined;
+    return { title: document!.title ?? "", themeId: theme?.id ?? null, pageDesign: theme?.page_design, own: variantPageValues(variant) };
   });
-  const design = pageDesignFromStored(source.pageDesign);
-  if (!design) refuse("INVALID_STATE", "The document's theme has no page design, so it cannot be laid out as pages.");
+  const design = pageDesignFromStored(source.pageDesign) ?? DEFAULT_PAGE_DESIGN;
+  const layouts: Record<string, Readonly<Record<string, unknown>>> = {};
+  if (source.own) layouts[""] = source.own;
+  // Every template the content was built from, the document's own first, under the scope its blocks carry.
+  for (const template of content.templates) {
+    const page = template.version.variants[0]?.page;
+    if (page) layouts[template.path.join("/")] = page;
+  }
   try {
     const paged = buildPagedDocument({
-      title: source.title, locale: content.locale, blocks: content.blocks.map(pageBlock), design, fonts: [],
+      title: source.title, locale: content.locale, blocks: content.blocks.map(pageBlock), layouts: layouts as PageLayouts, design, fonts: [],
     });
     return { value: { documentId, themeId: source.themeId, compositionHash: content.compositionHash, ...paged } };
   } catch (error) {

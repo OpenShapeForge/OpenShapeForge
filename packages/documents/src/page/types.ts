@@ -51,7 +51,7 @@ export type PageAsset = Readonly<{
   label?: string;
 }>;
 
-/** What a section break decides for the pages after it. */
+/** What a document's page settings decide for its pages. */
 export type PageSettings = Readonly<{
   layout: string;
   margin: number;
@@ -81,10 +81,20 @@ export type PageFont = Readonly<{
   data: string;
 }>;
 
+/**
+ * The page settings of every template laid out as pages, keyed by the scope
+ * its blocks arrive with; "" is the document itself. The values are the page
+ * fields of the document's or template's variant: margin, gap, blockGap,
+ * background, backgroundImage and bodyAlignment.
+ */
+export type PageLayouts = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+
 export type PagedDocumentInput = Readonly<{
   title: string;
   locale: string;
   blocks: readonly PageBlock[];
+  /** Absent: every block lies on default pages. */
+  layouts?: PageLayouts;
   design: PageDesign;
   fonts: readonly PageFont[];
 }>;
@@ -100,3 +110,20 @@ export type PagedDocument = Readonly<{
   page: Readonly<{ width: number; height: number }>;
   sections: readonly PagedSection[];
 }>;
+
+/**
+ * The page a document gets without a theme: A4 at 96 dpi, black on white, in
+ * four text styles. A theme replaces all of it; it only ever supplies the
+ * look, never whether a document has pages.
+ */
+export const DEFAULT_PAGE_DESIGN: PageDesign = {
+  page: { width: 794, height: 1123 },
+  colors: { text: "#16181d", muted: "#5f6b7c" },
+  textStyles: {
+    title: { fontFamily: "DM Sans", fontSize: 32, lineHeight: 38, fontWeight: 600, color: "text", label: "Titel" },
+    heading: { fontFamily: "DM Sans", fontSize: 20, lineHeight: 26, fontWeight: 600, color: "text", label: "Kop" },
+    body: { fontFamily: "DM Sans", fontSize: 14, lineHeight: 21, fontWeight: 400, color: "text", label: "Tekst" },
+    small: { fontFamily: "DM Sans", fontSize: 11, lineHeight: 15, fontWeight: 400, color: "muted", label: "Klein" },
+  },
+  assets: {},
+};

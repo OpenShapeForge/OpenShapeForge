@@ -233,6 +233,10 @@ operations:
         additionalProperties: false
         required: [theme, resolution]
         properties:
+          templatePages:
+            type: object
+            x-osf-i18n: { title: { en: Template page settings, nl: Pagina-instellingen van het template } }
+            description: For a document - the page settings its template version froze for each variant laid out as pages, keyed by channel/locale. A document variant that sets no layout of its own uses these.
           pageDesign:
             type: ["object", "null"]
             x-osf-i18n: { title: { en: Page design, nl: Paginaontwerp } }

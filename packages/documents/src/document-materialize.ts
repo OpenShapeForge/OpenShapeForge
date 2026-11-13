@@ -6,6 +6,7 @@ import { contentBlockFromRow, type BlockRowSelection } from "./content-snapshot.
 import { immutableContent, type JsonObject } from "./content/json.js";
 import { materializeTemplateContent, materializeDocumentContent } from "./content/materialize.js";
 import type { ContentResolvers, ContentTemplateVariant } from "./content/types.js";
+import { variantPageValues } from "./page/html.js";
 import { object, refuse, text, uuid } from "./validation.js";
 
 type DocumentRow = Readonly<{ id: string; template_version_id: string | null; parameters: unknown }>;
@@ -21,14 +22,17 @@ const BLOCK_OWNER_COLUMN = "document_variant_id";
  * so an edit cannot slip in between reading the variants and hashing their
  * content.
  */
-export async function documentContentVariants(trx: unknown, document: { readonly id: string; readonly channel: string; readonly defaultLocales?: ReadonlySet<string> },
+export async function documentContentVariants(trx: unknown, document: { readonly id: string; readonly channel: string; readonly defaultLocales?: ReadonlySet<string>; readonly templatePages?: (locale: string) => JsonObject | undefined },
   selection: BlockRowSelection, allowedDefinitions: readonly string[]): Promise<readonly ContentTemplateVariant[]> {
-  const variants = await rows<{ id: string; channel: string; locale: string }>(trx,
-    "select id, channel, locale from erp.document_variants where tenant_id = $1 and document_id = $2 and channel = $3 order by locale, id for share",
+  const variants = await rows<{ id: string; channel: string; locale: string } & Record<string, unknown>>(trx,
+    "select id, channel, locale, page_layout, page_margin, page_gap, page_block_gap, page_background, page_background_image, page_body_alignment from erp.document_variants where tenant_id = $1 and document_id = $2 and channel = $3 order by locale, id for share",
     [selection.tenantId, document.id, document.channel]);
   const result: ContentTemplateVariant[] = [];
   for (const variant of variants) {
     const variantId = uuid(variant.id, "document variant");
+    // A document that does not say how it is laid out is laid out as its template.
+    const own = variantPageValues(variant);
+    const page = own === null ? document.templatePages?.(variant.locale) : own;
     const found = await rows<{ row: Record<string, unknown> }>(trx,
       "select to_jsonb(b.*) as row from erp.blocks b where tenant_id = $1 and document_variant_id = $2 order by document_variant_id_position, id for share",
       [selection.tenantId, variantId]);
@@ -36,6 +40,7 @@ export async function documentContentVariants(trx: unknown, document: { readonly
     result.push({
       id: variantId, channel: document.channel, locale: text(variant.locale, "document variant locale"), blocks, allowedDefinitions: [...allowedDefinitions],
       ...(document.defaultLocales?.has(variant.locale) ? { default: true } : {}),
+      ...(page ? { page: page as JsonObject } : {}),
     });
   }
   return result;
@@ -86,7 +91,9 @@ export const materializeDocument: ModuleOperationHandler = async (input, context
           if (!version || id !== templateVersionId) return version;
           const selection: BlockRowSelection = { tenantId, carrier, definitionVersionColumn: DEFINITION_VERSION_COLUMN };
           const defaultLocales = new Set(version.variants.filter((variant) => variant.default).map((variant) => variant.locale));
-          return { ...version, variants: await documentContentVariants(trx, { id: documentId, channel, defaultLocales }, selection, documentCollection.allowedDefinitions) };
+          const templatePages = (wanted: string) => (version.variants.find((variant) => variant.locale === wanted)
+            ?? version.variants.find((variant) => variant.locale.slice(0, 2) === wanted.slice(0, 2)) ?? version.variants.find((variant) => variant.default))?.page;
+          return { ...version, variants: await documentContentVariants(trx, { id: documentId, channel, defaultLocales, templatePages }, selection, documentCollection.allowedDefinitions) };
         },
       };
       return materializeTemplateContent({ tenantId, templateVersionId, channel, locale, parameters }, registry, resolvers);

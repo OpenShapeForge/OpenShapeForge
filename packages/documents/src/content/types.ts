@@ -87,6 +87,11 @@ export type ContentTemplateVariant = {
   /** The owning collection's order is authoritative. No second position property exists. */
   readonly blocks: readonly ContentBlock[];
   readonly allowedDefinitions?: readonly string[];
+  /**
+   * The variant's page settings when its content is laid out as pages; absent
+   * for continuous content. A document's own setting, else its template's.
+   */
+  readonly page?: JsonObject;
 };
 
 export type ContentTemplateVersion = {

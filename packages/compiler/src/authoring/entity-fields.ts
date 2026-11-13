@@ -35,6 +35,13 @@ export function assertEntityValueFieldPolicies(field: object, path: string, sema
   for (const key of ["classification", "authorization", "permissions", "writtenBy", "secureInput", "immutable"]) {
     const authored = Reflect.get(field, key);
     const inherited = semantic ? Reflect.get(semantic, key) : undefined;
+    if (key === "classification") {
+      // The authored classification wins over the type's; one that restricts
+      // nothing (`public`, `internal`) needs no adapter. Same rule as the runtime guard.
+      const effective = authored ?? inherited;
+      const sensitivity = effective && typeof effective === "object" ? Reflect.get(effective, "sensitivity") : undefined;
+      if (effective === undefined || sensitivity === "public" || sensitivity === "internal") continue;
+    }
     if (key === "immutable" ? authored === true || inherited === true : authored !== undefined || inherited !== undefined) {
       throw new Error(`${path}: entityValue definition field policy ${key} requires a canonical embedded-field policy adapter; not supported yet.`);
     }

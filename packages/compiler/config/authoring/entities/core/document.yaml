@@ -802,6 +802,10 @@ interfaces:
   graphql: {}
   mcp: {}
   web:
+    fields:
+      # The values of the linked template's variables read as named values, never as raw JSON.
+      parameters:
+        render: { component: FieldKeyValuePairs }
     operations:
       materialize: { resultRenderer: document.content }
       create:

@@ -31,7 +31,9 @@ test("an immediate business failure preserves the start's acceptance and offers 
  const tasks = createTasks({store:{retain:async()=>{retained++;throw new Error("must not retain");},get:async()=>undefined},
   providers:new Map([["workflow",{kind:"workflow",read:async()=>({status:"completed" as const,updatedAt:new Date().toISOString(),result:{data:{status:"failed"},operations:[]},isError:true})}]]),
   context:{execute:async()=>{throw new Error("unused");}} });
- const original=projected();expect(await tasks.project(original,meta)).toBe(original);expect(retained).toBe(0);
+ const original=projected();const result=await tasks.project(original,meta);
+ // Only the 2026-07-28 completion marker is added; the start's content, offers and private reference stay intact.
+ expect(result).toEqual({resultType:"complete",...original});expect(executionReferenceOf(result as typeof original)).toEqual(reference);expect(retained).toBe(0);
 });
 test("authority binding rejects unknown bearer clients, separates scopes and survives API-key rotation", () => {
  const s: TrustedSessionContext={tenantId:"tenant",userId:"actor",issuer:"issuer",roles:[],groups:[],scope:"tenant",credential:"bearer"};

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import { Server } from "@modelcontextprotocol/server";
 import { handleModernMcpRequest } from "../modern-http.js";
-import { createTasks, executionProviders, supportsTasks, taskAwareToolParams, TASKS_EXTENSION } from "../tasks.js";
+import { completeToolResult, createTasks, executionProviders, supportsTasks, taskAwareToolParams, TASKS_EXTENSION } from "../tasks.js";
 import { withExecutionReference } from "../execution-reference.js";
 import type { TaskBinding, TaskStore } from "../task-store.js";
 import type { RuntimeExecutionProvider } from "@openshapeforge/plugin-runtime";
@@ -85,7 +85,11 @@ describe("MCP Tasks extension over actual HTTP", () => {
   test("requires Tasks on the tool request itself and never trusts upstream execution-shaped JSON", async () => {
     const plainMeta = { ...meta, "io.modelcontextprotocol/clientCapabilities": {} };
     expect((await call("tools/call", { name: "start" }, plainMeta)).result!.content).toBeDefined();
-    expect((await call("tools/call", { name: "native" })).result!.resultType).not.toBe("task");
+    expect((await call("tools/call", { name: "native" })).result!.resultType).toBe("complete");
+    expect((await call("tools/call", { name: "start" }, plainMeta)).result!.resultType).toBe("complete");
+    expect(completeToolResult({ content: [] }, { ...meta, "io.modelcontextprotocol/protocolVersion": "2025-11-25" })).toEqual({ content: [] });
+    expect(completeToolResult({ content: [] }, { ...meta, "io.modelcontextprotocol/protocolVersion": "2027-01-15" })).toEqual({ resultType: "complete", content: [] });
+    expect(completeToolResult({ resultType: "task", content: [] }, meta)).toEqual({ resultType: "task", content: [] });
     expect(supportsTasks({ ...meta, "io.modelcontextprotocol/protocolVersion": "2025-11-25" })).toBe(false);
   });
   test("cancels through the owner, refuses unknown handles and unissued input", async () => {

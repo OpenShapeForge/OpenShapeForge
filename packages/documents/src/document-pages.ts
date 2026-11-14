@@ -3,7 +3,7 @@ import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import type { CompiledContentBlockRegistry, MaterializedContentBlock, MaterializedDocumentContent, MaterializedTemplateContent } from "./content/types.js";
 import { materializeDocument } from "./document-materialize.js";
-import { buildPagedDocument, pageImages, PagedDocumentError, withImages, withPaletteColors } from "./page/html.js";
+import { buildPagedDocument, PAGE_BLOCK_KEYS, pageImages, PagedDocumentError, withImages, withPaletteColors } from "./page/html.js";
 import { contentImages } from "./images.js";
 import { pageDesignFromStored } from "./page-design.js";
 import { DEFAULT_PAGE_DESIGN, type PageBlock, type PageLayouts } from "./page/types.js";
@@ -12,6 +12,8 @@ import { refuse, uuid } from "./validation.js";
 
 /** The value schema a block's materialization is drawn by, when its definition renders its fields as document content. */
 export function typedSchema(block: MaterializedContentBlock, definitions: CompiledContentBlockRegistry): Readonly<Record<string, unknown>> | undefined {
+  // The page renderer draws its own block types from their fields; only the others are drawn from their output schema.
+  if ((PAGE_BLOCK_KEYS as readonly string[]).includes(block.definitionKey)) return undefined;
   if (block.materialization?.result.kind !== "block" || !Object.hasOwn(definitions, block.definitionKey)) return undefined;
   const definition = definitions[block.definitionKey]!;
   if (definition.renderers?.document !== "entityFields") return undefined;

@@ -250,6 +250,36 @@ describe("Document commands", () => {
     expect(calls[4]!.input.expectedVersion).toBe("2026-09-13T10:00:04Z");
   });
 
+  test("links a new document to the chosen template version with its local values", async () => {
+    const fixture = context({ results: [[{ documentId, documentVersionId }]] });
+    const templateVersionId = "70000000-0000-4000-8000-000000000001";
+    const calls: Array<{ id: string; input: Record<string, unknown> }> = [];
+    const platform = fixture.operationContext.platform!;
+    (platform.operations as any).list = async () => [
+      { id: "Document.get", entityName: "Document", intent: "get", effects: { data: "read", external: "none" } },
+      { id: "Document.insertVariant", entityName: "Document", intent: "invoke", effects: { data: "write", external: "none" } },
+      { id: "Document.linkTemplate", entityName: "Document", intent: "invoke", effects: { data: "write", external: "none" } },
+    ];
+    (platform.operations as any).execute = async (_session: unknown, request: { operation: { id: string }; input: Record<string, unknown> }) => {
+      calls.push({ id: request.operation.id, input: request.input });
+      return request.operation.id === "Document.get" ? { data: { ...documentRow(), updatedAt: "2026-09-13T10:00:00Z" } } : { data: { id: documentId, templateVersionId } };
+    };
+    // The form's empty content skeleton gives way to the template's own variants.
+    const content = { variant: { channel: "document", locale: "nl" }, blocks: [] };
+    await createDocument({ document, version, content, templateVersionId, parameters: { client: "Nova Harbor" } }, fixture.operationContext);
+    expect(calls.map(call => call.id)).toEqual(["Document.get", "Document.linkTemplate", "Document.get"]);
+    expect(calls[1]!.input).toEqual({ id: documentId, expectedVersion: "2026-09-13T10:00:00Z", templateVersionId, parameters: { client: "Nova Harbor" } });
+  });
+
+  test("refuses local values without a template, and a template beside authored blocks", async () => {
+    const fixture = context({ results: [] });
+    const templateVersionId = "70000000-0000-4000-8000-000000000001";
+    await failure(createDocument({ document, version, parameters: { client: "x" } }, fixture.operationContext), "VALIDATION");
+    const content = { variant: { channel: "document", locale: "nl" }, blocks: [{ definitionKey: "TextBlock", values: { markdown: "Hello" } }] };
+    await failure(createDocument({ document, version, content, templateVersionId }, fixture.operationContext), "VALIDATION");
+    expect(fixture.executed).toHaveLength(0);
+  });
+
   test("rejects a missing collection version token as a handler contract violation", async () => {
     const fixture = context({ results: [[{ documentId, documentVersionId }]] });
     const variantId = "60000000-0000-4000-8000-000000000001";

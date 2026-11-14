@@ -304,11 +304,18 @@ export const createDocument: ModuleOperationHandler = async (input, context) => 
   const document = inputObject(input, "document");
   const version = inputObject(input, "version");
   const { logicalVersion, binding } = artifactInput(input, version);
-  const content = input.content === undefined ? undefined : inputObject(input, "content");
-  if (content && binding) throw operationFailure({ code: "VALIDATION", message: "A document cannot contain both an uploaded file and authored content.", retryable: false });
-  if (content && (!content.variant || typeof content.variant !== "object" || Array.isArray(content.variant) || !Array.isArray(content.blocks))) {
+  const authored = input.content === undefined ? undefined : inputObject(input, "content");
+  if (authored && binding) throw operationFailure({ code: "VALIDATION", message: "A document cannot contain both an uploaded file and authored content.", retryable: false });
+  if (authored && (!authored.variant || typeof authored.variant !== "object" || Array.isArray(authored.variant) || !Array.isArray(authored.blocks))) {
     throw operationFailure({ code: "VALIDATION", message: "Content requires a variant and an ordered block list.", retryable: false });
   }
+  const template = templateInput(input);
+  if (template && binding) throw operationFailure({ code: "VALIDATION", message: "A document cannot start from both an uploaded file and a template.", retryable: false });
+  if (template && authored && (authored.blocks as unknown[]).length > 0) {
+    throw operationFailure({ code: "VALIDATION", message: "A document cannot start from both authored blocks and a template.", retryable: false });
+  }
+  // The template supplies every variant and block; an empty content skeleton (the form's default) gives way to it.
+  const content = template ? undefined : authored;
 
   const value = await translateDatabaseError(platform, () =>
     platform.db.withSession(session, async (transaction) => {
@@ -358,11 +365,35 @@ export const createDocument: ModuleOperationHandler = async (input, context) => 
           if (typeof token !== "string") throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The content variant version token is unavailable.", retryable: false });
         }
       }
+      if (template) {
+        // Linked through the canonical Operation, so the version, its local values and the
+        // caller's access are checked exactly as a later "Link template" would check them.
+        const definitions = await platform.operations.list(session);
+        const operation = definitions.find(item => item.id === "Document.linkTemplate" && item.effects.data === "write" && item.effects.external === "none");
+        if (!operation) throw operationFailure({ code: "OPERATION_UNAVAILABLE", message: "The canonical template link Operation is unavailable.", retryable: false });
+        const head = await readCanonicalDocument(platform, session, created.documentId);
+        if (typeof head?.updatedAt !== "string") throw operationFailure({ code: "HANDLER_CONTRACT_VIOLATION", message: "The document version token is unavailable.", retryable: false });
+        const linked = await platform.operations.execute(session, { operation, input: {
+          id: created.documentId, expectedVersion: head.updatedAt, templateVersionId: template.templateVersionId,
+          ...(template.parameters ? { parameters: template.parameters } : {}),
+        } });
+        if ("error" in linked) throw operationFailure(linked.error);
+      }
       return authoredRow(await readCanonicalDocument(platform, session, created.documentId), { id: created.documentId });
     }),
   );
   return { value, status: 201 };
 };
+
+/** The optional template a new document starts from: a published version and the values of its local variables. */
+function templateInput(input: JsonObject): { templateVersionId: string; parameters?: JsonObject } | undefined {
+  if (input.templateVersionId === undefined) {
+    if (input.parameters !== undefined) throw operationFailure({ code: "VALIDATION", message: "Local values require a template.", retryable: false });
+    return undefined;
+  }
+  const templateVersionId = inputUuid(input, "templateVersionId");
+  return input.parameters === undefined ? { templateVersionId } : { templateVersionId, parameters: inputObject(input, "parameters") };
+}
 
 /**
  * Append one version to a Document under a session, as the canonical

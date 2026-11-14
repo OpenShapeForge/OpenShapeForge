@@ -467,8 +467,10 @@ operations:
   create:
     name: { en: Create document, nl: Document aanmaken }
     description:
-      en: Create a document with its first version.
-      nl: Maak een document met de eerste versie.
+      en: Create a document with its first version, optionally from a published template version with the values of
+        its local variables; the document is then linked to that template as by Link template.
+      nl: Maak een document met de eerste versie, desgewenst vanuit een gepubliceerde templateversie met de waarden van
+        haar lokale variabelen; het document is dan aan die template gekoppeld zoals met Template koppelen.
 
     implementation: { type: plugin, plugin: documents, handler: createDocument, action: create }
     target: { scope: collection }
@@ -545,6 +547,19 @@ operations:
               description:
                 en: Optionally attach a file to this version.
                 nl: Voeg desgewenst een bestand aan deze versie toe.
+          templateVersionId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Template, valueField: publishedVersionId }
+            x-osf-i18n:
+              title: { en: Template, nl: Template }
+              description:
+                en: Optional. The document starts from this template's published content and stays linked to it.
+                nl: Optioneel. Het document begint met de gepubliceerde inhoud van deze template en blijft eraan gekoppeld.
+          parameters:
+            type: object
+            x-osf-inputFields: templateVersionId.parameters
+            x-osf-i18n: { title: { en: Local values, nl: Lokale waarden } }
           document:
             x-osf-entityInput:
               entity: Document
@@ -607,7 +622,9 @@ operations:
     reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }
     confirmation: { mode: none }
     errors:
-      - { status: 400, code: VALIDATION, description: The document or version input is invalid. }
+      - { status: 400, code: VALIDATION, description: "The document or version input is invalid, or the local values do not match the template." }
+      - { status: 409, code: INVALID_STATE, description: The template version is not published. }
+      - { status: 404, code: NOT_FOUND, description: The template version does not exist. }
       - { status: 403, code: FORBIDDEN, description: The document is not accessible. }
       - { status: 503, code: STORAGE_UNAVAILABLE, description: No artifact storage provider is available. }
       - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
@@ -630,13 +647,17 @@ operations:
             format: uuid
             x-osf-reference: { entity: Document }
             x-osf-i18n: { title: { en: Document, nl: Document } }
+          # A person picks the template by name; its published version is the value. Any published version stays linkable here.
           templateVersionId:
             type: string
             format: uuid
-            x-osf-reference: { entity: TemplateVersion }
-            x-osf-i18n: { title: { en: Template version, nl: Templateversie } }
+            x-osf-reference: { entity: Template, valueField: publishedVersionId }
+            x-osf-i18n: { title: { en: Template, nl: Template } }
+          # One field per local variable the picked version declares; the document's current values fill them.
           parameters:
             type: object
+            x-osf-inputFields: templateVersionId.parameters
+            x-osf-sourceField: parameters
             x-osf-i18n: { title: { en: Local values, nl: Lokale waarden } }
           replace:
             type: boolean
@@ -793,6 +814,8 @@ interfaces:
           groups:
             - title: { en: Document, nl: Document }
               fields: [document.title, document.documentType]
+            - title: { en: Template, nl: Template }
+              fields: [templateVersionId, parameters]
     views:
       quotePreview:
         kind: record
@@ -851,5 +874,3 @@ interfaces:
             groups:
               - title: { en: Document, nl: Document }
                 fields: [ code, title, description, documentType, status, confidentiality, source, author, isExternal ]
-              - title: { en: Local values, nl: Lokale waarden }
-                fields: [ parameters ]

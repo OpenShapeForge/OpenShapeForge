@@ -1160,9 +1160,10 @@ export type UpdateIntegrationRolesInput = {
  * refused) or waits for this to finish. The realm is set from what it maps
  * NOW (`KeycloakAdmin.setClientRoles`), withdrawing before granting, so a
  * failure there leaves the account with no role that neither set authorized
- * and the stored roles unchanged, and a repeat converges. The one remaining
- * window is the database commit itself failing after the realm moved; the
- * stored set is then the old one, which a repeat of the same request repairs.
+ * and the stored roles unchanged, and a repeat converges. Once the realm has
+ * moved, the row and its audit event commit in their own transaction; if that
+ * fails, the realm is put back to the roles the database records
+ * (`restoreRecordedRealmRoles`), and a restore the realm refuses is logged.
  *
  * Existing keys are not touched. A key carries no roles of its own — the
  * exchange turns it into the service account's token (exchange.ts) and a
@@ -1183,13 +1184,21 @@ export async function updateIntegrationRoles(
     throw new ApiKeyValidationError("Role-free integrations require a configured API verifier audience.");
   }
 
+  /** Set once the realm holds the new set; from then on a failure must undo it. */
+  let realmMoved: { serviceAccount: string } | null = null;
   try {
+    // Its own transaction, like creation's intent row: the realm is about to
+    // move, so the row and its audit event must commit WITH that move rather
+    // than wait on whatever Operation transaction this is nested in, whose
+    // later rollback would otherwise erase the record of a change the realm
+    // keeps.
     return await withSession(deps, session, async (trx) => {
       const locked = await lockIntegration(trx, session.tenantId, input.integrationId);
-      if (!locked) throw new ApiKeyNotFoundError("No such integration.");
-      if (locked.status !== "active") {
-        throw new ApiKeyValidationError(
-          `This integration is ${integrationStatus(locked.status)}; only an active integration's roles can be changed.`,
+      // A disabled or still provisioning integration answers like it does to
+      // `issueKey`: there is no active integration by that id to change.
+      if (!locked || locked.status !== "active") {
+        throw new ApiKeyNotFoundError(
+          "No such active integration. A disabled or still provisioning integration's roles cannot be changed.",
         );
       }
       const previous = grantedRolesOf(locked.granted_roles);
@@ -1197,12 +1206,23 @@ export async function updateIntegrationRoles(
       let changed: { added: string[]; removed: string[] };
       try {
         const serviceAccount = await deps.admin.serviceAccountUserId(locked.keycloak_client_id);
+        // A role-free integration is admitted only by the API audience. A
+        // client created before that mapper existed would lose its only
+        // audience with its last role, so it is attached first.
+        if (roles.length === 0) await deps.admin.ensureApiAudience(locked.keycloak_client_id);
+        // A failed response can follow a successful remote write; compensate
+        // even when setClientRoles rejects after sending the mutation.
+        realmMoved = { serviceAccount };
         changed = await deps.admin.setClientRoles(serviceAccount, deps.entityRoleClientId, roles);
       } catch (error) {
+        // The realm's own message names internal client and user ids and
+        // admin paths; it is logged for the operator, not returned.
+        console.warn(
+          "[api-keys] Changing an integration's realm roles failed:",
+          error instanceof Error ? error.message : String(error),
+        );
         throw new ApiKeyProvisioningError(
-          `Could not change the roles of this integration: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          "The identity provider could not change this integration's roles; its recorded roles are unchanged.",
         );
       }
 
@@ -1239,11 +1259,52 @@ export async function updateIntegrationRoles(
          limit 1
       `.execute(trx);
       return listedIntegration(result.rows[0]!);
-    });
+    }, { independent: true });
+  } catch (error) {
+    // The realm moved but the row and its event did not commit: put the realm
+    // back to what the database records, so the two cannot drift silently.
+    const moved = realmMoved as { serviceAccount: string } | null;
+    if (moved) await restoreRecordedRealmRoles(deps, session, input.integrationId, moved.serviceAccount);
+    throw error;
   } finally {
     // Also after a failure: the realm may already have withdrawn roles, and a
-    // cached token minted before that must not outlive it.
+    // cached token minted before that must not outlive it. Tokens are cached
+    // under the row's roles version as well (exchange.ts), so this only
+    // shortens what a committed change already retired, on this process.
     invalidateIntegrationToken(input.integrationId);
+  }
+}
+
+/**
+ * Best effort: make the realm hold exactly the roles the database records for
+ * an integration, after a role change moved the realm and then failed to
+ * commit. Taken under the integration lock and read from the committed row, so
+ * a change that committed meanwhile is what the realm converges on, not the
+ * set this attempt started from. A failure is logged, never thrown: the caller
+ * is already reporting the original error.
+ */
+async function restoreRecordedRealmRoles(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+  integrationId: string,
+  serviceAccount: string,
+): Promise<void> {
+  try {
+    await withSession(deps, session, async (trx) => {
+      const locked = await lockIntegration(trx, session.tenantId, integrationId);
+      if (!locked || locked.status !== "active") return;
+      await deps.admin.setClientRoles(
+        serviceAccount,
+        deps.entityRoleClientId,
+        grantedRolesOf(locked.granted_roles),
+      );
+    }, { independent: true });
+  } catch (error) {
+    console.error(
+      `[api-keys] Could not restore the realm roles of integration ${integrationId} after a failed role change; ` +
+        "its realm roles may differ from its recorded roles until the change is repeated.",
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 

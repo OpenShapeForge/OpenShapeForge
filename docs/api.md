@@ -777,7 +777,7 @@ integration; `roles` is the complete new set, not a delta, and an empty set is
 admitted only where creation admits one. The ceiling is creation's: every role
 in the new set must be held by the caller, while withdrawing a role is not
 checked against the caller. A `pending` or `disabled` integration is refused
-with `400 VALIDATION`. The service takes the integration lock that issue and
+with `404 NOT_FOUND`, like key issuance. The service takes the integration lock that issue and
 disable share, sets the service account's client roles on the entity-role
 client to exactly the new set, and only then records `granted_roles` and
 appends an `ApiKeyIntegration` / `api_key_integration_roles_changed` event to
@@ -786,13 +786,25 @@ before granting, so a refused realm call leaves the stored roles unchanged, the
 account with no role neither set authorized, and a repeated request
 converging. Keys are not touched: a key names an integration and its roles are
 the service account's token roles (intersected with its `role_subset`), so the
-change applies to every existing key from its next request. The process-local
-exchanged-token cache is dropped for the integration; another API replica
-serves its cached token until it expires (at most the realm's access token
-lifetime, 900s in the generated realm). A key narrowed to roles that are
+change applies from the next request that reads the committed row, on every API
+replica: both cached and in-flight exchanges are bound to the row's roles
+version, read on each request. Local invalidation also stops new requests
+joining the previous exchange. A key narrowed to roles that are
 withdrawn keeps only the ones that remain, possibly none. The web integration
 view offers it as the "Edit roles" record action on active integrations,
 prefilled from `grantedRoles`.
+
+Role updates commit their row and audit event in an independent transaction;
+a later outer Operation failure cannot erase the record of a realm change.
+If a row write, event write, read-back or commit fails after the realm changes,
+compensation reacquires the integration lock and restores the currently recorded
+roles, preserving any concurrent committed edit. Compensation is best effort:
+if Keycloak or PostgreSQL remains unavailable, an operator error records that
+reconciliation is required; the original failure is returned. An empty role set
+first ensures that the existing client has the configured API audience mapper.
+A key subset can also gain a previously named role when that role is later added
+to the integration; the subset still never grants anything the service account
+itself lacks.
 
 **A fenced activation compensates recoverably.** The intent row commits before
 the realm is touched, so the integration is visible and mutable while the

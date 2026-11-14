@@ -208,17 +208,7 @@ export class KeycloakAdmin {
       implicitFlowEnabled: false,
       directAccessGrantsEnabled: false,
       enabled: true,
-      protocolMappers: [TENANT_CLAIM_MAPPER, ...(this.config.apiAudience ? [{
-        name: `${this.config.apiAudience}-audience`,
-        protocol: "openid-connect",
-        protocolMapper: "oidc-audience-mapper",
-        consentRequired: false,
-        config: {
-          "included.custom.audience": this.config.apiAudience,
-          "id.token.claim": "false",
-          "access.token.claim": "true",
-        },
-      }] : [])],
+      protocolMappers: [TENANT_CLAIM_MAPPER, ...(this.config.apiAudience ? [this.apiAudienceMapper(this.config.apiAudience)] : [])],
     });
 
     if (response.status === 409) {
@@ -330,6 +320,63 @@ export class KeycloakAdmin {
     if (!response.ok) {
       throw new KeycloakAdminError(
         `Granting roles to ${serviceAccountUserId} failed with ${response.status}.`,
+        response.status,
+      );
+    }
+  }
+
+  private apiAudienceMapper(audience: string) {
+    return {
+      name: `${audience}-audience`,
+      protocol: "openid-connect",
+      protocolMapper: "oidc-audience-mapper",
+      consentRequired: false,
+      config: {
+        "included.custom.audience": audience,
+        "id.token.claim": "false",
+        "access.token.claim": "true",
+      },
+    };
+  }
+
+  /**
+   * Attach the API audience mapper to an existing integration client unless it
+   * already carries one for this audience.
+   *
+   * Clients created before the deployment configured an audience have none,
+   * and for those the token's audience comes only from its entity-role-client
+   * roles: withdrawing the last role would make every key under it fail
+   * verification. A no-op when no audience is configured.
+   */
+  async ensureApiAudience(clientId: string): Promise<void> {
+    const audience = this.config.apiAudience;
+    if (!audience) return;
+    const clients = await this.json<Array<{ id: string }>>(
+      "GET",
+      `/clients?clientId=${encodeURIComponent(clientId)}`,
+    );
+    const internalId = clients[0]?.id;
+    if (!internalId) {
+      throw new KeycloakAdminError(`Keycloak client "${clientId}" does not exist.`, 404);
+    }
+    const mappers = await this.json<Array<{ id?: string; name?: string; protocol?: string; protocolMapper?: string; config?: Record<string, unknown> }>>(
+      "GET",
+      `/clients/${internalId}/protocol-mappers/models`,
+    );
+    if (mappers.some((mapper) => mapper.protocol === "openid-connect" &&
+      mapper.protocolMapper === "oidc-audience-mapper" &&
+      mapper.config?.["included.custom.audience"] === audience &&
+      mapper.config?.["access.token.claim"] === "true")) return;
+    const desired = this.apiAudienceMapper(audience);
+    const existing = mappers.find((mapper) => mapper.name === desired.name);
+    const response = await this.request(
+      existing?.id ? "PUT" : "POST",
+      `/clients/${internalId}/protocol-mappers/models${existing?.id ? `/${existing.id}` : ""}`,
+      existing?.id ? { ...desired, id: existing.id } : desired,
+    );
+    if (!response.ok) {
+      throw new KeycloakAdminError(
+        `Adding the API audience to "${clientId}" failed with ${response.status}.`,
         response.status,
       );
     }

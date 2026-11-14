@@ -47,6 +47,7 @@ import { API_KEY_MANAGE_ROLE } from "../auth/api-key/ceiling.js";
 import {
   createIntegration,
   issueKey,
+  updateIntegrationRoles,
   listKeys,
   pageIntegrations,
   revokeKey,
@@ -1291,7 +1292,7 @@ describe("changing an integration's roles over the real dispatcher", () => {
       }) as unknown as typeof fetch,
     }, integrationId, secret.client, {
       ciphertext: secret.ciphertext, keyId: secret.key_id, algorithm: secret.algorithm,
-    } as never);
+    } as never, "dispatcher-test");
     expect(await exchange()).toBe("token-1");
     expect(await exchange()).toBe("token-1");
 
@@ -1376,7 +1377,7 @@ describe("changing an integration's roles over the real dispatcher", () => {
 
     const refused = await operation("update-roles", { integrationId, roles: [WRITE_ROLE] }, editor());
     expect({ status: refused.status, code: refused.body.error?.code })
-      .toEqual({ status: 400, code: "VALIDATION" });
+      .toEqual({ status: 404, code: "NOT_FOUND" });
     expect(refused.body.error.message).toContain("disabled");
     expect(realm.requests.slice(before)).toEqual([]);
     expect(await storedRoles(integrationId)).toEqual([READ_ROLE]);
@@ -1399,7 +1400,68 @@ describe("changing an integration's roles over the real dispatcher", () => {
     const refused = await operation("update-roles", { integrationId, roles: [API_KEY_MANAGE_ROLE] });
     expect({ status: refused.status, code: refused.body.error?.code })
       .toEqual({ status: 502, code: "PROVISIONING_FAILED" });
-    expect(mappingWrites(before)).toEqual([]);
+    // Compensation reconciles the realm back to this integration's recorded set.
+    expect(realm.mappedRoles()).toEqual([READ_ROLE]);
+    expect(refused.body.error.message).not.toContain("erp-provider");
+    expect(refused.body.error.message).not.toContain("/admin/");
     expect(await storedRoles(integrationId)).toEqual([READ_ROLE]);
   }, TEST_TIMEOUT);
+
+  for (const stage of ["row-write", "event-write", "commit"] as const) {
+    test(`restores recorded realm roles after a database ${stage} failure`, async () => {
+      if (!booted) return;
+      const created = await operation("create", {
+        displayName: `Compensation ${stage}`, roles: [READ_ROLE], expiresInDays: 30,
+      }, editor());
+      expect(created.status).toBe(200);
+      const id = created.body.integration.integrationId as string;
+      const table = stage === "row-write" ? "api_key_integrations" : "entity_events";
+      const predicate = stage === "row-write" ? `new.id = '${id}'::uuid` : `new.aggregate_id = '${id}'`;
+      await sql.raw(`create function platform.test_roles_write_failure() returns trigger language plpgsql as $$
+        begin
+          if ${predicate} then raise exception 'synthetic roles ${stage} failure'; end if;
+          return new;
+        end $$`).execute(booted.adminDb);
+      try {
+        await sql.raw(stage === "commit"
+          ? `create constraint trigger test_roles_write_failure after insert on platform.${table}
+              deferrable initially deferred for each row execute function platform.test_roles_write_failure()`
+          : `create trigger test_roles_write_failure before ${stage === "row-write" ? "update" : "insert"}
+              on platform.${table} for each row execute function platform.test_roles_write_failure()`
+        ).execute(booted.adminDb);
+        const result = await operation("update-roles", { integrationId: id, roles: [WRITE_ROLE] }, editor());
+        // PostgreSQL P0001 is projected by the dispatcher as a conflict.
+        expect(result.status).toBe(409);
+        expect(await storedRoles(id)).toEqual([READ_ROLE]);
+        expect(realm.mappedRoles()).toEqual([READ_ROLE]);
+        const events = await sql<{ count: number }>`select count(*)::int as count from platform.entity_events
+          where aggregate_id = ${id} and event_type = 'api_key_integration_roles_changed'`.execute(booted.adminDb);
+        expect(events.rows[0]!.count).toBe(0);
+      } finally {
+        await sql.raw(`drop trigger if exists test_roles_write_failure on platform.${table}`).execute(booted.adminDb);
+        await sql.raw(`drop function platform.test_roles_write_failure()`).execute(booted.adminDb);
+      }
+    }, TEST_TIMEOUT);
+  }
+
+  test("a later outer Operation rollback preserves the independently committed roles and audit", async () => {
+    if (!booted) return;
+    const created = await operation("create", {
+      displayName: "Roles survive outer rollback", roles: [READ_ROLE], expiresInDays: 30,
+    }, editor());
+    const id = created.body.integration.integrationId as string;
+    const person = { ...verifiedPersonSession(), roles: [API_KEY_MANAGE_ROLE, READ_ROLE, WRITE_ROLE] };
+    const manager = { ...provisioningSession(), roles: person.roles };
+    await expect(withDbSession(booted.appDb, person, async () => {
+      await updateIntegrationRoles(booted!.deps, manager, { integrationId: id, roles: [WRITE_ROLE] });
+      throw new Error("synthetic outer Operation failure");
+    })).rejects.toThrow("synthetic outer Operation failure");
+    expect(await storedRoles(id)).toEqual([WRITE_ROLE]);
+    expect(realm.mappedRoles()).toEqual([WRITE_ROLE]);
+    const events = await sql<{ payload: Record<string, unknown> }>`select payload from platform.entity_events
+      where aggregate_id = ${id} and event_type = 'api_key_integration_roles_changed'`.execute(booted.adminDb);
+    expect(events.rows).toHaveLength(1);
+    expect(events.rows[0]!.payload).toMatchObject({ actor: MANAGER, grantedRoles: [WRITE_ROLE] });
+  }, TEST_TIMEOUT);
+
 });

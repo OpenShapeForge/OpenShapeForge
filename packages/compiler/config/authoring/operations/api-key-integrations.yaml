@@ -626,10 +626,10 @@ operations:
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: acknowledgement }
     errors:
-      - { status: 400, code: VALIDATION, description: 'The input does not describe a valid request, or the integration is not active: a disabled or still provisioning integration cannot be edited.' }
+      - { status: 400, code: VALIDATION, description: The input does not describe a valid request. }
       - { status: 401, code: UNAUTHENTICATED, description: An authenticated tenant session is required. }
       - { status: 403, code: FORBIDDEN, description: 'The session may not manage API keys: it lacks the management role, asked for a role the caller does not hold, or is not a verified person.' }
-      - { status: 404, code: NOT_FOUND, description: The integration does not exist in this organization. }
+      - { status: 404, code: NOT_FOUND, description: The integration does not exist or is not active in this organization. }
       - { status: 502, code: PROVISIONING_FAILED, description: 'The identity provider refused or could not complete the role change; the stored roles are unchanged and repeating the request converges the realm.' }
       - { status: 503, code: NOT_CONFIGURED, description: 'This deployment has no API key provisioning configuration, so no integration can be managed here.' }
 interfaces:

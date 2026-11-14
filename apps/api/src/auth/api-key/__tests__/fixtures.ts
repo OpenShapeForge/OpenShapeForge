@@ -366,6 +366,7 @@ export function stubRealm(options: {
   const roleClientInternalId = "22ca2f30-5b6c-4d7e-8f90-1a2b3c4d5e6f";
   /** clientId → the realm's own internal id, for the clients that exist. */
   const clients = new Map<string, string>();
+  const clientMappers = new Map<string, Array<Record<string, unknown>>>();
   /** Role name → role, as currently mapped onto the service-account user. */
   const mapped = new Map<string, { id: string; name: string }>();
   const internalIdOf = (clientId: string) => {
@@ -395,10 +396,11 @@ export function stubRealm(options: {
       const admin = `/admin/realms/${realm}`;
       if (request.method === "POST" && url.pathname === `${admin}/clients`) {
         if (options.failClientCreation) return new Response(null, { status: 500 });
-        const body = await request.json() as { clientId?: string };
+        const body = await request.json() as { clientId?: string; protocolMappers?: Array<Record<string, unknown>> };
         if (typeof body.clientId === "string") {
           if (clients.has(body.clientId)) return new Response(null, { status: 409 });
           internalIdOf(body.clientId);
+          clientMappers.set(body.clientId, (body.protocolMappers ?? []).map((m) => ({ ...m, id: randomUUID() })));
         }
         return new Response(null, { status: 201 });
       }
@@ -417,6 +419,24 @@ export function stubRealm(options: {
         const [clientId, id] = integration;
         if (request.method === "DELETE" && url.pathname === `${admin}/clients/${id}`) {
           clients.delete(clientId);
+          return new Response(null, { status: 204 });
+        }
+        const mapperPath = `${admin}/clients/${id}/protocol-mappers/models`;
+        if (request.method === "GET" && url.pathname === mapperPath) return json(clientMappers.get(clientId) ?? []);
+        if (request.method === "POST" && url.pathname === mapperPath) {
+          const mapper = await request.json() as Record<string, unknown>;
+          const mappers = clientMappers.get(clientId) ?? [];
+          if (mappers.some((existing) => existing.name === mapper.name)) return new Response(null, { status: 409 });
+          mappers.push({ ...mapper, id: randomUUID() });
+          clientMappers.set(clientId, mappers);
+          return new Response(null, { status: 201 });
+        }
+        if (request.method === "PUT" && url.pathname.startsWith(`${mapperPath}/`)) {
+          const mapper = await request.json() as Record<string, unknown>;
+          const mappers = clientMappers.get(clientId) ?? [];
+          const index = mappers.findIndex((item) => item.id === mapper.id);
+          if (index < 0) return new Response(null, { status: 404 });
+          mappers[index] = mapper;
           return new Response(null, { status: 204 });
         }
         if (url.pathname === `${admin}/clients/${id}/client-secret`) {

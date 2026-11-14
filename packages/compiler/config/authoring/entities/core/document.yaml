@@ -652,6 +652,8 @@ operations:
             type: string
             format: uuid
             x-osf-reference: { entity: Template, valueField: publishedVersionId }
+            # A linked document opens on the template and version it follows now.
+            x-osf-sourceField: templateVersionId
             x-osf-i18n: { title: { en: Template, nl: Template } }
           # One field per local variable the picked version declares; the document's current values fill them.
           parameters:

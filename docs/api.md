@@ -746,8 +746,9 @@ the core `osf-api-keys` plugin and bound by
 `api-keys.create-integration`, `api-keys.list-integrations`,
 `api-keys.get-integration`, `api-keys.list-credentials`,
 `api-keys.get-credential`, `api-keys.issue-credential`,
-`api-keys.revoke-credential` and `api-keys.disable-integration`, projected to
-REST under `/api/api-key-integrations/*`. They are a third projection of the
+`api-keys.revoke-credential`, `api-keys.update-integration-roles` and
+`api-keys.disable-integration`, projected to REST under
+`/api/api-key-integrations/*`. They are a third projection of the
 same authority, not a second implementation: every handler calls
 `auth/api-key/service.ts` and therefore the one ceiling, and an integration is
 named by its stable `platform.api_key_integrations.id` — never by the derived
@@ -764,10 +765,34 @@ SAME transaction that mints the key, from the activation statement's own
 exists exactly once, in that answer, so any statement between minting it and
 returning it is a step whose failure loses the secret while the mint has
 committed, and whose retry provisions a second realm client and a second
-credential. It is the only Operation here that declares `external: write` and
-the only one that can report `502 PROVISIONING_FAILED`; a realm that refuses
-leaves the intent row at `pending`, which authenticates nothing and is what the
-reconciler sweeps.
+credential. It and `update-integration-roles` are the only Operations here
+that declare `external: write` and the only ones that can report
+`502 PROVISIONING_FAILED`; a realm that refuses creation leaves the intent row
+at `pending`, which authenticates nothing and is what the reconciler sweeps.
+
+**Changing an integration's roles.** `update-integration-roles`
+(`POST /api/api-key-integrations/update-roles`, input `integrationId`, `roles`
+and the acknowledgement `confirmed`) replaces the role set of an `active`
+integration; `roles` is the complete new set, not a delta, and an empty set is
+admitted only where creation admits one. The ceiling is creation's: every role
+in the new set must be held by the caller, while withdrawing a role is not
+checked against the caller. A `pending` or `disabled` integration is refused
+with `400 VALIDATION`. The service takes the integration lock that issue and
+disable share, sets the service account's client roles on the entity-role
+client to exactly the new set, and only then records `granted_roles` and
+appends an `ApiKeyIntegration` / `api_key_integration_roles_changed` event to
+`platform.entity_events`. The realm is set from what it maps now, withdrawing
+before granting, so a refused realm call leaves the stored roles unchanged, the
+account with no role neither set authorized, and a repeated request
+converging. Keys are not touched: a key names an integration and its roles are
+the service account's token roles (intersected with its `role_subset`), so the
+change applies to every existing key from its next request. The process-local
+exchanged-token cache is dropped for the integration; another API replica
+serves its cached token until it expires (at most the realm's access token
+lifetime, 900s in the generated realm). A key narrowed to roles that are
+withdrawn keeps only the ones that remain, possibly none. The web integration
+view offers it as the "Edit roles" record action on active integrations,
+prefilled from `grantedRoles`.
 
 **A fenced activation compensates recoverably.** The intent row commits before
 the realm is touched, so the integration is visible and mutable while the

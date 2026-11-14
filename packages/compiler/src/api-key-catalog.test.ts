@@ -92,6 +92,9 @@ function presentationComponents(value: unknown): string[] {
 /** The two Operations that hand over a live credential. */
 const MINTING = ["api-keys.create-integration", "api-keys.issue-credential"];
 
+/** The Operations that mutate the identity provider's realm. */
+const REALM_WRITERS = new Set(["api-keys.create-integration", "api-keys.update-integration-roles"]);
+
 describe("shipped integration and API-key catalog", () => {
   test("projects role lists as collections of text, including nullable credential subsets", () => {
     const entities = manifest(apiKeyCatalog()).entities;
@@ -153,6 +156,7 @@ describe("shipped integration and API-key catalog", () => {
       "api-keys.list-credentials",
       "api-keys.list-integrations",
       "api-keys.revoke-credential",
+      "api-keys.update-integration-roles",
     ]);
     for (const operation of operations) {
       expect(operation.plugin).toBe("osf-api-keys");
@@ -162,10 +166,10 @@ describe("shipped integration and API-key catalog", () => {
       expect(operation.tenancy).toEqual({ mode: "required" });
       // Every refusal the handlers can return is declared, the unconfigured
       // deployment included: an undeclared status is a contract violation at
-      // runtime, not a 503. Only the Operation that mutates the realm may
+      // runtime, not a 503. Only the Operations that mutate the realm may
       // report the identity provider refusing.
       expect(operation.errors.map(({ status, code }) => `${status} ${code}`)).toEqual(
-        operation.key === "api-keys.create-integration"
+        REALM_WRITERS.has(operation.key)
           ? [
             "400 VALIDATION",
             "401 UNAUTHENTICATED",
@@ -182,10 +186,9 @@ describe("shipped integration and API-key catalog", () => {
             "503 NOT_CONFIGURED",
           ],
       );
-      // Creating an integration is the only path that reaches outward.
-      expect(operation.effects.external).toBe(
-        operation.key === "api-keys.create-integration" ? "write" : "none",
-      );
+      // Creating an integration and changing its roles are the only paths
+      // that reach outward.
+      expect(operation.effects.external).toBe(REALM_WRITERS.has(operation.key) ? "write" : "none");
       // MCP uses the shared private-output interaction for confidential fields.
       expect(operation.transports.mcp.enabled).toBe(true);
       expect(operation.transports.graphql.enabled).toBe(false);
@@ -318,12 +321,15 @@ describe("shipped integration and API-key catalog", () => {
       "listCredentials",
       "listIntegrations",
       "revokeCredential",
+      "updateIntegrationRoles",
     ]);
     expect(web.entities!.ApiKeyIntegration!.operations.create).toEqual({ operation: "createIntegration" });
     expect(web.entities!.ApiKeyCredential!.operations.create).toBeUndefined();
     const entities = manifest(apiKeyCatalog()).entities;
     const actions = entities.ApiKeyIntegration!.views.record!.operations.actions!;
-    expect(actions.map((action) => action.id)).toEqual(["api-keys.issue-credential", "api-keys.disable-integration"]);
+    expect(actions.map((action) => action.id)).toEqual([
+      "api-keys.issue-credential", "api-keys.update-integration-roles", "api-keys.disable-integration",
+    ]);
     // The record action is bound to the record it was opened on, by the
     // entity's own id field — the integration's stable database id.
     expect(actions[0]!.target).toEqual({
@@ -332,6 +338,26 @@ describe("shipped integration and API-key catalog", () => {
       scope: "record",
       inputField: "integrationId",
     });
+  });
+
+  test("offers role editing on a live integration only, prefilled with its current roles", () => {
+    const catalog = apiKeyCatalog();
+    const input = catalog.operations.updateIntegrationRoles!.input!.schema as any;
+    // The full set, shaped exactly like creation's so the same control renders
+    // it, and seeded from the record's own roles rather than starting empty.
+    expect(input.required).toEqual(["integrationId", "roles"]);
+    const { "x-osf-sourceField": source, "x-osf-i18n": _i18n, description: _d, ...shape } = input.properties.roles;
+    const { "x-osf-i18n": _ci18n, description: _cd, ...createShape } =
+      (catalog.operations.createIntegration!.input!.schema as any).properties.roles;
+    expect(shape).toEqual(createShape);
+    expect(source).toBe("grantedRoles");
+
+    const action = manifest(catalog).entities.ApiKeyIntegration!.views.record!.operations.actions!
+      .find((candidate) => candidate.id === "api-keys.update-integration-roles")!;
+    expect(action.target).toMatchObject({ scope: "record", inputField: "integrationId" });
+    expect(action.visibleWhen).toEqual({ conditions: [{ field: "status", operator: "eq", value: "active" }] });
+    expect(catalog.interfaces.rest!.operations!.updateIntegrationRoles)
+      .toMatchObject({ method: "POST", path: "/api/api-key-integrations/update-roles" });
   });
 
   /**

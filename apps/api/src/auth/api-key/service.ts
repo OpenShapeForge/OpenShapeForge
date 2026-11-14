@@ -54,6 +54,7 @@ import {
   type CeilingSession,
 } from "./ceiling.js";
 import { invalidateIntegrationToken } from "./exchange.js";
+import { appendScopedEntityEventInTransaction } from "../../platform/entity-events.js";
 import { mintApiKey } from "./format.js";
 import { KeycloakAdmin } from "./keycloak-admin.js";
 import {
@@ -506,8 +507,9 @@ async function discardRealmClient(
  * Take the integration's row lock, tenant-fenced, before deciding anything
  * about the keys under it.
  *
- * This is the serialization point `createIntegration`'s activation, `issueKey`
- * and `disableIntegration` SHARE, and sharing it is the whole point. Without it
+ * This is the serialization point `createIntegration`'s activation, `issueKey`,
+ * `updateIntegrationRoles` and `disableIntegration` SHARE, and sharing it is
+ * the whole point. Without it
  * two of them interleave into a credential nobody asked for: disable reads the
  * integration, revokes the keys
  * it can see and commits, while a concurrent issue — which read the same
@@ -524,13 +526,20 @@ async function discardRealmClient(
  * defense-in-depth the generated engine applies, and it keeps the lock from
  * ever being taken on another tenant's row even if a policy were relaxed.
  */
+type LockedIntegration = {
+  id: string;
+  status: string;
+  granted_roles: unknown;
+  keycloak_client_id: string;
+};
+
 async function lockIntegration(
   trx: unknown,
   tenantId: string,
   integrationId: string,
-): Promise<{ id: string; status: string; granted_roles: unknown } | undefined> {
-  const found = await sql<{ id: string; status: string; granted_roles: unknown }>`
-    select id, status, granted_roles
+): Promise<LockedIntegration | undefined> {
+  const found = await sql<LockedIntegration>`
+    select id, status, granted_roles, keycloak_client_id
       from platform.api_key_integrations
      where id = ${integrationId}
        and tenant_id = ${tenantId}
@@ -1122,6 +1131,120 @@ export async function disableIntegration(
 
   invalidateIntegrationToken(integrationId);
   return { id: integrationId, revokedKeys };
+}
+
+/** The audit trail's name for an integration, in `platform.entity_events`. */
+export const API_KEY_INTEGRATION_AGGREGATE = "ApiKeyIntegration";
+
+export type UpdateIntegrationRolesInput = {
+  integrationId: string;
+  /** The complete new role set, not a delta. Bounded by the ceiling. */
+  roles: string[];
+};
+
+/**
+ * Replace an active integration's roles.
+ *
+ * The same ceiling as creation: every role in the NEW set must be held by the
+ * caller. Withdrawing a role is not checked against the caller — narrowing
+ * grants nothing — but keeping one is, so an administrator who has since lost
+ * a role the integration holds cannot re-confirm it by saving the set.
+ *
+ * Postgres and Keycloak share no transaction, so the order is chosen for the
+ * failure it leaves behind:
+ *
+ *   lock the row (and check it is live)  →  set the realm  →  record the set
+ *
+ * The row lock is the one `issueKey`, `disableIntegration` and creation's
+ * activation share, so a concurrent disable either lands first (and this is
+ * refused) or waits for this to finish. The realm is set from what it maps
+ * NOW (`KeycloakAdmin.setClientRoles`), withdrawing before granting, so a
+ * failure there leaves the account with no role that neither set authorized
+ * and the stored roles unchanged, and a repeat converges. The one remaining
+ * window is the database commit itself failing after the realm moved; the
+ * stored set is then the old one, which a repeat of the same request repairs.
+ *
+ * Existing keys are not touched. A key carries no roles of its own — the
+ * exchange turns it into the service account's token (exchange.ts) and a
+ * subset is intersected with that token's roles (resolve.ts) — so the cached
+ * token is dropped and every key gets the new roles on its next request. A
+ * key narrowed to roles that are withdrawn keeps only the ones that remain.
+ */
+export async function updateIntegrationRoles(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+  input: UpdateIntegrationRolesInput,
+  now: Date = new Date(),
+): Promise<ListedIntegration> {
+  assertMayManageApiKeys(session);
+  const roles = [...new Set(input.roles)];
+  assertMayGrantRoles(session, roles);
+  if (roles.length === 0 && !deps.admin.hasApiAudience) {
+    throw new ApiKeyValidationError("Role-free integrations require a configured API verifier audience.");
+  }
+
+  try {
+    return await withSession(deps, session, async (trx) => {
+      const locked = await lockIntegration(trx, session.tenantId, input.integrationId);
+      if (!locked) throw new ApiKeyNotFoundError("No such integration.");
+      if (locked.status !== "active") {
+        throw new ApiKeyValidationError(
+          `This integration is ${integrationStatus(locked.status)}; only an active integration's roles can be changed.`,
+        );
+      }
+      const previous = grantedRolesOf(locked.granted_roles);
+
+      let changed: { added: string[]; removed: string[] };
+      try {
+        const serviceAccount = await deps.admin.serviceAccountUserId(locked.keycloak_client_id);
+        changed = await deps.admin.setClientRoles(serviceAccount, deps.entityRoleClientId, roles);
+      } catch (error) {
+        throw new ApiKeyProvisioningError(
+          `Could not change the roles of this integration: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+
+      await sql`
+        update platform.api_key_integrations
+           set granted_roles = ${jsonbLiteral(roles)}, updated_at = ${now}
+         where id = ${input.integrationId}
+           and tenant_id = ${session.tenantId}
+      `.execute(trx);
+
+      await appendScopedEntityEventInTransaction(trx, {
+        aggregateType: API_KEY_INTEGRATION_AGGREGATE,
+        aggregateId: input.integrationId,
+        eventType: "api_key_integration_roles_changed",
+        payload: {
+          previousRoles: previous,
+          grantedRoles: roles,
+          // What the realm actually changed, which differs from the stored
+          // difference only when the two had drifted apart.
+          added: changed.added,
+          removed: changed.removed,
+          actor: session.userId,
+        },
+      });
+
+      const result = await sql<IntegrationRow>`
+        select ${integrationMetadataColumns(now)}
+          from platform.api_key_integrations i
+          left join platform.api_keys k
+            on k.integration_id = i.id and k.tenant_id = i.tenant_id
+         where i.tenant_id = ${session.tenantId}
+           and i.id = ${input.integrationId}
+         group by i.id
+         limit 1
+      `.execute(trx);
+      return listedIntegration(result.rows[0]!);
+    });
+  } finally {
+    // Also after a failure: the realm may already have withdrawn roles, and a
+    // cached token minted before that must not outlive it.
+    invalidateIntegrationToken(input.integrationId);
+  }
 }
 
 type InsertKeyArgs = {

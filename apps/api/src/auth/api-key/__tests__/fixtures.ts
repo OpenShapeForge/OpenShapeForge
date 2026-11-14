@@ -310,6 +310,12 @@ export type StubRealm = {
   serviceAccountUserId: string;
   /** Integration clients this realm currently holds, as `clientId`s. */
   clients(): string[];
+  /**
+   * Role-client roles the (single, shared) service-account user is mapped to
+   * now, sorted. Every integration client of this stub answers with the same
+   * service account, so this is the union over every integration it holds.
+   */
+  mappedRoles(): string[];
   stop(): Promise<void>;
 };
 
@@ -360,6 +366,8 @@ export function stubRealm(options: {
   const roleClientInternalId = "22ca2f30-5b6c-4d7e-8f90-1a2b3c4d5e6f";
   /** clientId → the realm's own internal id, for the clients that exist. */
   const clients = new Map<string, string>();
+  /** Role name → role, as currently mapped onto the service-account user. */
+  const mapped = new Map<string, { id: string; name: string }>();
   const internalIdOf = (clientId: string) => {
     const existing = clients.get(clientId);
     if (existing) return existing;
@@ -428,6 +436,12 @@ export function stubRealm(options: {
         return new Response(null, { status: 204 });
       }
       if (url.pathname.startsWith(`${admin}/users/${serviceAccountUserId}/role-mappings/clients/`)) {
+        if (request.method === "GET") return json([...mapped.values()]);
+        const body = await request.json().catch(() => []) as Array<{ id: string; name: string }>;
+        for (const role of Array.isArray(body) ? body : []) {
+          if (request.method === "POST") mapped.set(role.name, role);
+          if (request.method === "DELETE") mapped.delete(role.name);
+        }
         return new Response(null, { status: 204 });
       }
       return new Response(null, { status: 404 });
@@ -441,6 +455,7 @@ export function stubRealm(options: {
     clientSecret,
     serviceAccountUserId,
     clients: () => [...clients.keys()],
+    mappedRoles: () => [...mapped.keys()].sort(),
     async stop() { await server.stop(true); },
   };
 }

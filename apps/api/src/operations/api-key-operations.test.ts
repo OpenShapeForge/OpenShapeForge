@@ -242,6 +242,7 @@ describe("integration catalog Operations", () => {
     expect(apiKeyOperationHandlerNames()).toEqual([
       "createIntegration", "disableIntegration", "getCredential", "getIntegration",
       "issueCredential", "listCredentials", "listIntegrations", "revokeCredential",
+      "updateIntegrationRoles",
     ]);
     expect([...contracts.keys()].sort()).toEqual([...apiKeyOperationHandlerNames()]);
     expect(() => apiKeyOperationHandler({ key: "api-keys.unknown", handler: "mintEverything" }))
@@ -691,6 +692,7 @@ describe("integration catalog Operations", () => {
       ["issueCredential", { integrationId: INTEGRATION_A, displayName: "Nope" }],
       ["revokeCredential", { id: KEY_LIVE }],
       ["disableIntegration", { integrationId: INTEGRATION_A }],
+      ["updateIntegrationRoles", { integrationId: INTEGRATION_A, roles: [READ_ROLE] }],
     ];
 
     test("refuses every Operation to a session that may not manage keys", async () => {

@@ -118,6 +118,19 @@ export type ContentResolvedVariable = {
   readonly value: JsonValue;
 };
 
+/**
+ * A variable that followed a record parameter through its relationships: the
+ * type the path yields, the value read, and every record read on the way, so
+ * the snapshot says exactly which versions it was built from.
+ */
+export type ContentResolvedPath = {
+  readonly root: { readonly entity: string; readonly id: string };
+  readonly path: string;
+  readonly shape: ContentValueShape;
+  readonly value: JsonValue;
+  readonly sources: readonly { readonly entity: string; readonly id: string; readonly versionId: string }[];
+};
+
 export type ContentResolvedEntity = {
   readonly tenantId: string;
   readonly entity: string;
@@ -150,6 +163,16 @@ export type ContentResolvers = {
     reference: ContentEntityReference,
     context: { readonly tenantId: string },
   ) => MaybePromise<ContentResolvedEntity | null>;
+  /**
+   * Follow `path` (relationships, then optionally a field) from one record a
+   * reference parameter names, under the adapter's authorization. Absent on
+   * adapters that cannot: a template naming such a variable is refused.
+   */
+  readonly resolveVariablePath?: (
+    root: { readonly entity: string; readonly id: string },
+    path: string,
+    context: { readonly tenantId: string },
+  ) => MaybePromise<ContentResolvedPath | null>;
   /** Runtime adapters use the existing canonical FieldDefinition schema service here. */
   readonly validateParameters?: (
     version: ContentTemplateVersion,
@@ -222,6 +245,8 @@ export type MaterializedTemplateContent = {
   }[];
   readonly definitions: CompiledContentBlockRegistry;
   readonly globals: Readonly<Record<string, ContentResolvedVariable>>;
+  /** Variables that followed a record parameter, keyed `<entity>:<id>:<path>`; absent when none did. */
+  readonly paths?: Readonly<Record<string, ContentResolvedPath>>;
   readonly compositionHashVersion: "osf-template-content-v1";
   readonly compositionHash: string;
 };

@@ -196,3 +196,18 @@ export * from "./schema-regexp.js";
 
 export * from "./colors.js";
 export { PRIVATE_OUTPUT_TOOL_NAME, hasSensitiveOutput, assertSensitiveOutputSchema, splitSensitiveOutput, type SensitiveOutputField } from "./sensitive-output.js";
+export {
+  compileValuePath,
+  valuePathChoices,
+  ValuePathError,
+  ENTITY_GRAPH_VERSION,
+  MAX_PATH_RELATIONSHIPS,
+} from "./value-paths.js";
+export type {
+  CompiledValuePath,
+  EntityGraph,
+  EntityGraphEntity,
+  EntityGraphField,
+  EntityGraphRelationship,
+  ValuePathStep,
+} from "./value-paths.js";

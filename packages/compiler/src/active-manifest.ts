@@ -83,6 +83,7 @@ export function mergePromotedTables(
     ...baseManifest,
     ...(promotedManifest.entityValues ? { entityValues: promotedManifest.entityValues } : {}),
     ...(promotedManifest.extensionRegistry ? { extensionRegistry: promotedManifest.extensionRegistry } : {}),
+    ...(promotedManifest.entityGraph ? { entityGraph: promotedManifest.entityGraph } : {}),
     ...(promotedManifest.entitySubtypes ? { entitySubtypes: promotedManifest.entitySubtypes } : {}),
     description:
       "Greenfield platform schema with authoring-catalog generated backend tables.",

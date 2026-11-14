@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { isFieldVariableMode, operationFailure, schemaVariableShape } from "@openshapeforge/operations";
+import { compileValuePath, isFieldVariableMode, operationFailure, schemaVariableShape, ValuePathError } from "@openshapeforge/operations";
 import type { ModuleOperationContext, ModuleOperationHandler, RuntimeEntityValueCarrier, RuntimeEntityValueDefinition, RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import { materializeTemplateContent } from "./content/materialize.js";
@@ -167,6 +167,110 @@ export function canonicalReader(context: ModuleOperationContext, operationDefini
   };
 }
 
+/** Records a path may read in all, so a list relationship cannot fan out without bound. */
+const PATH_RECORD_LIMIT = 200;
+
+/**
+ * Follow a record parameter through its relationships (`compileValuePath`
+ * over the generated entity graph). Every record is read through its
+ * canonical get or list Operation in this session, so record and field
+ * policies decide what is seen; a step that cannot be read refuses the whole
+ * variable rather than yielding a partial value. Absent when the host has no
+ * entity graph: the engine then refuses such a variable.
+ */
+export function pathResolver(context: ModuleOperationContext, operationDefinitions: readonly RuntimeOperationDefinition[], read: CanonicalReader): ContentResolvers["resolveVariablePath"] {
+  const { platform, session } = contextServices(context);
+  const graph = platform.schemas.entityGraph;
+  if (!graph) return undefined;
+  const tenantId = session.tenantId;
+  const list = async (entityName: string, filter: Record<string, unknown>): Promise<Record<string, unknown>[]> => {
+    const matches = operationDefinitions.filter((operation) => operation.entityName === entityName && operation.intent === "list");
+    if (matches.length !== 1 || matches[0]!.effects.data !== "read" || matches[0]!.effects.external !== "none") refuse("OPERATION_UNAVAILABLE", `${entityName} has no unambiguous canonical list Operation.`);
+    const found: Record<string, unknown>[] = [];
+    let cursor: string | undefined;
+    do {
+      const result = await platform.operations.execute(session, { operation: matches[0]!, input: { filter, limit: 100, ...(cursor ? { cursor } : {}) } });
+      if ("error" in result) throw operationFailure(result.error);
+      const page = object(result.data, "list result");
+      if (!Array.isArray(page.items)) refuse("DEPENDENCY_INVALID", `${entityName} listed no items.`);
+      for (const item of page.items) {
+        const row = object(item, "listed record");
+        if (row.tenantId !== undefined && row.tenantId !== tenantId) refuse("DEPENDENCY_INVALID", "A listed record belongs to another tenant.");
+        found.push(row);
+        if (found.length > PATH_RECORD_LIMIT) refuse("CONTENT_LIMIT_EXCEEDED", `A variable may read at most ${PATH_RECORD_LIMIT} records.`);
+      }
+      const next = typeof page.nextCursor === "string" && page.nextCursor ? page.nextCursor : undefined;
+      if (next && next === cursor) refuse("DEPENDENCY_INVALID", "A list repeated its cursor.");
+      cursor = next;
+    } while (cursor);
+    return found;
+  };
+  return async (root, path) => {
+    let compiled: ReturnType<typeof compileValuePath>;
+    try {
+      compiled = compileValuePath(graph, root.entity, path);
+    } catch (error) {
+      if (error instanceof ValuePathError) refuse("INVALID_VALUE", error.message);
+      throw error;
+    }
+    const sources = new Map<string, { entity: string; id: string; versionId: string }>();
+    const seen = (entity: string, row: Record<string, unknown>) => {
+      if (typeof row.id !== "string") refuse("DEPENDENCY_INVALID", `A ${entity} record has no id.`);
+      sources.set(`${entity}:${row.id}`, { entity, id: row.id, versionId: typeof row.updatedAt === "string" ? row.updatedAt : String(row.id) });
+      if (sources.size > PATH_RECORD_LIMIT) refuse("CONTENT_LIMIT_EXCEEDED", `A variable may read at most ${PATH_RECORD_LIMIT} records.`);
+    };
+    const start = await read(root.entity, root.id);
+    if (!start) return null;
+    seen(root.entity, start);
+    let rows = [start];
+    for (const { relationship } of compiled.steps) {
+      const matches = (row: Record<string, unknown>) => Object.entries(relationship.constraints ?? {}).every(([key, rule]) => row[key] === rule.eq);
+      let next: Record<string, unknown>[];
+      if (relationship.kind === "belongsTo") {
+        const ids = [...new Set(rows.map((row) => row[relationship.field]).filter((id): id is string => typeof id === "string" && id !== ""))];
+        next = [];
+        for (const id of ids) {
+          const row = await read(relationship.target, id);
+          if (!row) refuse("DEPENDENCY_UNRESOLVED", `A ${relationship.target} on the path ${path} could not be read.`);
+          if (matches(row)) next.push(row);
+        }
+      } else {
+        const ids = [...new Set(rows.map((row) => row.id as string))];
+        next = ids.length ? (await list(relationship.target, { [relationship.field]: { in: ids } })).filter(matches) : [];
+      }
+      for (const row of next) seen(relationship.target, row);
+      rows = next;
+    }
+    const many = compiled.shape.cardinality === "collection";
+    let value: JsonValue;
+    if (compiled.field) {
+      const field = compiled.field.key;
+      const read = rows.map((row) => (Object.hasOwn(row, field) ? row[field] : undefined));
+      if (read.some((item) => item === undefined)) refuse("DEPENDENCY_INVALID", `The field ${compiled.target}.${field} was not returned to this reader.`);
+      value = many ? (read.flatMap((item) => Array.isArray(item) ? item : item === null ? [] : [item]) as JsonValue) : ((read[0] ?? null) as JsonValue);
+    } else {
+      value = many ? rows.map((row) => row.id as string) : ((rows[0]?.id as string | undefined) ?? null);
+    }
+    const shape = compiled.shape;
+    return {
+      root: { entity: root.entity, id: root.id },
+      path,
+      shape: {
+        baseType: shape.baseType,
+        osfType: shape.osfType,
+        cardinality: shape.cardinality,
+        nullable: true,
+        ...(shape.enum ? { enum: shape.enum } : {}),
+        ...(shape.unit ? { unit: shape.unit } : {}),
+        ...(shape.currency ? { currency: shape.currency } : {}),
+        ...(shape.target ? { relationship: { target: shape.target } } : {}),
+      } as ContentValueShape,
+      value,
+      sources: [...sources.values()],
+    };
+  };
+}
+
 /**
  * Global variables use the existing Chip namespace, read through its
  * canonical Operation: the value AND the FieldDefinition that types it, in
@@ -261,6 +365,8 @@ export type ContentScope = {
   /** The template variant collection's allowlist, applied to every frozen template version. */
   readonly allowedDefinitions: readonly string[];
   readonly read: CanonicalReader;
+  /** Follows record parameters (`pathResolver`); absent, such a variable is refused. */
+  readonly resolveVariablePath?: ContentResolvers["resolveVariablePath"];
   /**
    * Version ids the caller reaches through its own record's authority (a
    * document's pinned version, whose editor need hold no template role, as
@@ -324,6 +430,7 @@ export function contentResolvers(context: ModuleOperationContext, trx: unknown, 
     },
     resolveGlobalVariable: chipResolver(trx, tenantId, read, storedDefinitionShape(context)),
     resolveEntity: entityResolver(tenantId, read),
+    ...(scope.resolveVariablePath ? { resolveVariablePath: scope.resolveVariablePath } : {}),
     validateParameters(version, values) {
       const fields = parameterFields.get(version.id);
       if (!fields) refuse("INVALID_DEFINITION", "Template parameter definitions are unavailable.");
@@ -371,12 +478,14 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
   const carrier = contentCarrier(context);
   const collection = blockCollection(context, carrier, "TemplateVariant");
   const registry = await compiledContentRegistry(context, carrier);
-  const read = canonicalReader(context, await platform.operations.list(session));
+  const operations = await platform.operations.list(session);
+  const read = canonicalReader(context, operations);
+  const resolveVariablePath = pathResolver(context, operations, read);
   try {
     const snapshot = await platform.db.withSession(session, async (trx) => materializeTemplateContent({
       tenantId, templateVersionId, channel, locale,
       ...(input.parameters === undefined ? {} : { parameters: immutableContent(object(input.parameters, "parameters")) as JsonObject }),
-    }, registry, contentResolvers(context, trx, { tenantId, channel, locale, carrier, allowedDefinitions: collection.allowedDefinitions, read })));
+    }, registry, contentResolvers(context, trx, { tenantId, channel, locale, carrier, allowedDefinitions: collection.allowedDefinitions, read, ...(resolveVariablePath ? { resolveVariablePath } : {}) })));
     return { value: snapshot };
   } catch (error) {
     contentFailure(error);

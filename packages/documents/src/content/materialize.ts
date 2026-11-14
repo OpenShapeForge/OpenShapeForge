@@ -28,6 +28,7 @@ import type {
   ContentBlock,
   ContentEntityReference,
   ContentResolvedEntity,
+  ContentResolvedPath,
   ContentResolvedVariable,
   ContentResolvers,
   ContentTemplateVersion,
@@ -80,6 +81,7 @@ async function materializeContent(
   const versions = new Map<string, ContentTemplateVersion>();
   const entities = new Map<string, ContentResolvedEntity>();
   const globals: Record<string, ContentResolvedVariable> = Object.create(null);
+  const paths: Record<string, ContentResolvedPath> = Object.create(null);
   const definitions: Record<string, CompiledContentBlockDefinition> = Object.create(null);
   const templates: MaterializedTemplateContent["templates"][number][] = [];
   const compositions: MaterializedTemplateContent["compositions"][number][] = [];
@@ -149,6 +151,43 @@ async function materializeContent(
     return value;
   }
 
+  /**
+   * One record parameter followed through its relationships: `deal.relationId.name`
+   * is the parameter `deal`, then the path `relationId.name` from the record it
+   * names. The adapter reads every step under its authorization; the result,
+   * and every record read for it, is frozen into the snapshot once per record
+   * and path.
+   */
+  async function follow(key: string, scope: VariableScope): Promise<ContentResolvedPath> {
+    const separator = key.indexOf(".");
+    const name = key.slice(0, separator);
+    const path = key.slice(separator + 1);
+    const parameter = contentVariableOffer(scope.catalogue, contentVariableReference(`local.${name}`));
+    if (!parameter.target || parameter.cardinality !== "single")
+      contentError("INVALID_VALUE", `local.${name} is not a record parameter; only a record can be followed.`);
+    const id = Object.hasOwn(scope.parameters, name) ? scope.parameters[name] : undefined;
+    if (typeof id !== "string" || !id)
+      contentError("MISSING_VARIABLE", `local.${name} has no record to follow.`);
+    const cacheKey = `${parameter.target}:${id}:${path}`;
+    if (Object.hasOwn(paths, cacheKey)) return paths[cacheKey]!;
+    if (!resolvers.resolveVariablePath)
+      contentError("DEPENDENCY_UNRESOLVED", "This content runtime cannot follow a record parameter.");
+    countDependency();
+    const read = await resolvers.resolveVariablePath({ entity: parameter.target, id }, path, context);
+    if (!read) contentError("MISSING_VARIABLE", `local.${key} could not be read.`);
+    const value = immutableContent(read);
+    if (value.root.entity !== parameter.target || value.root.id !== id || value.path !== path)
+      contentError("DEPENDENCY_INVALID", `local.${key} resolved to a different record or path.`);
+    if (!value.shape || typeof value.shape.baseType !== "string")
+      contentError("DEPENDENCY_INVALID", `local.${key} declares no value type.`);
+    for (const source of value.sources) {
+      assertContentName(source.id, "path source id");
+      assertContentName(source.versionId, "path source version");
+    }
+    paths[cacheKey] = value;
+    return value;
+  }
+
   /** The variables and their values one template version's blocks may name. */
   type VariableScope = { readonly catalogue: VariableCatalogue; readonly parameters: JsonObject };
 
@@ -179,7 +218,19 @@ async function materializeContent(
         contentVariableFailure(error);
       }
     }
-    const resolved = declared ? await global(reference.key) : undefined;
+    // `local.<parameter>.<path>` follows a record parameter through its
+    // relationships. Its type is the path's, known only after the authorized
+    // read, so it is compared like a global: read first, then checked.
+    const followed = !declared && reference.namespace === "local" && reference.key.includes(".")
+      ? await follow(reference.key, scope) : undefined;
+    if (followed) {
+      try {
+        assertVariableUsagePermitted(slot, usage);
+      } catch (error) {
+        contentVariableFailure(error);
+      }
+    }
+    const resolved = declared ? await global(reference.key) : followed;
     const offer = resolved
       ? contentGlobalVariableOffer(reference, resolved)
       : contentVariableOffer(scope.catalogue, reference);
@@ -548,7 +599,7 @@ async function materializeContent(
     templates,
     definitions,
     globals,
-
+    ...(Object.keys(paths).length ? { paths } : {}),
   });
   return immutableContent({
     ...snapshot,

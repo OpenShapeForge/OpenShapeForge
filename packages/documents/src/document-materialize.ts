@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
-import { blockCollection, canonicalReader, compiledContentRegistry, contentCarrier, contentFailure, contentResolvers, DEFINITION_VERSION_COLUMN } from "./content-runtime.js";
+import { blockCollection, canonicalReader, compiledContentRegistry, pathResolver, contentCarrier, contentFailure, contentResolvers, DEFINITION_VERSION_COLUMN } from "./content-runtime.js";
 import { contentBlockFromRow, type BlockRowSelection } from "./content-snapshot.js";
 import { immutableContent, type JsonObject } from "./content/json.js";
 import { materializeTemplateContent, materializeDocumentContent } from "./content/materialize.js";
@@ -64,7 +64,9 @@ export const materializeDocument: ModuleOperationHandler = async (input, context
   const templateCollection = blockCollection(context, carrier, "TemplateVariant");
   const documentCollection = blockCollection(context, carrier, "DocumentVariant");
   const registry = await compiledContentRegistry(context, carrier);
-  const read = canonicalReader(context, await platform.operations.list(session));
+  const operations = await platform.operations.list(session);
+  const read = canonicalReader(context, operations);
+  const resolveVariablePath = pathResolver(context, operations, read);
   await platform.records.assertAccess(session, { entityName: "Document", id: documentId, intent: "get" });
   try {
     const snapshot = await platform.db.withSession(session, async (trx) => {
@@ -76,14 +78,14 @@ export const materializeDocument: ModuleOperationHandler = async (input, context
         const selection: BlockRowSelection = {tenantId,carrier,definitionVersionColumn:DEFINITION_VERSION_COLUMN};
         const variants=await documentContentVariants(trx,{id:documentId,channel},selection,documentCollection.allowedDefinitions);
         return materializeDocumentContent({tenantId,documentId,channel,locale,variants},registry,
-          contentResolvers(context,trx,{tenantId,channel,locale,carrier,allowedDefinitions:templateCollection.allowedDefinitions,read}));
+          contentResolvers(context,trx,{tenantId,channel,locale,carrier,allowedDefinitions:templateCollection.allowedDefinitions,read,...(resolveVariablePath?{resolveVariablePath}:{})}));
       }
       const templateVersionId = uuid(document!.template_version_id, "template version");
       const parameters = immutableContent(document!.parameters == null ? {} : object(document!.parameters, "parameters")) as JsonObject;
       // The pinned version is reached through the document's own read access,
       // as linkTemplate reached it through the document's update access; a
       // template another block includes still needs its own read roles.
-      const frozen = contentResolvers(context, trx, { tenantId, channel, locale, carrier, allowedDefinitions: templateCollection.allowedDefinitions, read, ownVersions: new Set([templateVersionId]) });
+      const frozen = contentResolvers(context, trx, { tenantId, channel, locale, carrier, allowedDefinitions: templateCollection.allowedDefinitions, read, ...(resolveVariablePath ? { resolveVariablePath } : {}), ownVersions: new Set([templateVersionId]) });
       const resolvers: ContentResolvers = {
         ...frozen,
         async resolveTemplateVersion(id, scope) {

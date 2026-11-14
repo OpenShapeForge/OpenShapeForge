@@ -12,6 +12,7 @@
  * the design, and every asset and font is inlined so the page never fetches.
  */
 import { DEFAULT_PAGE_LAYOUT, type PageAsset, type PageBlock, type PageDesign, type PageFont, type PageLayouts, type PageSettings, type PagedDocument, type PagedDocumentInput, type PagedSection } from "./types.js";
+import { TYPED_BLOCK_RULES, TypedPageBlockError, typedPageBlock } from "./typed.js";
 
 const KEY = /^[a-z][A-Za-z0-9-]{0,63}$/;
 const FONT_FAMILY = /^[A-Za-z][A-Za-z0-9 -]{0,63}$/;
@@ -189,6 +190,10 @@ export function renderPageBlock(block: PageBlock, design: PageDesign): string {
 }
 
 function renderBlock(block: PageBlock, design: PageDesign): string {
+  if (block.typed) {
+    try { return typedPageBlock(block.values, block.typed.schema, block.typed.locale, styleClass(design, undefined, `${block.definitionKey}.style`)); }
+    catch (error) { if (error instanceof TypedPageBlockError) fail(`${block.definitionKey}: ${error.message}`); throw error; }
+  }
   switch (block.definitionKey) {
     case "TextBlock": return textBlock(block, design);
     case "TextColumns": return textColumns(block, design);
@@ -287,7 +292,7 @@ function textStyleRules(design: PageDesign, scope: string): string {
 function blockRules(scope: string): string {
   return [
     ".b{flex:none;width:100%}", ".cols{display:flex}", ".col{display:flex}", ".col.end{justify-content:flex-end}", ".image{display:flex}", ".image img{display:block}",
-    ".text{overflow-wrap:break-word}", ".text p{margin:0}", ".text p+p{margin-top:1em}",
+    ".text{overflow-wrap:break-word}", ...TYPED_BLOCK_RULES, ".text p{margin:0}", ".text p+p{margin-top:1em}",
   ].map((rule) => scope + rule).join("");
 }
 

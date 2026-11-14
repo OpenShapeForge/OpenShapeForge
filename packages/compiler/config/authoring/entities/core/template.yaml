@@ -87,14 +87,15 @@ operations:
           images:
             type: array
             maxItems: 200
+            x-osf-i18n: { title: { en: Images, nl: Beelden } }
             items:
               type: object
               required: [artifactId, sha256, mediaType, fileName]
               properties:
-                artifactId: { type: string, format: uuid }
-                sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
-                mediaType: { type: string }
-                fileName: { type: string }
+                artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: File, nl: Bestand } } }
+                sha256: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Content hash, nl: Inhoudshash } } }
+                mediaType: { type: string, x-osf-i18n: { title: { en: Media type, nl: Mediatype } } }
+                fileName: { type: string, x-osf-i18n: { title: { en: File name, nl: Bestandsnaam } } }
     output:
       schema:
         type: object
@@ -103,14 +104,15 @@ operations:
         properties:
           images:
             type: array
+            x-osf-i18n: { title: { en: Images, nl: Beelden } }
             items:
               type: object
               additionalProperties: false
               required: [artifactId, mediaType, fileName, data]
               properties:
-                artifactId: { type: string, format: uuid }
-                mediaType: { type: string }
-                fileName: { type: string }
+                artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: File, nl: Bestand } } }
+                mediaType: { type: string, x-osf-i18n: { title: { en: Media type, nl: Mediatype } } }
+                fileName: { type: string, x-osf-i18n: { title: { en: File name, nl: Bestandsnaam } } }
                 data: { type: string, x-osf-i18n: { title: { en: Contents (base64), nl: Inhoud (base64) } } }
     errors:
       - { status: 403, code: FORBIDDEN, description: The template is not accessible. }
@@ -148,10 +150,10 @@ operations:
         additionalProperties: false
         required: [artifactId, sha256, mediaType, fileName]
         properties:
-          artifactId: { type: string, format: uuid }
-          sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
-          mediaType: { type: string }
-          fileName: { type: string }
+          artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: File, nl: Bestand } } }
+          sha256: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Content hash, nl: Inhoudshash } } }
+          mediaType: { type: string, x-osf-i18n: { title: { en: Media type, nl: Mediatype } } }
+          fileName: { type: string, x-osf-i18n: { title: { en: File name, nl: Bestandsnaam } } }
     errors:
       - { status: 400, code: VALIDATION, description: The file is not a supported image. }
       - { status: 403, code: FORBIDDEN, description: The template cannot be changed by this session. }

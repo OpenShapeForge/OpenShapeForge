@@ -368,8 +368,13 @@ operations:
         required: [id, channel, locale]
         properties:
           id: { type: string, format: uuid, x-osf-reference: { entity: Document }, x-osf-i18n: { title: { en: Document, nl: Document } } }
-          channel: { type: string, enum: [document, email, whatsapp] }
-          locale: { type: string, pattern: "^[a-z]{2}(-[A-Z]{2})?$" }
+          channel:
+            type: string
+            enum: [document, email, whatsapp]
+            x-osf-i18n:
+              title: { en: Channel, nl: Kanaal }
+              enum: { document: { en: Document, nl: Document }, email: { en: Email, nl: E-mail }, whatsapp: { en: WhatsApp, nl: WhatsApp } }
+          locale: { type: string, pattern: "^[a-z]{2}(-[A-Z]{2})?$", x-osf-i18n: { title: { en: Language, nl: Taal } } }
     output:
       schema:
         type: object
@@ -378,14 +383,15 @@ operations:
         properties:
           images:
             type: array
+            x-osf-i18n: { title: { en: Images, nl: Beelden } }
             items:
               type: object
               additionalProperties: false
               required: [artifactId, mediaType, fileName, data]
               properties:
-                artifactId: { type: string, format: uuid }
-                mediaType: { type: string }
-                fileName: { type: string }
+                artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: File, nl: Bestand } } }
+                mediaType: { type: string, x-osf-i18n: { title: { en: Media type, nl: Mediatype } } }
+                fileName: { type: string, x-osf-i18n: { title: { en: File name, nl: Bestandsnaam } } }
                 data: { type: string, x-osf-i18n: { title: { en: Contents (base64), nl: Inhoud (base64) } } }
     errors:
       - { status: 403, code: FORBIDDEN, description: The document is not accessible. }
@@ -424,10 +430,10 @@ operations:
         additionalProperties: false
         required: [artifactId, sha256, mediaType, fileName]
         properties:
-          artifactId: { type: string, format: uuid }
-          sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
-          mediaType: { type: string }
-          fileName: { type: string }
+          artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: File, nl: Bestand } } }
+          sha256: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Content hash, nl: Inhoudshash } } }
+          mediaType: { type: string, x-osf-i18n: { title: { en: Media type, nl: Mediatype } } }
+          fileName: { type: string, x-osf-i18n: { title: { en: File name, nl: Bestandsnaam } } }
     errors:
       - { status: 400, code: VALIDATION, description: The file is not a supported image. }
       - { status: 403, code: FORBIDDEN, description: The document cannot be changed by this session. }

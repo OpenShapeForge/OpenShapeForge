@@ -138,11 +138,10 @@ fields:
   - key: pageBackgroundImage
     label: { en: Background image, nl: Achtergrondbeeld }
     description:
-      en: Key of an image of the document theme, stretched over the whole page.
-      nl: Sleutel van een beeld uit het documentthema, uitgerekt over de hele pagina.
-    osfType: string
+      en: An image uploaded to the template or document, stretched over the whole page.
+      nl: Een beeld dat bij de template of het document is geüpload, uitgerekt over de hele pagina.
+    osfType: image
     required: false
-    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
     persisted: { column: page_background_image, storageClass: core }
   - key: pageBodyAlignment
     label: { en: Content position, nl: Plaats van de inhoud }

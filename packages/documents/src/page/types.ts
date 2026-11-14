@@ -44,7 +44,7 @@ export type PageTextStyle = Readonly<{
 }>;
 
 export type PageAsset = Readonly<{
-  mediaType: "image/svg+xml" | "image/png" | "image/jpeg";
+  mediaType: "image/svg+xml" | "image/png" | "image/jpeg" | "image/webp";
   /** Base64 of the asset bytes. Assets are inlined; a page never fetches. */
   data: string;
   /** Name an author sees when choosing this image. */

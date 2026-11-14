@@ -18,7 +18,7 @@ const FONT_FAMILY = /^[A-Za-z][A-Za-z0-9 -]{0,63}$/;
 const FONT_WEIGHT = /^[1-9]\d{2,3}( [1-9]\d{2,3})?$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 const COLOR = /^(#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\))$/;
-const ASSET_TYPES = new Set(["image/svg+xml", "image/png", "image/jpeg"]);
+const ASSET_TYPES = new Set(["image/svg+xml", "image/png", "image/jpeg", "image/webp"]);
 const MAX_BLOCKS = 2000;
 
 export class PagedDocumentError extends Error {
@@ -124,9 +124,48 @@ function textColumns(block: PageBlock, design: PageDesign): string {
   return `<div class="b cols" style="align-items:${items};gap:${distribution === "fit" ? 16 : 0}px">${slots.join("")}</div>`;
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** An `image` value: an uploaded file of the template or document, named by its id and pinned by its content hash. */
+export type ImageValue = Readonly<{ artifactId: string; sha256: string; mediaType: string; fileName: string }>;
+
+export function isImageValue(value: unknown): value is ImageValue {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.artifactId === "string" && UUID.test(v.artifactId) && typeof v.sha256 === "string" && /^[a-f0-9]{64}$/.test(v.sha256) &&
+    typeof v.mediaType === "string" && ASSET_TYPES.has(v.mediaType) && typeof v.fileName === "string";
+}
+
+/** The key an image value's bytes are inlined under in the page design. */
+export function imageAssetKey(image: Pick<ImageValue, "artifactId">): string {
+  return `img-${image.artifactId}`;
+}
+
+/**
+ * Every image the blocks and page settings use, with the scope it belongs to: "" is the document's (or template's)
+ * own content, any other scope an included template's. Whoever renders reads these files and inlines them in the
+ * page design under `imageAssetKey`, so the page itself never fetches.
+ */
+export function pageImages(blocks: readonly PageBlock[], layouts: PageLayouts = {}): { scope: string; image: ImageValue }[] {
+  const found = new Map<string, { scope: string; image: ImageValue }>();
+  const add = (scope: string, value: unknown) => { if (isImageValue(value)) found.set(`${scope}|${value.artifactId}`, { scope, image: value }); };
+  for (const block of blocks) if (block.definitionKey === "ImageBlock") add(block.scope ?? "", block.values.asset);
+  for (const [scope, layout] of Object.entries(layouts)) add(scope, layout.backgroundImage);
+  return [...found.values()];
+}
+
+/** The design with the bytes of the given images inlined under their asset keys. */
+export function withImages(design: PageDesign, images: readonly { artifactId: string; mediaType: string; fileName: string; data: string }[]): PageDesign {
+  if (!images.length) return design;
+  const assets: Record<string, PageAsset> = { ...design.assets };
+  for (const image of images) assets[`img-${image.artifactId}`] = { mediaType: image.mediaType as PageAsset["mediaType"], data: image.data, label: image.fileName };
+  return { ...design, assets };
+}
+
 function imageBlock(block: PageBlock, design: PageDesign): string {
   const v = block.values;
-  const key = optionalKey(v.asset, "Image.asset") ?? fail("Image.asset is required.");
+  if (!isImageValue(v.asset)) fail("Image.asset must be an uploaded image.");
+  const key = imageAssetKey(v.asset);
   const width = px(v.width, "Image.width", 1, 4000);
   const height = px(v.height, "Image.height", 1, 4000);
   const align = option(v.align, "Image.align", ALIGN, "left");
@@ -203,9 +242,10 @@ export function pageSettings(values: Readonly<Record<string, unknown>> | undefin
   const v = values ?? {};
   // The background is a color code: whoever reads the settings resolves the palette color the document chose
   // (the organization's or a standard one) first. Anything else, such as a color that no longer exists, leaves
-  // the page white rather than refusing it; so does an image the theme does not have.
+  // the page white rather than refusing it; so does an image whose file was not supplied.
   const background = typeof v.background === "string" && /^#[0-9A-Fa-f]{6}$/.test(v.background) ? v.background : undefined;
-  const image = typeof v.backgroundImage === "string" && KEY.test(v.backgroundImage) && Object.hasOwn(design.assets, v.backgroundImage) ? v.backgroundImage : undefined;
+  const imageKey = isImageValue(v.backgroundImage) ? imageAssetKey(v.backgroundImage) : undefined;
+  const image = imageKey && Object.hasOwn(design.assets, imageKey) ? imageKey : undefined;
   const format = typeof v.format === "string" ? v.format : "";
   const page = format === "custom" ? { width: px(v.width, "Page.width", 100, 5000, design.page.width), height: px(v.height, "Page.height", 100, 5000, design.page.height) }
     : Object.hasOwn(PAGE_FORMATS, format) ? PAGE_FORMATS[format as keyof typeof PAGE_FORMATS] : undefined;

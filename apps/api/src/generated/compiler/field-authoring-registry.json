@@ -17363,12 +17363,13 @@
             "nl": "Templateversie"
           },
           "description": {
-            "en": "The published template version this document's content is seeded from. Pinned; moves only through Link template or when the template is republished.",
-            "nl": "De gepubliceerde templateversie waaruit de inhoud van dit document is overgenomen. Vastgepind; verschuift alleen via Template koppelen of als de template opnieuw wordt gepubliceerd."
+            "en": "The published template version this document's content is seeded from. Pinned; set when the document is created from a template, and moves only through Link template or when the template is republished.",
+            "nl": "De gepubliceerde templateversie waaruit de inhoud van dit document is overgenomen. Vastgepind; gezet als het document vanuit een template wordt aangemaakt, en verschuift alleen via Template koppelen of als de template opnieuw wordt gepubliceerd."
           },
           "required": false,
           "readOnly": true,
           "writtenBy": [
+            "Document.create",
             "Document.linkTemplate",
             "Template.publish"
           ],
@@ -41779,7 +41780,7 @@
         "source": "TemplateVersion",
         "valueField": "id"
       },
-      "displayTemplate": "{{versionNumber}}",
+      "displayTemplate": "v{{versionNumber}}",
       "filterField": "id",
       "icon": "file",
       "render": {

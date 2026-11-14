@@ -803,9 +803,9 @@ interfaces:
   mcp: {}
   web:
     fields:
-      # The values of the linked template's variables read as named values, never as raw JSON.
+      # The values of the linked template's variables read under the template's own labels, never as keys or JSON.
       parameters:
-        render: { component: FieldKeyValuePairs }
+        render: { component: TemplateValues }
     operations:
       materialize: { resultRenderer: document.content }
       create:

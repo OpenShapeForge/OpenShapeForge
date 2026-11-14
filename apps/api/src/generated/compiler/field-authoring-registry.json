@@ -41631,6 +41631,23 @@
           }
         },
         {
+          "key": "templateName",
+          "osfType": "string",
+          "immutable": true,
+          "label": {
+            "en": "Template name",
+            "nl": "Templatenaam"
+          },
+          "description": {
+            "en": "The name the template carried when this version was published, read from the frozen content, so a version reads as \"Proposal · v7\" wherever it is referenced. Set by the database on publication; never written by a caller.",
+            "nl": "De naam die de template droeg toen deze versie werd gepubliceerd, gelezen uit de vastgelegde inhoud, zodat een versie overal als \"Voorstel · v7\" leest. De database zet die bij publicatie; een aanroeper schrijft hem nooit."
+          },
+          "persisted": {
+            "column": "template_name",
+            "storageClass": "core"
+          }
+        },
+        {
           "key": "versionNumber",
           "osfType": "integer",
           "required": true,
@@ -41780,7 +41797,7 @@
         "source": "TemplateVersion",
         "valueField": "id"
       },
-      "displayTemplate": "v{{versionNumber}}",
+      "displayTemplate": "{{templateName}} · v{{versionNumber}}",
       "filterField": "id",
       "icon": "file",
       "render": {

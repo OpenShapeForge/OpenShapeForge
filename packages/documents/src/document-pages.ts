@@ -3,7 +3,8 @@ import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import type { MaterializedContentBlock, MaterializedDocumentContent, MaterializedTemplateContent } from "./content/types.js";
 import { materializeDocument } from "./document-materialize.js";
-import { buildPagedDocument, PagedDocumentError, withPaletteColors } from "./page/html.js";
+import { buildPagedDocument, pageImages, PagedDocumentError, withImages, withPaletteColors } from "./page/html.js";
+import { contentImages } from "./images.js";
 import { pageDesignFromStored } from "./page-design.js";
 import { DEFAULT_PAGE_DESIGN, type PageBlock, type PageLayouts } from "./page/types.js";
 import { themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
@@ -70,9 +71,13 @@ export const renderDocumentPages: ModuleOperationHandler = async (input, context
     const palette = (listed.data as { colors: { reference: string; value: string }[] }).colors;
     for (const scope of Object.keys(layouts)) layouts[scope] = withPaletteColors(layouts[scope]!, palette);
   }
+  // Every image is inlined: the document's own files, and the frozen images of the template versions it was made from.
+  const blocks = content.blocks.map(pageBlock);
+  const images = await contentImages(context, content, pageImages([], layouts).map((entry) => entry.image), { entity: "Document", id: documentId });
   try {
     const paged = buildPagedDocument({
-      title: source.title, locale: content.locale, blocks: content.blocks.map(pageBlock), layouts: layouts as PageLayouts, design, fonts: [],
+      title: source.title, locale: content.locale, blocks, layouts: layouts as PageLayouts,
+      design: withImages(design, images), fonts: [],
     });
     return { value: { documentId, themeId: source.themeId, compositionHash: content.compositionHash, ...paged } };
   } catch (error) {

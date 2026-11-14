@@ -187,6 +187,10 @@ describe("Document commands", () => {
       "linkTemplate",
       "materializeDocument",
       "renderDocumentPages",
+      "addDocumentImage",
+      "addTemplateImage",
+      "documentImages",
+      "templateImages",
       "resolveDocumentTheme",
       "setDefaultDocumentTheme",
     ]);

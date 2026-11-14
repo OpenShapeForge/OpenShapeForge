@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { buildPagedDocument, layoutPagedSections, pageBlockCss, variantPageValues, withPaletteColors, pageSettings, renderPageBlock, PagedDocumentError, PAGED_FONTS_MARKER } from "./html.js";
+import { buildPagedDocument, layoutPagedSections, pageImages, withImages, pageBlockCss, variantPageValues, withPaletteColors, pageSettings, renderPageBlock, PagedDocumentError, PAGED_FONTS_MARKER } from "./html.js";
 import type { PageBlock, PagedDocumentInput } from "./types.js";
 
 const design: PagedDocumentInput["design"] = {
@@ -10,25 +10,29 @@ const design: PagedDocumentInput["design"] = {
     body: { fontFamily: "DM Sans", fontSize: 14, lineHeight: 20, fontWeight: 400, color: "foreground" },
     title: { fontFamily: "DM Sans", fontSize: 36, lineHeight: 43.2, fontWeight: 300, letterSpacing: -1.08, color: "foreground" },
   },
-  assets: { mark: { mediaType: "image/svg+xml", data: "PHN2Zy8+" } },
+  assets: {},
 };
+
+// An uploaded image and its bytes, as whoever renders supplies them.
+const MARK = { artifactId: "11111111-1111-4111-8111-111111111111", sha256: "a".repeat(64), mediaType: "image/svg+xml", fileName: "mark.svg" };
+const withMark = withImages(design, [{ ...MARK, data: "PHN2Zy8+" }]);
 
 const block = (id: string, definitionKey: string, values: Record<string, unknown>, region: PageBlock["region"] = "body", layoutKey?: string): PageBlock =>
   ({ id, definitionKey, values, region, ...(layoutKey ? { layoutKey } : {}) });
 
-const build = (blocks: PageBlock[], layouts?: PagedDocumentInput["layouts"]) => buildPagedDocument({ title: "Proposal", locale: "en", blocks, design, fonts: [], ...(layouts ? { layouts } : {}) });
+const build = (blocks: PageBlock[], layouts?: PagedDocumentInput["layouts"]) => buildPagedDocument({ title: "Proposal", locale: "en", blocks, design: withMark, fonts: [], ...(layouts ? { layouts } : {}) });
 
 describe("buildPagedDocument", () => {
   test("a cover template included in a document gives each its own pages, header and footer", () => {
     const cover = (id: string, definitionKey: string, values: Record<string, unknown>, region: PageBlock["region"] = "body"): PageBlock =>
       ({ ...block(id, definitionKey, values, region), scope: "cover" });
     const paged = build([
-      cover("h1", "ImageBlock", { asset: "mark", width: 120, height: 24 }, "header"),
+      cover("h1", "ImageBlock", { asset: MARK, width: 120, height: 24 }, "header"),
       cover("f1", "TextColumns", { left: "left", center: "middle", right: "right", centerWidth: 140 }, "footer"),
       block("f2", "TextBlock", { markdown: "Confidential" }, "footer"),
       cover("b1", "TextBlock", { markdown: "Pentesting for Nova Harbor", style: "title" }),
       block("b2", "TextBlock", { markdown: "Dear reader" }),
-    ], { cover: { background: "#becbd3", backgroundImage: "mark" }, "": { margin: 32 } });
+    ], { cover: { background: "#becbd3", backgroundImage: MARK }, "": { margin: 32 } });
     expect(paged.page).toEqual({ width: 720, height: 913 });
     expect(paged.sections).toHaveLength(2);
     const [first, content] = paged.sections.map((section) => section.html);
@@ -114,7 +118,7 @@ describe("buildPagedDocument", () => {
   });
 
   test("the page never fetches: a strict policy and inlined assets only", () => {
-    const html = build([block("i", "ImageBlock", { asset: "mark", width: 10, height: 10 })]).sections[0]!.html;
+    const html = build([block("i", "ImageBlock", { asset: MARK, width: 10, height: 10 })]).sections[0]!.html;
     expect(html).toContain("default-src 'none'");
     expect(html).toContain('src="data:image/svg+xml;base64,PHN2Zy8+"');
     expect(html).not.toMatch(/https?:\/\//);
@@ -122,7 +126,8 @@ describe("buildPagedDocument", () => {
 
   test.each([
     ["an unknown text style", [block("b", "TextBlock", { markdown: "x", style: "missing" })]],
-    ["an unknown asset", [block("b", "ImageBlock", { asset: "missing", width: 1, height: 1 })]],
+    ["an image whose file was not supplied", [block("b", "ImageBlock", { asset: { ...MARK, artifactId: "22222222-2222-4222-8222-222222222222" }, width: 1, height: 1 })]],
+    ["an image that is a theme key, not an upload", [block("b", "ImageBlock", { asset: "mark", width: 1, height: 1 })]],
     ["an unsupported block type", [block("b", "YouTubeEmbed", { url: "x" })]],
     ["a style key that is not a key", [block("b", "TextBlock", { markdown: "x", style: 'x"}body{display:none' })]],
     ["a width that is not a number", [block("b", "TextBlock", { markdown: "x", maxWidth: "1px;position:fixed" })]],
@@ -135,7 +140,7 @@ describe("buildPagedDocument", () => {
     const page = (layout: Record<string, unknown>) => build([block("b", "TextBlock", { markdown: "x" })], { "": withPaletteColors(layout, palette) }).sections[0]!.html;
     expect(page({ background: "tenant:cover", margin: 32 })).toContain('class="bg" style="background:#BECBD3"');
     expect(page({ background: "standard:ocean" })).toContain('class="bg" style="background:#175BAA"');
-    expect(page({ background: "tenant:removed", backgroundImage: "missing" })).toContain('<div class="bg"></div>');
+    expect(page({ background: "tenant:removed", backgroundImage: { ...MARK, artifactId: "22222222-2222-4222-8222-222222222222" } })).toContain('<div class="bg"></div>');
     // Unresolved or hostile text never reaches the page.
     expect(build([block("b", "TextBlock", { markdown: "x" })], { "": { background: "red;position:fixed" } }).sections[0]!.html).toContain('<div class="bg"></div>');
   });
@@ -150,6 +155,12 @@ describe("buildPagedDocument", () => {
     expect(() => pageSettings({ format: "custom", width: 20 }, design)).toThrow(PagedDocumentError);
   });
 
+  test("the images a document shows are found in its blocks and page settings, by scope", () => {
+    const found = pageImages([{ ...block("i", "ImageBlock", { asset: MARK, width: 1, height: 1 }), scope: "cover" }, block("t", "TextBlock", { markdown: "x" })],
+      { "": { backgroundImage: { ...MARK, artifactId: "22222222-2222-4222-8222-222222222222" } } });
+    expect(found.map((entry) => [entry.scope, entry.image.artifactId])).toEqual([["cover", MARK.artifactId], ["", "22222222-2222-4222-8222-222222222222"]]);
+  });
+
   test("a variant's fields read as page settings", () => {
     expect(variantPageValues({ page_layout: "pages", page_margin: "32", page_background: "tenant:cover", page_body_alignment: null })).toEqual({ margin: 32, background: "tenant:cover" });
     expect(variantPageValues({ pageLayout: "pages", pageFormat: "custom", pageWidth: "600", pageBodyAlignment: "center" })).toEqual({ format: "custom", width: 600, bodyAlignment: "center" });
@@ -161,7 +172,7 @@ describe("buildPagedDocument", () => {
     const css = pageBlockCss(design, ".page ");
     expect(css).toContain(".page .s-title{");
     expect(css).toContain(".page .cols{display:flex}");
-    expect(renderPageBlock(block("i", "ImageBlock", { asset: "mark", width: 10, height: 10 }), design)).toContain('src="data:image/svg+xml;base64,PHN2Zy8+"');
+    expect(renderPageBlock(block("i", "ImageBlock", { asset: MARK, width: 10, height: 10 }), withMark)).toContain('src="data:image/svg+xml;base64,PHN2Zy8+"');
     expect(() => pageBlockCss(design, ".page{}body")).toThrow(PagedDocumentError);
     expect(pageSettings(undefined, design)).toEqual({ layout: "default", margin: 40, gap: 24, blockGap: 16, bodyAlignment: "top" });
   });

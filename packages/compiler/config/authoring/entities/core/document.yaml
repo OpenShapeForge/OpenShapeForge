@@ -352,6 +352,90 @@ fields:
     relationship:
       ownership: reference
 operations:
+  images:
+    name: { en: Read document images, nl: Documentbeelden lezen }
+    description: >-
+      Returns the bytes of every image the document's content shows: its own uploads and the frozen images of the
+      template versions it was made from. For an editor or viewer that draws the pages itself.
+    implementation: { type: plugin, plugin: documents, handler: documentImages }
+    target: { scope: record, inputField: id }
+    auth: { mode: session, roles: [CaseFile.All.Read, CaseFile.All.ReadWrite, Organization.All.Read, Organization.All.ReadWrite] }
+    tenancy: { mode: required }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, channel, locale]
+        properties:
+          id: { type: string, format: uuid, x-osf-reference: { entity: Document }, x-osf-i18n: { title: { en: Document, nl: Document } } }
+          channel: { type: string, enum: [document, email, whatsapp] }
+          locale: { type: string, pattern: "^[a-z]{2}(-[A-Z]{2})?$" }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [images]
+        properties:
+          images:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [artifactId, mediaType, fileName, data]
+              properties:
+                artifactId: { type: string, format: uuid }
+                mediaType: { type: string }
+                fileName: { type: string }
+                data: { type: string, x-osf-i18n: { title: { en: Contents (base64), nl: Inhoud (base64) } } }
+    errors:
+      - { status: 403, code: FORBIDDEN, description: The document is not accessible. }
+      - { status: 404, code: NOT_FOUND, description: The document does not exist. }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  addImage:
+    name: { en: Add image, nl: Beeld toevoegen }
+    description: >-
+      Keeps an uploaded PNG, JPEG, WebP or SVG image as a file of this document and returns the image value that an image
+      field of the document, its variants or its blocks stores. Only readers of the document can read the file.
+    implementation: { type: plugin, plugin: documents, handler: addDocumentImage }
+    target: { scope: record, inputField: id }
+    auth: { mode: session, roles: [CaseFile.All.ReadWrite, Organization.All.ReadWrite] }
+    tenancy: { mode: required }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, artifact]
+        properties:
+          id: { type: string, format: uuid, x-osf-reference: { entity: Document }, x-osf-i18n: { title: { en: Document, nl: Document } } }
+          artifact:
+            type: object
+            x-osf-control: artifact-upload
+            x-osf-i18n: { title: { en: Image, nl: Beeld } }
+            additionalProperties: false
+            required: [artifactId, expectedArtifactVersion]
+            properties:
+              artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: Upload, nl: Upload } } }
+              expectedArtifactVersion: { type: integer, minimum: 1, x-osf-i18n: { title: { en: Upload version, nl: Uploadversie } } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [artifactId, sha256, mediaType, fileName]
+        properties:
+          artifactId: { type: string, format: uuid }
+          sha256: { type: string, pattern: "^[a-f0-9]{64}$" }
+          mediaType: { type: string }
+          fileName: { type: string }
+    errors:
+      - { status: 400, code: VALIDATION, description: The file is not a supported image. }
+      - { status: 403, code: FORBIDDEN, description: The document cannot be changed by this session. }
+      - { status: 404, code: NOT_FOUND, description: The document does not exist. }
+      - { status: 503, code: STORAGE_UNAVAILABLE, description: File storage is unavailable. }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
   insertVariant:
     name: { en: Add content, nl: Inhoud toevoegen }
     description: Add one channel and language to this document through its owned content collection.
@@ -621,9 +705,10 @@ operations:
     name: Lay out document pages
     description: >-
       Returns the document's current editable content laid out as pages, without changing any stored content: one
-      self-contained HTML document per section, for a print engine to turn into a PDF. Blocks flow in order; a
-      section break starts a new page and selects a page layout, whose header and footer blocks repeat on every page
-      of that section. Colors, text styles and images come from the page design of the document's theme. Fonts are
+      self-contained HTML document per section, for a print engine to turn into a PDF. Blocks flow in order on the
+      pages the document's variant (else its template's) describes; an included template with pages of its own starts
+      its own section with its own header and footer. Images are the document's own files and those of included
+      templates; text styles come from the document's theme. Fonts are
       not included; the host that prints supplies them.
     implementation: { type: plugin, plugin: documents, handler: renderDocumentPages }
     target: { scope: record, inputField: id }
@@ -685,6 +770,8 @@ interfaces:
       linkTemplate: { method: POST, path: "/api/document-content/:id/link-template" }
       materialize: { method: POST, path: "/api/document-content/:id/materialize" }
       renderPages: { method: POST, path: "/api/document-content/:id/pages" }
+      images: { method: POST, path: "/api/document-content/:id/images" }
+      addImage: { method: POST, path: "/api/document-content/:id/add-image" }
   graphql: {}
   mcp: {}
   web:

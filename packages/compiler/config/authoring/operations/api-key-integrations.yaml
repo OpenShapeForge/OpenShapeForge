@@ -587,6 +587,51 @@ operations:
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: acknowledgement }
     errors: *catalogErrors
+  updateIntegrationRoles:
+    id: api-keys.update-integration-roles
+    name: { en: Edit roles, nl: Rollen wijzigen }
+    description:
+      en: Replaces the roles of an active integration. Existing API keys keep working and carry the new roles from
+        their next request on; a key narrowed to specific roles keeps only those that remain.
+      nl: Vervangt de rollen van een actieve integratie. Bestaande API-sleutels blijven werken en krijgen de nieuwe
+        rollen vanaf hun volgende verzoek; een sleutel die tot bepaalde rollen is beperkt houdt alleen de rollen die
+        overblijven.
+    implementation: { type: plugin, plugin: osf-api-keys, handler: updateIntegrationRoles }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId, roles]
+        properties:
+          integrationId: *integrationIdInput
+          roles:
+            type: array
+            uniqueItems: true
+            items: { type: string, minLength: 1 }
+            description: The integration's complete new role set, not a delta. Roles left out are withdrawn. Every
+              role in the set must already be held by the caller, exactly as at creation; an empty set grants no
+              general roles.
+            x-osf-sourceField: grantedRoles
+            x-osf-i18n:
+              title: { en: Roles, nl: Rollen }
+              description:
+                en: The complete set of roles. Roles you leave out are withdrawn from the integration and its keys.
+                nl: De volledige set rollen. Rollen die je weglaat worden ingetrokken bij de integratie en haar sleutels.
+    output: { schema: *integration }
+    auth: *manageAuth
+    tenancy: { mode: required }
+    # The realm is mutated: the service account's client roles are set to the new set.
+    effects: { data: write, external: write }
+    # Setting a complete set is idempotent: repeating it changes nothing further.
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 400, code: VALIDATION, description: 'The input does not describe a valid request, or the integration is not active: a disabled or still provisioning integration cannot be edited.' }
+      - { status: 401, code: UNAUTHENTICATED, description: An authenticated tenant session is required. }
+      - { status: 403, code: FORBIDDEN, description: 'The session may not manage API keys: it lacks the management role, asked for a role the caller does not hold, or is not a verified person.' }
+      - { status: 404, code: NOT_FOUND, description: The integration does not exist in this organization. }
+      - { status: 502, code: PROVISIONING_FAILED, description: 'The identity provider refused or could not complete the role change; the stored roles are unchanged and repeating the request converges the realm.' }
+      - { status: 503, code: NOT_CONFIGURED, description: 'This deployment has no API key provisioning configuration, so no integration can be managed here.' }
 interfaces:
   mcp: {}
   rest:
@@ -599,6 +644,7 @@ interfaces:
       issueCredential: { method: POST, path: /api/api-key-integrations/issue-credential, response: { status: 200, kind: json } }
       revokeCredential: { method: POST, path: /api/api-key-integrations/revoke-credential, response: { status: 200, kind: json } }
       disableIntegration: { method: POST, path: /api/api-key-integrations/disable, response: { status: 200, kind: json } }
+      updateIntegrationRoles: { method: POST, path: /api/api-key-integrations/update-roles, response: { status: 200, kind: json } }
   web:
     entities:
       ApiKeyIntegration:
@@ -613,7 +659,12 @@ interfaces:
           list: { operation: listIntegrations, resultField: integrations }
           get: { operation: getIntegration, bindings: { integrationId: integrationId } }
           create: { operation: createIntegration }
-          recordActions: [issueCredential, disableIntegration]
+          recordActions:
+            - issueCredential
+            # Only a live integration can be edited; the service refuses the rest as well.
+            - operation: updateIntegrationRoles
+              visibleWhen: { conditions: [{ field: status, operator: eq, value: active }] }
+            - disableIntegration
         related:
           - { entity: ApiKeyCredential, label: { en: Credentials, nl: Credentials }, route: /api-key-integrations/:integrationId/credentials }
           - { entity: RecordActionAssignment, label: { en: Permissions, nl: Rechten }, route: /integrations/:integrationId/record-actions }

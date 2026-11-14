@@ -55,6 +55,7 @@ import {
   type ProvisioningSession,
 } from "../auth/api-key/service.js";
 import { stubRealm, type StubRealm } from "../auth/api-key/__tests__/fixtures.js";
+import { exchangeForToken } from "../auth/api-key/exchange.js";
 import { readApiKeyProvisioningConfig } from "../auth/api-key/runtime-config.js";
 import { createDatabaseRuntime } from "../db/connection.js";
 import { runMigrationChain } from "../db/migration-chain.js";
@@ -100,6 +101,8 @@ const PENDING_IDENTITY = randomUUID();
 const CANDIDATE_RELATION = randomUUID();
 const SUPPLIER_RELATION = randomUUID();
 const READ_ROLE = "Relations.All.Read";
+/** A second realm role, held only by the callers that are meant to grant it. */
+const WRITE_ROLE = "Relations.All.Write";
 const ISSUER = "https://identity.test/realms/openshapeforge";
 
 function databaseUrl(name: string, app = false): string {
@@ -241,7 +244,7 @@ function unclassifiedV2Hop(userId = MANAGER): Record<string, string> {
 }
 
 /** The paths whose contract declares an acknowledgement. */
-const ACKNOWLEDGED = new Set(["create", "issue-credential", "revoke-credential", "disable"]);
+const ACKNOWLEDGED = new Set(["create", "issue-credential", "revoke-credential", "disable", "update-roles"]);
 
 /** One canonical Operation over its declared REST projection. */
 async function operation(
@@ -268,7 +271,7 @@ beforeAll(async () => {
     );
     return;
   }
-  realm = stubRealm({ roles: [READ_ROLE] });
+  realm = stubRealm({ roles: [READ_ROLE, WRITE_ROLE] });
   databaseName = `api_key_dispatcher_test_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
   server = new SQL(ADMIN_URL, { max: 1 });
   await server.unsafe(`create database "${databaseName}"`);
@@ -1238,5 +1241,165 @@ describe("the catalog over the real dispatcher, by principal class", () => {
     // Nothing was created, and the manage-role holder still reaches it.
     const stillReaches = await operation("list", { first: 10 });
     expect(stillReaches.status).toBe(200);
+  }, TEST_TIMEOUT);
+});
+
+describe("changing an integration's roles over the real dispatcher", () => {
+  /** An administrator who holds both delegable roles. */
+  const editor = () => signedHop({
+    userId: MANAGER,
+    roles: [API_KEY_MANAGE_ROLE, READ_ROLE, WRITE_ROLE],
+    principalKind: "person",
+  });
+
+  async function storedRoles(integrationId: string): Promise<unknown> {
+    const stored = await sql<{ granted_roles: unknown }>`
+      select granted_roles from platform.api_key_integrations
+       where id = ${integrationId}::uuid and tenant_id = ${TENANT}::uuid
+    `.execute(booted!.adminDb);
+    return stored.rows[0]?.granted_roles;
+  }
+
+  /** Role-mapping writes the realm received since `from`. */
+  const mappingWrites = (from: number) => realm.requests.slice(from)
+    .filter((line) => /^(POST|DELETE) .*\/role-mappings\/clients\//.test(line));
+
+  test("adds and withdraws roles in the realm and the row; issued keys keep working", async () => {
+    if (!booted) return;
+    const created = await operation("create", {
+      displayName: "Roles change", roles: [READ_ROLE], expiresInDays: 30,
+    }, editor());
+    expect(created.status).toBe(200);
+    const integrationId = created.body.integration.integrationId as string;
+
+    // A token cached for the integration's service account, as a live key
+    // would have it after its first request.
+    const secret = (await sql<{ ciphertext: string; key_id: string; algorithm: string; client: string }>`
+      select client_secret_ciphertext as ciphertext, client_secret_key_id as key_id,
+             client_secret_algorithm as algorithm, keycloak_client_id as client
+        from platform.api_key_integrations where id = ${integrationId}::uuid
+    `.execute(booted.adminDb)).rows[0]!;
+    let exchanges = 0;
+    const exchange = () => exchangeForToken({
+      issuer: `${realm.baseUrl}/realms/${realm.realm}`,
+      keyring: booted!.deps.keyring,
+      fetch: (async () => {
+        exchanges += 1;
+        return new Response(JSON.stringify({ access_token: `token-${exchanges}`, expires_in: 900 }), {
+          status: 200, headers: { "content-type": "application/json" },
+        });
+      }) as unknown as typeof fetch,
+    }, integrationId, secret.client, {
+      ciphertext: secret.ciphertext, keyId: secret.key_id, algorithm: secret.algorithm,
+    } as never);
+    expect(await exchange()).toBe("token-1");
+    expect(await exchange()).toBe("token-1");
+
+    // Add.
+    const added = await operation("update-roles", { integrationId, roles: [READ_ROLE, WRITE_ROLE] }, editor());
+    expect(added).toMatchObject({
+      status: 200,
+      body: {
+        integrationId, status: "active", grantedRoles: [READ_ROLE, WRITE_ROLE],
+        credentialCount: 1, activeCredentialCount: 1,
+      },
+    });
+    expect(realm.mappedRoles()).toEqual([READ_ROLE, WRITE_ROLE].sort());
+    expect(await storedRoles(integrationId)).toEqual([READ_ROLE, WRITE_ROLE]);
+    // The cached token was dropped, so the next request exchanges afresh and
+    // carries the service account's new roles.
+    expect(await exchange()).toBe("token-2");
+
+    // Withdraw.
+    const withdrawn = await operation("update-roles", { integrationId, roles: [WRITE_ROLE] }, editor());
+    expect(withdrawn).toMatchObject({ status: 200, body: { grantedRoles: [WRITE_ROLE] } });
+    expect(realm.mappedRoles()).toEqual([WRITE_ROLE]);
+    expect(await storedRoles(integrationId)).toEqual([WRITE_ROLE]);
+    expect(await exchange()).toBe("token-3");
+
+    // The same set again changes nothing in the realm.
+    const before = realm.requests.length;
+    const repeated = await operation("update-roles", { integrationId, roles: [WRITE_ROLE] }, editor());
+    expect(repeated).toMatchObject({ status: 200, body: { grantedRoles: [WRITE_ROLE] } });
+    expect(mappingWrites(before)).toEqual([]);
+
+    // The credential issued at creation is untouched and still live.
+    const credentials = await operation("list-credentials", { integrationId, first: 10 });
+    expect(credentials.body.credentials).toHaveLength(1);
+    expect(credentials.body.credentials[0]).toMatchObject({ status: "active", revokedAt: null });
+
+    // Each change is on the audit trail, with what it replaced.
+    const events = await sql<{ event_type: string; payload: Record<string, unknown> }>`
+      select event_type, payload from platform.entity_events
+       where tenant_id = ${TENANT}::uuid
+         and aggregate_type = 'ApiKeyIntegration' and aggregate_id = ${integrationId}
+       order by occurred_at, id
+    `.execute(booted.adminDb);
+    expect(events.rows.map((row) => row.event_type)).toEqual([
+      "api_key_integration_roles_changed",
+      "api_key_integration_roles_changed",
+      "api_key_integration_roles_changed",
+    ]);
+    expect(events.rows[0]!.payload).toMatchObject({
+      previousRoles: [READ_ROLE], grantedRoles: [READ_ROLE, WRITE_ROLE], added: [WRITE_ROLE], removed: [],
+      actor: MANAGER,
+    });
+    expect(events.rows[1]!.payload).toMatchObject({
+      previousRoles: [READ_ROLE, WRITE_ROLE], grantedRoles: [WRITE_ROLE], added: [], removed: [READ_ROLE],
+    });
+  }, TEST_TIMEOUT);
+
+  test("refuses a role the caller does not hold, before the realm is touched", async () => {
+    if (!booted) return;
+    const created = await operation("create", {
+      displayName: "Ceiling", roles: [READ_ROLE], expiresInDays: 30,
+    });
+    const integrationId = created.body.integration.integrationId as string;
+    const before = realm.requests.length;
+
+    // The default manager holds READ_ROLE but not WRITE_ROLE.
+    const refused = await operation("update-roles", { integrationId, roles: [READ_ROLE, WRITE_ROLE] });
+    expect({ status: refused.status, code: refused.body.error?.code })
+      .toEqual({ status: 403, code: "FORBIDDEN" });
+    expect(realm.requests.slice(before)).toEqual([]);
+    expect(await storedRoles(integrationId)).toEqual([READ_ROLE]);
+  }, TEST_TIMEOUT);
+
+  test("refuses to edit a disabled integration, and an unknown one", async () => {
+    if (!booted) return;
+    const created = await operation("create", {
+      displayName: "Switched off", roles: [READ_ROLE], expiresInDays: 30,
+    }, editor());
+    const integrationId = created.body.integration.integrationId as string;
+    expect((await operation("disable", { integrationId })).status).toBe(200);
+    const before = realm.requests.length;
+
+    const refused = await operation("update-roles", { integrationId, roles: [WRITE_ROLE] }, editor());
+    expect({ status: refused.status, code: refused.body.error?.code })
+      .toEqual({ status: 400, code: "VALIDATION" });
+    expect(refused.body.error.message).toContain("disabled");
+    expect(realm.requests.slice(before)).toEqual([]);
+    expect(await storedRoles(integrationId)).toEqual([READ_ROLE]);
+
+    const unknown = await operation("update-roles", { integrationId: randomUUID(), roles: [READ_ROLE] });
+    expect({ status: unknown.status, code: unknown.body.error?.code })
+      .toEqual({ status: 404, code: "NOT_FOUND" });
+  }, TEST_TIMEOUT);
+
+  test("a realm that refuses leaves the stored roles as they were and a declared 502", async () => {
+    if (!booted) return;
+    const created = await operation("create", {
+      displayName: "Realm refuses edit", roles: [READ_ROLE], expiresInDays: 30,
+    });
+    const integrationId = created.body.integration.integrationId as string;
+    const before = realm.requests.length;
+
+    // The caller holds the management role, so the ceiling admits it; the
+    // stub realm has no such role, so the realm refuses before changing anything.
+    const refused = await operation("update-roles", { integrationId, roles: [API_KEY_MANAGE_ROLE] });
+    expect({ status: refused.status, code: refused.body.error?.code })
+      .toEqual({ status: 502, code: "PROVISIONING_FAILED" });
+    expect(mappingWrites(before)).toEqual([]);
+    expect(await storedRoles(integrationId)).toEqual([READ_ROLE]);
   }, TEST_TIMEOUT);
 });

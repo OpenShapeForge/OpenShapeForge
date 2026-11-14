@@ -335,6 +335,93 @@ export class KeycloakAdmin {
     }
   }
 
+  /** The service-account user of an existing integration client. */
+  async serviceAccountUserId(clientId: string): Promise<string> {
+    const clients = await this.json<Array<{ id: string }>>(
+      "GET",
+      `/clients?clientId=${encodeURIComponent(clientId)}`,
+    );
+    const internalId = clients[0]?.id;
+    if (!internalId) {
+      throw new KeycloakAdminError(`Keycloak client "${clientId}" does not exist.`, 404);
+    }
+    const serviceAccount = await this.json<{ id?: string }>(
+      "GET",
+      `/clients/${internalId}/service-account-user`,
+    );
+    if (!serviceAccount.id) {
+      throw new KeycloakAdminError(`Client "${clientId}" has no service account user.`);
+    }
+    return serviceAccount.id;
+  }
+
+  /**
+   * Make the service-account user's roles on `roleClientId` exactly `roleNames`.
+   *
+   * The difference is taken against what the REALM maps now, not against what
+   * the database last recorded, so a repeated call after a partial failure
+   * converges instead of compounding it. Every requested role is checked to
+   * exist before anything changes, and roles are withdrawn before new ones are
+   * added: whichever request fails, the account never holds a role that
+   * neither the old nor the new set authorized.
+   */
+  async setClientRoles(
+    serviceAccountUserId: string,
+    roleClientId: string,
+    roleNames: readonly string[],
+  ): Promise<{ added: string[]; removed: string[] }> {
+    const clients = await this.json<Array<{ id: string }>>(
+      "GET",
+      `/clients?clientId=${encodeURIComponent(roleClientId)}`,
+    );
+    const roleClientInternalId = clients[0]?.id;
+    if (!roleClientInternalId) {
+      throw new KeycloakAdminError(`Role client "${roleClientId}" does not exist.`);
+    }
+
+    const available = await this.json<Array<{ id: string; name: string }>>(
+      "GET",
+      `/clients/${roleClientInternalId}/roles`,
+    );
+    const byName = new Map(available.map((role) => [role.name, role]));
+    const missing = roleNames.filter((name) => !byName.has(name));
+    if (missing.length > 0) {
+      throw new KeycloakAdminError(
+        `Roles do not exist on client "${roleClientId}": ${missing.sort().join(", ")}.`,
+      );
+    }
+
+    const mappingPath = `/users/${serviceAccountUserId}/role-mappings/clients/${roleClientInternalId}`;
+    const current = await this.json<Array<{ id: string; name: string }>>("GET", mappingPath);
+    const wanted = new Set(roleNames);
+    const held = new Set(current.map((role) => role.name));
+    const toRemove = current.filter((role) => !wanted.has(role.name));
+    const toAdd = roleNames.filter((name) => !held.has(name)).map((name) => byName.get(name)!);
+
+    if (toRemove.length > 0) {
+      const response = await this.request("DELETE", mappingPath, toRemove);
+      if (!response.ok) {
+        throw new KeycloakAdminError(
+          `Withdrawing roles from ${serviceAccountUserId} failed with ${response.status}.`,
+          response.status,
+        );
+      }
+    }
+    if (toAdd.length > 0) {
+      const response = await this.request("POST", mappingPath, toAdd);
+      if (!response.ok) {
+        throw new KeycloakAdminError(
+          `Granting roles to ${serviceAccountUserId} failed with ${response.status}.`,
+          response.status,
+        );
+      }
+    }
+    return {
+      added: toAdd.map((role) => role.name).sort(),
+      removed: toRemove.map((role) => role.name).sort(),
+    };
+  }
+
   /** Remove a client. Used by the reconciler to sweep a half-provisioned integration. */
   async deleteClient(clientId: string): Promise<void> {
     const clients = await this.json<Array<{ id: string }>>(

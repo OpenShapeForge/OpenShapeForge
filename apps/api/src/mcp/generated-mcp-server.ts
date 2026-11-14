@@ -65,7 +65,7 @@
  *                                       external catalogs it is shown
  *   *-routes.ts, route-context.ts       the browser-facing routes
  */
-import { tasksForScope, taskAwareToolParams } from "./tasks.js";
+import { tasksForScope, taskAwareToolParams, completeToolResult } from "./tasks.js";
 import { primeSessionExtensions } from "./extension-schemas.js";
 import { createMcpSessionAdmission } from "./session-admission.js";
 import { createExternalDiscovery, currentLiveRequestSignal } from "./external-discovery.js";
@@ -229,7 +229,7 @@ export function buildServer(
     const httpSignal = currentLiveRequestSignal();
     await discovery.discover({ signal: httpSignal
       ? AbortSignal.any([ctx.mcpReq.signal, httpSignal]) : ctx.mcpReq.signal });
-    return tasks ? await tasks.project(outcome.result, ctx.mcpReq.envelope) : outcome.result;
+    return tasks ? await tasks.project(outcome.result, ctx.mcpReq.envelope) : completeToolResult(outcome.result, ctx.mcpReq.envelope);
   });
 
   registerSessionExecutors(scope, dispatchTool);

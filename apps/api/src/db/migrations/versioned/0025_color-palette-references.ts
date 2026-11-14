@@ -6,6 +6,10 @@ import type { VersionedMigration } from '../versioned-runner.js';
 import { colorReferenceTables } from '../../../operations/entity/color-references.js';
 const migration: VersionedMigration = {
   version:'0025_color-palette-references', fileUrl:import.meta.url,
+  // Compatibility is limited to replacing the historical privileged RLS context
+  // flag with its token. All schema/data statements and row scope are unchanged;
+  // a previously completed migration must not run again or rewrite its checksum.
+  supersededChecksums: ["4486157f0086aed5608875a785a7a6467e2815cb581e5b264964da1e592713ea", "c191b7b14a2b310aaee42e12cca156e06f49bd6c51ee19daf8c23f6b490f9bf4"],
   async up(db) {
     await sql`select set_config('app.bypass_rls',${rlsBypassToken()},true)`.execute(db);
     const tenants=await sql<{id:string}>`select id from erp.tenants`.execute(db);

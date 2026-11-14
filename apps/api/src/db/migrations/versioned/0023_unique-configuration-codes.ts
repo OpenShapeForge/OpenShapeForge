@@ -54,6 +54,10 @@ export async function makeConfigurationCodesUnique(
 
 const migration: VersionedMigration = {
   version: "0023_unique-configuration-codes",
+  // Compatibility is limited to replacing the historical privileged RLS context
+  // flag with its token. All schema/data statements and row scope are unchanged;
+  // a previously completed migration must not run again or rewrite its checksum.
+  supersededChecksums: ["e69b06b09cd9f3e07538fd128c581699ca9221b6239a3b577904a58655925dad", "b399a6e7c50b166259636e5149c41d5270b9b189587392374876f005a29a4847"],
   fileUrl: import.meta.url,
   async up(db) { await makeConfigurationCodesUnique(db); },
 };

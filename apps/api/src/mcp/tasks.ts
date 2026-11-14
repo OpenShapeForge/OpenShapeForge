@@ -21,12 +21,14 @@ export function supportsTasks(meta: unknown): boolean {
     record(record(record(value[capabilitiesKey])?.extensions)?.[TASKS_EXTENSION]) !== undefined;
 }
 /**
- * Protocol revision 2026-07-28 requires every tools/call result to name its
+ * Protocol revision 2026-07-28 (and later) requires every tools/call result to name its
  * kind; a client of that revision refuses a result without it. Earlier
  * revisions have no such field, so their results stay exactly as they were.
  */
 export function completeToolResult<T extends object>(result: T, meta: unknown): T | (T & { resultType: "complete" }) {
-  if (record(meta)?.[protocolKey] !== "2026-07-28" || "resultType" in result) return result;
+  const version = record(meta)?.[protocolKey];
+  // Revisions are ISO dates, so a later revision compares as a greater string.
+  if (typeof version !== "string" || version < "2026-07-28" || "resultType" in result) return result;
   return { resultType: "complete", ...result };
 }
 export function executionProviders(modules: readonly { executionProviders?: readonly RuntimeExecutionProvider[] }[]) {

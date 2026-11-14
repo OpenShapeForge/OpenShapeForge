@@ -88,6 +88,8 @@ describe("MCP Tasks extension over actual HTTP", () => {
     expect((await call("tools/call", { name: "native" })).result!.resultType).toBe("complete");
     expect((await call("tools/call", { name: "start" }, plainMeta)).result!.resultType).toBe("complete");
     expect(completeToolResult({ content: [] }, { ...meta, "io.modelcontextprotocol/protocolVersion": "2025-11-25" })).toEqual({ content: [] });
+    expect(completeToolResult({ content: [] }, { ...meta, "io.modelcontextprotocol/protocolVersion": "2027-01-15" })).toEqual({ resultType: "complete", content: [] });
+    expect(completeToolResult({ resultType: "task", content: [] }, meta)).toEqual({ resultType: "task", content: [] });
     expect(supportsTasks({ ...meta, "io.modelcontextprotocol/protocolVersion": "2025-11-25" })).toBe(false);
   });
   test("cancels through the owner, refuses unknown handles and unissued input", async () => {

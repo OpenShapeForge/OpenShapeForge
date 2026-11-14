@@ -99,6 +99,7 @@ export function platformFor(who: Session) {
     operation("DocumentVariant.get", "DocumentVariant", "get", "read", { type: "object" }),
     operation("TemplateVersion.get", "TemplateVersion", "get", "read", { type: "object" }),
     operation("Document.insertVariant", "Document", "invoke", "write", { type: "object" }),
+    operation("Document.linkTemplate", "Document", "invoke", "write", { type: "object" }),
     operation("DocumentVariant.insertBlock", "DocumentVariant", "invoke", "write", { type: "object" }),
     operation("TemplateBlock.materialize", "TemplateBlock", "invoke", "read", { type: "object", required: ["definitionKey", "values", "references", "referenceField", "parametersField"], properties: {
       definitionKey: { const: "TemplateBlock" }, values: { type: "object" }, references: { type: "object" }, referenceField: { const: "version" }, parametersField: { const: "parameters" } } }),
@@ -165,6 +166,11 @@ export function platformFor(who: Session) {
             const table = owner === "Document" ? "documents" : "document_variants";
             const row = (await sql<{ updatedAt: string }>`select to_jsonb(updated_at) #>> '{}' as "updatedAt" from ${sql.id("erp", table)} where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
             return { data: { ...result, parent: { updatedAt: row!.updatedAt } } };
+          }
+          if (request.operation.id === "Document.linkTemplate") {
+            // Core checks a record Operation's expectedVersion before its handler runs; the handler never sees it.
+            const { expectedVersion: _expectedVersion, ...input } = request.input;
+            return { data: (await handlers.linkTemplate!(input, context)).value };
           }
           if (FIELD_BLOCKS.some((entity) => request.operation.id === `${entity}.materialize`)) return { data: (await handlers.materializeFields!(request.input, context)).value };
           if (request.operation.id === "TemplateBlock.materialize") return { data: (await handlers.composeTemplate!(request.input, context)).value };

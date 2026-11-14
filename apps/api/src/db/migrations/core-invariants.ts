@@ -4,6 +4,7 @@ import type { OpenShapeForgeDatabase } from "../connection.js";
 import { applyArtifactBinding } from "./core-invariants-artifacts.js";
 import { applyDocumentAuthority, applyDocumentCommands } from "./core-invariants-documents.js";
 import { applyDocumentThemeInvariants } from "./document-themes.js";
+import { applyTemplateVersionNames } from "./template-version-names.js";
 
 /**
  * The core's own database invariants on manifest tables: functions,
@@ -65,6 +66,7 @@ export async function applyCoreInvariants(db: OpenShapeForgeDatabase): Promise<v
   await applyDocumentCommands(db);
   await applyArtifactBinding(db);
   await applyDocumentThemeInvariants(db);
+  await applyTemplateVersionNames(db);
 }
 
 

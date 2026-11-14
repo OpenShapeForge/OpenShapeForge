@@ -33,6 +33,19 @@ export function imageValuesIn(value: unknown, found = new Map<string, ImageValue
   return found;
 }
 
+/**
+ * Storage recognises SVG only as text, so it is never served as active content. An image value
+ * says image/svg+xml only for text whose root element is <svg>, and it is only ever shown
+ * through <img>, where an SVG runs no script.
+ */
+const SVG = /^\uFEFF?\s*(<\?xml[^>]*\?>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE svg[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i;
+export function isSvgText(bytes: Uint8Array): boolean {
+  try { return SVG.test(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, 4096))); } catch { return false; }
+}
+function imageMediaType(stored: string, image: ImageValue): string {
+  return stored === "text/plain" && image.mediaType === "image/svg+xml" ? image.mediaType : stored;
+}
+
 function base64(bytes: Uint8Array): string {
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
 }
@@ -40,7 +53,7 @@ function base64(bytes: Uint8Array): string {
 async function readFile(platform: PluginPlatformServices, session: PluginSessionContext, image: ImageValue, owner: { entity: string; id: string }): Promise<ImageData> {
   const contents = await platform.artifacts.read(session, { artifactId: image.artifactId, owner });
   if (contents.descriptor.sha256 !== image.sha256) refuse("INVALID_STATE", `The image "${image.fileName}" no longer matches its file.`);
-  return { artifactId: image.artifactId, mediaType: contents.descriptor.mediaType, fileName: image.fileName, data: base64(contents.bytes) };
+  return { artifactId: image.artifactId, mediaType: imageMediaType(contents.descriptor.mediaType, image), fileName: image.fileName, data: base64(contents.bytes) };
 }
 
 /** The frozen images of these template versions, by file. */
@@ -95,9 +108,14 @@ function addImage(entity: "Template" | "Document", table: string): ModuleOperati
       const found = await rows<{ id: string }>(trx, `select id from erp.${table} where tenant_id = app.current_tenant() and id = $1::uuid for share`, [id]);
       if (!found.length) refuse("NOT_FOUND", `The ${entity.toLowerCase()} does not exist.`);
       const bound = await platform.artifacts.bind(session, { artifactId, expectedArtifactVersion: expected as number, owner: { entity, id } });
-      if (!IMAGE_TYPES.has(bound.mediaType)) refuse("VALIDATION", "Upload a PNG, JPEG, WebP or SVG image.");
       if (bound.byteSize > MAX_IMAGE_BYTES) refuse("VALIDATION", "An image may be at most 5 MB.");
-      return bound;
+      let mediaType = bound.mediaType;
+      if (mediaType === "text/plain") {
+        const contents = await platform.artifacts.read(session, { artifactId, owner: { entity, id } });
+        if (isSvgText(contents.bytes)) mediaType = "image/svg+xml";
+      }
+      if (!IMAGE_TYPES.has(mediaType)) refuse("VALIDATION", "Upload a PNG, JPEG, WebP or SVG image.");
+      return { ...bound, mediaType };
     });
     const value: ImageValue = { artifactId: descriptor.artifactId, sha256: descriptor.sha256, mediaType: descriptor.mediaType, fileName: descriptor.fileName };
     return { value };
@@ -124,7 +142,7 @@ export async function freezeTemplateImages(context: PublishFollowerContext): Pro
       throw operationFailure({ code: "INVALID_STATE", message: `The image "${image.fileName}" is not a file of this template; upload it again.`, retryable: false });
     }
     if (contents.descriptor.sha256 !== image.sha256) refuse("INVALID_STATE", `The image "${image.fileName}" no longer matches its file.`);
-    const data = { mediaType: contents.descriptor.mediaType, data: base64(contents.bytes) };
+    const data = { mediaType: imageMediaType(contents.descriptor.mediaType, image), data: base64(contents.bytes) };
     await rows(transaction, `insert into erp.template_version_images
         (id, tenant_id, template_version_id, artifact_id, sha256, media_type, file_name, data)
       values (gen_random_uuid(), app.current_tenant(), $1::uuid, $2, $3, $4, $5, $6)

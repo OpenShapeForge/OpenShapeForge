@@ -85,7 +85,8 @@ const FIELD_BLOCKS = ["TextBlock", "TextColumns", "ImageBlock", "SpacerBlock"] a
 /** Files outlive one platform: an editor's upload is what a reader's render reads. */
 const stagedArtifacts: Staged[] = [];
 const artifactOwners = new Map<string, { entity: string; id: string }>();
-const MEDIA_TYPES: Record<string, string> = { svg: "image/svg+xml", png: "image/png", jpg: "image/jpeg", webp: "image/webp", json: "application/json" };
+// Storage recognises SVG only as text, as osf-plugin-storage does.
+const MEDIA_TYPES: Record<string, string> = { svg: "text/plain", png: "image/png", jpg: "image/jpeg", webp: "image/webp", json: "application/json" };
 
 export function platformFor(who: Session) {
   let active: Transaction<DB> | undefined;

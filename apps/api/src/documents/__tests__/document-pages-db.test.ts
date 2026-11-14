@@ -208,5 +208,7 @@ describe("document pages against PostgreSQL", () => {
     await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, "values", region) values
       (${randomUUID()}::uuid, ${tenant}::uuid, ${other.variant}::uuid, 10, 'ImageBlock', ${jsonbLiteral({ asset: own, width: 10, height: 10 })}, 'body')`.execute(privileged());
     await fails(publishTemplate(context, other.template), "INVALID_STATE");
+    // Text that is not an SVG is not an image, whatever its name says.
+    await fails(upload(handlers, context, "Template", other.template, "just some text"), "VALIDATION");
   });
 });

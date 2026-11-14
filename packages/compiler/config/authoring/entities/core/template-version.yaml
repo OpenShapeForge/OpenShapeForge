@@ -16,7 +16,7 @@ authorization:
     create: [Templates.Manage]
     update: [Templates.Manage]
     delete: [Templates.Manage]
-displayTemplate: "{{versionNumber}}"
+displayTemplate: "v{{versionNumber}}"
 indexes:
   - { name: template_versions_tenant_number_uidx, fields: [tenantId, template, versionNumber], unique: true }
 fields:

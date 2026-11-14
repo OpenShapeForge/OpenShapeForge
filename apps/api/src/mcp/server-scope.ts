@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { rememberDiagnosticServer } from "./diagnostics/observer.js";
 /**
  * The base of one MCP session's server, resolved once per session: the
  * locale, the SDK server with its instructions, the tables and operations
@@ -111,6 +112,24 @@ function createServerScopePrologue(input: {
   const allAgentSkills = projectAgentSkills([BUILTIN_AGENT_SKILL_MODULE, ...runtimeModules]);
   const prompts = projectPrompts(runtimeModules);
   const skillsForSession = () => visibleAgentSkills(allAgentSkills, session.roles);
+  const diagnosticInstructions = input.includeInstructions === false ? "" : buildServerInstructions({
+      opening,
+      hasConnectors: catalogDerivedTools.some((entry) => entry.connect),
+      oauthCallbackUrl: oauthCallbackUrlForInstructions(),
+      // The words this deployment uses for its records: the authored label
+      // of every entity this session can reach, in the person's language.
+      vocabulary: entitiesForSession(session, tables).map(({ entity }) => ({
+        entity: entity.entity,
+        label: entityTitle(entity, locale) ?? entity.title,
+        description: entityDescription(entity, locale),
+      })),
+      locale,
+      client: sessionClientOf(session),
+      skills: skillsForSession().map(({ entry }) => ({ uri: entry.uri, description: entry.frontmatter.description })),
+      peopleAndAccess: sessionMayInviteEmployees(session),
+    }) + (operationToolProjection.mode === "searchable"
+      ? ` Use ${searchableOperationToolNames.search} to discover entity CRUD, integration management and published services. A word query returns ranked short summaries; follow nextCursor to continue. A compact tools/list is not the full capability catalog. Call ${searchableOperationToolNames.search} with only operationId set to the chosen id to read its full contract, including its exact input schema (no result means this session cannot use it), then execute that id with ${searchableOperationToolNames.execute}. Run required prerequisites through the same executor. When a guide names a tool absent from tools/list, find its canonical Operation instead: for example, osf_create with entity Connection means Connection.create, and osf_list with entity Adapter means Adapter.list. Operations declaring interaction.secureInput or confidential output use the separate secure executor when it is advertised; never send secret values through the ordinary executor. Confidential output is disclosed only in the private app after the person submits it; app-only completion tools and their results must never be relayed into chat. Ordinary Operations use ${searchableOperationToolNames.execute} without opening an app. Private configuration may pause; its resumeWith Operation is the read to poll through the executor.`
+      : "");
   const server = new Server({ ...SERVER_INFO, ...(input.serverIcons ? { icons: input.serverIcons } : {}) }, {
     capabilities: {
       // listChanged is advertised only when the tool list can actually change
@@ -129,25 +148,9 @@ function createServerScopePrologue(input: {
     // The server owns the OAuth redirect URL, so it states it rather than
     // leaving assistants to ask the person for a value only this process
     // knows; without a public origin it says that, instead of failing.
-    instructions: input.includeInstructions === false ? "" : buildServerInstructions({
-      opening,
-      hasConnectors: catalogDerivedTools.some((entry) => entry.connect),
-      oauthCallbackUrl: oauthCallbackUrlForInstructions(),
-      // The words this deployment uses for its records: the authored label
-      // of every entity this session can reach, in the person's language.
-      vocabulary: entitiesForSession(session, tables).map(({ entity }) => ({
-        entity: entity.entity,
-        label: entityTitle(entity, locale) ?? entity.title,
-        description: entityDescription(entity, locale),
-      })),
-      locale,
-      client: sessionClientOf(session),
-      skills: skillsForSession().map(({ entry }) => ({ uri: entry.uri, description: entry.frontmatter.description })),
-      peopleAndAccess: sessionMayInviteEmployees(session),
-    }) + (operationToolProjection.mode === "searchable"
-      ? ` Use ${searchableOperationToolNames.search} to discover entity CRUD, integration management and published services. A word query returns ranked short summaries; follow nextCursor to continue. A compact tools/list is not the full capability catalog. Call ${searchableOperationToolNames.search} with only operationId set to the chosen id to read its full contract, including its exact input schema (no result means this session cannot use it), then execute that id with ${searchableOperationToolNames.execute}. Run required prerequisites through the same executor. When a guide names a tool absent from tools/list, find its canonical Operation instead: for example, osf_create with entity Connection means Connection.create, and osf_list with entity Adapter means Adapter.list. Operations declaring interaction.secureInput or confidential output use the separate secure executor when it is advertised; never send secret values through the ordinary executor. Confidential output is disclosed only in the private app after the person submits it; app-only completion tools and their results must never be relayed into chat. Ordinary Operations use ${searchableOperationToolNames.execute} without opening an app. Private configuration may pause; its resumeWith Operation is the read to poll through the executor.`
-      : ""),
+    instructions: diagnosticInstructions,
   });
+  rememberDiagnosticServer(server, diagnosticInstructions);
   const hasArtifactStorage = runtimeModules.some((module) => module.artifactStorage !== undefined);
   // Read on the per-entity schemas, not the compact generic listing, whose
   // stubs no longer carry the upload marker of an entity's own fields.

@@ -779,6 +779,8 @@ export type RuntimeConnectionResolution =
       message: string };
 
 export type PluginPlatformServices = {
+  /** Diagnostic journal access requires a live verified tenant session and McpInsights.Manage. */
+  readonly mcpDiagnostics?: import("./diagnostics.js").RuntimeMcpDiagnosticServices<PluginSessionContext>;
   readonly readProgress?: RuntimeReadProgressServices<PluginSessionContext>;
   /**
    * What the host's declarative Service engine enforces (see

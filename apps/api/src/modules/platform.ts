@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { diagnosticServices } from "../mcp/diagnostics/services.js";
+import { observeDiagnosticOperation } from "../mcp/diagnostics/observer.js";
 /** Core-owned services made available to reviewed runtime modules. */
 import { createConnectionUseGrantServices } from "./connection-use-grants.js";
 import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
@@ -538,6 +540,7 @@ export class ModulePlatformRuntime {
       },
     });
     this.services = {
+      mcpDiagnostics: diagnosticServices((session) => this.#acceptsScopedSession(session)),
       readProgress: {
         report: (session, snapshot) => this.#acceptsScopedSession(session)
           ? this.#readProgress.report(session, snapshot) : Promise.resolve(false),
@@ -1211,6 +1214,7 @@ export class ModulePlatformRuntime {
     }
     const staticOperation = this.#staticOperations.get(operationId);
     if (staticOperation) {
+      observeDiagnosticOperation(staticOperation.definition);
       return staticOperation.available(session)
         ? staticOperation.definition
         : undefined;
@@ -1255,6 +1259,7 @@ export class ModulePlatformRuntime {
       (candidate) => candidate.id === request.operation.id,
     );
     if (entityOperation && !controlSession) {
+      observeDiagnosticOperation(entityOperation);
       if (entityOperation.intent !== request.operation.intent) {
         return {
           error: {
@@ -1371,6 +1376,7 @@ export class ModulePlatformRuntime {
     // A keyed Operation declares its canonical input field. All transports may
     // supply that field; an explicit transport key still takes precedence and
     // the provider rejects a conflicting input value before admitting effects.
+    observeDiagnosticOperation(match.definition);
     const idempotency = match.definition.reliability.idempotency;
     if (idempotency.mode === "keyed" && !request.idempotencyKey && idempotency.inputField) {
       const inputKey = request.input?.[idempotency.inputField];

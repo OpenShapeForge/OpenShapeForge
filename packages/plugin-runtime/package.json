@@ -19,7 +19,8 @@
     "./principals": "./src/principals.ts",
     "./secrets": "./src/secrets.ts",
     "./read-progress": "./src/read-progress.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./diagnostics": "./src/diagnostics.ts"
   },
   "files": [
     "src",

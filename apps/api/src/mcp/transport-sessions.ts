@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { bindDiagnosticSession, observeMcpHttp } from "./diagnostics/observer.js";
 import { SessionCapacity } from "./session-capacity.js";
 /**
  * The stateful MCP transport sessions and their request handler. Split out
@@ -134,6 +135,7 @@ export function createTransportSessions(input: {
   ): Promise<void> => {
     void reply.header("vary", SHORT_ADDRESS_VARY);
     const { db, session, resource } = await requireMcpSession(request);
+    bindDiagnosticSession(session);
     rememberSessionClient(session, clientInfoFromEnvelopeBody(request.body));
     const includeInstructions = requestNeedsInstructions(request.body);
     if (await handleModernMcpRequest(request, reply, async () => {
@@ -198,6 +200,7 @@ export function createTransportSessions(input: {
           "Authorization changed; reinitialize the MCP session.",
         );
       }
+      bindDiagnosticSession(session, existing.server);
       existing.lastSeenMs = Date.now();
       // The credential this request carried is newer than the one the
       // session was initialized with — the client refreshes silently — so
@@ -339,7 +342,7 @@ export function createTransportSessions(input: {
   };
 
   const handleMcpRequest = (request: FastifyRequest, reply: FastifyReply): Promise<void> =>
-    withLiveRequestSignal(request, reply, () => handleAuthenticatedMcpRequest(request, reply));
+    observeMcpHttp(request, reply, () => withLiveRequestSignal(request, reply, () => handleAuthenticatedMcpRequest(request, reply)));
 
   return { handleMcpRequest, notifyDerivedDefinitionChanged };
 }

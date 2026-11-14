@@ -161,17 +161,29 @@ export class McpDiagnosticObserver{
  }
 }
 
-/** Observes bytes already being written; never consumes or tees a response stream. */
-export function observeMcpHttp<T>(request:FastifyRequest,reply:FastifyReply,work:()=>Promise<T>,journal=configuredDiagnosticJournal()):Promise<T>{
- if(!journal)return work();
- const observer=new McpDiagnosticObserver(journal,request.body,request.headers,request.method);
+const requests=new WeakMap<FastifyRequest,{observer:McpDiagnosticObserver}>();
+/** Attach before body parsing, so malformed JSON and parser limits are recorded too. */
+export function beginMcpDiagnosticRequest(request:FastifyRequest,reply:FastifyReply,journal=configuredDiagnosticJournal()):void{
+ if(!journal||requests.has(request))return;
+ const holder={observer:new McpDiagnosticObserver(journal,undefined,request.headers,request.method)};
+ if(request.method==='POST')holder.observer.event.truncated.push('/arguments/unparsedBody');
+ requests.set(request,holder);
  const response=reply.raw as ServerResponse;
  const originalWrite=response.write,originalEnd=response.end;
- const note=(chunk:unknown)=>{if(typeof chunk==='string'||chunk instanceof Uint8Array){observer.headers(response.statusCode,String(response.getHeader('content-type')??''));observer.chunk(chunk);}};
+ const note=(chunk:unknown)=>{if(typeof chunk==='string'||chunk instanceof Uint8Array){holder.observer.headers(response.statusCode,String(response.getHeader('content-type')??''));holder.observer.chunk(chunk);}};
  // Preserve overloads, callbacks, return values and backpressure of Node's exact methods.
  response.write=function(this:ServerResponse,...args:Parameters<ServerResponse['write']>){note(args[0]);return Reflect.apply(originalWrite,this,args);} as ServerResponse['write'];
  response.end=function(this:ServerResponse,...args:Parameters<ServerResponse['end']>){note(args[0]);return Reflect.apply(originalEnd,this,args);} as ServerResponse['end'];
- response.once('finish',()=>{observer.headers(response.statusCode,String(response.getHeader('content-type')??''));observer.finish(false);});
- response.once('close',()=>observer.finish(!response.writableFinished));
+ response.once('finish',()=>{holder.observer.headers(response.statusCode,String(response.getHeader('content-type')??''));holder.observer.finish(false);});
+ response.once('close',()=>holder.observer.finish(!response.writableFinished));
+}
+export function observeMcpDiagnosticHttpError(request:FastifyRequest,error:unknown):void{requests.get(request)?.observer.failure(error);}
+/** Observes bytes already being written; never consumes or tees a response stream. */
+export function observeMcpHttp<T>(request:FastifyRequest,reply:FastifyReply,work:()=>Promise<T>,journal=configuredDiagnosticJournal()):Promise<T>{
+ if(!journal)return work();
+ beginMcpDiagnosticRequest(request,reply,journal);
+ const holder=requests.get(request)!;
+ holder.observer=new McpDiagnosticObserver(journal,request.body,request.headers,request.method,holder.observer.started);
+ const observer=holder.observer;
  return observers.run(observer,async()=>{try{return await work();}catch(cause){observer.failure(cause);throw cause;}});
 }

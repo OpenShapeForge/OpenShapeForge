@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { beginMcpDiagnosticRequest, observeMcpDiagnosticHttpError } from "./diagnostics/observer.js";
 /**
  * Generated MCP server — the third transport, beside GraphQL and REST.
  *
@@ -347,6 +348,8 @@ export function registerGeneratedMcpServer(
 
     instance.route({
       url: MCP_MOUNT_PATH,
+      onRequest: async (request,reply) => beginMcpDiagnosticRequest(request,reply),
+      onError: async (request,_reply,error) => observeMcpDiagnosticHttpError(request,error),
       method: ["GET", "POST", "DELETE"],
       handler: (request, reply) => request.method === "POST"
         ? withRuntimeSpan("mcp.request", () => handleMcpRequest(request, reply))
@@ -359,6 +362,8 @@ export function registerGeneratedMcpServer(
     for (const url of ORGANIZATION_MCP_ROUTES) {
       instance.route({
         url,
+        onRequest: async (request,reply) => beginMcpDiagnosticRequest(request,reply),
+        onError: async (request,_reply,error) => observeMcpDiagnosticHttpError(request,error),
         method: ["GET", "POST", "DELETE"],
         handler: (request, reply) => request.method === "POST"
         ? withRuntimeSpan("mcp.request", () => handleMcpRequest(request, reply))

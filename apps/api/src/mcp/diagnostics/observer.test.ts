@@ -7,7 +7,7 @@ import {join}from"node:path";
 import {randomUUID}from"node:crypto";
 import type {TrustedSessionContext}from"../../auth/trusted-context.js";
 import {DiagnosticJournal}from"./journal.js";
-import {McpDiagnosticObserver,observeMcpHttp,bindDiagnosticSession,observeDiagnosticContract,diagnosticHeaders}from"./observer.js";
+import {McpDiagnosticObserver,observeMcpHttp,bindDiagnosticSession,observeDiagnosticContract,diagnosticHeaders,beginMcpDiagnosticRequest,observeMcpDiagnosticHttpError}from"./observer.js";
 import {diagnosticServices}from"./services.js";
 const tenant=randomUUID(),actor=randomUUID();
 const session={tenantId:tenant,userId:actor,roles:[]} as unknown as TrustedSessionContext;
@@ -71,5 +71,18 @@ test("a masked HTTP error retains the underlying server failure in the separate 
   const response=await fetch(app.listeningOrigin+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:1,method:'tools/call',params:{name:'sample',arguments:{amount:'bad'}}})});
   expect(await response.text()).not.toContain('Synthetic parser');
   const batch=await j.read(tenant);expect(JSON.stringify(batch)).toContain('Synthetic parser failed at amount');expect(batch.events.at(-1)!.outcome).toBe('runtime_error');
+ }finally{await app.close();await rm(path,{recursive:true,force:true});}
+});
+
+test("malformed JSON is observed before the MCP handler or tenant authentication can run",async()=>{
+ const path=await mkdtemp(join(tmpdir(),"osf-mcp-parse-")),journal=new DiagnosticJournal(path),app=Fastify();let called=false;
+ app.route({url:'/mcp',method:'POST',onRequest:async(request,reply)=>beginMcpDiagnosticRequest(request,reply,journal),onError:async(request,_reply,error)=>observeMcpDiagnosticHttpError(request,error),handler:async()=>{called=true;return {};}});
+ try{
+  await app.listen({port:0,host:'127.0.0.1'});
+  const response=await fetch(app.listeningOrigin+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:'{"broken":'});await response.text();
+  expect(response.status).toBe(400);expect(called).toBe(false);await journal.flush();
+  const {readFile,readdir}=await import('node:fs/promises');const names=await readdir(join(path,'unassigned'));
+  const record=JSON.parse(await readFile(join(path,'unassigned',names[0]!),'utf8'));
+  expect(record.event.httpStatus).toBe(400);expect(record.event.tenantId).toBeNull();expect(record.event.truncated).toContain('/arguments/unparsedBody');expect(record.event.metadata.serverFailures.length).toBeGreaterThan(0);
  }finally{await app.close();await rm(path,{recursive:true,force:true});}
 });

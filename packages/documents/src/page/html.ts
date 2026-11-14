@@ -354,6 +354,19 @@ function sectionHtml(input: PagedDocumentInput, section: PageSettings, header: r
 }
 
 const scopedKey = (scope: string, layout: string) => `${scope}\n${layout}`;
+/**
+ * A header or footer of a section: its own template's, else that of the
+ * nearest including template with one for the same layout. An included
+ * chapter with pages of its own but no header of its own keeps the
+ * document's header; one with a header of its own (a cover) keeps that.
+ */
+function inherited(region: ReadonlyMap<string, PageBlock[]>, scope: string, layout: string): PageBlock[] {
+  for (let at = scope; ; at = at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "") {
+    const found = region.get(scopedKey(at, layout));
+    if (found) return found;
+    if (!at) return [];
+  }
+}
 
 /** One section of a paged document: its page settings and the blocks of its three zones. */
 export type PagedSectionLayout = Readonly<{ settings: PageSettings; header: readonly PageBlock[]; body: readonly PageBlock[]; footer: readonly PageBlock[] }>;
@@ -410,7 +423,7 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
   }
   if (!sections.length) open("");
   return sections.filter((section, index) => section.body.length || index === sections.length - 1).map(({ scope, body, ...rest }) => ({
-    settings: rest, body, header: regions.header.get(scopedKey(scope, rest.layout)) ?? [], footer: regions.footer.get(scopedKey(scope, rest.layout)) ?? [],
+    settings: rest, body, header: inherited(regions.header, scope, rest.layout), footer: inherited(regions.footer, scope, rest.layout),
   }));
 }
 

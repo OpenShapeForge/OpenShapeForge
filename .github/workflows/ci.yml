@@ -197,6 +197,8 @@ jobs:
           src/auth/api-key/role-subset.test.ts
           src/auth/api-key/format.test.ts
           src/auth/api-key/timeout.test.ts
+          src/auth/api-key/exchange-cache.test.ts
+          src/auth/api-key/keycloak-audience.test.ts
           src/auth/__tests__/organization-binding.unit.test.ts
           src/auth/__tests__/organization-tenant-cache-key.unit.test.ts
           src/artifacts/rest-routes.test.ts

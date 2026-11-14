@@ -119,6 +119,61 @@ operations:
     effects: { data: read, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
+  variablePaths:
+    name: { en: Browse variable paths, nl: Variabelenpaden bladeren }
+    description: >-
+      What a template variable can name from a record of one entity, one step at a time: the fields of the record a
+      path leads to and the relationships it can follow next. Returns metadata only, never a record's values; reading
+      values happens when content is materialized, with the reader's own rights.
+    implementation: { type: plugin, plugin: documents, handler: variablePaths }
+    target: { scope: collection }
+    auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
+    tenancy: { mode: required }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [entity]
+        properties:
+          entity: { type: string, pattern: "^[A-Z][A-Za-z0-9]{0,127}$", x-osf-i18n: { title: { en: Entity, nl: Entiteit } } }
+          path: { type: string, maxLength: 700, x-osf-i18n: { title: { en: Path so far, nl: Pad tot nu toe } } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [entity, label, fields, relationships]
+        properties:
+          entity: { type: string, x-osf-i18n: { title: { en: Entity, nl: Entiteit } } }
+          label: { type: object, additionalProperties: { type: string }, x-osf-i18n: { title: { en: Label, nl: Label } } }
+          fields:
+            type: array
+            x-osf-i18n: { title: { en: Fields, nl: Velden } }
+            items:
+              type: object
+              additionalProperties: false
+              required: [key, label, osfType, many]
+              properties:
+                key: { type: string, x-osf-i18n: { title: { en: Key, nl: Sleutel } } }
+                label: { type: object, additionalProperties: { type: string }, x-osf-i18n: { title: { en: Label, nl: Label } } }
+                osfType: { type: string, x-osf-i18n: { title: { en: Type, nl: Type } } }
+                many: { type: boolean, x-osf-i18n: { title: { en: List, nl: Lijst } } }
+          relationships:
+            type: array
+            x-osf-i18n: { title: { en: Relationships, nl: Relaties } }
+            items:
+              type: object
+              additionalProperties: false
+              required: [key, label, target, many]
+              properties:
+                key: { type: string, x-osf-i18n: { title: { en: Key, nl: Sleutel } } }
+                label: { type: object, additionalProperties: { type: string }, x-osf-i18n: { title: { en: Label, nl: Label } } }
+                target: { type: string, x-osf-i18n: { title: { en: Leads to, nl: Leidt naar } } }
+                many: { type: boolean, x-osf-i18n: { title: { en: List, nl: Lijst } } }
+    errors:
+      - { status: 400, code: VALIDATION, description: The path cannot be followed from this entity. }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
   addImage:
     name: { en: Add image, nl: Beeld toevoegen }
     description: >-
@@ -210,6 +265,7 @@ interfaces:
     operations:
       images: { method: POST, path: "/api/template-content/:id/images" }
       addImage: { method: POST, path: "/api/template-content/:id/add-image" }
+      variablePaths: { method: POST, path: "/api/template-content/variable-paths" }
   graphql: {}
   mcp: { tools: generic }
   web:

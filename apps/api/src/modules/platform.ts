@@ -58,7 +58,7 @@ import { requestConnectionHttp } from "./connection-http-egress.js";
 import { connectSocket } from "./socket-egress.js";
 import { classifyDatabaseError } from "../db/database-refusals.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "./field-schemas.js";
-import { generatedEntityValues } from "./entity-value-registry.js";
+import { generatedEntityGraph, generatedEntityValues } from "./entity-value-registry.js";
 import { generatedVersioning } from "./versioning-registry.js";
 import { extensionRegistry } from "../operations/entity/extensions/registry.js";
 import { extensionSnapshot } from "../operations/entity/extensions/snapshot.js";
@@ -702,6 +702,7 @@ export class ModulePlatformRuntime {
         json: runtimeJsonSchemas,
         entityValues: generatedEntityValues,
         versioning: generatedVersioning,
+        get entityGraph() { return generatedEntityGraph(); },
         ...(extensionRegistry.entityNames().length ? {
           extensions: {
             snapshot: (transaction: unknown, session: unknown, entityName: string, row: Readonly<Record<string, unknown>>) =>

@@ -1014,3 +1014,52 @@ describe("template composition", () => {
     );
   });
 });
+
+describe("variables that follow a record parameter", () => {
+  const deal = { deal: { baseType: "string", required: true, relationship: { target: "Deal" } } } as const;
+  function followed(body: string, resolveVariablePath?: ContentResolvers["resolveVariablePath"]) {
+    const f = fixture([text("t", body)]);
+    f.versions.root = { ...f.versions.root!, parameters: deal };
+    const resolvers = { ...f.resolvers, ...(resolveVariablePath ? { resolveVariablePath } : {}) };
+    return () => materializeTemplateContent({ ...f.request, parameters: { deal: "deal-1" } }, f.registry, resolvers);
+  }
+  const customerName: ContentResolvers["resolveVariablePath"] = (root, path, context) => {
+    expect(context.tenantId).toBe(tenantId);
+    expect(root).toEqual({ entity: "Deal", id: "deal-1" });
+    return { root, path, shape: { baseType: "string", osfType: "string", nullable: true }, value: path === "relationId.name" ? "Nova Harbor" : "Elise",
+      sources: [{ entity: "Deal", id: "deal-1", versionId: "d1" }, { entity: "Relation", id: "rel-1", versionId: "r1" }] };
+  };
+
+  test("reads the path through the adapter and freezes it, once per record and path", async () => {
+    let calls = 0;
+    const snapshot = await followed("Dear {{local.deal.relationId.contactPersonId.firstName}} of {{local.deal.relationId.name}} ({{local.deal.relationId.name}})",
+      (root, path, context) => { calls++; return customerName!(root, path, context); })();
+    expect(snapshot.blocks[0]!.values).toMatchObject({ body: "Dear Elise of Nova Harbor (Nova Harbor)" });
+    expect(calls).toBe(2);
+    expect(Object.keys(snapshot.paths ?? {}).sort()).toEqual(["Deal:deal-1:relationId.contactPersonId.firstName", "Deal:deal-1:relationId.name"]);
+    expect(snapshot.paths!["Deal:deal-1:relationId.name"]!.sources.map((source) => source.entity)).toEqual(["Deal", "Relation"]);
+  });
+
+  test("a snapshot without followed variables has no paths key, so existing hashes stay", async () => {
+    const f = fixture();
+    expect("paths" in await f.run()).toBe(false);
+  });
+
+  test("refuses when the runtime cannot follow records", async () => {
+    await rejectsCode(followed("{{local.deal.relationId.name}}")(), "DEPENDENCY_UNRESOLVED");
+  });
+
+  test("refuses to follow a parameter that is not a record", async () => {
+    const f = fixture([text("t", "{{local.name.length}}")]);
+    await rejectsCode(materializeTemplateContent(f.request, f.registry, { ...f.resolvers, resolveVariablePath: customerName }), "INVALID_VALUE");
+  });
+
+  test("refuses a resolver that answers for another record", async () => {
+    await rejectsCode(followed("{{local.deal.relationId.name}}", (root, path) => ({ root: { ...root, id: "other" }, path, shape: { baseType: "string" }, value: "x", sources: [] }))(), "DEPENDENCY_INVALID");
+  });
+
+  test("a list cannot be printed where one value is expected", async () => {
+    await expect(followed("{{local.deal.dealProducts.quantity}}", (root, path) => ({ root, path, shape: { baseType: "number", osfType: "decimal", cardinality: "collection" }, value: [1, 2], sources: [] }))())
+      .rejects.toBeInstanceOf(TemplateContentError);
+  });
+});

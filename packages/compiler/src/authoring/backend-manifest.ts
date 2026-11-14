@@ -1,5 +1,6 @@
 import { validateDefaultTemplates } from "./compiler/default-template.js";
 // SPDX-License-Identifier: BUSL-1.1
+import { compileEntityGraph } from "./entity-graph.js";
 import { sortablePositionColumn } from "./sortable-position.js";
 import { join, relative } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
@@ -1854,6 +1855,7 @@ export function compileAuthoringBackendManifest(
 
   const entityTables = physicalCandidates.map((candidate, index) => ({ contract: candidate.contract, table: tables[index]! }));
   const entityValues = compileFieldRelationStorage(physicalCandidates, tables, relationshipRegister, candidates);
+  const entityGraph = compileEntityGraph(physicalCandidates.map((candidate) => candidate.contract));
   const extensionRegistry = compileExtensionStorage(entityTables, tables);
   bindVersioningStorage(physicalCandidates, tables);
   bindOwnerAxes(physicalCandidates, tables);
@@ -1893,6 +1895,7 @@ export function compileAuthoringBackendManifest(
     tables: sortTablesByDependencies(tables),
     ...(entitySubtypes.length > 0 ? { entitySubtypes } : {}),
     ...(entityValues ? { entityValues } : {}),
+    entityGraph,
     ...(extensionRegistry ? { extensionRegistry } : {}),
   };
 }

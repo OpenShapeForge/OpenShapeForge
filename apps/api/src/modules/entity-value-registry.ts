@@ -84,3 +84,23 @@ export const generatedEntityValues: RuntimeEntityValueRegistry = Object.freeze({
   get: (entity, field) => readGenerated().get(entity, field),
   collection: (entity, field) => readGenerated().collection(entity, field),
 });
+
+let graph: import("@openshapeforge/operations").EntityGraph | null | undefined;
+/** The generated entity graph, or undefined when this build has none (callers fail closed). */
+export function generatedEntityGraph(): import("@openshapeforge/operations").EntityGraph | undefined {
+  if (graph === undefined) {
+    const manifest = JSON.parse(readFileSync(new URL("../generated/db/manifest.json", import.meta.url), "utf8")) as Record<string, unknown>;
+    const value = manifest.entityGraph;
+    if (value === undefined) graph = null;
+    else {
+      if (!record(value) || value.version !== 1 || !record(value.entities) ||
+          !Object.entries(value.entities).every(([name, entity]) => entityName.test(name) && record(entity) &&
+            Array.isArray(entity.fields) && Array.isArray(entity.relationships) && record(entity.operations))) {
+        throw new Error("The generated entity graph is invalid.");
+      }
+      freeze(value);
+      graph = value as unknown as import("@openshapeforge/operations").EntityGraph;
+    }
+  }
+  return graph ?? undefined;
+}

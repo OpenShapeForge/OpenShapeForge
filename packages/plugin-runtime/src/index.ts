@@ -833,6 +833,12 @@ export type PluginPlatformServices = {
     versioning?: RuntimeVersioningRegistry;
     /** Absent on hosts without extensible entities; a snapshot of an extensible head then fails closed. */
     extensions?: RuntimeExtensionSnapshotService;
+    /**
+     * Generated fields, relationships and canonical read Operations per stored
+     * entity, for `compileValuePath`. Absent on hosts without it; a caller that
+     * would follow a relationship must fail closed.
+     */
+    entityGraph?: import("@openshapeforge/operations").EntityGraph;
   };
   events: {
     append(

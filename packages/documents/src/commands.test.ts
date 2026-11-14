@@ -191,6 +191,7 @@ describe("Document commands", () => {
       "addTemplateImage",
       "documentImages",
       "templateImages",
+      "variablePaths",
       "resolveDocumentTheme",
       "setDefaultDocumentTheme",
     ]);

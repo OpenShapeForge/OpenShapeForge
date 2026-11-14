@@ -1048,6 +1048,8 @@ function renderManifestJson(
       // Entities that accept tenant-defined fields, their side tables and the
       // reverse reference map; the runtime validates it on load.
       ...(manifest.extensionRegistry ? { extensionRegistry: manifest.extensionRegistry } : {}),
+      // Fields, relationships and read Operations per entity, for value paths.
+      ...(manifest.entityGraph ? { entityGraph: manifest.entityGraph } : {}),
       tables,
       ...(entitySubtypes.length > 0 ? { entitySubtypes } : {}),
     },

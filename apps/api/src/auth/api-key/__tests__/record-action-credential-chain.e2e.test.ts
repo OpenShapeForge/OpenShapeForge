@@ -472,7 +472,7 @@ describe("a credential this realm issued, resolved and dispatched", () => {
     `.execute(admin.db)).rows[0]!;
     const token = await exchangeForToken({ issuer: ISSUER!, keyring: provisioning.keyring }, integrationId,
       backing.keycloak_client_id, { ciphertext: backing.client_secret_ciphertext,
-        keyId: backing.client_secret_key_id, algorithm: backing.client_secret_algorithm });
+        keyId: backing.client_secret_key_id, algorithm: backing.client_secret_algorithm }, "e2e");
     expect(typeof token).toBe("string");
     const claims = JSON.parse(Buffer.from(token!.split(".")[1]!, "base64url").toString("utf8")) as { aud?: string | string[] };
     expect(Array.isArray(claims.aud) ? claims.aud : [claims.aud]).toContain(API_AUDIENCE);

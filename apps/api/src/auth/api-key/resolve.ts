@@ -90,6 +90,7 @@ export async function resolveApiKeySession(
       key.integrationId,
       key.keycloakClientId,
       key.clientSecret,
+      key.rolesVersion,
     );
   } catch (error) {
     // A decryption failure or an unreachable token endpoint. Neither is the

@@ -46,6 +46,7 @@ import {
   pageIntegrations,
   pageKeys,
   revokeKey,
+  updateIntegrationRoles,
   type ApiKeyServiceDeps,
   type ListedIntegration,
   type ListedKey,
@@ -146,9 +147,10 @@ function declaredServiceFailure(error: unknown): ModuleOperationErrorResult {
     return declaredFailure(400, "VALIDATION", error.message);
   }
   if (error instanceof ApiKeyProvisioningError) {
-    // Only `createIntegration` mutates the realm, and only its contract
-    // declares this status; every other Operation here would be a handler
-    // contract violation if it reached this branch, which is the intent.
+    // Only `createIntegration` and `updateIntegrationRoles` mutate the realm,
+    // and only their contracts declare this status; every other Operation
+    // here would be a handler contract violation if it reached this branch,
+    // which is the intent.
     return declaredFailure(502, "PROVISIONING_FAILED", error.message);
   }
   throw error;
@@ -204,7 +206,7 @@ function lifetime(value: unknown): { expiresInDays?: number } {
   return { expiresInDays: value };
 }
 
-/** Role names, with empty allowed only for an integration's initial roles. */
+/** Role names, with empty allowed only for an integration's own role set. */
 function roleList(value: unknown, name: string, allowEmpty = false): string[] {
   if (!Array.isArray(value) || value.some((role) => typeof role !== "string")) {
     throw new ApiKeyValidationError(`${name} must be a list of role names.`);
@@ -509,6 +511,22 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
     try {
       const revoked = await revokeKey(resolved.deps, resolved.session, text(input.id));
       return { value: { id: revoked.id, status: "revoked", revokedAt: revoked.revokedAt.toISOString() } };
+    } catch (error) {
+      return declaredServiceFailure(error);
+    }
+  },
+
+  async updateIntegrationRoles(input, context): Promise<ModuleOperationResult> {
+    const resolved = resolve(context);
+    if (isFailure(resolved)) return resolved;
+    try {
+      // The full new set; the ceiling bounds it inside the service, exactly as
+      // at creation.
+      const updated = await updateIntegrationRoles(resolved.deps, resolved.session, {
+        integrationId: text(input.integrationId),
+        roles: roleList(input.roles, "roles", true),
+      });
+      return { value: projectIntegration(updated) };
     } catch (error) {
       return declaredServiceFailure(error);
     }

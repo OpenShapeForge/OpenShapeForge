@@ -360,11 +360,17 @@ const scopedKey = (scope: string, layout: string) => `${scope}\n${layout}`;
  * chapter with pages of its own but no header of its own keeps the
  * document's header; one with a header of its own (a cover) keeps that.
  */
-function inherited(region: ReadonlyMap<string, PageBlock[]>, scope: string, layout: string): PageBlock[] {
+/**
+ * The header and footer of a section: its own template's, or else the nearest enclosing template's. A template
+ * that brings a header or a footer brings its whole page frame, so a letter with only a footer of its own does
+ * not take the document's header.
+ */
+function pageFrame(regions: { header: ReadonlyMap<string, PageBlock[]>; footer: ReadonlyMap<string, PageBlock[]> }, scope: string, layout: string): { header: PageBlock[]; footer: PageBlock[] } {
   for (let at = scope; ; at = at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "") {
-    const found = region.get(scopedKey(at, layout));
-    if (found) return found;
-    if (!at) return [];
+    const key = scopedKey(at, layout);
+    const header = regions.header.get(key), footer = regions.footer.get(key);
+    if (header || footer) return { header: header ?? [], footer: footer ?? [] };
+    if (!at) return { header: [], footer: [] };
   }
 }
 
@@ -423,7 +429,7 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
   }
   if (!sections.length) open("");
   return sections.filter((section, index) => section.body.length || index === sections.length - 1).map(({ scope, body, ...rest }) => ({
-    settings: rest, body, header: inherited(regions.header, scope, rest.layout), footer: inherited(regions.footer, scope, rest.layout),
+    settings: rest, body, ...pageFrame(regions, scope, rest.layout),
   }));
 }
 

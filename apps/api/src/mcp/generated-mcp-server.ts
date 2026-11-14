@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { configuredDiagnosticJournal } from "./diagnostics/journal.js";
 import { beginMcpDiagnosticRequest, observeMcpDiagnosticHttpError } from "./diagnostics/observer.js";
 /**
  * Generated MCP server — the third transport, beside GraphQL and REST.
@@ -283,6 +284,7 @@ export function registerGeneratedMcpServer(
   // the global JSON parser with a raw-buffer passthrough for GraphQL Yoga, and
   // the SDK transport needs a parsed body.
   void app.register(async (instance) => {
+    instance.addHook("onClose",async()=>{await configuredDiagnosticJournal()?.flush();});
     instance.removeContentTypeParser("application/json");
     instance.addContentTypeParser(
       "application/json",

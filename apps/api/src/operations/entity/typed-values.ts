@@ -1,3 +1,4 @@
+import { observeDiagnosticSecret } from "../../mcp/diagnostics/observer.js";
 import { deriveTypedValue } from "./derive-typed-values.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
@@ -276,6 +277,7 @@ export async function prepareTypedValueWrite(
       validationCurrent[value.name] = current?.[metadata.documentColumn] ?? null;
     }
     if (metadata.encrypted && secretDefinition(stored)) {
+      observeDiagnosticSecret(output.get(value));
       const existing = current?.[value.name];
       if (validationCurrent && isRecord(existing)) validationCurrent[value.name] = decryptSecret(secretKeys(), secretScope(table,session,String(id)), value.name, existing as StoredSecret);
       if (output.get(value) === SECRET_SET_SENTINEL) {

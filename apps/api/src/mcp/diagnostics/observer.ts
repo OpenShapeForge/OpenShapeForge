@@ -23,6 +23,7 @@ export function bindDiagnosticSession(session:TrustedSessionContext,server?:obje
 }
 export function observeDiagnosticContract(tool:unknown,operation?:unknown,server?:object):void{observers.getStore()?.contract(tool,operation,server?instructions.get(server):undefined);}
 export function observeDiagnosticOperation(operation:unknown):void{observers.getStore()?.operation(operation);}
+export function observeDiagnosticSecret(value:unknown):void{if(typeof value==='string'&&value.length)observers.getStore()?.secret(value);}
 export function observeDiagnosticFailure(cause:unknown):void{observers.getStore()?.failure(cause);}
 /** Retain extensible client context, while credential-bearing headers never enter the capture. */
 export function diagnosticHeaders(headers:FastifyRequest['headers']):Record<string,unknown>{
@@ -43,6 +44,8 @@ export class McpDiagnosticObserver{
  private contractParts:{tool:unknown;operation:unknown;instructions:string|null}={tool:null,operation:null,instructions:null};
  private rawArguments:unknown;
  private confidentialPaths=new Set<string>();
+ private secretValues=new Set<string>();
+ secret(value:string):void{this.secretValues.add(value);}
  private rootOperation:{id:string|null;component:string|null}|null=null;
  private nestedOperations:unknown[]=[];
  constructor(readonly journal:DiagnosticJournal,body:unknown,headers:FastifyRequest['headers'],method:string,readonly started=Date.now()){
@@ -77,8 +80,15 @@ export class McpDiagnosticObserver{
   };
   walk(schema,'',0);
   if(interaction?.secureInput)paths.push('');
-  for(const path of paths)this.confidentialPaths.add(path);
-  if(this.confidentialPaths.size){const secured=capture(this.rawArguments,{confidentialPaths:[...this.confidentialPaths]});this.event.arguments=secured.value;this.event.redactions.push(...secured.redactions.map(p=>`/arguments${p}`));}
+  for(const path of paths){
+   this.confidentialPaths.add(path);
+   // The searchable executor wraps canonical Operation input in its input property.
+   if(definition&&object(this.rawArguments)?.operationId===definition.id)this.confidentialPaths.add(`/input${path}`);
+  }
+  if(this.confidentialPaths.size){
+   const remember=(value:unknown,depth:number)=>{if(depth>64)return;if(typeof value==='string')this.secret(value);else if(Array.isArray(value))value.forEach(child=>remember(child,depth+1));else if(object(value))Object.values(object(value)!).forEach(child=>remember(child,depth+1));};
+   for(const path of this.confidentialPaths){let value=this.rawArguments;for(const key of path.split('/').slice(1))value=object(value)?.[key.replaceAll('~1','/').replaceAll('~0','~')];remember(value,0);}
+   const secured=capture(this.rawArguments,{confidentialPaths:[...this.confidentialPaths]});this.event.arguments=secured.value;this.event.redactions.push(...secured.redactions.map(p=>`/arguments${p}`));}
   const content=capture(this.contractParts,{schemaDocument:true});
   const snapshot:ContractSnapshot={tenantId:this.event.tenantId,hash:fingerprint(content.value),capturedAt:new Date().toISOString(),content:content.value};
   this.snapshots.push(snapshot);this.event.contractHash=snapshot.hash;
@@ -100,7 +110,21 @@ export class McpDiagnosticObserver{
   else this.rootOperation={id:this.event.operationId,component:this.event.component};
   if(this.event.operationId?.startsWith('mcp-insights.'))this.event.systemOrigin=true;
  }
- private persist():void{this.journal.record(this.event,this.snapshots);}
+ private persist():void{
+  if(!this.secretValues.size){this.journal.record(this.event,this.snapshots);return;}
+  const secretValues=[...this.secretValues];
+  // Runtime-resolved typed secrets can occur in validation errors and text mirrors too.
+  const secured=capture(this.event,{secretValues,schemaDocument:true,maxBytes:32*1024*1024});
+  const event=secured.value as unknown as UsageEvent;
+  event.redactions.push(...secured.redactions);
+  event.truncated.push(...secured.truncated);
+  const snapshots=this.snapshots.map(snapshot=>{
+   const content=capture(snapshot.content,{secretValues,schemaDocument:true});
+   return {...snapshot,content:content.value,hash:fingerprint(content.value)};
+  });
+  if(snapshots.length)event.contractHash=snapshots.at(-1)!.hash;
+  this.journal.record(event,snapshots);
+ }
  failure(cause:unknown):void{
   const plain=(value:unknown,depth:number):unknown=>value instanceof Error?{...value,name:value.name,message:value.message,stack:value.stack,cause:depth<6?plain(value.cause,depth+1):'[cause depth limit]'}:value;
   const captured=capture(plain(cause,0));
@@ -137,7 +161,24 @@ export class McpDiagnosticObserver{
   this.result(result??{error});this.event.delivery='prepared';this.persist();
  }
  private result(raw:unknown):void{
-  const captured=capture(raw);this.event.result=captured.value;
+  // These are app-only disclosure channels, never diagnostic payloads. The
+  // configuration URL itself is a bearer capability, unlike the signed-in URL.
+  const privatePaths:string[]=[];
+  const visit=(value:unknown,path:string,depth:number)=>{
+   if(depth>64)return;
+   if(Array.isArray(value)){value.forEach((child,index)=>visit(child,`${path}/${index}`,depth+1));return;}
+   const node=object(value);if(!node)return;
+   const meta=object(node._meta);
+   if(meta){
+    for(const key of ['privateOutput','configurationUrl'])if(meta[key]!==undefined)privatePaths.push(`${path}/_meta/${key}`);
+    const fields=object(meta.privateOutput)?.fields;
+    if(Array.isArray(fields))for(const field of fields){const value=object(field)?.value;if(typeof value==='string')this.secret(value);}
+    if(typeof meta.configurationUrl==='string')this.secret(meta.configurationUrl);
+   }
+   for(const [key,child]of Object.entries(node))visit(child,`${path}/${key.replaceAll('~','~0').replaceAll('/','~1')}`,depth+1);
+  };
+  visit(raw,'',0);
+  const captured=capture(raw,{confidentialPaths:privatePaths,secretValues:[...this.secretValues]});this.event.result=captured.value;
   this.event.redactions.push(...captured.redactions.map(p=>`/result${p}`));this.event.truncated.push(...captured.truncated.map(p=>`/result${p}`));
   const result=object(raw),terminal=object(result?.result),payload=result?.status==='completed'&&terminal?terminal:result;
   const structured=object(payload?.structuredContent),error=object(payload?.error)??object(structured?.error);

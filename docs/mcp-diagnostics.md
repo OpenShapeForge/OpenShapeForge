@@ -24,6 +24,10 @@ Offered tool and canonical Operation definitions and server instructions are
 content-addressed snapshots. Nested definitions remain context of the external
 call rather than extra user calls. Credentials, schema-marked private input,
 credential-bearing headers and JSON text copies of secret fields are removed.
+App-only private output and bearer configuration URLs are excluded. Runtime
+resolution of encrypted typed values adds plaintext to a request-scoped secret
+filter, including validation errors and mirrored text. Ordinary MCP metadata
+remains available. Graceful API shutdown drains pending journal writes.
 Ordinary personal and business context is retained. Captures have explicit byte
 and depth loss markers rather than silent clipping.
 

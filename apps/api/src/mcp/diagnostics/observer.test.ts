@@ -86,3 +86,32 @@ test("malformed JSON is observed before the MCP handler or tenant authentication
   expect(record.event.httpStatus).toBe(400);expect(record.event.tenantId).toBeNull();expect(record.event.truncated).toContain('/arguments/unparsedBody');expect(record.event.metadata.serverFailures.length).toBeGreaterThan(0);
  }finally{await app.close();await rm(path,{recursive:true,force:true});}
 });
+
+test("private app disclosure and dynamically resolved typed secrets never enter the journal",async()=>{
+ const path=await mkdtemp(join(tmpdir(),"osf-mcp-private-")),j=new DiagnosticJournal(path),app=Fastify();
+ const {observeDiagnosticSecret}=await import('./observer.js');
+ app.post('/mcp',async(request,reply)=>observeMcpHttp(request,reply,async()=>{
+  bindDiagnosticSession(session);
+  observeDiagnosticSecret('opaque-typed-value-1814');
+  const result={content:[{type:'text',text:JSON.stringify({ordinary:'retain evidence',mirror:'opaque-app-value-1814'})}],structuredContent:{ordinary:'retain evidence'},_meta:{clientExtra:{unexpected:'keep'},privateOutput:{fields:[{path:'/value',value:'opaque-app-value-1814'}]},configurationUrl:'https://test.invalid/configuration/opaque-capability-1814'}};
+  reply.type('application/json').send({id:1,result});
+ },j));
+ try{
+  await app.listen({port:0,host:'127.0.0.1'});
+  const response=await fetch(app.listeningOrigin+'/mcp',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:1,method:'tools/call',params:{name:'sample',arguments:{value:'opaque-typed-value-1814',other:'retain arguments'}}})});
+  expect(await response.text()).toContain('opaque-app-value-1814');
+  const batch=await j.read(tenant),text=JSON.stringify(batch);
+  for(const secret of ['opaque-typed-value-1814','opaque-app-value-1814','opaque-capability-1814'])expect(text).not.toContain(secret);
+  expect(text).toContain('retain arguments');expect(text).toContain('retain evidence');expect(text).toContain('unexpected');
+ }finally{await app.close();await rm(path,{recursive:true,force:true});}
+});
+
+test("canonical confidential input paths also apply inside the searchable executor envelope",async()=>{
+ const path=await mkdtemp(join(tmpdir(),"osf-mcp-private-")),j=new DiagnosticJournal(path);
+ try{
+  const observer=new McpDiagnosticObserver(j,{method:'tools/call',params:{name:'osf_execute',arguments:{operationId:'sample.update',input:{ordinary:'keep',value:'opaque-schema-value'}}}},{},'POST');
+  observer.bind(session);observer.operation({id:'sample.update',input:{schema:{properties:{value:{writeOnly:true}}}}});
+  observer.headers(200,'application/json');observer.chunk(JSON.stringify({id:1,result:{content:[]}}));observer.finish();
+  const batch=await j.read(tenant);expect(JSON.stringify(batch)).not.toContain('opaque-schema-value');expect(JSON.stringify(batch)).toContain('keep');
+ }finally{await rm(path,{recursive:true,force:true});}
+});

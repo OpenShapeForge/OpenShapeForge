@@ -63,7 +63,7 @@ const credentialValue = /(?:\bBearer\s+[A-Za-z0-9._~+\/-]+=*|-----BEGIN (?:[A-Z 
 export type Captured = { value: Json; redactions: string[]; truncated: string[] };
 
 /** Ordinary values, including unknown keys, survive. Confidential paths come from the contract. */
-export function capture(value: unknown, options: { confidentialPaths?: readonly string[]; maxBytes?: number; maxDepth?: number; schemaDocument?: boolean } = {}): Captured {
+export function capture(value: unknown, options: { confidentialPaths?: readonly string[]; secretValues?: readonly string[]; maxBytes?: number; maxDepth?: number; schemaDocument?: boolean } = {}): Captured {
   const redactions: string[] = [], truncated: string[] = [];
   const privatePaths = new Set(options.confidentialPaths ?? []);
   let remaining = options.maxBytes ?? 8 * 1024 * 1024;
@@ -86,7 +86,7 @@ export function capture(value: unknown, options: { confidentialPaths?: readonly 
           return beforeRedactions===redactions.length&&beforeTruncated===truncated.length?input:JSON.stringify(cleaned);
         } catch { /* Ordinary non-JSON text follows the same value rules below. */ }
       }
-      if (credentialValue.test(input)) { redactions.push(path); return { redacted: true, type: "string" }; }
+      if (credentialValue.test(input) || options.secretValues?.some(secret => secret.length > 0 && input.includes(secret))) { redactions.push(path); return { redacted: true, type: "string" }; }
       const bytes = Buffer.byteLength(input);
       if (bytes > remaining) { truncated.push(path); remaining = 0; return { truncated: true, originalBytes: bytes }; }
       remaining -= bytes; return input;

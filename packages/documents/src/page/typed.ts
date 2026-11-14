@@ -36,12 +36,12 @@ function scalar(value: unknown, schema: Schema): string | undefined {
 function table(rows: readonly unknown[], item: Schema, locale: string): string {
   const properties = isObject(item.properties) ? Object.entries(item.properties).filter((entry): entry is [string, Schema] => isObject(entry[1]) && typeOf(entry[1]) !== "object" && typeOf(entry[1]) !== "array") : [];
   if (!properties.length) return "";
-  const head = properties.map(([key, schema], index) => `<th${index ? ' class="n"' : ""}>${escape(schemaLabel(schema, key, locale))}</th>`).join("");
+  const head = properties.map(([key, schema], index) => `<div role="columnheader" class="c${index ? " n" : ""}">${escape(schemaLabel(schema, key, locale))}</div>`).join("");
   const body = rows.map((row) => {
     if (!isObject(row)) return fail("A table row is not an object.");
-    return `<tr>${properties.map(([key, schema], index) => `<td${index ? ' class="n"' : ""}>${scalar(row[key], schema) ?? ""}</td>`).join("")}</tr>`;
+    return `<div role="row" class="r">${properties.map(([key, schema], index) => `<div role="cell" class="c${index ? " n" : ""}">${scalar(row[key], schema) ?? ""}</div>`).join("")}</div>`;
   }).join("");
-  return `<table class="t"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  return `<div role="table" class="t"><div role="row" class="r h">${head}</div>${body}</div>`;
 }
 
 function part(value: unknown, schema: Schema, key: string, locale: string, depth: number): { rows: string[]; parts: string[] } {
@@ -57,7 +57,7 @@ function part(value: unknown, schema: Schema, key: string, locale: string, depth
       const inner = part(value[name], child, name, locale, depth + 1);
       rows.push(...inner.rows); parts.push(...inner.parts);
     }
-    const kv = rows.length ? `<table class="kv"><tbody>${rows.join("")}</tbody></table>` : "";
+    const kv = rows.length ? `<div role="table" class="t kv">${rows.join("")}</div>` : "";
     return depth === 0 ? { rows: [], parts: [kv, ...parts].filter(Boolean) } : { rows: [], parts: rows.length || parts.length ? [`<div class="th">${label}</div>${kv}${parts.join("")}`] : [] };
   }
   if (type === "array") {
@@ -68,7 +68,7 @@ function part(value: unknown, schema: Schema, key: string, locale: string, depth
     return { rows: [], parts: inner ? [`<div class="th">${label}</div>${inner}`] : [] };
   }
   const text = scalar(value, schema);
-  return { rows: text === undefined ? [] : [`<tr><td>${label}</td><td class="n">${text}</td></tr>`], parts: [] };
+  return { rows: text === undefined ? [] : [`<div role="row" class="r"><div role="rowheader" class="c">${label}</div><div role="cell" class="c n">${text}</div></div>`], parts: [] };
 }
 
 /** The block's HTML: `schema` is the materialization's value schema, `value` the materialized value. */
@@ -77,8 +77,13 @@ export function typedPageBlock(value: unknown, schema: unknown, locale: string, 
   return `<div class="b typed ${styleClass}">${part(value, schema as Schema, "", locale, 0).parts.join("")}</div>`;
 }
 
+/**
+ * Tables are rows of blocks, not `<table>`: a print engine breaks a nested
+ * table across pages without the room the page keeps for its footer, and it
+ * keeps that room between ordinary blocks. A row never breaks.
+ */
 export const TYPED_BLOCK_RULES = [
-  ".typed>*+*{margin-top:12px}", ".typed table{width:100%;border-collapse:collapse}", ".typed th,.typed td{text-align:left;padding:6px 0;vertical-align:top}",
-  ".typed .n{text-align:right;padding-left:16px}", ".typed thead th{font-weight:600;border-bottom:1px solid currentColor}", ".typed tbody td{border-bottom:1px solid rgba(0,0,0,.12)}",
-  ".typed .th{font-weight:600;margin-bottom:4px}", ".typed ul{margin:0;padding-left:1.2em}",
+  ".typed>*+*{margin-top:12px}", ".typed .r{display:flex;break-inside:avoid;border-bottom:1px solid rgba(0,0,0,.12)}",
+  ".typed .c{flex:1 1 0;min-width:0;padding:6px 0;text-align:left;overflow-wrap:anywhere}", ".typed .c:first-child{flex-grow:2}", ".typed .n{text-align:right;padding-left:16px}",
+  ".typed .r.h{font-weight:600;border-bottom-color:currentColor}", ".typed .th{font-weight:600;margin-bottom:4px}", ".typed ul{margin:0;padding-left:1.2em}",
 ];

@@ -18,12 +18,12 @@ const block = (locale = "nl") => ({ id: "p", definitionKey: "QuotePricing", valu
 describe("a materialized block on a page", () => {
   test("draws lists as tables with the authored labels and objects as label rows", () => {
     const html = renderPageBlock(block(), DEFAULT_PAGE_DESIGN);
-    expect(html).toContain("<th>Product</th><th class=\"n\">Bedrag</th>");
+    expect(html).toContain('<div role="columnheader" class="c">Product</div><div role="columnheader" class="c n">Bedrag</div>');
     expect(html).toContain("Security &#60;assessment&#62;");
-    expect(html).toContain("<td>Eenmalig</td><td class=\"n\">€ 10.200,00</td>");
+    expect(html).toContain('<div role="rowheader" class="c">Eenmalig</div><div role="cell" class="c n">€ 10.200,00</div>');
     expect(html).not.toContain("Contractwaarde");
     expect(html).not.toContain("Looptijd");
-    expect(renderPageBlock(block("en"), DEFAULT_PAGE_DESIGN)).toContain(">Amount</th>");
+    expect(renderPageBlock(block("en"), DEFAULT_PAGE_DESIGN)).toContain(">Amount</div>");
   });
   test("refuses a value that does not match its schema", () => {
     expect(() => renderPageBlock({ ...block(), values: { lines: "x" } }, DEFAULT_PAGE_DESIGN)).toThrow();

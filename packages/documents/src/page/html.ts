@@ -119,10 +119,13 @@ function textColumns(block: PageBlock, design: PageDesign): string {
     const width = v[`${slot}Width`] === undefined || v[`${slot}Width`] === null ? undefined : px(v[`${slot}Width`], `TextColumns.${slot}Width`, 1, 4000);
     const grows = width === undefined && (distribution === "fill" || slot === "left");
     const flex = width !== undefined ? `flex:0 0 ${width}px;` : grows ? "flex:1 1 0;min-width:0;" : "flex:0 0 auto;white-space:nowrap;";
-    const cell = `<div class="text ${styleClass(design, v[`${slot}Style`], `TextColumns.${slot}Style`)}"${slot === "right" ? ' style="white-space:nowrap"' : ""}>${paragraphs(markdown)}</div>`;
-    slots.push(`<div class="col${slot === "right" ? " end" : ""}" style="${flex}">${cell}</div>`);
+    // Filled columns share the row as equal, wrapping columns 24px apart (the Figma letter's address and
+    // reference); fitted columns keep the right one on one line against the right edge.
+    const end = slot === "right" && distribution === "fit";
+    const cell = `<div class="text ${styleClass(design, v[`${slot}Style`], `TextColumns.${slot}Style`)}"${end ? ' style="white-space:nowrap"' : ""}>${paragraphs(markdown)}</div>`;
+    slots.push(`<div class="col${end ? " end" : ""}" style="${flex}">${cell}</div>`);
   }
-  return `<div class="b cols" style="align-items:${items};gap:${distribution === "fit" ? 16 : 0}px">${slots.join("")}</div>`;
+  return `<div class="b cols" style="align-items:${items};gap:${distribution === "fit" ? 16 : 24}px">${slots.join("")}</div>`;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -292,7 +295,7 @@ function textStyleRules(design: PageDesign, scope: string): string {
 function blockRules(scope: string): string {
   return [
     ".b{flex:none;width:100%}", ".cols{display:flex}", ".col{display:flex}", ".col.end{justify-content:flex-end}", ".image{display:flex}", ".image img{display:block}",
-    ".text{overflow-wrap:break-word}", ...TYPED_BLOCK_RULES, ".text p{margin:0}", ".text p+p{margin-top:1em}",
+    ".text{overflow-wrap:break-word}", ...TYPED_BLOCK_RULES, ".text p{margin:0;white-space:pre-wrap}", ".text p+p{margin-top:1em}",
   ].map((rule) => scope + rule).join("");
 }
 

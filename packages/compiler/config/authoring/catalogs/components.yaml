@@ -202,6 +202,13 @@ components:
     description: Read-only display for single field definitions and field-definition lists.
     props: []
 
+  TemplateValues:
+    kind: field
+    description: A record's local values under the labels its linked template version declares, each shown by its own
+      type. Reads the definitions from the version the record links (versionField on versionEntity) and the field of
+      that version's template that declares them (definitionsField).
+    props: [versionField, versionEntity, definitionsField]
+
   NumberInput:
     kind: field
     description: Numeric input with optional min/max and unit display.

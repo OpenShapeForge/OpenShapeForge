@@ -95,6 +95,17 @@ describe("buildPagedDocument", () => {
     expect(html).toContain("justify-content:flex-end;min-height:calc((var(--h) - var(--top) - var(--m)) / 2 - var(--bg))");
   });
 
+  test("an included chapter with pages but no header of its own keeps the document's header and footer", () => {
+    const sections = layoutPagedSections([
+      block("h", "TextBlock", { markdown: "Head" }, "header"), block("f", "TextBlock", { markdown: "Foot" }, "footer"),
+      block("a", "TextBlock", { markdown: "Letter" }),
+      { ...block("c", "TextBlock", { markdown: "Chapter" }), scope: "ch" },
+      { ...block("ch-h", "TextBlock", { markdown: "Cover head" }, "header"), scope: "cover" }, { ...block("cv", "TextBlock", { markdown: "Cover" }), scope: "cover" },
+    ], design, { "": {}, ch: {}, cover: {} });
+    expect(sections.map((section) => [section.body[0]!.id, section.header.map((entry) => entry.id), section.footer.map((entry) => entry.id)]))
+      .toEqual([["a", ["h"], ["f"]], ["c", ["h"], ["f"]], ["cv", ["ch-h"], ["f"]]]);
+  });
+
   test("an included template without page settings flows inside the including page", () => {
     const paged = build([block("a", "TextBlock", { markdown: "Before" }), { ...block("c", "TextBlock", { markdown: "Clause" }), scope: "include-1" }, block("b", "TextBlock", { markdown: "After" })]);
     expect(paged.sections).toHaveLength(1);

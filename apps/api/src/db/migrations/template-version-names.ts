@@ -6,7 +6,8 @@ import { entityColumnName, entityTableName } from "../manifest-lookup.js";
 /**
  * A template version reads as "Voorstel · v7": its display template names the
  * template beside the number. The name is the one the frozen content carries
- * (`snapshot.head.row.name`), so it is as immutable as the version itself and
+ * (`snapshot.head.row.name`; a version imported before snapshots had a head
+ * carries it as `snapshot.name`), so it is as immutable as the version itself and
  * a later rename of the template never rewrites what an older version says.
  * The generic snapshot publish (packages/versioning) inserts without it; this
  * trigger fills it on insert, and the backfill gives versions published
@@ -24,7 +25,7 @@ export async function applyTemplateVersionNames(db: OpenShapeForgeDatabase): Pro
     set search_path = pg_catalog, pg_temp
     as $function$
     begin
-      new.${sql.ref(name)} := nullif(btrim(new.${sql.ref(snapshot)} #>> '{head,row,name}'), '');
+      new.${sql.ref(name)} := coalesce(nullif(btrim(new.${sql.ref(snapshot)} #>> '{head,row,name}'), ''), nullif(btrim(new.${sql.ref(snapshot)} ->> 'name'), ''));
       return new;
     end;
     $function$;
@@ -37,8 +38,8 @@ export async function applyTemplateVersionNames(db: OpenShapeForgeDatabase): Pro
 
   await sql`
     update ${versions}
-       set ${sql.ref(name)} = nullif(btrim(${sql.ref(snapshot)} #>> '{head,row,name}'), '')
+       set ${sql.ref(name)} = coalesce(nullif(btrim(${sql.ref(snapshot)} #>> '{head,row,name}'), ''), nullif(btrim(${sql.ref(snapshot)} ->> 'name'), ''))
      where ${sql.ref(name)} is null
-       and nullif(btrim(${sql.ref(snapshot)} #>> '{head,row,name}'), '') is not null
+       and coalesce(nullif(btrim(${sql.ref(snapshot)} #>> '{head,row,name}'), ''), nullif(btrim(${sql.ref(snapshot)} ->> 'name'), '')) is not null
   `.execute(db);
 }

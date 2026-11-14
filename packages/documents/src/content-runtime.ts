@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { compileValuePath, isFieldVariableMode, operationFailure, schemaVariableShape, ValuePathError } from "@openshapeforge/operations";
+import { compileValuePath, isFieldVariableMode, operationFailure, schemaVariableShape, valuePathChoices, ValuePathError } from "@openshapeforge/operations";
 import type { ModuleOperationContext, ModuleOperationHandler, RuntimeEntityValueCarrier, RuntimeEntityValueDefinition, RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import { materializeTemplateContent } from "./content/materialize.js";
@@ -490,4 +490,32 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
   } catch (error) {
     contentFailure(error);
   }
+};
+
+/**
+ * Template.variablePaths: one step of the path an author is building, from
+ * the generated entity graph — the fields where `path` leads and the
+ * relationships it can follow next. Metadata only; no record is read.
+ */
+export const variablePaths: ModuleOperationHandler = async (input, context) => {
+  const { platform } = contextServices(context);
+  const graph = platform.schemas.entityGraph;
+  if (!graph) refuse("OPERATION_UNAVAILABLE", "This runtime cannot follow record variables.");
+  const entity = text(input.entity, "entity");
+  const path = input.path === undefined || input.path === "" ? "" : text(input.path, "path");
+  let choices: ReturnType<typeof valuePathChoices>;
+  try {
+    choices = valuePathChoices(graph!, entity, path);
+  } catch (error) {
+    if (error instanceof ValuePathError) refuse("VALIDATION", error.message);
+    throw error;
+  }
+  return {
+    value: {
+      entity: choices.entity,
+      label: { ...graph!.entities[choices.entity]!.label },
+      fields: choices.fields.map((field) => ({ key: field.key, label: { ...field.label }, osfType: field.osfType, many: field.cardinality === "collection" })),
+      relationships: choices.relationships.map((item) => ({ key: item.key, label: { ...item.label }, target: item.target, many: item.kind === "hasMany" })),
+    },
+  };
 };

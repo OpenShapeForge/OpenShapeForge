@@ -2,7 +2,7 @@
 import type { RuntimeModule } from "@openshapeforge/plugin-runtime";
 import { registerPublishFollower } from "@openshapeforge/versioning/followers";
 import { createDocument, createDocumentVersion } from "./commands.js";
-import { composeTemplate, materializeFields, materializeTemplate } from "./content-runtime.js";
+import { composeTemplate, materializeFields, materializeTemplate, variablePaths } from "./content-runtime.js";
 import { createDocumentFromTemplate } from "./template-document.js";
 import { renderSnapshot } from "./render-runtime.js";
 import { followTemplatePublish } from "./document-follow.js";
@@ -46,6 +46,7 @@ const module = {
     addTemplateImage,
     documentImages,
     templateImages,
+    variablePaths,
     resolveDocumentTheme,
     setDefaultDocumentTheme,
   },

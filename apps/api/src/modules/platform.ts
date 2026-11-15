@@ -1214,7 +1214,6 @@ export class ModulePlatformRuntime {
     }
     const staticOperation = this.#staticOperations.get(operationId);
     if (staticOperation) {
-      observeDiagnosticOperation(staticOperation.definition);
       return staticOperation.available(session)
         ? staticOperation.definition
         : undefined;
@@ -1304,6 +1303,7 @@ export class ModulePlatformRuntime {
           },
         };
       }
+      observeDiagnosticOperation(staticOperation.definition);
       const contractFailure = contractPreconditionFailure(
         staticOperation.definition,
         request,

@@ -29,7 +29,7 @@ test("real HTTP writes preserve an HTTP-200 tool failure, raw values and safe cl
   const batch=await j.read(tenant),e=batch.events.find(event=>event.delivery==='sent')!;
   expect(e.httpStatus).toBe(200);expect(e.outcome).toBe('input_error');expect(e.delivery).toBe('sent');
   expect(e.arguments).toEqual({range:'wrong',unknownField:'valuable context',apiKey:{redacted:true,type:'string'}});
-  expect(e.metadata.newClientField).toEqual({value:'retain'});expect(e.correlation.model).toBe('test');expect(e.correlation.conversationId).toBe('chat-A');
+  expect(e.metadata.newClientField).toEqual({value:'retain'});expect(e.metadata.serverReceipt).toMatchObject({observerVersion:2,collectorId:j.collectorId});expect(e.correlation.model).toBe('test');expect(e.correlation.conversationId).toBe('chat-A');
   expect(JSON.stringify(batch)).not.toContain('real-looking-private-value');
   expect(batch.snapshots.some(s=>JSON.stringify(s.content).includes('Exact offered words'))).toBe(true);
  }finally{await app.close();await rm(path,{recursive:true,force:true});}

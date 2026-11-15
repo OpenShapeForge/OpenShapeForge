@@ -51,7 +51,7 @@ export class McpDiagnosticObserver{
  constructor(readonly journal:DiagnosticJournal,body:unknown,headers:FastifyRequest['headers'],method:string,readonly started=Date.now()){
   const envelope=object(body),params=object(envelope?.params),meta=object(params?._meta)??{};
   const safeHeaders=diagnosticHeaders(headers);
-  const captured=capture({...safeHeaders,...meta,transportHeaders:safeHeaders,requestEnvelope:{...envelope,params:{...params,arguments:undefined}}});
+  const captured=capture({...safeHeaders,...meta,transportHeaders:safeHeaders,requestEnvelope:{...envelope,params:{...params,arguments:undefined}},serverReceipt:{observerVersion:2,build:process.env.OPENSHAPEFORGE_BUILD_REVISION??null,release:process.env.OPENSHAPEFORGE_BUILD_RELEASE??null,collectorId:journal.collectorId}});
   const metadata=object(captured.value) as ObjectValue;
   const argument=capture(params?.arguments??params??body);
   this.rawArguments=params?.arguments??params??body;
@@ -105,7 +105,7 @@ export class McpDiagnosticObserver{
   this.contract(null,undefined);
   if(typeof definition.id==='string')this.event.operationId=definition.id;
   const implementation=object(definition.implementation);
-  this.event.component=string(implementation?.plugin)??string(definition.owner)??this.event.component;
+  this.event.component=string(implementation?.plugin)??string(definition.owner)??this.event.component??"openshapeforge";
   if(this.rootOperation){this.event.operationId=this.rootOperation.id;this.event.component=this.rootOperation.component;}
   else this.rootOperation={id:this.event.operationId,component:this.event.component};
   if(this.event.operationId?.startsWith('mcp-insights.'))this.event.systemOrigin=true;

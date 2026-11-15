@@ -20,6 +20,8 @@ export type Correlation = {
   turnStartedAt?: number;
 };
 export type UsageEvent = {
+  /** Server-owned capture provenance; absent on pre-release, unverified captures. */
+  captureVersion?: number;
   id: string;
   tenantId: string | null;
   actorId: string | null;

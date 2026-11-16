@@ -200,3 +200,24 @@ describe("buildPagedDocument", () => {
     expect(() => buildPagedDocument({ title: "t", locale: "en", blocks: [], fonts: [], design: { ...design, colors: { foreground: "red;} body{display:none" } } })).toThrow(PagedDocumentError);
   });
 });
+
+test('section boundaries own their frame, while page boundaries repeat it', () => {
+  const pages = layoutPagedSections([
+    block('header', 'TextBlock', {markdown:'First header'}, 'header'),
+    block('before', 'TextBlock', {markdown:'First body'}),
+    block('section', 'SectionBreak', {layout:'letter',name:'Letter',format:'a5',margin:20}),
+    {...block('letter-head','TextBlock',{markdown:'Letter header'},'header'),layoutKey:'letter'},
+    {...block('letter-foot','TextBlock',{markdown:'Letter footer'},'footer'),layoutKey:'letter'},
+    block('letter1','TextBlock',{markdown:'First letter page'}),
+    block('next','PageBreak',{}),
+    block('letter2','TextBlock',{markdown:'Second letter page'}),
+    block('rest','SectionBreak',{layout:'rest',name:'Rest',format:'a4'}),
+    block('last','TextBlock',{markdown:'Rest of document'}),
+  ], design);
+  expect(pages).toHaveLength(4);
+  expect(pages.map(p=>p.header.map(b=>b.id))).toEqual([['header'],['letter-head'],['letter-head'],[]]);
+  expect(pages.map(p=>p.footer.map(b=>b.id))).toEqual([[],['letter-foot'],['letter-foot'],[]]);
+  expect(pages[1]!.settings.page).toEqual({width:559,height:794});
+  expect(pages[2]!.settings).toEqual(pages[1]!.settings);
+  expect(pages[3]!.settings.page).toEqual({width:794,height:1123});
+});

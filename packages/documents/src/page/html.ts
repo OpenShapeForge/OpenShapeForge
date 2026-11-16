@@ -187,13 +187,14 @@ function spacerBlock(block: PageBlock): string {
 }
 
 /** Block types the paged renderer lays out itself. A section break is not one: it decides the page, it is not on it. */
-export const PAGE_BLOCK_KEYS = ["TextBlock", "TextColumns", "ImageBlock", "SpacerBlock"] as const;
+export const PAGE_BLOCK_KEYS = ["TextBlock", "TextColumns", "ImageBlock", "SpacerBlock", "SectionBreak", "PageBreak"] as const;
 
 /**
  * One block as the HTML both the print engine and an editor preview show.
  * Text is escaped and every key is checked, so the result is safe to insert.
  */
 export function renderPageBlock(block: PageBlock, design: PageDesign): string {
+  if (block.definitionKey === "SectionBreak" || block.definitionKey === "PageBreak") return "";
   return renderBlock(block, design);
 }
 
@@ -242,7 +243,6 @@ export function withPaletteColors(values: Readonly<Record<string, unknown>>, pal
   return found ? { ...rest, background: found } : rest;
 }
 
-type Section = PageSettings & { scope: string; body: PageBlock[] };
 
 /**
  * Reads a variant's page fields into page settings, with the defaults a
@@ -384,7 +384,7 @@ function pageFrame(regions: { header: ReadonlyMap<string, PageBlock[]>; footer: 
 }
 
 /** One section of a paged document: its page settings and the blocks of its three zones. */
-export type PagedSectionLayout = Readonly<{ settings: PageSettings; header: readonly PageBlock[]; body: readonly PageBlock[]; footer: readonly PageBlock[] }>;
+export type PagedSectionLayout = Readonly<{ settings: PageSettings; header: readonly PageBlock[]; body: readonly PageBlock[]; footer: readonly PageBlock[]; sectionId?: string; sectionName?: string }>;
 
 /**
  * Splits the ordered blocks into sections.
@@ -403,42 +403,50 @@ export type PagedSectionLayout = Readonly<{ settings: PageSettings; header: read
 export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDesign, layouts: PageLayouts = {}): PagedSectionLayout[] {
   if (blocks.length > MAX_BLOCKS) fail(`A paged document holds at most ${MAX_BLOCKS} blocks.`);
   const regions = { header: new Map<string, PageBlock[]>(), footer: new Map<string, PageBlock[]>() };
-  const sections: Section[] = [];
-  const owners = new Map<string, string>();
   const owner = (scope: string): string => {
-    const known = owners.get(scope);
-    if (known !== undefined) return known;
     let at = scope;
     while (at && !Object.hasOwn(layouts, at)) at = at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "";
-    owners.set(scope, at);
     return at;
   };
-  const settings = new Map<string, PageSettings>();
-  const settingsOf = (scope: string): PageSettings => {
-    const known = settings.get(scope);
-    if (known) return known;
-    const made = pageSettings(Object.hasOwn(layouts, scope) ? layouts[scope] : undefined, design);
-    settings.set(scope, made);
-    return made;
+  type State = { scope: string; settings: PageSettings; sectionId?: string; sectionName?: string };
+  const states = new Map<string, State>();
+  const stateFor = (scope: string): State => {
+    let state = states.get(scope);
+    if (!state) { state = { scope, settings: pageSettings(layouts[scope], design) }; states.set(scope, state); }
+    return state;
   };
-  const open = (scope: string) => { sections.push({ ...settingsOf(scope), scope, body: [] }); };
+  const sections: (State & { body: PageBlock[]; force: boolean })[] = [];
+  const open = (state: State, force = false) => { const section = { ...state, body: [] as PageBlock[], force }; sections.push(section); return section; };
+  // Headers and footers are records, keyed by their declared section layout. They may occur anywhere in stored order.
   for (const block of blocks) {
     const scope = block.scope ?? "";
     if (scope.length > 4000 || /[\n]/.test(scope)) fail("A block scope is not valid.");
-    const owned = owner(scope);
-    if (block.region === "body") {
-      if (sections.at(-1)?.scope !== owned) open(owned);
-      sections.at(-1)!.body.push(block);
-      continue;
-    }
-    const key = scopedKey(owned, optionalKey(block.layoutKey, "Block.layoutKey") ?? DEFAULT_PAGE_LAYOUT);
+    if (block.region === "body") continue;
+    if (block.definitionKey === "SectionBreak" || block.definitionKey === "PageBreak") fail("A page or section break belongs in the body.");
+    const key = scopedKey(owner(scope), optionalKey(block.layoutKey, "Block.layoutKey") ?? DEFAULT_PAGE_LAYOUT);
     const list = regions[block.region].get(key) ?? [];
-    list.push(block);
-    regions[block.region].set(key, list);
+    list.push(block); regions[block.region].set(key, list);
   }
-  if (!sections.length) open("");
-  return sections.filter((section, index) => section.body.length || index === sections.length - 1).map(({ scope, body, ...rest }) => ({
-    settings: rest, body, ...pageFrame(regions, scope, rest.layout),
+  for (const block of blocks) {
+    if (block.region !== "body") continue;
+    const owned = owner(block.scope ?? "");
+    let state = stateFor(owned);
+    if (block.definitionKey === "SectionBreak") {
+      const layout = optionalKey(block.values.layout, "SectionBreak.layout");
+      if (!layout || layout === DEFAULT_PAGE_LAYOUT) fail("A section must name its own layout.");
+      if (sections.some(section => section.scope === owned && section.settings.layout === layout)) fail("Section layouts must be unique within a template.");
+      const settings = pageSettings({ ...(layouts[owned] ?? {}), ...block.values, layout }, design);
+      state = { scope: owned, settings, sectionId: block.id, ...(typeof block.values.name === "string" ? { sectionName: block.values.name } : {}) };
+      states.set(owned, state); open(state, true); continue;
+    }
+    if (block.definitionKey === "PageBreak") { open(state, true); continue; }
+    const last = sections.at(-1);
+    const section = last && last.scope === owned && last.sectionId === state.sectionId ? last : open(state);
+    section.body.push(block);
+  }
+  if (!sections.length) open(stateFor(""), true);
+  return sections.filter(section => section.body.length || section.force).map(({ scope, settings, body, sectionId, sectionName }) => ({
+    settings, body, ...pageFrame(regions, scope, settings.layout), ...(sectionId ? { sectionId } : {}), ...(sectionName ? { sectionName } : {}),
   }));
 }
 

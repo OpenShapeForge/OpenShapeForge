@@ -15,7 +15,7 @@ import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { REST_MOUNT_PATH, REST_OPENAPI_PATH } from "../generated-rest-routes.js";
 import { createRow } from "../../graphql/__tests__/e2e/entity-factory.js";
-import { isEntityBackedCreate, operationIdFor } from "../../graphql/__tests__/e2e/operations.js";
+import { createOffersField, isEntityBackedCreate, operationIdFor } from "../../graphql/__tests__/e2e/operations.js";
 import { expectCreateWriteRefusal, expectWriterRefusal, operationWrittenReferences, plantReference, referenceTarget } from "../../graphql/__tests__/e2e/reference-policy.js";
 import { describe, registerSuiteLifecycle, tenantA, tenantB, test, type Identity } from "../../graphql/__tests__/e2e/harness.js";
 import {
@@ -47,7 +47,7 @@ describe("REST transport: operation-written references", () => {
 
         const body = await buildCreateBody(table, tenantA);
         const refusedCreate = await rest(tenantA, "POST", base, { ...body, [field]: randomUUID() });
-        expect(refusedCreate.status).toBe(writers.includes(operationIdFor(table, "create")) ? 404 : 400);
+        expect(refusedCreate.status).toBe(writers.includes(operationIdFor(table, "create")) && createOffersField(table, field) ? 404 : 400);
         expectCreateWriteRefusal(table, refusedCreate.body.error, field, writers);
 
         const id = await createRestRow(table, tenantA, body);

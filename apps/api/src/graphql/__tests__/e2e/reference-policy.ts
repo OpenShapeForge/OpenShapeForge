@@ -7,7 +7,7 @@
  * read from the manifest or the database — never from an entity's name.
  */
 import { expect } from "bun:test";
-import { operationIdFor } from "./operations.js";
+import { createOffersField, operationIdFor } from "./operations.js";
 import { sql } from "kysely";
 import { isOperationWrittenColumn } from "../../../operations/entity/write-policy.js";
 import { eligibleTablesByName, fieldName, foreignKeyTargets, referencingRows } from "./entity-factory.js";
@@ -97,7 +97,7 @@ export function expectCreateWriteRefusal(
   field: string,
   writers: readonly string[],
 ): void {
-  if (writers.includes(operationIdFor(table, "create"))) {
+  if (writers.includes(operationIdFor(table, "create")) && createOffersField(table, field)) {
     const text = refusal.text ?? `${refusal.code ?? ""} ${refusal.message ?? ""}`;
     expect(text).toContain("NOT_FOUND");
     return;

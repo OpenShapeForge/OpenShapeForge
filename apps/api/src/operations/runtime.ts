@@ -841,7 +841,7 @@ export function requireOperationAuthorization(
     throw new HttpError(403, "FORBIDDEN", "Session lacks a required operation role group.");
   }
   const requiredScopes = operation.auth.scopes ?? [];
-  if (session.credential === "api-key" && requiredScopes.length > 0) {
+  if ((session.credential === "api-key" || session.credential === "personal-key") && requiredScopes.length > 0) {
     throw new HttpError(403, "INSUFFICIENT_SCOPE", "OAuth-scoped operations cannot be invoked with an API key.");
   }
   const heldScopes = new Set(session.oauthScopes ?? []);

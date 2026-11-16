@@ -487,6 +487,28 @@ export class KeycloakAdmin {
     }
   }
 
+  /**
+   * A realm user as a personal key needs to know it: whether the account may
+   * still sign in, and the group paths a login's `groups` claim would carry.
+   * Null when the user no longer exists. Read-only; `manage-users` covers it.
+   */
+  async userAccount(userId: string): Promise<{ enabled: boolean; groups: string[] } | null> {
+    const response = await this.request("GET", `/users/${encodeURIComponent(userId)}`);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new KeycloakAdminError(`Reading realm user failed with ${response.status}.`, response.status);
+    }
+    const user = (await response.json()) as { enabled?: unknown };
+    const groups = await this.json<Array<{ path?: unknown }>>(
+      "GET",
+      `/users/${encodeURIComponent(userId)}/groups?briefRepresentation=true&max=1000`,
+    );
+    return {
+      enabled: user.enabled === true,
+      groups: groups.map((group) => group.path).filter((path): path is string => typeof path === "string").sort(),
+    };
+  }
+
   /** Whether a client still exists. The reconciler's "was the realm reset?" probe. */
   async clientExists(clientId: string): Promise<boolean> {
     const clients = await this.json<Array<{ id: string }>>(

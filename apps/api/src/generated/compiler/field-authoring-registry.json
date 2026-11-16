@@ -44485,6 +44485,24 @@
         "nl": "Services"
       }
     },
+    "MyPersonalApiKey": {
+      "kind": "provider",
+      "entity": "MyPersonalApiKey",
+      "baseType": "object",
+      "label": {
+        "en": "My API keys",
+        "nl": "Mijn API-sleutels"
+      }
+    },
+    "PersonalApiKey": {
+      "kind": "provider",
+      "entity": "PersonalApiKey",
+      "baseType": "object",
+      "label": {
+        "en": "Personal API keys",
+        "nl": "Persoonlijke API-sleutels"
+      }
+    },
     "RecordActionAssignment": {
       "kind": "provider",
       "entity": "RecordActionAssignment",

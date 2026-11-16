@@ -240,9 +240,10 @@ afterEach(async () => {
 describe("integration catalog Operations", () => {
   test("binds exactly the handlers the compiled catalog declares", () => {
     expect(apiKeyOperationHandlerNames()).toEqual([
-      "createIntegration", "disableIntegration", "getCredential", "getIntegration",
-      "issueCredential", "listCredentials", "listIntegrations", "revokeCredential",
-      "updateIntegrationRoles",
+      "createIntegration", "createMyPersonalKey", "disableIntegration", "getCredential",
+      "getIntegration", "getMyPersonalKey", "getPersonalKey", "issueCredential",
+      "listCredentials", "listIntegrations", "listMyPersonalKeys", "listPersonalKeys",
+      "revokeCredential", "revokeMyPersonalKey", "revokePersonalKey", "updateIntegrationRoles",
     ]);
     expect([...contracts.keys()].sort()).toEqual([...apiKeyOperationHandlerNames()]);
     expect(() => apiKeyOperationHandler({ key: "api-keys.unknown", handler: "mintEverything" }))

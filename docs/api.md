@@ -1142,6 +1142,96 @@ service account": an entity that declares a record action for integrations
 excludes `application` from its generic routes by default, so a broad role on a
 key no longer reaches the collection behind the per-record grant.
 
+### Personal API keys
+
+An integration key (above) is the ORGANIZATION's credential for an external
+party: it names an integration, runs as that integration's own service account,
+and outlives whoever created it. A personal key is the other kind: a person
+mints it for THEMSELVES, and a request made with it acts as that person.
+
+**Format and routing.** `osf_user_<lookupId>_<secret><crc>` — the integration
+format with its own prefix, so a secret scanner can tell the kinds apart and the
+session resolver routes on the prefix alone; neither kind is ever resolved by
+the other's path. The stored half is a SHA-256 hash in
+`platform.personal_api_keys`, a table of its own beside `platform.api_keys`.
+
+**What a request with one may do.** Resolution
+(`auth/api-key/personal-resolve.ts`) reads the CURRENT state on every request:
+the key row (secret, expiry, revocation, and dormancy — a key unused for 90
+days stops working), the owner's realm account (it must exist and be enabled;
+read through the provisioner's admin client, cached 30 seconds per process),
+and the owner's membership row in the tenant (it must be `linked`, read
+uncached). The roles are then computed exactly as for that person's own login —
+`personOrganizationAuthority` in `auth/bearer-session.ts`, shared by both paths:
+membership roles expanded through the realm composites, RelationGroup roles and
+custom-role permissions — and intersected with the key's `role_subset`, which
+narrows and never widens. Issuer-wide realm roles are NOT carried: a key is
+bound to one organization. So withdrawing a role from the person withdraws it
+from all their keys on the next request, and disabling the account or blocking
+the membership (`MEMBER_ACCESS_BLOCKED`) stops every key they hold, with
+nothing to revoke. An unreachable realm is a `503`, not a refusal.
+
+The session's `credential` is `personal-key` and its `principalKind` is
+`person`: audit records the person (`actorKind: person`), row ownership and
+named-person record actions see them, and `personalKeyId` records which key
+they acted through. Everything that needs a person to be PRESENT refuses the
+credential: no API key, personal or not, reaches any key management
+(`auth/api-key/ceiling.ts`), and OAuth-scoped Operations refuse it as they
+refuse an integration key.
+
+**Who sees and manages them.** Three rights, all `Platform.*` client roles so
+no entity grant confers them, deliberately separate:
+
+| Role | Grants |
+|---|---|
+| `Platform.ApiKeys.Personal` | Mint, list, read and revoke your OWN personal keys. |
+| `Platform.ApiKeys.PersonalRead` | See every person's personal keys in the organization — metadata only. |
+| `Platform.ApiKeys.PersonalRevoke` | Revoke any person's personal key in the organization. |
+
+Nobody mints a key for somebody else; there is no Operation for it. Holding
+`Platform.ApiKeys.Manage` (integrations) confers none of the three. The shipped
+`org_admin` composite carries all three and `org_employee` carries the first.
+The service states the owner or oversight predicate on every statement, and RLS
+on `platform.personal_api_keys` (`db/migrations/api-keys.ts`) carries the same
+one: a session reads its own rows, or every row of its tenant with an oversight
+role; it updates its own, or any with the revoke role; it inserts only rows it
+owns; nothing deletes outside an audited bypass. The single tenant-without-user
+session — credential resolution — is the one that reads before an owner is
+known, through `app.personal_api_key_tenant(lookup_id)` as for integration keys.
+
+**Operations** (`operations/personal-api-keys.yaml`, the core `osf-api-keys`
+plugin), REST under `/api/personal-api-keys/*` and MCP:
+
+| Operation | REST | Role |
+|---|---|---|
+| `api-keys.list-my-personal-keys` | `POST mine/list` | `Personal` |
+| `api-keys.get-my-personal-key` | `POST mine/get` | `Personal` |
+| `api-keys.create-my-personal-key` | `POST mine/create` | `Personal` |
+| `api-keys.revoke-my-personal-key` | `POST mine/revoke` | `Personal` |
+| `api-keys.list-personal-keys` | `POST list` | `PersonalRead` |
+| `api-keys.get-personal-key` | `POST get` | `PersonalRead` |
+| `api-keys.revoke-personal-key` | `POST revoke` | `PersonalRevoke` |
+
+`create-my-personal-key` takes `displayName`, an optional `roleSubset` (every
+role named must be held by the caller now) and `expiresInDays` (default 30,
+at most 90 — a personal key always expires), and returns the secret once with
+`no-store` headers. Writes take the acknowledgement `confirmed: true`. Another
+person's key is `404` on the owner Operations, and an organization is never
+crossed. Revocation is idempotent and keeps the first instant and actor;
+`revokedByAdministrator` tells the owner when somebody else withdrew a key, and
+`platform.entity_events` records a `PersonalApiKey` event —
+`personal_api_key_created`, `personal_api_key_revoked` or
+`personal_api_key_revoked_by_administrator`, with the owner and the actor. The
+web projection has two entities: `MyPersonalApiKey` (`/my-api-keys`) and the
+oversight list `PersonalApiKey` (`/personal-api-keys`). Personal keys need only
+a database to be managed — no keyring and no realm write — and the resolver
+needs the bearer issuer and the `OPENSHAPEFORGE_KEYCLOAK_*` admin settings,
+without which it answers `503` rather than accepting a key it cannot check.
+
+The end-to-end proof is
+`apps/api/src/auth/api-key/__tests__/personal-api-key.e2e.test.ts`, against the
+real realm and database.
+
 ### What makes a session a `person`
 
 The `person` class is the server's own positive verdict that a HUMAN

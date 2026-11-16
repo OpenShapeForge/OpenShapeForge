@@ -76,7 +76,7 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // and the operator side of capability grants (operations/grants.yaml),
   // plus accounts, members, groups, permissions, roles, source-sync,
   // edit-lease, record-action and record-action-assignment catalogs.
-  "operation-catalog.schema.json": 12,
+  "operation-catalog.schema.json": 13,
   // No event contracts are authored by the core repository yet.
   "event-contract.schema.json": 0,
   "settings-definition.schema.json": 0,

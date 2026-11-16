@@ -11,6 +11,7 @@ export function assertIncludedProtection(before:ReadonlyMap<string,string>,after
 }
 /** Source locks protect their descendants even when an unlocked enclosing block is removed or replaced. */
 export async function includedContentProtection(variant:ContentTemplateVariant,content:unknown,registry:CompiledContentBlockRegistry,resolve:InclusionVariantResolver):Promise<ReadonlyMap<string,string>> {
+ registry=Object.fromEntries(Object.entries(registry).map(([key,definition])=>{const fields=definition.source?.fields;const composition=definition.composition??(Array.isArray(fields)?templateComposition(fields as Readonly<Record<string,unknown>>[]):undefined);return [key,composition?{...definition,composition}:definition];}));
  let visits=0;
  async function walk(source:ContentTemplateVariant,local:unknown,ancestors:readonly string[]):Promise<Map<string,string>> {
   if(ancestors.includes(source.id))contentError('TEMPLATE_CYCLE','Template inclusion contains a cycle.');

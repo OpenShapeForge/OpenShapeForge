@@ -48,6 +48,14 @@ describe("buildPagedDocument", () => {
     expect(first).toContain(PAGED_FONTS_MARKER);
   });
 
+  test("a page number in a footer is a mark the print engine fills per page, and a value cannot forge one", () => {
+    const paged = build([block("f", "TextBlock", { markdown: "Ref \\{\\{page.number\\}\\}   {{page.number}}" }, "footer"), block("b", "TextBlock", { markdown: "Body" })]);
+    const html = paged.sections[0]!.html;
+    expect(html.match(/<span class="osf-page-number"><\/span>/g)).toHaveLength(1);
+    expect(html).toContain("Ref {{page.number}}");
+    expect(html).toContain(".osf-page-number::after{content:var(--osf-page-number,");
+  });
+
   test("a document without page settings lies on default pages with its header", () => {
     const paged = build([block("h", "TextBlock", { markdown: "Head" }, "header"), block("b", "TextBlock", { markdown: "Body" })]);
     expect(paged.sections).toHaveLength(1);

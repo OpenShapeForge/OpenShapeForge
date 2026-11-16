@@ -67,11 +67,16 @@ function text(value: unknown, name: string): string {
  * backslash-escaped punctuation mark is that mark, never markup: resolved
  * variable values arrive escaped this way so they cannot become emphasis.
  */
+/** Where a page number is printed: an empty mark the print engine names per page through `--osf-page-number`. */
+export const PAGE_NUMBER_HTML = '<span class="osf-page-number"></span>';
+
 function inline(source: string): string {
   const literal = source.replace(/\\([!-/:-@[-`{-~])/g, (_match, char: string) => String.fromCharCode(0xe000 + char.charCodeAt(0)));
   return escapeHtml(literal)
     .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
+    // The number of the page the text is printed on; the print engine fills it per page.
+    .replace(/\{\{page\.number\}\}/g, PAGE_NUMBER_HTML)
     .replace(/[\ue021-\ue07e]/g, (char) => escapeHtml(String.fromCharCode(char.charCodeAt(0) - 0xe000)));
 }
 
@@ -323,6 +328,7 @@ const BASE_CSS = [
   ".region{position:fixed;left:var(--m);width:calc(var(--w) - 2*var(--m));display:flex;flex-direction:column;gap:var(--bg)}",
   ".region.header{top:var(--m)}.region.footer{top:calc(var(--h) - var(--m) - var(--osf-footer-height,0px))}",
   "table.flow{width:var(--w);border-collapse:collapse;border-spacing:0}table.flow td{padding:0;vertical-align:top}",
+  ".osf-page-number::after{content:var(--osf-page-number,\"\")}",
   ".space-top{height:var(--top)}.space-bottom{height:var(--bottom)}",
   ".body{position:relative;display:flex;flex-direction:column;gap:var(--bg);padding:0 var(--m);min-height:calc(var(--h) - var(--top) - var(--bottom))}",
 ].join("");

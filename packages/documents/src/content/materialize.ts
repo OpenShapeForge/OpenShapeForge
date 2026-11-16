@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import {
+  isPageVariableKey,
   assertVariableCompatible,
   assertVariableSourceValue,
   assertVariableUsagePermitted,
@@ -277,6 +278,8 @@ async function materializeContent(
       // surrounding `\s*` around a lazy group backtracks cubically on an
       // unclosed `{{`.
       const whole = wholeVariableExpression(value);
+      if (whole !== undefined && contentVariableReference(whole).namespace === "page")
+        contentError("INVALID_VALUE", "A page variable is text inside a template, not a field's value.");
       if (whole !== undefined && permitsVariableUsage(slot.mode, "whole")) {
         // The typed value of the variable is the value of the field; it is
         // data, not Markdown source, so it is not escaped here.
@@ -296,6 +299,15 @@ async function materializeContent(
         const literal = value.slice(offset, match.index);
         if (/\{\{|\}\}/.test(literal))
           contentError("INVALID_VALUE", "Malformed variable expression.");
+        // A fact of the printed page is filled by the page renderer on every
+        // page; it stays as written here.
+        const page = contentVariableReference(match[1]!);
+        if (page.namespace === "page") {
+          if (!isPageVariableKey(page.key)) contentError("INVALID_VALUE", `page.${page.key} is not a page variable.`);
+          result += literal + `{{page.${page.key}}}`;
+          offset = match.index + match[0].length;
+          continue;
+        }
         const bound = await bind(match[1]!, slot, "template", scope);
         let text: string;
         try {

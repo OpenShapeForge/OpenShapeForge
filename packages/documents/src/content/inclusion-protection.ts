@@ -24,9 +24,9 @@ export async function includedContentProtection(variant:ContentTemplateVariant,c
   }
   const effective=applyIncludedContent(source,local,registry),result=new Map<string,string>();
   const current=new Map(effective.blocks.map(block=>[block.id,block]));
-  const childResults=new Map<string,Map<string,string>>();
+  const childResults=new Map<string,Map<string,string>>();const requiredOrder=new Map<string,string>();
   for(const block of source.blocks){
-   const required=await child(block);
+   const required=await child(block);if(block.locked)requiredOrder.set(block.id,canonicalJson(block));for(const [path,value] of required)requiredOrder.set(`${block.id}/${path}`,value);
    const next=current.get(block.id),actual=next?(canonicalJson(next)===canonicalJson(block)?required:await child(next)):new Map<string,string>();
    const field=registry[block.definitionKey]?.composition?.templateVersionField;
    assertIncludedProtection(required,actual,Boolean(next&&field&&canonicalJson(block.references[field]??null)!==canonicalJson(next.references[field]??null)));childResults.set(block.id,actual);
@@ -35,6 +35,7 @@ export async function includedContentProtection(variant:ContentTemplateVariant,c
    if(block.locked)result.set(block.id,canonicalJson(block));
    for(const [path,value] of childResults.get(block.id)??await child(block))result.set(`${block.id}/${path}`,value);
   }
+  assertIncludedProtection(requiredOrder,result,true);
   return result;
  }
  return walk(variant,content,[]);

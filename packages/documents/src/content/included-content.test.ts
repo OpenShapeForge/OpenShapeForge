@@ -62,3 +62,11 @@ test('new source locks conflict with local changes without mutating either input
  const local={blocks:[{id:'intro',values:{markdown:'Custom'}}]};
  expect(()=>rebaseIncludedContent(before,next,local,registry)).toThrow();expect(local.blocks[0]!.values.markdown).toBe('Custom');expect(next.blocks[0]!.values.markdown).toBe('Mandatory');
 });
+
+test('an initial overlay cannot reorder protected clauses through unlocked containers',async()=>{
+ const {includedContentProtection}=await import('./inclusion-protection.js');
+ const a=version('a',[text('legal-a','First required clause',true)]).variants[0]!,b=version('b',[text('legal-b','Second required clause',true)]).variants[0]!;
+ const wrap=(id:string):ContentBlock=>({id,definitionKey:'TemplateBlock',schemaVersion:1,values:{parameters:{}},references:{version:{entity:'TemplateVersion',id}}});
+ const source=version('root',[wrap('a'),wrap('b')]).variants[0]!;
+ await expect(includedContentProtection(source,{blocks:[{id:'b'},{id:'a'}]},registry,async id=>id==='a'?a:b)).rejects.toBeDefined();
+});

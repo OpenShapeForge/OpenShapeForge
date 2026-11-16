@@ -142,6 +142,7 @@ test("this repository's own catalogs offer their tenant collections and withhold
 
   expect(offered).toEqual([
     "AccessInvitationRelation", "AccessMember", "AccessPermission", "AccessRole", "ApiKeyIntegration",
+    "MyPersonalApiKey", "PersonalApiKey",
   ]);
   expect(sources.every((source) => !("field" in source) && !("get" in source))).toBe(true);
   expect(sources.find((source) => source.entity === "AccessRole")?.labels)

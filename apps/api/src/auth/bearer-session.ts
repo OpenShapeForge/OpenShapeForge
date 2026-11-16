@@ -28,7 +28,8 @@ import {
   resolveTenantForBoundOrganization,
   resolveTenantFromOrganization,
 } from "./tenant-resolution.js";
-import type { TrustedSessionContext } from "./trusted-context.js";
+import type { SessionScope, TrustedSessionContext } from "./trusted-context.js";
+import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { ResolveSessionOptions } from "./session-resolver.js";
 import { EMPTY_SESSION, hostOrganizationContext, resolveScope } from "./session-scope.js";
 
@@ -95,6 +96,52 @@ export function sessionIdentityRoles(identity: AuthIdentity): string[] {
 }
 
 
+
+/**
+ * What a PERSON may do in one organization: the issuer-wide roles they bring,
+ * the roles on their membership row expanded through the realm composites,
+ * the roles of the Relation groups they belong to, and the custom-role
+ * permissions those names carry — with the RelationGroup memberships that
+ * produced them.
+ *
+ * One function because two credentials need the same answer: a bearer login
+ * (below) and a personal API key acting as that same person
+ * (api-key/personal-resolve.ts). Two copies would drift, and a drift here is
+ * a key that can do something its owner cannot.
+ */
+export async function personOrganizationAuthority(
+  db: OpenShapeForgeDatabase,
+  person: {
+    tenantId: string;
+    userId: string;
+    groups: readonly string[];
+    issuerRoles: readonly string[];
+    identity: { issuer: string; subject: string };
+  },
+  relation: IdentityLinkState,
+  realm: string | undefined,
+): Promise<{ roles: string[]; scope: SessionScope; relationGroupIds: string[] }> {
+  const groups = [...person.groups];
+  let roles = personSessionRoles({ roles: [...person.issuerRoles] }, relation, realm);
+  let scope = resolveScope(roles, groups);
+  const relationGroupIds = [...await resolveRelationGroupMembershipIds(
+    db,
+    { tenantId: person.tenantId, userId: person.userId, roles, groups, scope },
+    person.identity,
+  )];
+  const groupRoles = await resolveGroupRoles(db, {
+    tenantId: person.tenantId, userId: person.userId, roles, groups, scope,
+  }, relationGroupIds);
+  roles = personSessionRoles({ roles: [...person.issuerRoles] }, {
+    ...relation, roles: [...relation.roles, ...groupRoles],
+  }, realm);
+  const customPermissions = await resolveCustomRolePermissions(db, {
+    tenantId: person.tenantId, userId: person.userId, roles, groups, scope,
+  }, [...relation.roles, ...groupRoles]);
+  roles = [...new Set([...roles, ...customPermissions])].sort();
+  scope = resolveScope(roles, groups);
+  return { roles, scope, relationGroupIds };
+}
 
 type Verifier = NonNullable<ReturnType<typeof getBearerVerifier>>;
 
@@ -192,32 +239,27 @@ export async function resolveVerifiedBearerSession(
     const loginSessionBinding = loginSessionBindingFromClaims(
       claims as Record<string, unknown>,
     );
-    const relationGroupIds =
-      tenantId && identity.userId && options.db && !serviceAccount && personClaims
-        ? await resolveRelationGroupMembershipIds(
-            options.db,
-            {
-              tenantId,
-              userId: identity.userId,
-              roles: effectiveRoles,
-              groups,
-              scope: effectiveScope,
-            },
-            { issuer: personClaims.issuer, subject: personClaims.subject },
-          )
-        : [];
+    let relationGroupIds: string[] = [];
     if (isPerson && relation && options.db && tenantId && identity.userId) {
-      const groupRoles = await resolveGroupRoles(options.db, {
-        tenantId, userId: identity.userId, roles: effectiveRoles, groups, scope: effectiveScope,
-      }, relationGroupIds);
-      effectiveRoles = personSessionRoles(identity, {
-        ...relation, roles: [...relation.roles, ...groupRoles],
-      }, realmFromIssuer(claims.iss));
-      const customPermissions = await resolveCustomRolePermissions(options.db, {
-        tenantId, userId: identity.userId, roles: effectiveRoles, groups, scope: effectiveScope,
-      }, [...relation.roles, ...groupRoles]);
-      effectiveRoles = [...new Set([...effectiveRoles, ...customPermissions])].sort();
-      effectiveScope = resolveScope(effectiveRoles, groups);
+      const authority = await personOrganizationAuthority(options.db, {
+        tenantId, userId: identity.userId, groups, issuerRoles: identity.roles,
+        identity: { issuer: personClaims.issuer, subject: personClaims.subject },
+      }, relation, realmFromIssuer(claims.iss));
+      effectiveRoles = authority.roles;
+      effectiveScope = authority.scope;
+      relationGroupIds = authority.relationGroupIds;
+    } else if (tenantId && identity.userId && options.db && !serviceAccount && personClaims) {
+      relationGroupIds = [...await resolveRelationGroupMembershipIds(
+        options.db,
+        {
+          tenantId,
+          userId: identity.userId,
+          roles: effectiveRoles,
+          groups,
+          scope: effectiveScope,
+        },
+        { issuer: personClaims.issuer, subject: personClaims.subject },
+      )];
     }
     // ---- end identity ↔ Relation link ----
     return {

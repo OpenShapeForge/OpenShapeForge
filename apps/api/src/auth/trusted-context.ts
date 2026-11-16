@@ -33,6 +33,16 @@ export type SessionCredential =
   | "trusted-context"
   | "control-bearer"
   /**
+   * A personal API key (auth/api-key/personal-resolve.ts): a credential a
+   * person minted for THEMSELVES, which acts as that person with their
+   * CURRENT organization roles (optionally narrowed) and stops working when
+   * their membership is blocked or their account disabled. Deliberately not
+   * "api-key": that value means "an integration's service account" to every
+   * consumer that branches on it, and a personal key is not one. Like
+   * "api-key", it can never manage API keys (auth/api-key/ceiling.ts).
+   */
+  | "personal-key"
+  /**
    * A capability grant resolved by core for an `auth.mode: capability`
    * Operation: a tenant, no user, no roles, and exactly the Operations, the
    * subject record and the delegated records the grant names (`grant`). Only
@@ -135,6 +145,13 @@ export type TrustedSessionContext = {
    * carrier sets it; see {@link VerifiedAppPrincipal}.
    */
   appPrincipal?: VerifiedAppPrincipal;
+  /**
+   * `platform.personal_api_keys.id` of the personal key that resolved this
+   * session. Present exactly when `credential` is "personal-key"; an
+   * identity, never the secret. The person acting is `userId` as always —
+   * this only records which of their keys they acted through.
+   */
+  personalKeyId?: string;
   /** OAuth scopes from a verified bearer token; empty on non-bearer carriers. */
   oauthScopes?: string[];
   /**

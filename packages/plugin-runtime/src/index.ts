@@ -73,6 +73,12 @@ export type PluginSessionCredential =
   | "none"
   | "bearer"
   | "api-key"
+  /**
+   * A personal API key: the person who minted it, acting with their current
+   * organization roles (narrowed if the key says so). `principalKind` is
+   * "person"; the credential is what tells a plugin nobody is at the keyboard.
+   */
+  | "personal-key"
   | "trusted-context"
   /**
    * A platform operator of the host's control realm: no tenant, ever. Only

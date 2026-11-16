@@ -245,12 +245,16 @@ clientRoleComposites:
           - Relations.All.ReadWrite
           - Relations.All.Read
           - Platform.ApiKeys.Manage
+          - Platform.ApiKeys.Personal
+          - Platform.ApiKeys.PersonalRead
+          - Platform.ApiKeys.PersonalRevoke
           - Platform.Jobs.Manage
     org_employee:
       description: Organization employee — invited or assigned per organization
       composites:
         erp-provider:
           - Relations.All.Read
+          - Platform.ApiKeys.Personal
 
 # What a role means to the person holding it, in the languages the deployment
 # speaks. The MCP session reads these (`whoami`, the opening sentence of a
@@ -320,6 +324,12 @@ clientRoles:
     # Platform.* role, so it is never emitted by an entity's authorization
     # block and cannot be acquired through ordinary business access.
     - Platform.ApiKeys.Manage
+    # Personal API keys (operations/personal-api-keys.yaml): hold your own
+    # keys, see everyone's, revoke anyone's. Three roles because they are
+    # three different trusts; all Platform.*, so no entity grant confers them.
+    - Platform.ApiKeys.Personal
+    - Platform.ApiKeys.PersonalRead
+    - Platform.ApiKeys.PersonalRevoke
     # Grants the durable job queue's operator surface (jobs.list / jobs.get /
     # jobs.retry, docs/jobs.md): reading a tenant's background jobs and
     # requeueing or closing the ones that stopped. Same family as the API-key

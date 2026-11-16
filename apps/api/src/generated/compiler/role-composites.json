@@ -68,6 +68,18 @@
           },
           {
             "client": "erp-provider",
+            "role": "Platform.ApiKeys.Personal"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Platform.ApiKeys.PersonalRead"
+          },
+          {
+            "client": "erp-provider",
+            "role": "Platform.ApiKeys.PersonalRevoke"
+          },
+          {
+            "client": "erp-provider",
             "role": "Platform.Jobs.Manage"
           },
           {
@@ -84,6 +96,10 @@
           }
         ],
         "org_employee": [
+          {
+            "client": "erp-provider",
+            "role": "Platform.ApiKeys.Personal"
+          },
           {
             "client": "erp-provider",
             "role": "Relations.All.Read"

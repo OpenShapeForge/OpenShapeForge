@@ -128,13 +128,7 @@ export function assertMayGrantRoles(
 ): void {
   // The carrier first, and with its own message: a service principal that
   // holds every role must not learn that roles were even consulted.
-  if (!mayCarryKeyManagement(session)) {
-    throw new ApiKeyAuthorizationError(
-      session.credential === "api-key"
-        ? "API keys cannot manage API keys. Use an interactive session."
-        : "Only a verified person may manage API keys. Use an interactive session.",
-    );
-  }
+  assertKeyManagementCarrier(session);
 
   const held = new Set(session.roles);
   if (!held.has(API_KEY_MANAGE_ROLE)) {
@@ -163,4 +157,77 @@ export function assertMayGrantRoles(
  */
 export function assertMayManageApiKeys(session: CeilingSession): void {
   assertMayGrantRoles(session, []);
+}
+
+/** The carrier rule, with the message that names why it refused. */
+function assertKeyManagementCarrier(session: CeilingSession): void {
+  if (mayCarryKeyManagement(session)) return;
+  throw new ApiKeyAuthorizationError(
+    session.credential === "api-key" || session.credential === "personal-key"
+      ? "API keys cannot manage API keys. Use an interactive session."
+      : "Only a verified person may manage API keys. Use an interactive session.",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Personal keys
+//
+// Three rights, kept apart on purpose (the same split Datadog and GitHub
+// make): holding keys for yourself, seeing everyone's, and withdrawing
+// anyone's. An administrator who may see every key need not be one who may
+// cut a colleague off, and neither right lets anyone mint a key for somebody
+// else — there is no Operation for that at all.
+//
+// Every one of them sits behind the carrier rule above: a personal key is a
+// credential, and a credential that can mint credentials is the ladder that
+// rule exists to break.
+
+/** Hold, list and revoke your own personal keys. */
+export const PERSONAL_KEY_ROLE = "Platform.ApiKeys.Personal";
+/** See every person's personal keys in the organization — metadata only. */
+export const PERSONAL_KEY_READ_ROLE = "Platform.ApiKeys.PersonalRead";
+/** Revoke any person's personal key in the organization. */
+export const PERSONAL_KEY_REVOKE_ROLE = "Platform.ApiKeys.PersonalRevoke";
+
+/**
+ * Gate minting a personal key, and every read or revoke of one's own.
+ *
+ * `requestedRoles` is the key's narrowing, when it has one. A key without
+ * one carries whatever its owner holds at the time of each request, so there
+ * is nothing more to bound here; a key WITH one may only name roles the owner
+ * holds now — a narrowing naming a role the owner lacks would be inert today
+ * (the resolver intersects) but would quietly come alive the day the role is
+ * granted, which is not what anybody asked for.
+ */
+export function assertMayHoldPersonalKeys(
+  session: CeilingSession,
+  requestedRoles: readonly string[] = [],
+): void {
+  assertKeyManagementCarrier(session);
+  const held = new Set(session.roles);
+  if (!held.has(PERSONAL_KEY_ROLE)) {
+    throw new ApiKeyAuthorizationError("Not authorized to hold personal API keys.");
+  }
+  const ungranted = [...new Set(requestedRoles)].filter((role) => !held.has(role)).sort();
+  if (ungranted.length > 0) {
+    throw new ApiKeyAuthorizationError(
+      `Cannot narrow a key to roles you do not hold: ${ungranted.join(", ")}.`,
+    );
+  }
+}
+
+/** Gate the organization-wide overview of personal keys. */
+export function assertMayReadPersonalKeys(session: CeilingSession): void {
+  assertKeyManagementCarrier(session);
+  if (!session.roles.includes(PERSONAL_KEY_READ_ROLE)) {
+    throw new ApiKeyAuthorizationError("Not authorized to view other people's API keys.");
+  }
+}
+
+/** Gate revoking another person's personal key. */
+export function assertMayRevokePersonalKeys(session: CeilingSession): void {
+  assertKeyManagementCarrier(session);
+  if (!session.roles.includes(PERSONAL_KEY_REVOKE_ROLE)) {
+    throw new ApiKeyAuthorizationError("Not authorized to revoke other people's API keys.");
+  }
 }

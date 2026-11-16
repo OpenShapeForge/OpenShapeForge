@@ -106,6 +106,8 @@ export type ContentTemplateVersion = {
 };
 
 export type ContentResolvedVariable = {
+  /** Authorized record versions read when this global follows a relationship path. */
+  readonly sources?: ContentResolvedPath["sources"];
   readonly tenantId: string;
   readonly sourceId: string;
   readonly sourceVersionId: string;

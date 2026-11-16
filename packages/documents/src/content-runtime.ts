@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { contentCardinality } from './content/validation.js';
 import { compileValuePath, isFieldVariableMode, operationFailure, schemaVariableShape, valuePathChoices, ValuePathError } from "@openshapeforge/operations";
 import type { ModuleOperationContext, ModuleOperationHandler, RuntimeEntityValueCarrier, RuntimeEntityValueDefinition, RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
@@ -287,21 +288,26 @@ export function chipResolver(
   tenantId: string,
   read: CanonicalReader,
   shapeOf: (definition: Readonly<Record<string, unknown>>) => ContentValueShape,
+  resolvePath?: ContentResolvers["resolveVariablePath"],
 ): ContentResolvers["resolveGlobalVariable"] {
-  return async (key) => {
-    const found = (await rows<{ id: string }>(trx, "select id from erp.chips where tenant_id = $1 and key = $2 for share", [tenantId, key]))[0];
+  return async (key, context) => {
+    // Prefer an exact dotted chip key; otherwise the longest chip prefix owns the remaining path.
+    const found = (await rows<{ id: string }>(trx, "select id from erp.chips where tenant_id = $1 and (key = $2 or left($2, length(key) + 1) = key || '.') order by length(key) desc limit 1 for share", [tenantId, key]))[0];
     if (!found) return null;
     const chip = await read("Chip", uuid(found.id, "chip id"));
-    if (!chip || chip.key !== key) return null;
+    if (!chip || typeof chip.key!=='string' || !(chip.key===key || key.startsWith(`${chip.key}.`))) return null;
     const definition = object(chip.definition, "chip value definition");
     if (definition.key !== CHIP_VALUE_FIELD) refuse("DEPENDENCY_INVALID", "The global's stored definition does not describe its value.");
-    return {
-      tenantId,
-      sourceId: found.id,
-      sourceVersionId: `${found.id}@${text(chip.updatedAt, "chip version")}`,
-      shape: shapeOf(definition),
-      value: (chip.value ?? null) as JsonValue,
-    };
+    const shape=shapeOf(definition) as ContentField,path=key.slice(chip.key.length+1);
+    const base={tenantId,sourceId:found.id,sourceVersionId:`${found.id}@${text(chip.updatedAt,"chip version")}`};
+    if(!path)return {...base,shape,value:(chip.value??null) as JsonValue};
+    if(!shape.relationship?.target || contentCardinality(shape).collection || typeof chip.value!=='string' || !resolvePath)
+      refuse("INVALID_VALUE","Only a single referenced global can be followed through its relationships.");
+    const root={entity:shape.relationship.target,id:uuid(chip.value,"global record")};
+    const resolved=await resolvePath(root,path,context);
+    if(!resolved)return null;
+    if(resolved.root.entity!==root.entity||resolved.root.id!==root.id||resolved.path!==path)refuse("DEPENDENCY_INVALID","Global path resolved to a different record or path.");
+    return {...base,shape:resolved.shape,value:resolved.value,sources:resolved.sources};
   };
 }
 
@@ -428,7 +434,7 @@ export function contentResolvers(context: ModuleOperationContext, trx: unknown, 
       parameterFields.set(id, frozen.parameterFields);
       return { id, tenantId, templateId, versionNumber: Number(version.versionNumber), parameters: parameterShapes(context, frozen.parameterFields), variants: projected };
     },
-    resolveGlobalVariable: chipResolver(trx, tenantId, read, storedDefinitionShape(context)),
+    resolveGlobalVariable: chipResolver(trx, tenantId, read, storedDefinitionShape(context),scope.resolveVariablePath),
     resolveEntity: entityResolver(tenantId, read),
     ...(scope.resolveVariablePath ? { resolveVariablePath: scope.resolveVariablePath } : {}),
     validateParameters(version, values) {

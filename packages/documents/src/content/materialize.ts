@@ -142,6 +142,7 @@ async function materializeContent(
       sourceVersionId: resolved.sourceVersionId,
       shape: resolved.shape,
       value: resolved.value,
+      ...(resolved.sources?{sources:resolved.sources}:{}),
     });
     if (value.tenantId !== request.tenantId)
       contentError("DEPENDENCY_INVALID", "Global variable resolved outside the template tenant.");
@@ -149,6 +150,7 @@ async function materializeContent(
     assertContentName(value.sourceVersionId, "global variable source version");
     if (!Object.hasOwn(value, "value"))
       contentError("DEPENDENCY_INVALID", "Global variable has no snapshot value.");
+    for(const source of value.sources??[]){assertContentName(source.id,"global path source id");assertContentName(source.versionId,"global path source version");}
     globals[key] = value;
     return value;
   }

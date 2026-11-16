@@ -458,7 +458,9 @@ describe("identity ↔ Relation link", () => {
 
         const employee = await signIn(appDb, hal, tenantA);
         const employeeRoles = personSessionRoles({ roles: [] }, employee.state!, "openshapeforge");
-        expect(employeeRoles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
+        // An employee holds their own personal API keys (Platform.ApiKeys.Personal)
+        // and nothing that writes business records.
+        expect(employeeRoles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "Platform.ApiKeys.Personal", "org_employee"].sort());
         await expect(
           updateGeneratedEntity(
             appDb,

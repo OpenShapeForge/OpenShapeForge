@@ -35,6 +35,22 @@ describe("a materialized block on a page", () => {
     expect(html).not.toContain("Korting");
     expect(html).not.toContain("10%");
   });
+  test("writes a money value with the currency its record names, in the notation the block states", () => {
+    const money = (title: string) => ({ type: ["number", "null"], title, "x-osf-type": "money", "x-osf-currency": "currency" });
+    const priced = { type: "object", "x-osf-presentation": { locale: "nl-NL" }, properties: {
+      currency: { type: "string", title: "Currency" },
+      lines: { type: "array", title: "Lines", items: { type: "object", properties: { product: t("Product", "Product"), amount: money("Amount") } } },
+      totals: { type: "object", title: "Totals", properties: { oneOff: money("One-off"), usage: money("Usage") } } } };
+    const draw = (values: unknown, schema: unknown = priced) => renderPageBlock({ id: "p", definitionKey: "QuotePricing", region: "body" as const, typed: { schema: schema as never, locale: "en" }, values: values as never }, DEFAULT_PAGE_DESIGN);
+    const html = draw({ currency: "EUR", lines: [{ product: "Pentest", amount: 2500 }], totals: { oneOff: 10200.5, usage: null } });
+    expect(html).toContain('<div role="cell" class="c n">€\u00a02.500,00</div>');
+    expect(html).toContain('<div role="cell" class="c n">€\u00a010.200,50</div>');
+    expect(html).not.toContain("Usage");
+    // Without a stated notation the document's own language decides.
+    const { "x-osf-presentation": _stated, ...plain } = priced;
+    expect(draw({ currency: "EUR", lines: [], totals: { oneOff: 2500 } }, plain)).toContain("€2,500.00");
+    expect(() => draw({ lines: [{ product: "Pentest", amount: 2500 }], totals: {} })).toThrow();
+  });
   test("refuses a value that does not match its schema", () => {
     expect(() => renderPageBlock({ ...block(), values: { lines: "x" } }, DEFAULT_PAGE_DESIGN)).toThrow();
   });

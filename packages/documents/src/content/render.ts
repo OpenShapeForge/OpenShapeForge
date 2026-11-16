@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { CONTENT_LIMITS, canonicalJson, hashCanonicalJson, immutableContent } from "./json.js";
 import { contentError } from "./errors.js";
+import { isMoneySchema, moneyScope, moneyText, within, type MoneyScope } from "./typed-money.js";
 
 type Schema = Record<string, unknown>;
 const object = (value: unknown): value is Schema => !!value && typeof value === "object" && !Array.isArray(value);
@@ -24,7 +25,7 @@ function output(text: string, budget: Budget): string {
   if (budget.characters < 0) contentError("CONTENT_LIMIT_EXCEEDED", "Rendered content exceeds the text budget.");
   return text;
 }
-function fieldsText(value: unknown, schema: Schema, locale: string, budget: Budget, depth = 0): string {
+function fieldsText(value: unknown, schema: Schema, locale: string, budget: Budget, depth = 0, scope: MoneyScope = moneyScope(schema, locale)): string {
   if (--budget.fields < 0) contentError("CONTENT_LIMIT_EXCEEDED", "Rendered content exceeds the field budget.");
   if (depth > 32 || schema.$ref || schema.oneOf || schema.anyOf || schema.allOf) unsupported();
   const type = Array.isArray(schema.type) ? schema.type.find(type => type !== "null") : schema.type;
@@ -37,7 +38,7 @@ function fieldsText(value: unknown, schema: Schema, locale: string, budget: Budg
     if (Object.keys(data).some(key => !Object.hasOwn(properties, key))) unsupported();
     const fields = Object.entries(properties).filter(([key]) => Object.hasOwn(data, key));
     return fields.map(([key, definition]) => {
-      const field = record(definition), text = fieldsText(data[key], field, locale, budget, depth + 1);
+      const field = record(definition), text = fieldsText(data[key], field, locale, budget, depth + 1, within(scope, data));
       return fields.length === 1 ? text : `${output(`${title(field, key, locale)}: `, budget)}${text}`;
     }).join("\n");
   }
@@ -45,8 +46,10 @@ function fieldsText(value: unknown, schema: Schema, locale: string, budget: Budg
     const values = Array.isArray(value) ? value : unsupported();
     const item = record(schema.items);
     output("\n".repeat(values.length), budget);
-    return values.map(entry => fieldsText(entry, item, locale, budget, depth + 1)).join("\n");
+    return values.map(entry => fieldsText(entry, item, locale, budget, depth + 1, scope)).join("\n");
   }
+  // An amount is written by the platform's money formatter, with the currency its record names.
+  if (isMoneySchema(schema)) return output(moneyText(value, schema, scope) ?? unsupported(), budget);
   if (type === "string" && typeof value === "string") return output(value, budget);
   if (type === "boolean" && typeof value === "boolean") return output(String(value), budget);
   if ((type === "integer" || type === "number") && typeof value === "number" && Number.isFinite(value) && (type !== "integer" || Number.isInteger(value))) return output(String(value), budget);

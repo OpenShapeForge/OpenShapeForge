@@ -221,3 +221,19 @@ test('section boundaries own their frame, while page boundaries repeat it', () =
   expect(pages[2]!.settings).toEqual(pages[1]!.settings);
   expect(pages[3]!.settings.page).toEqual({width:794,height:1123});
 });
+
+test('page breaks create printable parts with the same repeating frame and no marker text',()=>{
+ const printed=buildPagedDocument({title:'Manual pages',locale:'en',design,fonts:[],blocks:[
+  block('h','TextBlock',{markdown:'Shared header'},'header'),
+  block('a','TextBlock',{markdown:'Page one'}),block('break','PageBreak',{}),block('b','TextBlock',{markdown:'Page two'}),
+  block('f','TextBlock',{markdown:'Shared footer'},'footer'),
+ ]});
+ expect(printed.sections).toHaveLength(2);
+ for(const section of printed.sections){expect(section.html).toContain('Shared header');expect(section.html).toContain('Shared footer');expect(section.html).not.toContain('PageBreak');}
+ expect(printed.sections[0]!.html).toContain('Page one');expect(printed.sections[1]!.html).toContain('Page two');
+});
+test('invalid section identities and boundaries in headers fail instead of leaking settings into content',()=>{
+ expect(()=>layoutPagedSections([block('s','SectionBreak',{layout:'bad layout'})],design)).toThrow();
+ expect(()=>layoutPagedSections([block('s','SectionBreak',{layout:'same'}),block('s2','SectionBreak',{layout:'same'})],design)).toThrow();
+ expect(()=>layoutPagedSections([block('p','PageBreak',{},'header')],design)).toThrow();
+});

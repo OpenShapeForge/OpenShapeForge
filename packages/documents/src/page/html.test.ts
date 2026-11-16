@@ -103,7 +103,7 @@ describe("buildPagedDocument", () => {
     expect(html).toContain("justify-content:flex-end;min-height:calc((var(--h) - var(--top) - var(--m)) / 2 - var(--bg))");
   });
 
-  test("an included chapter without a page frame keeps the document's; one with a header or footer of its own keeps only that", () => {
+  test("a paginated inclusion owns its frame, including an intentionally empty frame", () => {
     const sections = layoutPagedSections([
       block("h", "TextBlock", { markdown: "Head" }, "header"), block("f", "TextBlock", { markdown: "Foot" }, "footer"),
       block("a", "TextBlock", { markdown: "Letter" }),
@@ -111,7 +111,7 @@ describe("buildPagedDocument", () => {
       { ...block("ch-h", "TextBlock", { markdown: "Cover head" }, "header"), scope: "cover" }, { ...block("cv", "TextBlock", { markdown: "Cover" }), scope: "cover" },
     ], design, { "": {}, ch: {}, cover: {} });
     expect(sections.map((section) => [section.body[0]!.id, section.header.map((entry) => entry.id), section.footer.map((entry) => entry.id)]))
-      .toEqual([["a", ["h"], ["f"]], ["c", ["h"], ["f"]], ["cv", ["ch-h"], []]]);
+      .toEqual([["a", ["h"], ["f"]], ["c", [], []], ["cv", ["ch-h"], []]]);
   });
 
   test("an included template without page settings flows inside the including page", () => {
@@ -256,4 +256,24 @@ test("a section can repeat only its footer without deleting its header", () => {
   }
   blocks[0]={...blocks[0]!,values:{...blocks[0]!.values,headerEnabled:true}};
   expect(build(blocks).sections[0]!.html).toContain("Hidden letterhead");
+});
+
+test('continuous inclusions contribute only body blocks to the active host section',()=>{
+ const scoped=(id:string,key:string,values:Record<string,unknown>,region:PageBlock['region']='body')=>({...block(id,key,values,region),scope:'letter'});
+ const sections=layoutPagedSections([
+  block('section','SectionBreak',{layout:'report',format:'a5'}),
+  {...block('head','TextBlock',{markdown:'Host head'},'header'),layoutKey:'report'},
+  {...block('foot','TextBlock',{markdown:'Host foot'},'footer'),layoutKey:'report'},
+  block('before','TextBlock',{markdown:'Before'}),
+  scoped('h','TextBlock',{markdown:'Source header'},'header'),
+  scoped('s','SectionBreak',{layout:'source',format:'a4'}),
+  scoped('body','TextBlock',{markdown:'Letter'}),
+  scoped('f','TextBlock',{markdown:'Source footer'},'footer'),
+  scoped('page','PageBreak',{}),scoped('second','TextBlock',{markdown:'Second'}),
+  block('after','TextBlock',{markdown:'After'}),
+ ],design,{'':{}});
+ expect(sections).toHaveLength(2);
+ expect(sections.map(s=>s.body.map(b=>b.id))).toEqual([['before','body'],['second','after']]);
+ expect(sections.every(s=>s.header.map(b=>b.id).join()==='head'&&s.footer.map(b=>b.id).join()==='foot')).toBe(true);
+ expect(sections.every(s=>s.settings.page?.width===559)).toBe(true);
 });

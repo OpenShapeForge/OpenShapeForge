@@ -365,24 +365,10 @@ function sectionHtml(input: PagedDocumentInput, section: PageSettings, header: r
 }
 
 const scopedKey = (scope: string, layout: string) => `${scope}\n${layout}`;
-/**
- * A header or footer of a section: its own template's, else that of the
- * nearest including template with one for the same layout. An included
- * chapter with pages of its own but no header of its own keeps the
- * document's header; one with a header of its own (a cover) keeps that.
- */
-/**
- * The header and footer of a section: its own template's, or else the nearest enclosing template's. A template
- * that brings a header or a footer brings its whole page frame, so a letter with only a footer of its own does
- * not take the document's header.
- */
+/** A paginated inclusion owns its whole frame. Continuous content has already joined its host's scope. */
 function pageFrame(regions: { header: ReadonlyMap<string, PageBlock[]>; footer: ReadonlyMap<string, PageBlock[]> }, scope: string, layout: string): { header: PageBlock[]; footer: PageBlock[] } {
-  for (let at = scope; ; at = at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "") {
-    const key = scopedKey(at, layout);
-    const header = regions.header.get(key), footer = regions.footer.get(key);
-    if (header || footer) return { header: header ?? [], footer: footer ?? [] };
-    if (!at) return { header: [], footer: [] };
-  }
+  const key = scopedKey(scope, layout);
+  return {header:regions.header.get(key)??[],footer:regions.footer.get(key)??[]};
 }
 
 /** One section of a paged document: its page settings and the blocks of its three zones. */
@@ -424,6 +410,8 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
     const scope = block.scope ?? "";
     if (scope.length > 4000 || /[\n]/.test(scope)) fail("A block scope is not valid.");
     if (block.region === "body") continue;
+    // A continuous inclusion contributes body content, never a repeating page frame.
+    if (scope && !Object.hasOwn(layouts,scope)) continue;
     if (block.definitionKey === "SectionBreak" || block.definitionKey === "PageBreak") fail("A page or section break belongs in the body.");
     const key = scopedKey(owner(scope), optionalKey(block.layoutKey, "Block.layoutKey") ?? DEFAULT_PAGE_LAYOUT);
     const list = regions[block.region].get(key) ?? [];
@@ -434,6 +422,7 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
     const owned = owner(block.scope ?? "");
     let state = stateFor(owned);
     if (block.definitionKey === "SectionBreak") {
+      if (block.scope && !Object.hasOwn(layouts,block.scope)) continue;
       const layout = optionalKey(block.values.layout, "SectionBreak.layout");
       if (!layout || layout === DEFAULT_PAGE_LAYOUT) fail("A section must name its own layout.");
       if (sections.some(section => section.scope === owned && section.settings.layout === layout)) fail("Section layouts must be unique within a template.");

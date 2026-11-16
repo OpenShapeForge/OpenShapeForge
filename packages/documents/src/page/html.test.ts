@@ -254,6 +254,6 @@ test("a section can repeat only its footer without deleting its header", () => {
     expect(section.html).not.toContain("Hidden letterhead");
     expect(section.html).toContain("Repeated footer");
   }
-  blocks[0]!.values={...blocks[0]!.values,headerEnabled:true};
+  blocks[0]={...blocks[0]!,values:{...blocks[0]!.values,headerEnabled:true}};
   expect(build(blocks).sections[0]!.html).toContain("Hidden letterhead");
 });

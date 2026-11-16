@@ -82,7 +82,7 @@ export const composeTemplate: ModuleOperationHandler = async (input, context) =>
   if (reference.entity !== "TemplateVersion") refuse("DEPENDENCY_INVALID", "Template inclusion refers to another entity type.");
   const values = validatedValues(context, name, input.values);
   const parameters = object(values[parametersField] ?? {}, "parameters");
-  return { value: { kind: "template", referenceField, parameters } };
+  return { value: { kind: "template", referenceField, parameters, ...(values.content === undefined ? {} : {content: object(values.content, "included content")}) } };
 };
 
 /** Convert a canonical parameter schema to the engine's structural projection. */
@@ -484,6 +484,7 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
   try {
     const snapshot = await platform.db.withSession(session, async (trx) => materializeTemplateContent({
       tenantId, templateVersionId, channel, locale,
+      ...(input.content === undefined ? {} : {content: immutableContent(object(input.content, "included content")) as JsonObject}),
       ...(input.parameters === undefined ? {} : { parameters: immutableContent(object(input.parameters, "parameters")) as JsonObject }),
     }, registry, contentResolvers(context, trx, { tenantId, channel, locale, carrier, allowedDefinitions: collection.allowedDefinitions, read, ...(resolveVariablePath ? { resolveVariablePath } : {}) })));
     return { value: snapshot };

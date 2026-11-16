@@ -12,3 +12,5 @@ export {
   validateContentRegistry,
   validateContentValue,
 } from "./validation.js";
+
+export {applyIncludedContent} from "./included-content.js";

@@ -14,6 +14,7 @@ import {
   type VariableOffer,
   type VariableSlot,
 } from "@openshapeforge/operations";
+import { applyIncludedContent } from "./included-content.js";
 import { contentError } from "./errors.js";
 import {
   canonicalJson,
@@ -422,13 +423,15 @@ async function materializeContent(
     parameterInput: JsonObject,
     path: readonly string[],
     ancestors: readonly string[],
+    content?: JsonObject,
   ) {
     if (ancestors.includes(id))
       contentError("TEMPLATE_CYCLE", "Template inclusion contains a cycle.");
     if (ancestors.length >= CONTENT_LIMITS.templateDepth)
       contentError("CONTENT_LIMIT_EXCEEDED", "Template inclusion exceeds the maximum depth.");
     const version = await template(id);
-    const variant = selectContentTemplateVariant(version, request.channel, request.locale);
+    const originalVariant = selectContentTemplateVariant(version, request.channel, request.locale);
+    const variant = applyIncludedContent(originalVariant, content, registry);
     const parameters = resolveTemplateParameters(version.parameters, parameterInput);
     await resolvers.validateParameters?.(version, parameters);
     // The variables this version's blocks may name: its own typed parameters
@@ -439,7 +442,7 @@ async function materializeContent(
     // Capture only the selected channel's source body; other channel variants are not output.
     templates.push({
       path,
-      version: { ...version, variants: [variant] },
+      version: { ...version, variants: [originalVariant] },
       variantId: variant.id,
       parameters,
     });
@@ -571,7 +574,7 @@ async function materializeContent(
           references,
           ...(materialization ? { materialization } : {}),
         });
-        await visit(reference.id, nestedParameters as JsonObject, blockPath, ancestors);
+        await visit(reference.id, nestedParameters as JsonObject, blockPath, ancestors, inclusion?.content);
       } else {
         blocks.push({
           path: blockPath,
@@ -598,7 +601,7 @@ async function materializeContent(
     // A document that follows no template is its own root: its variant's page settings travel with its content.
     ownPage=variant.page;
   } else {
-    await visit(request.templateVersionId, request.parameters ?? {}, [], []);
+    await visit(request.templateVersionId, request.parameters ?? {}, [], [], request.content);
     identity={templateVersionId:request.templateVersionId,compositionHashVersion:"osf-template-content-v1"};
   }
   const snapshot = immutableContent({

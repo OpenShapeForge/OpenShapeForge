@@ -103,7 +103,7 @@ export function contentBlockFromRow(row: Record<string, unknown>, owner: { reado
   // Reference slots live in their own columns; a stray key in the JSON body
   // must not be able to smuggle a second binding for the same field.
   const values = Object.fromEntries(Object.entries(stored as Record<string, unknown>).filter(([key]) => !Object.hasOwn(bound, key)));
-  return { id, definitionKey: definitionKey as string, schemaVersion: version, values: immutableContent(values) as JsonObject, references: bound, ...placement(row, origin) };
+  return { id, ...(row.locked === true ? {locked: true as const} : {}), definitionKey: definitionKey as string, schemaVersion: version, values: immutableContent(values) as JsonObject, references: bound, ...placement(row, origin) };
 }
 
 const LAYOUT_KEY = /^[a-z][A-Za-z0-9-]{0,63}$/;

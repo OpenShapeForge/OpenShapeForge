@@ -65,6 +65,8 @@ export type ContentReferenceValue =
   | null;
 
 export type ContentBlock = {
+  /** Source-authored protection; local inclusion changes cannot override it. */
+  readonly locked?: true;
   readonly id: string;
   readonly definitionKey: string;
   readonly schemaVersion: number;
@@ -146,7 +148,7 @@ export type ContentBlockMaterialization = {
   readonly operationId: string;
   readonly result:
     | { readonly kind: "block"; readonly value: JsonObject }
-    | { readonly kind: "template"; readonly referenceField: string; readonly parameters: JsonObject };
+    | { readonly kind: "template"; readonly referenceField: string; readonly parameters: JsonObject; readonly content?: JsonObject };
 };
 
 /** The adapter must authorize reads with its verified session, then return tenant-scoped data. */
@@ -197,6 +199,8 @@ export type ContentResolvers = {
 };
 
 export type MaterializeTemplateContentInput = {
+  /** Read-only preview of an inclusion-local composition. */
+  readonly content?: JsonObject;
   readonly tenantId: string;
   readonly templateVersionId: string;
   readonly channel: string;

@@ -40,6 +40,25 @@ fields:
         hold a `{{…}}` token of the including template; it is resolved there and handed on as data.
       nl: Waarden voor de lokale variabelen van de opgenomen templateversie, alleen voor deze opname. Een waarde mag
         een `{{…}}`-token van de opnemende template bevatten; dat wordt daar opgelost en als data doorgegeven.
+  - key: content
+    osfType: object
+    label: { en: Local block content, nl: Lokale blokinhoud }
+    description:
+      en: Ordered inclusion-local source references and edits, validated against the pinned source version. Locked source blocks remain protected.
+      nl: Volgorde en lokale blokwijzigingen voor deze invoeging, gecontroleerd tegen de gekozen bronversie. Vergrendelde bronblokken blijven beschermd.
+    children:
+      - key: blocks
+        osfType: object
+        cardinality: collection
+        required: true
+        children:
+          - { key: id, osfType: string, required: true }
+          - { key: definitionKey, osfType: string }
+          - { key: schemaVersion, osfType: integer }
+          - { key: values, osfType: object }
+          - { key: references, osfType: object }
+          - { key: region, osfType: string }
+          - { key: layoutKey, osfType: string }
 operations:
   materialize:
     name: Materialize included template

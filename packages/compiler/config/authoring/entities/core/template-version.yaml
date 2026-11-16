@@ -195,6 +195,9 @@ operations:
           parameters:
             type: object
             x-osf-i18n: { title: { en: Parameters, nl: Parameters } }
+          content:
+            type: object
+            x-osf-i18n: { title: { en: Local block content, nl: Lokale blokinhoud } }
     output: { schema: { type: object } }
     errors: []
     auth: { mode: session, roles: [Templates.Read, General.All.Read, General.All.ReadWrite, Templates.Manage] }

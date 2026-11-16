@@ -22,3 +22,11 @@ test('new placements validate local content; source authoring and free content r
 test('unavailable or cross-tenant sources fail closed without exposing or dropping content',async()=>{
  await expect(assertBlockInclusionWrite(transaction(true,false),tenant,carrier,row,undefined)).rejects.toBeDefined();
 });
+
+test('generic writes cannot bypass the source lock on a document-owned text block',async()=>{
+ const locked={...row,definition_key:'TextBlock',values:{markdown:'Required text'},locked:true};
+ await expect(assertBlockInclusionWrite(transaction(),tenant,carrier,locked,{...locked,values:{markdown:'Changed'}})).rejects.toBeDefined();
+ await expect(assertBlockInclusionWrite(transaction(),tenant,carrier,locked,undefined)).rejects.toBeDefined();
+ await assertBlockInclusionWrite(transaction(),tenant,carrier,locked,{...locked});
+ await assertBlockInclusionWrite(transaction(),tenant,carrier,locked,{...locked,values:{markdown:'New published source'}},{sourceChange:true});
+});

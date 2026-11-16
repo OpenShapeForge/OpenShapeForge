@@ -135,8 +135,8 @@ async function followVariant(apply: ApplyContext, variant: DocumentVariantRow, p
     nextNodes.map((node) => ({ templateBlockId: rowId(node), key: contentKey(blockContent(node.row, columns)), locked: node.row.locked === true })),
   );
   if(apply.carrier&&apply.tenantId){
-    for(const entry of plan.reseed){const row=current.find(block=>block.id===entry.id)!;await assertBlockInclusionWrite(trx,apply.tenantId,apply.carrier,row,{...row,...blockContent(nextById.get(entry.templateBlockId)!.row,columns)});}
-    for(const id of plan.remove)await assertBlockInclusionWrite(trx,apply.tenantId,apply.carrier,current.find(block=>block.id===id),undefined);
+    for(const entry of plan.reseed){const row=current.find(block=>block.id===entry.id)!;await assertBlockInclusionWrite(trx,apply.tenantId,apply.carrier,row,{...row,...blockContent(nextById.get(entry.templateBlockId)!.row,columns)},{sourceChange:true});}
+    for(const id of plan.remove)await assertBlockInclusionWrite(trx,apply.tenantId,apply.carrier,current.find(block=>block.id===id),undefined,{sourceChange:true});
   }
   const unchanged = new Map(current.map((row) => [row.id, contentKey(blockContent(row, columns))]));
   let changed = false;

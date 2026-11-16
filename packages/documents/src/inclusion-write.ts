@@ -8,10 +8,16 @@ import {selectContentTemplateVariant} from './content/validation.js';
 import {includedContentProtection,assertIncludedProtection,templateComposition} from './content/inclusion-protection.js';
 import type {CompiledContentBlockRegistry,ContentTemplateVariant} from './content/types.js';
 import {refuse} from './validation.js';
+import {canonicalJson} from './content/json.js';
 
 /** Canonical writes check the same source graph as rendering. The transaction/caller already owns the block. */
-async function checkBlockInclusionWrite(trx:unknown,tenantId:string,carrier:RuntimeEntityValueCarrier,before:Readonly<Record<string,unknown>>|undefined,after:Readonly<Record<string,unknown>>|undefined):Promise<void>{
+async function checkBlockInclusionWrite(trx:unknown,tenantId:string,carrier:RuntimeEntityValueCarrier,before:Readonly<Record<string,unknown>>|undefined,after:Readonly<Record<string,unknown>>|undefined,options:{sourceChange?:boolean}={}):Promise<void>{
  if(carrier.entityName!=='Block'||!(before?.document_variant_id||after?.document_variant_id))return;
+ if(before?.locked===true&&!options.sourceChange){
+  const definition=carrier.definitions[String(before[carrier.definitionColumn])];
+  const columns=[carrier.definitionColumn,carrier.valuesColumn,'definition_version','document_variant_id','document_variant_id_position','region','layout_key',...(definition?.references.flatMap(ref=>[ref.column,...(ref.parameterColumn?[ref.parameterColumn]:[])])??[])];
+  if(!after||columns.some(key=>canonicalJson(before[key]??null)!==canonicalJson(after[key]??null)))refuse('INVALID_STATE','This document block is locked by its source and cannot be changed, moved or removed.');
+ }
  if(![before,after].some(row=>row&&templateComposition(carrier.definitions[String(row[carrier.definitionColumn])]?.fields??[])))return;
  const owner=String(before?.document_variant_id??after?.document_variant_id);
  const variant=(await rows<{channel:string;locale:string}>(trx,'select channel,locale from erp.document_variants where tenant_id=$1 and id=$2 for share',[tenantId,owner]))[0];

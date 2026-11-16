@@ -31,3 +31,6 @@ export function applyIncludedContent(variant:ContentTemplateVariant,content:unkn
  if(blocks.filter(block=>block.locked).some((block,index)=>block.id!==locked[index]))contentError('INVALID_VALUE','Locked source blocks must retain their order.');
  return {...variant,blocks};
 }
+
+export {canonicalJson} from "./json.js";
+export type {ContentBlock,ContentTemplateVariant,MaterializedTemplateContent,JsonObject} from "./index.js";

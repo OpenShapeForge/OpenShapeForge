@@ -82,10 +82,16 @@ export type Handlers = Record<string, (input: Record<string, unknown>, context: 
 /** Block definitions whose values are plain fields, each with its own materialize Operation. */
 const FIELD_BLOCKS = ["TextBlock", "TextColumns", "ImageBlock", "SpacerBlock"] as const;
 
+/** Files outlive one platform: an editor's upload is what a reader's render reads. */
+const stagedArtifacts: Staged[] = [];
+const artifactOwners = new Map<string, { entity: string; id: string }>();
+// Storage recognises SVG only as text, as osf-plugin-storage does.
+const MEDIA_TYPES: Record<string, string> = { svg: "text/plain", png: "image/png", jpg: "image/jpeg", webp: "image/webp", json: "application/json" };
+
 export function platformFor(who: Session) {
   let active: Transaction<DB> | undefined;
   const events: { eventType: string; aggregateType: string; aggregateId: string; payload: Record<string, unknown> }[] = [];
-  const staged: Staged[] = [];
+  const staged = stagedArtifacts;
   const operation = (id: string, entityName: string, intent: string, data: "read" | "write", input: Record<string, unknown>) =>
     ({ id, entityName, intent, effects: { data, external: "none" }, reliability: { idempotency: { mode: "natural" } }, input: { kind: "json-schema", schema: input }, output: { kind: "json-schema", schema: { type: "object" } } });
   const operations = [
@@ -93,6 +99,7 @@ export function platformFor(who: Session) {
     operation("DocumentVariant.get", "DocumentVariant", "get", "read", { type: "object" }),
     operation("TemplateVersion.get", "TemplateVersion", "get", "read", { type: "object" }),
     operation("Document.insertVariant", "Document", "invoke", "write", { type: "object" }),
+    operation("Document.linkTemplate", "Document", "invoke", "write", { type: "object" }),
     operation("DocumentVariant.insertBlock", "DocumentVariant", "invoke", "write", { type: "object" }),
     operation("TemplateBlock.materialize", "TemplateBlock", "invoke", "read", { type: "object", required: ["definitionKey", "values", "references", "referenceField", "parametersField"], properties: {
       definitionKey: { const: "TemplateBlock" }, values: { type: "object" }, references: { type: "object" }, referenceField: { const: "version" }, parametersField: { const: "parameters" } } }),
@@ -118,14 +125,23 @@ export function platformFor(who: Session) {
         const chunks: Uint8Array[] = [];
         for await (const chunk of data.source) chunks.push(chunk);
         const bytes = new Uint8Array(Buffer.concat(chunks));
-        const entry: Staged = { artifactId: randomUUID(), version: 1, fileName: data.fileName, mediaType: "application/json", sha256: sha256(bytes), byteSize: bytes.byteLength, bytes };
+        const entry: Staged = { artifactId: randomUUID(), version: 1, fileName: data.fileName, mediaType: MEDIA_TYPES[data.fileName.split(".").pop() ?? ""] ?? "application/octet-stream", sha256: sha256(bytes), byteSize: bytes.byteLength, bytes };
         staged.push(entry);
         const { bytes: _bytes, ...descriptor } = entry;
         return descriptor;
       },
-      async bind(_session: unknown, request: { artifactId: string; expectedArtifactVersion: number }) {
+      async bind(_session: unknown, request: { artifactId: string; expectedArtifactVersion: number; owner?: { entity: string; id: string } }) {
         const { bytes: _bytes, ...descriptor } = staged.find((entry) => entry.artifactId === request.artifactId)!;
+        if (request.owner) artifactOwners.set(request.artifactId, request.owner);
         return { ...descriptor, version: request.expectedArtifactVersion + 1 };
+      },
+      // As core does: `get` on the named owner first, then the file only when it is bound to that owner.
+      async read(session: unknown, request: { artifactId: string; owner: { entity: string; id: string } }) {
+        await records.assertAccess(session as never, { entityName: request.owner.entity, id: request.owner.id, intent: "get" });
+        const bound = artifactOwners.get(request.artifactId);
+        if (!bound || bound.entity !== request.owner.entity || bound.id !== request.owner.id) throw Object.assign(new Error("The file is not bound to the named record."), { code: "FORBIDDEN" });
+        const { bytes, ...descriptor } = staged.find((entry) => entry.artifactId === request.artifactId)!;
+        return { descriptor, bytes, owner: bound };
       },
     },
     operations: {
@@ -150,6 +166,11 @@ export function platformFor(who: Session) {
             const table = owner === "Document" ? "documents" : "document_variants";
             const row = (await sql<{ updatedAt: string }>`select to_jsonb(updated_at) #>> '{}' as "updatedAt" from ${sql.id("erp", table)} where id = ${String(request.input.id)}::uuid`.execute(active!)).rows[0];
             return { data: { ...result, parent: { updatedAt: row!.updatedAt } } };
+          }
+          if (request.operation.id === "Document.linkTemplate") {
+            // Core checks a record Operation's expectedVersion before its handler runs; the handler never sees it.
+            const { expectedVersion: _expectedVersion, ...input } = request.input;
+            return { data: (await handlers.linkTemplate!(input, context)).value };
           }
           if (FIELD_BLOCKS.some((entity) => request.operation.id === `${entity}.materialize`)) return { data: (await handlers.materializeFields!(request.input, context)).value };
           if (request.operation.id === "TemplateBlock.materialize") return { data: (await handlers.composeTemplate!(request.input, context)).value };

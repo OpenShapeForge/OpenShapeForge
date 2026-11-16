@@ -2,16 +2,18 @@
 import type { RuntimeModule } from "@openshapeforge/plugin-runtime";
 import { registerPublishFollower } from "@openshapeforge/versioning/followers";
 import { createDocument, createDocumentVersion } from "./commands.js";
-import { composeTemplate, materializeFields, materializeTemplate } from "./content-runtime.js";
+import { composeTemplate, materializeFields, materializeTemplate, variablePaths } from "./content-runtime.js";
 import { createDocumentFromTemplate } from "./template-document.js";
 import { renderSnapshot } from "./render-runtime.js";
 import { followTemplatePublish } from "./document-follow.js";
 import { linkTemplate } from "./document-link.js";
 import { materializeDocument } from "./document-materialize.js";
 import { renderDocumentPages } from "./document-pages.js";
+import { addDocumentImage, addTemplateImage, documentImages, freezeTemplateImages, templateImages } from "./images.js";
 import { resolveDocumentTheme, setDefaultDocumentTheme } from "./theme-runtime.js";
 
 let unregisterFollower: (() => void) | undefined;
+let unregisterImages: (() => void) | undefined;
 
 /**
  * Documents move to a republished template inside the publish transaction.
@@ -20,13 +22,15 @@ let unregisterFollower: (() => void) | undefined;
  * for hosts that initialise the module more than once.
  */
 export function registerDocumentFollowers(): void {
+  // The images are frozen first: a document that follows the new version reads them from it.
+  unregisterImages ??= registerPublishFollower("Template", freezeTemplateImages);
   unregisterFollower ??= registerPublishFollower("Template", followTemplatePublish);
 }
 
 const module = {
   name: "documents",
   async init() { registerDocumentFollowers(); },
-  async close() { unregisterFollower?.(); unregisterFollower = undefined; },
+  async close() { unregisterFollower?.(); unregisterFollower = undefined; unregisterImages?.(); unregisterImages = undefined; },
   operationHandlers: {
     createDocument,
     createDocumentVersion,
@@ -38,6 +42,11 @@ const module = {
     linkTemplate,
     materializeDocument,
     renderDocumentPages,
+    addDocumentImage,
+    addTemplateImage,
+    documentImages,
+    templateImages,
+    variablePaths,
     resolveDocumentTheme,
     setDefaultDocumentTheme,
   },

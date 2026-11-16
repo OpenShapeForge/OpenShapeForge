@@ -27,6 +27,11 @@ export type PageBlock = Readonly<{
    * are names inside one template, so they are matched within a scope.
    */
   scope?: string;
+  /**
+   * A block drawn from its materialized value rather than its own page fields:
+   * the frozen output schema of that value and the locale its labels are read in.
+   */
+  typed?: Readonly<{ schema: Readonly<Record<string, unknown>>; locale: string }>;
 }>;
 
 /** Sizes are CSS pixels; the page box itself is declared in the same unit. */
@@ -44,7 +49,7 @@ export type PageTextStyle = Readonly<{
 }>;
 
 export type PageAsset = Readonly<{
-  mediaType: "image/svg+xml" | "image/png" | "image/jpeg";
+  mediaType: "image/svg+xml" | "image/png" | "image/jpeg" | "image/webp";
   /** Base64 of the asset bytes. Assets are inlined; a page never fetches. */
   data: string;
   /** Name an author sees when choosing this image. */

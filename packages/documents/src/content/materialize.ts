@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import {
+  isPageVariableKey,
   assertVariableCompatible,
   assertVariableSourceValue,
   assertVariableUsagePermitted,
@@ -28,6 +29,7 @@ import type {
   ContentBlock,
   ContentEntityReference,
   ContentResolvedEntity,
+  ContentResolvedPath,
   ContentResolvedVariable,
   ContentResolvers,
   ContentTemplateVersion,
@@ -80,6 +82,7 @@ async function materializeContent(
   const versions = new Map<string, ContentTemplateVersion>();
   const entities = new Map<string, ContentResolvedEntity>();
   const globals: Record<string, ContentResolvedVariable> = Object.create(null);
+  const paths: Record<string, ContentResolvedPath> = Object.create(null);
   const definitions: Record<string, CompiledContentBlockDefinition> = Object.create(null);
   const templates: MaterializedTemplateContent["templates"][number][] = [];
   const compositions: MaterializedTemplateContent["compositions"][number][] = [];
@@ -149,6 +152,43 @@ async function materializeContent(
     return value;
   }
 
+  /**
+   * One record parameter followed through its relationships: `deal.relationId.name`
+   * is the parameter `deal`, then the path `relationId.name` from the record it
+   * names. The adapter reads every step under its authorization; the result,
+   * and every record read for it, is frozen into the snapshot once per record
+   * and path.
+   */
+  async function follow(key: string, scope: VariableScope): Promise<ContentResolvedPath> {
+    const separator = key.indexOf(".");
+    const name = key.slice(0, separator);
+    const path = key.slice(separator + 1);
+    const parameter = contentVariableOffer(scope.catalogue, contentVariableReference(`local.${name}`));
+    if (!parameter.target || parameter.cardinality !== "single")
+      contentError("INVALID_VALUE", `local.${name} is not a record parameter; only a record can be followed.`);
+    const id = Object.hasOwn(scope.parameters, name) ? scope.parameters[name] : undefined;
+    if (typeof id !== "string" || !id)
+      contentError("MISSING_VARIABLE", `local.${name} has no record to follow.`);
+    const cacheKey = `${parameter.target}:${id}:${path}`;
+    if (Object.hasOwn(paths, cacheKey)) return paths[cacheKey]!;
+    if (!resolvers.resolveVariablePath)
+      contentError("DEPENDENCY_UNRESOLVED", "This content runtime cannot follow a record parameter.");
+    countDependency();
+    const read = await resolvers.resolveVariablePath({ entity: parameter.target, id }, path, context);
+    if (!read) contentError("MISSING_VARIABLE", `local.${key} could not be read.`);
+    const value = immutableContent(read);
+    if (value.root.entity !== parameter.target || value.root.id !== id || value.path !== path)
+      contentError("DEPENDENCY_INVALID", `local.${key} resolved to a different record or path.`);
+    if (!value.shape || typeof value.shape.baseType !== "string")
+      contentError("DEPENDENCY_INVALID", `local.${key} declares no value type.`);
+    for (const source of value.sources) {
+      assertContentName(source.id, "path source id");
+      assertContentName(source.versionId, "path source version");
+    }
+    paths[cacheKey] = value;
+    return value;
+  }
+
   /** The variables and their values one template version's blocks may name. */
   type VariableScope = { readonly catalogue: VariableCatalogue; readonly parameters: JsonObject };
 
@@ -179,7 +219,19 @@ async function materializeContent(
         contentVariableFailure(error);
       }
     }
-    const resolved = declared ? await global(reference.key) : undefined;
+    // `local.<parameter>.<path>` follows a record parameter through its
+    // relationships. Its type is the path's, known only after the authorized
+    // read, so it is compared like a global: read first, then checked.
+    const followed = !declared && reference.namespace === "local" && reference.key.includes(".")
+      ? await follow(reference.key, scope) : undefined;
+    if (followed) {
+      try {
+        assertVariableUsagePermitted(slot, usage);
+      } catch (error) {
+        contentVariableFailure(error);
+      }
+    }
+    const resolved = declared ? await global(reference.key) : followed;
     const offer = resolved
       ? contentGlobalVariableOffer(reference, resolved)
       : contentVariableOffer(scope.catalogue, reference);
@@ -226,7 +278,11 @@ async function materializeContent(
       // surrounding `\s*` around a lazy group backtracks cubically on an
       // unclosed `{{`.
       const whole = wholeVariableExpression(value);
-      if (whole !== undefined && permitsVariableUsage(slot.mode, "whole")) {
+      // A page variable is text the page renderer fills, even when it is all the field holds.
+      const pageOnly = whole !== undefined && contentVariableReference(whole).namespace === "page";
+      if (pageOnly && !permitsVariableUsage(slot.mode, "template"))
+        contentError("INVALID_VALUE", "A page variable is text inside a template, not a field's value.");
+      if (whole !== undefined && !pageOnly && permitsVariableUsage(slot.mode, "whole")) {
         // The typed value of the variable is the value of the field; it is
         // data, not Markdown source, so it is not escaped here.
         return (await bind(whole, slot, "whole", scope)).value;
@@ -245,6 +301,15 @@ async function materializeContent(
         const literal = value.slice(offset, match.index);
         if (/\{\{|\}\}/.test(literal))
           contentError("INVALID_VALUE", "Malformed variable expression.");
+        // A fact of the printed page is filled by the page renderer on every
+        // page; it stays as written here.
+        const page = contentVariableReference(match[1]!);
+        if (page.namespace === "page") {
+          if (!isPageVariableKey(page.key)) contentError("INVALID_VALUE", `page.${page.key} is not a page variable.`);
+          result += literal + `{{page.${page.key}}}`;
+          offset = match.index + match[0].length;
+          continue;
+        }
         const bound = await bind(match[1]!, slot, "template", scope);
         let text: string;
         try {
@@ -551,7 +616,7 @@ async function materializeContent(
     templates,
     definitions,
     globals,
-
+    ...(Object.keys(paths).length ? { paths } : {}),
   });
   return immutableContent({
     ...snapshot,

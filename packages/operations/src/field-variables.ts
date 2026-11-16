@@ -65,7 +65,7 @@ export function isFieldVariableMode(value: unknown): value is FieldVariableMode 
 /** How a variable fills its destination: as the whole typed value, or as text inside one. */
 export type VariableUsage = "whole" | "template";
 
-export type VariableScope = "global" | "local";
+export type VariableScope = "global" | "local" | "page";
 
 /**
  * The authored namespaces and the scope each one is. `chips` is the existing
@@ -75,9 +75,23 @@ export type VariableScope = "global" | "local";
 export const VARIABLE_NAMESPACE_SCOPES = Object.freeze({
   chips: "global",
   local: "local",
+  page: "page",
 } as const satisfies Record<string, VariableScope>);
 
 export type VariableNamespace = keyof typeof VARIABLE_NAMESPACE_SCOPES;
+
+/**
+ * The `page` namespace names facts of the printed page, known only once the
+ * document is laid out: `page.number` is the number of the page the text is
+ * printed on. Materialization keeps such a token as written, and the page
+ * renderer fills it on every page; it is text inside a template, never a
+ * field's whole value.
+ */
+export const PAGE_VARIABLE_KEYS = Object.freeze(["number"] as const);
+export type PageVariableKey = (typeof PAGE_VARIABLE_KEYS)[number];
+export function isPageVariableKey(key: string): key is PageVariableKey {
+  return (PAGE_VARIABLE_KEYS as readonly string[]).includes(key);
+}
 
 export const VARIABLE_NAMESPACES = Object.freeze(
   Object.keys(VARIABLE_NAMESPACE_SCOPES) as readonly VariableNamespace[],

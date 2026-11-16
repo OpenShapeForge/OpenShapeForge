@@ -721,6 +721,102 @@
         "checksumField": "checksum"
       }
     },
+    "image": {
+      "kind": "object",
+      "label": {
+        "en": "Image",
+        "nl": "Afbeelding"
+      },
+      "baseType": "object",
+      "icon": "Image",
+      "render": {
+        "display": "ImageDisplay",
+        "input": "ImagePicker"
+      },
+      "children": [
+        {
+          "key": "artifactId",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "File",
+            "nl": "Bestand"
+          },
+          "validation": {
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "maxLength": 36
+          }
+        },
+        {
+          "key": "sha256",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Content hash",
+            "nl": "Inhoudshash"
+          },
+          "validation": {
+            "pattern": "^[a-f0-9]{64}$",
+            "maxLength": 64
+          }
+        },
+        {
+          "key": "mediaType",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Media type",
+            "nl": "Mediatype"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "image/png",
+                "label": {
+                  "en": "PNG",
+                  "nl": "PNG"
+                }
+              },
+              {
+                "value": "image/jpeg",
+                "label": {
+                  "en": "JPEG",
+                  "nl": "JPEG"
+                }
+              },
+              {
+                "value": "image/webp",
+                "label": {
+                  "en": "WebP",
+                  "nl": "WebP"
+                }
+              },
+              {
+                "value": "image/svg+xml",
+                "label": {
+                  "en": "SVG",
+                  "nl": "SVG"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "fileName",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "File name",
+            "nl": "Bestandsnaam"
+          },
+          "validation": {
+            "minLength": 1,
+            "maxLength": 255
+          }
+        }
+      ]
+    },
     "postalCode": {
       "label": {
         "en": "Postal code",
@@ -9865,7 +9961,9 @@
                 "TemplateBlock",
                 "TextColumns",
                 "ImageBlock",
-                "SpacerBlock"
+                "SpacerBlock",
+                "SectionBreak",
+                "PageBreak"
               ]
             }
           }
@@ -9899,7 +9997,9 @@
                 "TemplateBlock",
                 "TextColumns",
                 "ImageBlock",
-                "SpacerBlock"
+                "SpacerBlock",
+                "SectionBreak",
+                "PageBreak"
               ]
             }
           }
@@ -17267,12 +17367,13 @@
             "nl": "Templateversie"
           },
           "description": {
-            "en": "The published template version this document's content is seeded from. Pinned; moves only through Link template or when the template is republished.",
-            "nl": "De gepubliceerde templateversie waaruit de inhoud van dit document is overgenomen. Vastgepind; verschuift alleen via Template koppelen of als de template opnieuw wordt gepubliceerd."
+            "en": "The published template version this document's content is seeded from. Pinned; set when the document is created from a template, and moves only through Link template or when the template is republished.",
+            "nl": "De gepubliceerde templateversie waaruit de inhoud van dit document is overgenomen. Vastgepind; gezet als het document vanuit een template wordt aangemaakt, en verschuift alleen via Template koppelen of als de template opnieuw wordt gepubliceerd."
           },
           "required": false,
           "readOnly": true,
           "writtenBy": [
+            "Document.create",
             "Document.linkTemplate",
             "Template.publish"
           ],
@@ -19441,15 +19542,11 @@
             "nl": "Achtergrondbeeld"
           },
           "description": {
-            "en": "Key of an image of the document theme, stretched over the whole page.",
-            "nl": "Sleutel van een beeld uit het documentthema, uitgerekt over de hele pagina."
+            "en": "An image uploaded to the template or document, stretched over the whole page.",
+            "nl": "Een beeld dat bij de template of het document is geüpload, uitgerekt over de hele pagina."
           },
-          "osfType": "string",
+          "osfType": "image",
           "required": false,
-          "validation": {
-            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
-            "maxLength": 64
-          },
           "persisted": {
             "column": "page_background_image",
             "storageClass": "core"
@@ -19522,7 +19619,9 @@
             "TemplateBlock",
             "TextColumns",
             "ImageBlock",
-            "SpacerBlock"
+            "SpacerBlock",
+            "SectionBreak",
+            "PageBreak"
           ],
           "relationship": {
             "inverse": "documentVariant",
@@ -21869,19 +21968,15 @@
       "shape": [
         {
           "key": "asset",
-          "osfType": "string",
+          "osfType": "image",
           "required": true,
           "label": {
-            "en": "Asset",
+            "en": "Image",
             "nl": "Beeld"
           },
           "description": {
-            "en": "Key of an image asset in the document theme's page design.",
-            "nl": "Sleutel van een beeld in het paginaontwerp van het documentthema."
-          },
-          "validation": {
-            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
-            "maxLength": 64
+            "en": "An image uploaded to the template or document this block belongs to.",
+            "nl": "Een beeld dat is geüpload bij de template of het document waar dit blok bij hoort."
           }
         },
         {
@@ -28645,6 +28740,28 @@
       "displayTemplate": "{{clientId}} {{permissionName}}",
       "filterField": "permissionName",
       "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "PageBreak": {
+      "kind": "entity",
+      "entity": "PageBreak",
+      "entityIdentity": false,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Page break",
+        "nl": "Pagina-einde"
+      },
+      "pluralLabel": {
+        "en": "Page breaks",
+        "nl": "Pagina-eindes"
+      },
+      "shape": [],
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -37809,6 +37926,202 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "SectionBreak": {
+      "kind": "entity",
+      "entity": "SectionBreak",
+      "entityIdentity": false,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Section break",
+        "nl": "Sectie-einde"
+      },
+      "pluralLabel": {
+        "en": "Section breaks",
+        "nl": "Sectie-eindes"
+      },
+      "shape": [
+        {
+          "key": "layout",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Section key",
+            "nl": "Sectiesleutel"
+          },
+          "validation": {
+            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "maxLength": 64
+          }
+        },
+        {
+          "key": "name",
+          "osfType": "string",
+          "required": true,
+          "defaultValue": "Sectie",
+          "label": {
+            "en": "Section name",
+            "nl": "Sectienaam"
+          },
+          "validation": {
+            "maxLength": 120
+          }
+        },
+        {
+          "key": "format",
+          "osfType": "string",
+          "defaultValue": "a4",
+          "label": {
+            "en": "Page format",
+            "nl": "Paginaformaat"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "a4",
+                "label": {
+                  "en": "A4",
+                  "nl": "A4"
+                }
+              },
+              {
+                "value": "a5",
+                "label": {
+                  "en": "A5",
+                  "nl": "A5"
+                }
+              },
+              {
+                "value": "letter",
+                "label": {
+                  "en": "Letter",
+                  "nl": "Letter"
+                }
+              },
+              {
+                "value": "custom",
+                "label": {
+                  "en": "Custom",
+                  "nl": "Eigen formaat"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "width",
+          "osfType": "number",
+          "label": {
+            "en": "Width (px)",
+            "nl": "Breedte (px)"
+          },
+          "validation": {
+            "min": 200,
+            "max": 4000
+          }
+        },
+        {
+          "key": "height",
+          "osfType": "number",
+          "label": {
+            "en": "Height (px)",
+            "nl": "Hoogte (px)"
+          },
+          "validation": {
+            "min": 200,
+            "max": 4000
+          }
+        },
+        {
+          "key": "margin",
+          "osfType": "number",
+          "defaultValue": 40,
+          "label": {
+            "en": "Margin (px)",
+            "nl": "Marge (px)"
+          },
+          "validation": {
+            "min": 0,
+            "max": 400
+          }
+        },
+        {
+          "key": "gap",
+          "osfType": "number",
+          "defaultValue": 24,
+          "label": {
+            "en": "Header/footer gap (px)",
+            "nl": "Afstand kop en footer (px)"
+          },
+          "validation": {
+            "min": 0,
+            "max": 400
+          }
+        },
+        {
+          "key": "blockGap",
+          "osfType": "number",
+          "defaultValue": 12,
+          "label": {
+            "en": "Block gap (px)",
+            "nl": "Blokafstand (px)"
+          },
+          "validation": {
+            "min": 0,
+            "max": 200
+          }
+        },
+        {
+          "key": "bodyAlignment",
+          "osfType": "string",
+          "defaultValue": "top",
+          "label": {
+            "en": "Body alignment",
+            "nl": "Positie inhoud"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "top",
+                "label": {
+                  "en": "Top",
+                  "nl": "Bovenaan"
+                }
+              },
+              {
+                "value": "aboveCenter",
+                "label": {
+                  "en": "Above center",
+                  "nl": "Boven het midden"
+                }
+              },
+              {
+                "value": "center",
+                "label": {
+                  "en": "Center",
+                  "nl": "Midden"
+                }
+              },
+              {
+                "value": "bottom",
+                "label": {
+                  "en": "Bottom",
+                  "nl": "Onderaan"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "SlaPolicy": {
       "kind": "entity",
       "entity": "SlaPolicy",
@@ -41396,15 +41709,11 @@
             "nl": "Achtergrondbeeld"
           },
           "description": {
-            "en": "Key of an image of the document theme, stretched over the whole page.",
-            "nl": "Sleutel van een beeld uit het documentthema, uitgerekt over de hele pagina."
+            "en": "An image uploaded to the template or document, stretched over the whole page.",
+            "nl": "Een beeld dat bij de template of het document is geüpload, uitgerekt over de hele pagina."
           },
-          "osfType": "string",
+          "osfType": "image",
           "required": false,
-          "validation": {
-            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
-            "maxLength": 64
-          },
           "persisted": {
             "column": "page_background_image",
             "storageClass": "core"
@@ -41475,7 +41784,9 @@
             "TemplateBlock",
             "TextColumns",
             "ImageBlock",
-            "SpacerBlock"
+            "SpacerBlock",
+            "SectionBreak",
+            "PageBreak"
           ],
           "relationship": {
             "inverse": "variant",
@@ -41543,6 +41854,23 @@
               },
               "ownership": "owned"
             }
+          }
+        },
+        {
+          "key": "templateName",
+          "osfType": "string",
+          "immutable": true,
+          "label": {
+            "en": "Template name",
+            "nl": "Templatenaam"
+          },
+          "description": {
+            "en": "The name the template carried when this version was published, read from the frozen content, so a version reads as \"Proposal · v7\" wherever it is referenced. Set by the database on publication; never written by a caller.",
+            "nl": "De naam die de template droeg toen deze versie werd gepubliceerd, gelezen uit de vastgelegde inhoud, zodat een versie overal als \"Voorstel · v7\" leest. De database zet die bij publicatie; een aanroeper schrijft hem nooit."
+          },
+          "persisted": {
+            "column": "template_name",
+            "storageClass": "core"
           }
         },
         {
@@ -41695,7 +42023,168 @@
         "source": "TemplateVersion",
         "valueField": "id"
       },
-      "displayTemplate": "{{versionNumber}}",
+      "displayTemplate": "{{templateName}} · v{{versionNumber}}",
+      "filterField": "id",
+      "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "TemplateVersionImage": {
+      "kind": "entity",
+      "entity": "TemplateVersionImage",
+      "entityIdentity": true,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Template version image",
+        "nl": "Beeld van een templateversie"
+      },
+      "pluralLabel": {
+        "en": "Template version images",
+        "nl": "Beelden van templateversies"
+      },
+      "shape": [
+        {
+          "key": "templateVersion",
+          "osfType": "TemplateVersion",
+          "required": true,
+          "immutable": true,
+          "readOnly": true,
+          "writtenBy": [
+            "Template.publish"
+          ],
+          "label": {
+            "en": "Template version",
+            "nl": "Templateversie"
+          },
+          "persisted": {
+            "column": "template_version_id",
+            "storageClass": "core"
+          },
+          "relationship": {
+            "ownership": "reference",
+            "inverse": false
+          }
+        },
+        {
+          "key": "artifactId",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "readOnly": true,
+          "writtenBy": [
+            "Template.publish"
+          ],
+          "label": {
+            "en": "File",
+            "nl": "Bestand"
+          },
+          "persisted": {
+            "column": "artifact_id",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "sha256",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "readOnly": true,
+          "writtenBy": [
+            "Template.publish"
+          ],
+          "label": {
+            "en": "Content hash",
+            "nl": "Inhoudshash"
+          },
+          "persisted": {
+            "column": "sha256",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "mediaType",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "readOnly": true,
+          "writtenBy": [
+            "Template.publish"
+          ],
+          "label": {
+            "en": "Media type",
+            "nl": "Mediatype"
+          },
+          "persisted": {
+            "column": "media_type",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "fileName",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "readOnly": true,
+          "writtenBy": [
+            "Template.publish"
+          ],
+          "label": {
+            "en": "File name",
+            "nl": "Bestandsnaam"
+          },
+          "persisted": {
+            "column": "file_name",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "data",
+          "osfType": "string",
+          "required": true,
+          "immutable": true,
+          "readOnly": true,
+          "writtenBy": [
+            "Template.publish"
+          ],
+          "label": {
+            "en": "Contents",
+            "nl": "Inhoud"
+          },
+          "description": {
+            "en": "The image bytes, base64-encoded.",
+            "nl": "De bytes van het beeld, base64-gecodeerd."
+          },
+          "validation": {
+            "maxLength": 7000000
+          },
+          "persisted": {
+            "column": "data",
+            "storageClass": "core"
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "templateVersionImageId": {
+      "kind": "entityId",
+      "entity": "TemplateVersionImage",
+      "baseType": "string",
+      "label": {
+        "en": "Template version image",
+        "nl": "Beeld van een templateversie"
+      },
+      "validation": {
+        "format": "uuid"
+      },
+      "displayTemplate": "{{fileName}}",
       "filterField": "id",
       "icon": "file",
       "render": {

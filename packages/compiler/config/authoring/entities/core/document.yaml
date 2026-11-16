@@ -290,11 +290,11 @@ fields:
   - key: templateVersionId
     label: { en: Template version, nl: Templateversie }
     description:
-      en: The published template version this document's content is seeded from. Pinned; moves only through Link template or when the template is republished.
-      nl: De gepubliceerde templateversie waaruit de inhoud van dit document is overgenomen. Vastgepind; verschuift alleen via Template koppelen of als de template opnieuw wordt gepubliceerd.
+      en: The published template version this document's content is seeded from. Pinned; set when the document is created from a template, and moves only through Link template or when the template is republished.
+      nl: De gepubliceerde templateversie waaruit de inhoud van dit document is overgenomen. Vastgepind; gezet als het document vanuit een template wordt aangemaakt, en verschuift alleen via Template koppelen of als de template opnieuw wordt gepubliceerd.
     required: false
     readOnly: true
-    writtenBy: [Document.linkTemplate, Template.publish]
+    writtenBy: [Document.create, Document.linkTemplate, Template.publish]
     validation: { format: uuid }
     persisted: { column: template_version_id, storageClass: core }
     osfType: TemplateVersion
@@ -352,6 +352,96 @@ fields:
     relationship:
       ownership: reference
 operations:
+  images:
+    name: { en: Read document images, nl: Documentbeelden lezen }
+    description: >-
+      Returns the bytes of every image the document's content shows: its own uploads and the frozen images of the
+      template versions it was made from. For an editor or viewer that draws the pages itself.
+    implementation: { type: plugin, plugin: documents, handler: documentImages }
+    target: { scope: record, inputField: id }
+    auth: { mode: session, roles: [CaseFile.All.Read, CaseFile.All.ReadWrite, Organization.All.Read, Organization.All.ReadWrite] }
+    tenancy: { mode: required }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, channel, locale]
+        properties:
+          id: { type: string, format: uuid, x-osf-reference: { entity: Document }, x-osf-i18n: { title: { en: Document, nl: Document } } }
+          channel:
+            type: string
+            enum: [document, email, whatsapp]
+            x-osf-i18n:
+              title: { en: Channel, nl: Kanaal }
+              enum: { document: { en: Document, nl: Document }, email: { en: Email, nl: E-mail }, whatsapp: { en: WhatsApp, nl: WhatsApp } }
+          locale: { type: string, pattern: "^[a-z]{2}(-[A-Z]{2})?$", x-osf-i18n: { title: { en: Language, nl: Taal } } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [images]
+        properties:
+          images:
+            type: array
+            x-osf-i18n: { title: { en: Images, nl: Beelden } }
+            items:
+              type: object
+              additionalProperties: false
+              required: [artifactId, mediaType, fileName, data]
+              properties:
+                artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: File, nl: Bestand } } }
+                mediaType: { type: string, x-osf-i18n: { title: { en: Media type, nl: Mediatype } } }
+                fileName: { type: string, x-osf-i18n: { title: { en: File name, nl: Bestandsnaam } } }
+                data: { type: string, x-osf-i18n: { title: { en: Contents (base64), nl: Inhoud (base64) } } }
+    errors:
+      - { status: 403, code: FORBIDDEN, description: The document is not accessible. }
+      - { status: 404, code: NOT_FOUND, description: The document does not exist. }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  addImage:
+    name: { en: Add image, nl: Beeld toevoegen }
+    description: >-
+      Keeps an uploaded PNG, JPEG, WebP or SVG image as a file of this document and returns the image value that an image
+      field of the document, its variants or its blocks stores. Only readers of the document can read the file.
+    implementation: { type: plugin, plugin: documents, handler: addDocumentImage }
+    target: { scope: record, inputField: id }
+    auth: { mode: session, roles: [CaseFile.All.ReadWrite, Organization.All.ReadWrite] }
+    tenancy: { mode: required }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, artifact]
+        properties:
+          id: { type: string, format: uuid, x-osf-reference: { entity: Document }, x-osf-i18n: { title: { en: Document, nl: Document } } }
+          artifact:
+            type: object
+            x-osf-control: artifact-upload
+            x-osf-i18n: { title: { en: Image, nl: Beeld } }
+            additionalProperties: false
+            required: [artifactId, expectedArtifactVersion]
+            properties:
+              artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: Upload, nl: Upload } } }
+              expectedArtifactVersion: { type: integer, minimum: 1, x-osf-i18n: { title: { en: Upload version, nl: Uploadversie } } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [artifactId, sha256, mediaType, fileName]
+        properties:
+          artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: File, nl: Bestand } } }
+          sha256: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Content hash, nl: Inhoudshash } } }
+          mediaType: { type: string, x-osf-i18n: { title: { en: Media type, nl: Mediatype } } }
+          fileName: { type: string, x-osf-i18n: { title: { en: File name, nl: Bestandsnaam } } }
+    errors:
+      - { status: 400, code: VALIDATION, description: The file is not a supported image. }
+      - { status: 403, code: FORBIDDEN, description: The document cannot be changed by this session. }
+      - { status: 404, code: NOT_FOUND, description: The document does not exist. }
+      - { status: 503, code: STORAGE_UNAVAILABLE, description: File storage is unavailable. }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
   insertVariant:
     name: { en: Add content, nl: Inhoud toevoegen }
     description: Add one channel and language to this document through its owned content collection.
@@ -377,8 +467,10 @@ operations:
   create:
     name: { en: Create document, nl: Document aanmaken }
     description:
-      en: Create a document with its first version.
-      nl: Maak een document met de eerste versie.
+      en: Create a document with its first version, optionally from a published template version with the values of
+        its local variables; the document is then linked to that template as by Link template.
+      nl: Maak een document met de eerste versie, desgewenst vanuit een gepubliceerde templateversie met de waarden van
+        haar lokale variabelen; het document is dan aan die template gekoppeld zoals met Template koppelen.
 
     implementation: { type: plugin, plugin: documents, handler: createDocument, action: create }
     target: { scope: collection }
@@ -455,6 +547,19 @@ operations:
               description:
                 en: Optionally attach a file to this version.
                 nl: Voeg desgewenst een bestand aan deze versie toe.
+          templateVersionId:
+            type: string
+            format: uuid
+            x-osf-reference: { entity: Template, valueField: publishedVersionId }
+            x-osf-i18n:
+              title: { en: Template, nl: Template }
+              description:
+                en: Optional. The document starts from this template's published content and stays linked to it.
+                nl: Optioneel. Het document begint met de gepubliceerde inhoud van deze template en blijft eraan gekoppeld.
+          parameters:
+            type: object
+            x-osf-inputFields: templateVersionId.parameters
+            x-osf-i18n: { title: { en: Local values, nl: Lokale waarden } }
           document:
             x-osf-entityInput:
               entity: Document
@@ -517,7 +622,9 @@ operations:
     reliability: { idempotency: { mode: keyed, inputField: idempotencyKey } }
     confirmation: { mode: none }
     errors:
-      - { status: 400, code: VALIDATION, description: The document or version input is invalid. }
+      - { status: 400, code: VALIDATION, description: "The document or version input is invalid, or the local values do not match the template." }
+      - { status: 409, code: INVALID_STATE, description: The template version is not published. }
+      - { status: 404, code: NOT_FOUND, description: The template version does not exist. }
       - { status: 403, code: FORBIDDEN, description: The document is not accessible. }
       - { status: 503, code: STORAGE_UNAVAILABLE, description: No artifact storage provider is available. }
       - { status: 409, code: ALREADY_EXISTS, description: The document version label already exists. }
@@ -540,13 +647,19 @@ operations:
             format: uuid
             x-osf-reference: { entity: Document }
             x-osf-i18n: { title: { en: Document, nl: Document } }
+          # A person picks the template by name; its published version is the value. Any published version stays linkable here.
           templateVersionId:
             type: string
             format: uuid
-            x-osf-reference: { entity: TemplateVersion }
-            x-osf-i18n: { title: { en: Template version, nl: Templateversie } }
+            x-osf-reference: { entity: Template, valueField: publishedVersionId }
+            # A linked document opens on the template and version it follows now.
+            x-osf-sourceField: templateVersionId
+            x-osf-i18n: { title: { en: Template, nl: Template } }
+          # One field per local variable the picked version declares; the document's current values fill them.
           parameters:
             type: object
+            x-osf-inputFields: templateVersionId.parameters
+            x-osf-sourceField: parameters
             x-osf-i18n: { title: { en: Local values, nl: Lokale waarden } }
           replace:
             type: boolean
@@ -621,9 +734,10 @@ operations:
     name: Lay out document pages
     description: >-
       Returns the document's current editable content laid out as pages, without changing any stored content: one
-      self-contained HTML document per section, for a print engine to turn into a PDF. Blocks flow in order; the
-      variant's page settings determine its pages, with supported header and footer blocks repeated on each page
-      of that section. Colors, text styles and images come from the page design of the document's theme. Fonts are
+      self-contained HTML document per section, for a print engine to turn into a PDF. Blocks flow in order on the
+      pages the document's variant (else its template's) describes; an included template with pages of its own starts
+      its own section with its own header and footer. Images are the document's own files and those of included
+      templates; colors and text styles come from the document's theme. Fonts are
       not included; the host that prints supplies them.
     implementation: { type: plugin, plugin: documents, handler: renderDocumentPages }
     target: { scope: record, inputField: id }
@@ -685,9 +799,15 @@ interfaces:
       linkTemplate: { method: POST, path: "/api/document-content/:id/link-template" }
       materialize: { method: POST, path: "/api/document-content/:id/materialize" }
       renderPages: { method: POST, path: "/api/document-content/:id/pages" }
+      images: { method: POST, path: "/api/document-content/:id/images" }
+      addImage: { method: POST, path: "/api/document-content/:id/add-image" }
   graphql: {}
   mcp: {}
   web:
+    fields:
+      # The values of the linked template's variables read under the template's own labels, never as keys or JSON.
+      parameters:
+        render: { component: TemplateValues }
     operations:
       materialize: { resultRenderer: document.content }
       create:
@@ -700,6 +820,8 @@ interfaces:
           groups:
             - title: { en: Document, nl: Document }
               fields: [document.title, document.documentType]
+            - title: { en: Template, nl: Template }
+              fields: [templateVersionId, parameters]
     views:
       quotePreview:
         kind: record
@@ -758,5 +880,3 @@ interfaces:
             groups:
               - title: { en: Document, nl: Document }
                 fields: [ code, title, description, documentType, status, confidentiality, source, author, isExternal ]
-              - title: { en: Local values, nl: Lokale waarden }
-                fields: [ parameters ]

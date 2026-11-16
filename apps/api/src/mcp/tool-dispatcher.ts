@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { observeDiagnosticContract } from "./diagnostics/observer.js";
 /**
  * The tool call entry of one session. Split out of generated-mcp-server.ts,
  * verbatim.
@@ -231,6 +232,7 @@ export function createDispatchTool(scope: ServerScope, surface: SessionSurface):
         result: failed(error),
       };
     }
+    if (!internal && current) observeDiagnosticContract(current.tool, current.runtimeOperation, scope.server);
     if (!current) {
       return {
         result: failed(

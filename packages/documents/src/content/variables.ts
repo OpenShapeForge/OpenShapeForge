@@ -100,7 +100,7 @@ export function contentVariableCatalogue(
  */
 export function contentGlobalVariableOffer(
   reference: VariableReference,
-  resolved: ContentResolvedVariable,
+  resolved: Pick<ContentResolvedVariable, "shape">,
 ): VariableOffer {
   return declaredVariableOffer(reference, contentVariableShape(resolved.shape));
 }

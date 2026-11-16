@@ -13,6 +13,7 @@ const row={id:'placement',document_variant_id:owner,definition_key:'TemplateBloc
 test('canonical writes reject deleting or disguising a protected inclusion and tampering through its content',async()=>{
  for(const next of [undefined,{...row,definition_key:'TextBlock',values:{markdown:'Replacement'}},{...row,values:{parameters:{},content:{blocks:[]}}}])await expect(assertBlockInclusionWrite(transaction(),tenant,carrier,row,next)).rejects.toBeDefined();
  await assertBlockInclusionWrite(transaction(),tenant,carrier,row,{...row,values:{parameters:{name:'Customer'}}});
+ for(const next of [{...row,document_variant_id:template},{...row,document_variant_id_position:2}])await expect(assertBlockInclusionWrite(transaction(),tenant,carrier,row,next)).rejects.toBeDefined();
 });
 test('new placements validate local content; source authoring and free content remain editable',async()=>{
  await expect(assertBlockInclusionWrite(transaction(),tenant,carrier,undefined,{...row,values:{parameters:{},content:{blocks:[]}}})).rejects.toBeDefined();

@@ -39,7 +39,9 @@ async function checkBlockInclusionWrite(trx:unknown,tenantId:string,carrier:Runt
   const version=String(row[reference!.column]??'');const values=(row[carrier.valuesColumn]??{}) as Record<string,unknown>;
   return includedContentProtection(await resolve(version),values.content,registry,resolve);
  }
- const required=await protection(before),actual=await protection(after);assertIncludedProtection(required,actual,true);
+ const required=await protection(before),actual=await protection(after);
+ if(required.size&&before&&after&&['document_variant_id','document_variant_id_position'].some(key=>canonicalJson(before[key]??null)!==canonicalJson(after[key]??null)))refuse('INVALID_STATE','A block containing protected template content cannot be moved out of its placement.');
+ assertIncludedProtection(required,actual,true);
 }
 
 export async function assertBlockInclusionWrite(...args:Parameters<typeof checkBlockInclusionWrite>):Promise<void>{

@@ -1,3 +1,4 @@
+import {templateComposition} from './content/inclusion-protection.js';
 // SPDX-License-Identifier: BUSL-1.1
 import { compileValuePath, isFieldVariableMode, operationFailure, schemaVariableShape, valuePathChoices, ValuePathError } from "@openshapeforge/operations";
 import type { ModuleOperationContext, ModuleOperationHandler, RuntimeEntityValueCarrier, RuntimeEntityValueDefinition, RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
@@ -135,6 +136,7 @@ export async function compiledContentRegistry(context: ModuleOperationContext, c
       // names the version it was authored against, and the snapshot records
       // the exact definition it was computed with.
       entityName: entry.entityName, schemaVersion: entry.schemaVersion, definitionHash: entry.definitionHash,
+      ...(templateComposition(entry.fields)?{composition:templateComposition(entry.fields)}:{}),
       source: immutableContent(entry) as unknown as JsonObject,
       ...(operation?.output?.kind === "json-schema" ? { materializationSchema: immutableContent(operation.output.schema) as JsonObject } : {}),
       fields: Object.fromEntries(entry.fields.map((field) => [text(field.key, "field key"), contentFieldProjection(field)])),

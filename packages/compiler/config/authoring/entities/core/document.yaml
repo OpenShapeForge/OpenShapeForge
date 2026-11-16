@@ -632,8 +632,8 @@ operations:
   linkTemplate:
     name: { en: Link template, nl: Template koppelen }
     description:
-      en: Seed this document's content from a published template version, one variant per channel and language of the template. Linking a newer version of the same template follows it like a republish; linking another template replaces the content only when replace is set.
-      nl: Neem de inhoud van dit document over uit een gepubliceerde templateversie, één variant per kanaal en taal van de template. Een nieuwere versie van dezelfde template wordt gevolgd zoals bij herpubliceren; een andere template vervangt de inhoud alleen als replace is gezet.
+      en: Seed this document's content from a published template version, one variant per channel and language of the template. Linking a newer version of the same template follows it like a republish; linking another template requires replace and retains local edits. Conflicts keep the existing document.
+      nl: Neem de inhoud van dit document over uit een gepubliceerde templateversie, één variant per kanaal en taal van de template. Een nieuwere versie van dezelfde template wordt gevolgd zoals bij herpubliceren; een andere template kan met replace worden gekozen. Lokale wijzigingen blijven behouden; conflicten laten het bestaande document intact.
     implementation: { type: plugin, plugin: documents, handler: linkTemplate }
     target: { scope: record, inputField: id }
     input:
@@ -665,8 +665,8 @@ operations:
             type: boolean
             default: false
             x-osf-i18n:
-              title: { en: Replace local content, nl: Lokale inhoud vervangen }
-              description: { en: Discard local blocks when linking a different template., nl: Lokale blokken weggooien bij het koppelen van een andere template. }
+              title: { en: Switch template, nl: Template wisselen }
+              description: { en: Switch the source template while retaining local changes. Conflicts keep the current document., nl: Wissel de brontemplate met behoud van lokale wijzigingen. Bij een conflict blijft het huidige document behouden. }
     output:
       schema:
         type: object
@@ -680,7 +680,7 @@ operations:
       - { status: 400, code: VALIDATION, description: The link input or the local values are invalid. }
       - { status: 403, code: FORBIDDEN, description: The document or template version is not accessible. }
       - { status: 404, code: NOT_FOUND, description: The document or template version does not exist. }
-      - { status: 409, code: INVALID_STATE, description: "The template version is not published, or another template is linked while local blocks exist and replace is not set." }
+      - { status: 409, code: INVALID_STATE, description: "The template version is not published, or a different template is selected without replace, or local content conflicts with the new template." }
     auth: { mode: session, roles: [CaseFile.All.ReadWrite, Organization.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: write, external: none }

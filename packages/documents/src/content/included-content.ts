@@ -34,3 +34,31 @@ export function applyIncludedContent(variant:ContentTemplateVariant,content:unkn
 
 export {canonicalJson} from "./json.js";
 export type {ContentBlock,ContentTemplateVariant,MaterializedTemplateContent,JsonObject} from "./index.js";
+
+/** Three-way source change: keep local edits/deletions/additions and adopt untouched source content. */
+export function rebaseIncludedContent(previous:ContentTemplateVariant,next:ContentTemplateVariant,content:unknown,registry:Readonly<Record<string,Partial<Pick<CompiledContentBlockDefinition,'schemaVersion'>>>>): {blocks:Omit<ContentBlock,'locked'>[]}|undefined {
+ if(content===undefined)return undefined;
+ const current=applyIncludedContent(previous,content,registry);
+ const old=new Map(previous.blocks.map(block=>[block.id,block]));const upcoming=new Map(next.blocks.map(block=>[block.id,block]));
+ const localIds=new Set(current.blocks.map(block=>block.id));const result:ContentBlock[]=[];
+ for(const block of current.blocks){
+  const original=old.get(block.id),replacement=upcoming.get(block.id);
+  if(!original){if(replacement)contentError('INVALID_VALUE','A new template block conflicts with a local block identity.');result.push(block);continue;}
+  const edited=canonicalJson(original)!==canonicalJson(block);
+  if(replacement){
+   if(edited&&replacement.locked&&canonicalJson(block)!==canonicalJson(replacement))contentError('INVALID_VALUE','The new template locks a block with local changes. The existing inclusion has been kept.');
+   result.push(edited?block:replacement);
+  }else if(edited)result.push(block);
+  else if(original.locked)contentError('INVALID_VALUE','The replacement would remove protected template content.');
+ }
+ for(const block of next.blocks){
+  if(localIds.has(block.id))continue;
+  if(old.has(block.id)){if(block.locked)contentError('INVALID_VALUE','The new template protects a locally removed block.');continue;}
+  const index=next.blocks.findIndex(item=>item.id===block.id);
+  const following=next.blocks.slice(index+1).find(item=>result.some(row=>row.id===item.id));
+  const at=following?result.findIndex(item=>item.id===following.id):result.length;result.splice(at,0,block);
+ }
+ // Unmatched edited blocks are local additions in the new source; their content is retained verbatim.
+ applyIncludedContent(next,{blocks:result.map(({locked:_locked,...block})=>block)},registry);
+ return {blocks:result.map(({locked:_locked,...block})=>block)};
+}

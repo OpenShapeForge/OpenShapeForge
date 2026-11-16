@@ -221,7 +221,7 @@ field.
 
 | Operation | What it does |
 |---|---|
-| `Document.linkTemplate` `{ id, expectedVersion, templateVersionId, parameters?, replace? }` | Needs the document's update roles only. Seeds one `DocumentVariant` per variant of the published template version, blocks copied from the snapshot (`origin = template`, `templateBlockId`, `locked`), validates `parameters` against the template's local variables and stores them. Linking another version of the **same** template behaves like the follow rule (local edits survive). Linking a **different** template is refused with `INVALID_STATE` while local or diverged blocks exist, unless `replace: true`, which discards every variant first. REST `POST /api/document-content/:id/link-template`. |
+| `Document.linkTemplate` `{ id, expectedVersion, templateVersionId, parameters?, replace? }` | Needs the document's update roles only. Seeds one `DocumentVariant` per variant of the published template version, blocks copied from the snapshot (`origin = template`, `templateBlockId`, `locked`), validates `parameters` against the template's local variables and stores them. Linking another version of the **same** template behaves like the follow rule (local edits survive). Linking a **different** template requires `replace: true`, retains local and diverged blocks, and refuses protection conflicts instead of discarding content. REST `POST /api/document-content/:id/link-template`. |
 | `DocumentVariant.insertBlock` `{ id, expectedVersion, values, beforeId? }` | Core collection machinery; inserted blocks are `origin = local`; `beforeId` places the block before another one. |
 | `DocumentVariant.updateBlock` `{ id, expectedVersion, childId, values }` | Owner-scoped edit of one unlocked block's caller-writable fields. |
 | `DocumentVariant.moveBlock` `{ id, expectedVersion, childId, beforeId }` | Reorder an unlocked block. |
@@ -253,8 +253,8 @@ channel and locale (created when missing):
 2. Untouched and still present: overwrite from the new snapshot (skipped when
    the content is already identical, so `updatedAt` is not bumped). Untouched
    and gone: delete. Edited: keep, `diverged = true`, whether or not the
-   template still has it. Locked in the new snapshot: overwrite, whatever
-   happened locally. A second row claiming the same `templateBlockId` counts
+   template still has it. Newly locked content that conflicts with a local edit or deletion: refuse the
+   update and retain the existing document and pin. A second row claiming the same `templateBlockId` counts
    as a local block.
 3. New template blocks are inserted at their snapshot position; blocks whose
    definition is not allowed on a document are skipped and named in

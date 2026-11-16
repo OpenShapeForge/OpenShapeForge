@@ -47,10 +47,12 @@ describe("the follow-template plan", () => {
     expect(plan.remove).toEqual([]);
     expect(plan.order).toEqual([{ kind: "existing", id: "a" }, { kind: "existing", id: "dup" }]);
   });
-  test("a block the new snapshot marks locked is re-seeded even when edited or already diverged", () => {
-    const plan = planFollow([template("a", "t1", "one-edited"), template("b", "t2", "two", true)], previous, [next("t1", "one-v2", true), next("t2", "two-v2", true)]);
-    expect(plan.reseed).toEqual([{ id: "a", templateBlockId: "t1" }, { id: "b", templateBlockId: "t2" }]);
-    expect(plan.diverge).toEqual([]);
+  test("new source locks conflict instead of discarding local edits", () => {
+    expect(()=>planFollow([template("a","t1","one-edited")],previous,[next("t1","one-v2",true)])).toThrow();
+  });
+  test("a locally removed optional block stays removed; a new mandatory block conflicts",()=>{
+    expect(planFollow([],previous,[next("t1","one-v2")]).insert).toEqual([]);
+    expect(()=>planFollow([],previous,[next("t1","one-v2",true)])).toThrow();
   });
   test("the lock lives on the new snapshot block: a dropped block keeps its local edit", () => {
     expect(planFollow([template("a", "t1", "one-edited")], previous, []).diverge).toEqual(["a"]);

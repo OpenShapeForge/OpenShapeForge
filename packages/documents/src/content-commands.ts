@@ -2,3 +2,4 @@
 /** Document content commands and the follow-template rule (docs/document-content.md). */
 export { applyTemplateVersion, followTemplatePublish, planFollow, type ApplyContext, type FollowBlock, type FollowPlan, type FollowTemplateBlock } from "./document-follow.js";
 export { linkTemplate, projectDocument } from "./document-link.js";
+export {assertBlockInclusionWrite} from './inclusion-write.js';

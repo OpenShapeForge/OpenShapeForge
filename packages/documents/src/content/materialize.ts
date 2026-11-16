@@ -14,6 +14,7 @@ import {
   type VariableOffer,
   type VariableSlot,
 } from "@openshapeforge/operations";
+import {includedContentProtection} from './inclusion-protection.js';
 import { applyIncludedContent } from "./included-content.js";
 import { contentError } from "./errors.js";
 import {
@@ -431,6 +432,7 @@ async function materializeContent(
       contentError("CONTENT_LIMIT_EXCEEDED", "Template inclusion exceeds the maximum depth.");
     const version = await template(id);
     const originalVariant = selectContentTemplateVariant(version, request.channel, request.locale);
+    await includedContentProtection(originalVariant,content,registry,async nestedId=>selectContentTemplateVariant(await template(nestedId),request.channel,request.locale));
     const variant = applyIncludedContent(originalVariant, content, registry);
     const parameters = resolveTemplateParameters(version.parameters, parameterInput);
     await resolvers.validateParameters?.(version, parameters);

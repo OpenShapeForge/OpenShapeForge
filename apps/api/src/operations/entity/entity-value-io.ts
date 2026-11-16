@@ -1,3 +1,4 @@
+import {assertBlockInclusionWrite} from '@openshapeforge/documents/content-commands';
 // SPDX-License-Identifier: BUSL-1.1
 import type { RuntimeEntityValueCarrier, RuntimeEntityValueRegistry } from "@openshapeforge/plugin-runtime";
 import { operationFailure } from "@openshapeforge/operations";
@@ -206,6 +207,10 @@ export async function prepareEntityValueWriteInTransaction(
     const checkedValues = bound.size ? Object.fromEntries(Object.entries(dynamic.values as Record<string, unknown>).filter(([name]) => !bound.has(name))) : dynamic.values;
     const valid = generatedRuntimeFieldSchemas.validateObject(checkedFields, checkedValues);
     if (!valid.valid) throw operationFailure(valid.error);
+  }
+  if(session.tenantId)for(const carrier of entityValueCarriers(table,context.registry)){
+    const next={...(current??{}),...Object.fromEntries([...result].map(([column,value])=>[column.name,value]))};
+    await assertBlockInclusionWrite(trx,session.tenantId,carrier,current,next);
   }
   return result;
 }

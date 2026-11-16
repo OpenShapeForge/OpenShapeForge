@@ -1,3 +1,4 @@
+import {assertBlockInclusionWrite} from './inclusion-write.js';
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * The follow-template rule (docs/document-content.md): when a Template is
@@ -8,7 +9,7 @@
  * tracking document as a versioning publish follower. One document that
  * cannot be followed records why on itself and never vetoes the publication.
  */
-import { operationErrorOf } from "@openshapeforge/operations";
+import { operationErrorOf,operationFailure } from "@openshapeforge/operations";
 import type { PublishFollower, PublishFollowerContext } from "@openshapeforge/versioning/followers";
 import { orderedChildren, parseSnapshot, rowId, type PublishedSnapshot, type SnapshotNode } from "@openshapeforge/versioning/snapshot";
 import { rows } from "./commands.js";
@@ -34,8 +35,8 @@ export type FollowPlan = Readonly<{
 
 /**
  * `previous` maps template block id to the content key the variant was seeded
- * from; a block whose key still matches was not edited locally. A block the
- * new snapshot marks locked is re-seeded whatever happened to it locally.
+ * from; local changes and deletions survive source changes. A newly locked
+ * block conflicts with existing local changes instead of overwriting them.
  * Local blocks and kept diverged blocks trail the template block that
  * preceded them. A second row claiming the same template block is treated as
  * a local block.
@@ -55,7 +56,8 @@ export function planFollow(current: readonly FollowBlock[], previous: ReadonlyMa
     if (!templateBlockId) { trail(anchor, block.id); continue; }
     seen.add(templateBlockId);
     const upcoming = nextById.get(templateBlockId);
-    const edited = !upcoming?.locked && (block.diverged || previous.get(templateBlockId) !== block.key);
+    const edited = block.diverged || previous.get(templateBlockId) !== block.key;
+    if(upcoming?.locked&&edited)throw operationFailure({code:'INVALID_STATE',message:'The new template locks locally changed content; the existing document has been kept.',retryable:false});
     if (upcoming && !edited) { reseed.push({ id: block.id, templateBlockId }); slotFor.set(templateBlockId, block.id); anchor = templateBlockId; }
     else if (upcoming) { diverge.push(block.id); slotFor.set(templateBlockId, block.id); anchor = templateBlockId; }
     else if (!edited) remove.push(block.id);
@@ -64,6 +66,10 @@ export function planFollow(current: readonly FollowBlock[], previous: ReadonlyMa
   const insert: string[] = [];
   const order: FollowSlot[] = (trailers.get(null) ?? []).map((id) => ({ kind: "existing", id }));
   for (const block of next) {
+    if(previous.has(block.templateBlockId)&&!seen.has(block.templateBlockId)){
+      if(block.locked)throw operationFailure({code:'INVALID_STATE',message:'The new template protects locally removed content; the existing document has been kept.',retryable:false});
+      continue;
+    }
     const existing = slotFor.get(block.templateBlockId);
     if (existing) order.push({ kind: "existing", id: existing });
     else { insert.push(block.templateBlockId); order.push({ kind: "insert", templateBlockId: block.templateBlockId }); }
@@ -73,7 +79,7 @@ export function planFollow(current: readonly FollowBlock[], previous: ReadonlyMa
 }
 
 export type TrackedDocument = Readonly<{ id: string; template_version_id: string | null }>;
-export type ApplyContext = Readonly<{ trx: unknown; columns: BlockColumns; permitted: ReadonlySet<string>; tracked: Map<string, TemplateVersionRow | undefined> }>;
+export type ApplyContext = Readonly<{ trx: unknown; columns: BlockColumns; permitted: ReadonlySet<string>; carrier?: import('@openshapeforge/plugin-runtime').RuntimeEntityValueCarrier; tenantId?:string; tracked: Map<string, TemplateVersionRow | undefined> }>;
 
 /**
  * Applies a batch under one isolation boundary. A failed item is recorded and
@@ -128,6 +134,10 @@ async function followVariant(apply: ApplyContext, variant: DocumentVariantRow, p
     new Map([...previousNodes].map(([id, node]) => [id, contentKey(blockContent(node.row, columns))])),
     nextNodes.map((node) => ({ templateBlockId: rowId(node), key: contentKey(blockContent(node.row, columns)), locked: node.row.locked === true })),
   );
+  if(apply.carrier&&apply.tenantId){
+    for(const entry of plan.reseed){const row=current.find(block=>block.id===entry.id)!;await assertBlockInclusionWrite(trx,apply.tenantId,apply.carrier,row,{...row,...blockContent(nextById.get(entry.templateBlockId)!.row,columns)});}
+    for(const id of plan.remove)await assertBlockInclusionWrite(trx,apply.tenantId,apply.carrier,current.find(block=>block.id===id),undefined);
+  }
   const unchanged = new Map(current.map((row) => [row.id, contentKey(blockContent(row, columns))]));
   let changed = false;
   for (const entry of plan.reseed) {
@@ -209,7 +219,7 @@ export const followTemplatePublish: PublishFollower = async (context) => {
   const carrier = platform.schemas.entityValues?.get("Block", "values");
   if (!carrier) throw new Error("Compiled block definitions are unavailable.");
   const apply: ApplyContext = {
-    trx, columns: await blockColumns(trx, carrier), tracked: new Map(),
+    trx,carrier,tenantId:session.tenantId!, columns: await blockColumns(trx, carrier), tracked: new Map(),
     permitted: new Set(platform.schemas.entityValues?.collection("DocumentVariant", "blocks")?.allowedDefinitions ?? []),
   };
   await withDocumentCommand(trx, "follow", async () => {

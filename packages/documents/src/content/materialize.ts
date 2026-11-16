@@ -278,9 +278,11 @@ async function materializeContent(
       // surrounding `\s*` around a lazy group backtracks cubically on an
       // unclosed `{{`.
       const whole = wholeVariableExpression(value);
-      if (whole !== undefined && contentVariableReference(whole).namespace === "page")
+      // A page variable is text the page renderer fills, even when it is all the field holds.
+      const pageOnly = whole !== undefined && contentVariableReference(whole).namespace === "page";
+      if (pageOnly && !permitsVariableUsage(slot.mode, "template"))
         contentError("INVALID_VALUE", "A page variable is text inside a template, not a field's value.");
-      if (whole !== undefined && permitsVariableUsage(slot.mode, "whole")) {
+      if (whole !== undefined && !pageOnly && permitsVariableUsage(slot.mode, "whole")) {
         // The typed value of the variable is the value of the field; it is
         // data, not Markdown source, so it is not escaped here.
         return (await bind(whole, slot, "whole", scope)).value;

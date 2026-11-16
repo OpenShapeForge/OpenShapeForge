@@ -24,6 +24,14 @@ fields:
     defaultValue: Sectie
     label: { en: Section name, nl: Sectienaam }
     validation: { maxLength: 120 }
+  - key: headerEnabled
+    osfType: boolean
+    defaultValue: true
+    label: { en: Header on every page, nl: Koptekst op elke pagina }
+  - key: footerEnabled
+    osfType: boolean
+    defaultValue: true
+    label: { en: Footer on every page, nl: Voettekst op elke pagina }
   - key: format
     osfType: string
     defaultValue: a4
@@ -91,7 +99,7 @@ operations:
         properties:
           kind: { type: string, const: block }
           value:
-            x-osf-entityInput: { entity: SectionBreak, fields: [layout, name, format, width, height, margin, gap, blockGap, bodyAlignment] }
+            x-osf-entityInput: { entity: SectionBreak, fields: [layout, name, headerEnabled, footerEnabled, format, width, height, margin, gap, blockGap, bodyAlignment] }
     errors: []
     auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
     tenancy: { mode: required }

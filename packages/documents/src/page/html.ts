@@ -226,7 +226,7 @@ export function variantPageValues(source: Readonly<Record<string, unknown>> | nu
   const number = (value: unknown) => typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : value;
   const values: Record<string, unknown> = {};
   for (const [key, camel, snake] of [["margin", "pageMargin", "page_margin"], ["gap", "pageGap", "page_gap"], ["blockGap", "pageBlockGap", "page_block_gap"],
-    ["format", "pageFormat", "page_format"], ["width", "pageWidth", "page_width"], ["height", "pageHeight", "page_height"], ["background", "pageBackground", "page_background"], ["backgroundImage", "pageBackgroundImage", "page_background_image"], ["bodyAlignment", "pageBodyAlignment", "page_body_alignment"]] as const) {
+    ["format", "pageFormat", "page_format"], ["width", "pageWidth", "page_width"], ["height", "pageHeight", "page_height"], ["background", "pageBackground", "page_background"], ["backgroundImage", "pageBackgroundImage", "page_background_image"], ["bodyAlignment", "pageBodyAlignment", "page_body_alignment"], ["headerEnabled", "pageHeaderEnabled", "page_header_enabled"], ["footerEnabled", "pageFooterEnabled", "page_footer_enabled"]] as const) {
     const value = read(camel, snake);
     if (value != null && value !== "") values[key] = number(value);
   }
@@ -264,6 +264,8 @@ export function pageSettings(values: Readonly<Record<string, unknown>> | undefin
     : Object.hasOwn(PAGE_FORMATS, format) ? PAGE_FORMATS[format as keyof typeof PAGE_FORMATS] : undefined;
   return {
     layout: optionalKey(v.layout, "Page.layout") ?? DEFAULT_PAGE_LAYOUT,
+    ...(typeof v.headerEnabled === "boolean" ? {headerEnabled: v.headerEnabled} : {}),
+    ...(typeof v.footerEnabled === "boolean" ? {footerEnabled: v.footerEnabled} : {}),
     margin: px(v.margin, "Page.margin", 0, 400, 40),
     gap: px(v.gap, "Page.gap", 0, 400, 24),
     blockGap: px(v.blockGap, "Page.blockGap", 0, 400, 16),
@@ -446,7 +448,7 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
   }
   if (!sections.length) open(stateFor(""), true);
   return sections.filter(section => section.body.length || section.force).map(({ scope, settings, body, sectionId, sectionName }) => ({
-    settings, body, ...pageFrame(regions, scope, settings.layout), ...(sectionId ? { sectionId } : {}), ...(sectionName ? { sectionName } : {}),
+    settings, body, ...(() => { const frame = pageFrame(regions, scope, settings.layout); return {header: settings.headerEnabled === false ? [] : frame.header, footer: settings.footerEnabled === false ? [] : frame.footer}; })(), ...(sectionId ? { sectionId } : {}), ...(sectionName ? { sectionName } : {}),
   }));
 }
 

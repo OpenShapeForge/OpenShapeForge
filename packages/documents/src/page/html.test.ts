@@ -237,3 +237,23 @@ test('invalid section identities and boundaries in headers fail instead of leaki
  expect(()=>layoutPagedSections([block('s','SectionBreak',{layout:'same'}),block('s2','SectionBreak',{layout:'same'})],design)).toThrow();
  expect(()=>layoutPagedSections([block('p','PageBreak',{},'header')],design)).toThrow();
 });
+
+
+test("a section can repeat only its footer without deleting its header", () => {
+  const blocks: PageBlock[] = [
+    {id:"section",definitionKey:"SectionBreak",region:"body",values:{layout:"letter",name:"Brief",headerEnabled:false,footerEnabled:true}},
+    {id:"header",definitionKey:"TextBlock",region:"header",layoutKey:"letter",values:{markdown:"Hidden letterhead"}},
+    {id:"body",definitionKey:"TextBlock",region:"body",values:{markdown:"Letter"}},
+    {id:"break",definitionKey:"PageBreak",region:"body",values:{}},
+    {id:"next",definitionKey:"TextBlock",region:"body",values:{markdown:"Next page"}},
+    {id:"footer",definitionKey:"TextBlock",region:"footer",layoutKey:"letter",values:{markdown:"Repeated footer"}},
+  ];
+  const result = build(blocks);
+  expect(result.sections).toHaveLength(2);
+  for (const section of result.sections) {
+    expect(section.html).not.toContain("Hidden letterhead");
+    expect(section.html).toContain("Repeated footer");
+  }
+  blocks[0]!.values={...blocks[0]!.values,headerEnabled:true};
+  expect(build(blocks).sections[0]!.html).toContain("Hidden letterhead");
+});

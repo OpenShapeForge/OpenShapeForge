@@ -412,6 +412,8 @@ export interface EntityRestOperationProjectionConfig
 export interface EntityWebOperationProjectionConfig extends EntityInterfaceOperationProjectionConfig {
   /** Presentation only; never changes the operation result or its authorization. */
   resultRenderer?: string;
+  /** Completion copy; {{field}} binds a declared scalar output field. */
+  successMessage?: LocalizedText;
   form?: { showOnlyGroupedFields?: boolean; defaults?: Record<string, unknown>; groups: Array<{ title: LocalizedText; fields: string[]; collapsed?: boolean }> };
 }
 

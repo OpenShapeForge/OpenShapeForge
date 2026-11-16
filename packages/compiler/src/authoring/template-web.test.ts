@@ -38,3 +38,9 @@ test("real template Web contracts expose owned collections as navigable editor t
   expect(manifest.entities.TemplateVersion!.views.record!.routes.create).toBeUndefined();
   expect(JSON.stringify(manifest.entities.Template!.views.record)).toContain("parameters");
 });
+
+test("publication exposes localized completion copy and the scalar it names",()=>{
+ const entity=compile(loadEntity(directory,"template"));
+ const publish=entity.pluginOperations!.find(operation=>operation.key==="publish")!;
+ expect(publish).toMatchObject({interfaces:{web:{successMessage:{nl:"Versie {{version_number}} gepubliceerd"}}},definition:{output:{schema:{properties:{version_number:{type:"integer"}}}}}});
+});

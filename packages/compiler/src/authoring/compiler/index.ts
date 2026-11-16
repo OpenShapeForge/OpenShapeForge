@@ -145,7 +145,7 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
     implementation: { type: "plugin" as const, plugin: "core-versioning", handler: `publish${entity.entity}To${versioning.versionEntity}` },
     target: { scope: "record" as const, inputField: "id" },
     input: { schema: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string", format: "uuid", "x-osf-i18n": { title: { en: entity.title, nl: entity.labels?.nl ?? entity.title } } } } } },
-    output: { schema: { type: "object" } },
+    output: { schema: { type: "object", properties: { version_number: { type: "integer" } } } },
     errors: [
       { status: 404, code: "NOT_FOUND", description: "The editable source no longer exists." },
       { status: 409, code: "VERSION_CONFLICT", description: "The editable source changed before publication." },
@@ -162,15 +162,16 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
     ...entity,
     fields: [...entity.fields, ...managedFields],
     operations: { ...(entity.operations ?? {}), publish },
-    ...(views ? {
+    ...(entity.interfaces?.web ? {
       interfaces: {
         ...entity.interfaces,
         web: {
           ...entity.interfaces!.web,
-          views: {
+          operations: { ...entity.interfaces!.web!.operations, publish: { successMessage: { en: "Version {{version_number}} published", nl: "Versie {{version_number}} gepubliceerd" } } },
+          ...(views ? { views: {
             ...views,
             record: views.record ? { ...views.record, actions: [...new Set([...(views.record.actions ?? []), "publish"])] } : views.record,
-          },
+          } } : {}),
         },
       },
     } : {}),

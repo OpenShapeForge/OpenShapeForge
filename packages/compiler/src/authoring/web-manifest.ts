@@ -233,6 +233,7 @@ function customOperation(
     // drop those keys before the wire.
     input: { kind: "json-schema", schema: withOperationControls(definition.input.schema, definition) },
     output: { kind: "json-schema", schema: definition.output.schema },
+    ...(source.interfaces.web?.successMessage ? { successMessage: source.interfaces.web.successMessage } : {}),
     ...(source.interfaces.web?.resultRenderer ? { resultRenderer: source.interfaces.web.resultRenderer } : {}),
     ...(source.interfaces.web?.form ? { form: operationForm(source.interfaces.web.form, definition.input.schema, source.id, definition.reliability.idempotency.mode === "keyed" ? [definition.reliability.idempotency.inputField] : []) } : {}),
     effects: definition.effects,

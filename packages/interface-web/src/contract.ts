@@ -77,6 +77,8 @@ export type WebSchemaOperationRef<
     conditions: Array<{ field: string; operator: "eq" | "neq" | "in" | "notIn" | "gt" | "lt" | "gte" | "lte" | "isEmpty" | "isNotEmpty"; value?: unknown }>;
     logic?: "and" | "or";
   };
+  /** Localized confirmation for a completed write; placeholders name declared scalar output fields. */
+  successMessage?: LocalizedText;
   /** Opaque result presentation key; absent uses structured schema rendering. */
   resultRenderer?: WebRendererKey;
   /** Unlisted inputs are available unless hidden. Defaults can contain { from: "uiLocale" }, resolved to the normalized web language before submission. */

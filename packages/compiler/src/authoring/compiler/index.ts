@@ -167,7 +167,7 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
         ...entity.interfaces,
         web: {
           ...entity.interfaces!.web,
-          operations: { ...entity.interfaces!.web!.operations, publish: { successMessage: { en: "Version {{version_number}} published", nl: "Versie {{version_number}} gepubliceerd" } } },
+          operations: { ...entity.interfaces!.web!.operations, publish: entity.interfaces!.web!.operations?.publish === false ? false : { successMessage: { en: "Version {{version_number}} published", nl: "Versie {{version_number}} gepubliceerd" }, ...(entity.interfaces!.web!.operations?.publish ?? {}) } },
           ...(views ? { views: {
             ...views,
             record: views.record ? { ...views.record, actions: [...new Set([...(views.record.actions ?? []), "publish"])] } : views.record,

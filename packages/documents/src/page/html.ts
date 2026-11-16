@@ -372,7 +372,7 @@ function pageFrame(regions: { header: ReadonlyMap<string, PageBlock[]>; footer: 
 }
 
 /** One section of a paged document: its page settings and the blocks of its three zones. */
-export type PagedSectionLayout = Readonly<{ settings: PageSettings; header: readonly PageBlock[]; body: readonly PageBlock[]; footer: readonly PageBlock[]; sectionId?: string; sectionName?: string }>;
+export type PagedSectionLayout = Readonly<{ scope?: string; settings: PageSettings; header: readonly PageBlock[]; body: readonly PageBlock[]; footer: readonly PageBlock[]; sectionId?: string; sectionName?: string }>;
 
 /**
  * Splits the ordered blocks into sections.
@@ -437,7 +437,7 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
   }
   if (!sections.length) open(stateFor(""), true);
   return sections.filter(section => section.body.length || section.force).map(({ scope, settings, body, sectionId, sectionName }) => ({
-    settings, body, ...(() => { const frame = pageFrame(regions, scope, settings.layout); return {header: settings.headerEnabled === false ? [] : frame.header, footer: settings.footerEnabled === false ? [] : frame.footer}; })(), ...(sectionId ? { sectionId } : {}), ...(sectionName ? { sectionName } : {}),
+    ...(scope?{scope}:{}), settings, body, ...(() => { const frame = pageFrame(regions, scope, settings.layout); return {header: settings.headerEnabled === false ? [] : frame.header, footer: settings.footerEnabled === false ? [] : frame.footer}; })(), ...(sectionId ? { sectionId } : {}), ...(sectionName ? { sectionName } : {}),
   }));
 }
 

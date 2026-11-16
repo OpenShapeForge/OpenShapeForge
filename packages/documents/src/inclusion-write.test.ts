@@ -27,6 +27,7 @@ test('generic writes cannot bypass the source lock on a document-owned text bloc
  const locked={...row,definition_key:'TextBlock',values:{markdown:'Required text'},locked:true};
  await expect(assertBlockInclusionWrite(transaction(),tenant,carrier,locked,{...locked,values:{markdown:'Changed'}})).rejects.toBeDefined();
  await expect(assertBlockInclusionWrite(transaction(),tenant,carrier,locked,undefined)).rejects.toBeDefined();
+ await expect(assertBlockInclusionWrite(transaction(),tenant,carrier,locked,{...locked,locked:false})).rejects.toBeDefined();
  await assertBlockInclusionWrite(transaction(),tenant,carrier,locked,{...locked});
  await assertBlockInclusionWrite(transaction(),tenant,carrier,locked,{...locked,values:{markdown:'New published source'}},{sourceChange:true});
 });

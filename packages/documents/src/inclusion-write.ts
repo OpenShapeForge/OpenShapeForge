@@ -15,7 +15,7 @@ async function checkBlockInclusionWrite(trx:unknown,tenantId:string,carrier:Runt
  if(carrier.entityName!=='Block'||!(before?.document_variant_id||after?.document_variant_id))return;
  if(before?.locked===true&&!options.sourceChange){
   const definition=carrier.definitions[String(before[carrier.definitionColumn])];
-  const columns=[carrier.definitionColumn,carrier.valuesColumn,'definition_version','document_variant_id','document_variant_id_position','region','layout_key',...(definition?.references.flatMap(ref=>[ref.column,...(ref.parameterColumn?[ref.parameterColumn]:[])])??[])];
+  const columns=[carrier.definitionColumn,carrier.valuesColumn,'locked','definition_version','document_variant_id','document_variant_id_position','region','layout_key',...(definition?.references.flatMap(ref=>[ref.column,...(ref.parameterColumn?[ref.parameterColumn]:[])])??[])];
   if(!after||columns.some(key=>canonicalJson(before[key]??null)!==canonicalJson(after[key]??null)))refuse('INVALID_STATE','This document block is locked by its source and cannot be changed, moved or removed.');
  }
  if(![before,after].some(row=>row&&templateComposition(carrier.definitions[String(row[carrier.definitionColumn])]?.fields??[])))return;

@@ -111,3 +111,9 @@ interfaces:
     operations:
       materialize: { method: POST, path: /api/content-blocks/section-break/materialize }
   mcp: { tools: generic }
+  web:
+    fields:
+      headerEnabled:
+        render: { component: FieldBoolean, props: {} }
+      footerEnabled:
+        render: { component: FieldBoolean, props: {} }

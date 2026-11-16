@@ -235,6 +235,11 @@ interfaces:
   graphql: {}
   mcp: { tools: generic }
   web:
+    fields:
+      pageHeaderEnabled:
+        render: { component: FieldBoolean, props: {} }
+      pageFooterEnabled:
+        render: { component: FieldBoolean, props: {} }
     views:
       collection:
         route: /template-variants

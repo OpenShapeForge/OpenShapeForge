@@ -145,7 +145,7 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
     implementation: { type: "plugin" as const, plugin: "core-versioning", handler: `publish${entity.entity}To${versioning.versionEntity}` },
     target: { scope: "record" as const, inputField: "id" },
     input: { schema: { type: "object", additionalProperties: false, required: ["id"], properties: { id: { type: "string", format: "uuid", "x-osf-i18n": { title: { en: entity.title, nl: entity.labels?.nl ?? entity.title } } } } } },
-    output: { schema: { type: "object", properties: { version_number: { type: "integer" } } } },
+    output: { schema: { type: "object", properties: { version_number: { type: "integer", "x-osf-i18n": { title: { en: "Version number", nl: "Versienummer" } } } } } },
     errors: [
       { status: 404, code: "NOT_FOUND", description: "The editable source no longer exists." },
       { status: 409, code: "VERSION_CONFLICT", description: "The editable source changed before publication." },

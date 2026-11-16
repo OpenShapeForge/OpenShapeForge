@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { observeDiagnosticFailure } from "./diagnostics/observer.js";
 import { withExecutionReference } from "./execution-reference.js";
 /**
  * The shapes a tool call answers with: success, failure with the shared
@@ -121,6 +122,7 @@ export const __operationToolResultForTests = operationToolResult;
  * summary is derived from the same fields, so it cannot contradict them.
  */
 export function failed(error: unknown): ToolResult {
+  observeDiagnosticFailure(error);
   if (error instanceof DeclaredOperationError) {
     const body = error.body;
     const bodyMessage = body && typeof body === "object" && !Array.isArray(body)

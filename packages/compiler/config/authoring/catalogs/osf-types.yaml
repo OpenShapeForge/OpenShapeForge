@@ -347,6 +347,45 @@ types:
       mimeTypeField: mimeType
       checksumField: checksum
 
+  # An uploaded image, stored as a file of the record that holds it (or of the
+  # aggregate that owns that record): never a Document. The value names the
+  # file and its content hash, so a published version pins the exact bytes.
+  image:
+    kind: object
+    label: { en: Image, nl: Afbeelding }
+    baseType: object
+    icon: Image
+    render:
+      display: ImageDisplay
+      input: ImagePicker
+    children:
+      - key: artifactId
+        osfType: string
+        required: true
+        label: { en: File, nl: Bestand }
+        validation: { pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", maxLength: 36 }
+      - key: sha256
+        osfType: string
+        required: true
+        label: { en: Content hash, nl: Inhoudshash }
+        validation: { pattern: "^[a-f0-9]{64}$", maxLength: 64 }
+      - key: mediaType
+        osfType: string
+        required: true
+        label: { en: Media type, nl: Mediatype }
+        options:
+          type: static
+          items:
+            - { value: image/png, label: { en: PNG, nl: PNG } }
+            - { value: image/jpeg, label: { en: JPEG, nl: JPEG } }
+            - { value: image/webp, label: { en: WebP, nl: WebP } }
+            - { value: image/svg+xml, label: { en: SVG, nl: SVG } }
+      - key: fileName
+        osfType: string
+        required: true
+        label: { en: File name, nl: Bestandsnaam }
+        validation: { minLength: 1, maxLength: 255 }
+
   postalCode:
     label: { en: Postal code, nl: Postcode }
     baseType: string

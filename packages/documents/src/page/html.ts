@@ -12,13 +12,14 @@
  * the design, and every asset and font is inlined so the page never fetches.
  */
 import { DEFAULT_PAGE_LAYOUT, type PageAsset, type PageBlock, type PageDesign, type PageFont, type PageLayouts, type PageSettings, type PagedDocument, type PagedDocumentInput, type PagedSection } from "./types.js";
+import { TYPED_BLOCK_RULES, TypedPageBlockError, typedPageBlock } from "./typed.js";
 
 const KEY = /^[a-z][A-Za-z0-9-]{0,63}$/;
 const FONT_FAMILY = /^[A-Za-z][A-Za-z0-9 -]{0,63}$/;
 const FONT_WEIGHT = /^[1-9]\d{2,3}( [1-9]\d{2,3})?$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 const COLOR = /^(#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*(,\s*(0|1|0?\.\d+)\s*)?\))$/;
-const ASSET_TYPES = new Set(["image/svg+xml", "image/png", "image/jpeg"]);
+const ASSET_TYPES = new Set(["image/svg+xml", "image/png", "image/jpeg", "image/webp"]);
 const MAX_BLOCKS = 2000;
 
 export class PagedDocumentError extends Error {
@@ -66,11 +67,16 @@ function text(value: unknown, name: string): string {
  * backslash-escaped punctuation mark is that mark, never markup: resolved
  * variable values arrive escaped this way so they cannot become emphasis.
  */
+/** Where a page number is printed: an empty mark the print engine names per page through `--osf-page-number`. */
+export const PAGE_NUMBER_HTML = '<span class="osf-page-number"></span>';
+
 function inline(source: string): string {
   const literal = source.replace(/\\([!-/:-@[-`{-~])/g, (_match, char: string) => String.fromCharCode(0xe000 + char.charCodeAt(0)));
   return escapeHtml(literal)
     .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
+    // The number of the page the text is printed on; the print engine fills it per page.
+    .replace(/\{\{page\.number\}\}/g, PAGE_NUMBER_HTML)
     .replace(/[\ue021-\ue07e]/g, (char) => escapeHtml(String.fromCharCode(char.charCodeAt(0) - 0xe000)));
 }
 
@@ -118,15 +124,57 @@ function textColumns(block: PageBlock, design: PageDesign): string {
     const width = v[`${slot}Width`] === undefined || v[`${slot}Width`] === null ? undefined : px(v[`${slot}Width`], `TextColumns.${slot}Width`, 1, 4000);
     const grows = width === undefined && (distribution === "fill" || slot === "left");
     const flex = width !== undefined ? `flex:0 0 ${width}px;` : grows ? "flex:1 1 0;min-width:0;" : "flex:0 0 auto;white-space:nowrap;";
-    const cell = `<div class="text ${styleClass(design, v[`${slot}Style`], `TextColumns.${slot}Style`)}"${slot === "right" ? ' style="white-space:nowrap"' : ""}>${paragraphs(markdown)}</div>`;
-    slots.push(`<div class="col${slot === "right" ? " end" : ""}" style="${flex}">${cell}</div>`);
+    // Filled columns share the row as equal, wrapping columns 24px apart (the Figma letter's address and
+    // reference); fitted columns keep the right one on one line against the right edge.
+    const end = slot === "right" && distribution === "fit";
+    const cell = `<div class="text ${styleClass(design, v[`${slot}Style`], `TextColumns.${slot}Style`)}"${end ? ' style="white-space:nowrap"' : ""}>${paragraphs(markdown)}</div>`;
+    slots.push(`<div class="col${end ? " end" : ""}" style="${flex}">${cell}</div>`);
   }
-  return `<div class="b cols" style="align-items:${items};gap:${distribution === "fit" ? 16 : 0}px">${slots.join("")}</div>`;
+  return `<div class="b cols" style="align-items:${items};gap:${distribution === "fit" ? 16 : 24}px">${slots.join("")}</div>`;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** An `image` value: an uploaded file of the template or document, named by its id and pinned by its content hash. */
+export type ImageValue = Readonly<{ artifactId: string; sha256: string; mediaType: string; fileName: string }>;
+
+export function isImageValue(value: unknown): value is ImageValue {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.artifactId === "string" && UUID.test(v.artifactId) && typeof v.sha256 === "string" && /^[a-f0-9]{64}$/.test(v.sha256) &&
+    typeof v.mediaType === "string" && ASSET_TYPES.has(v.mediaType) && typeof v.fileName === "string";
+}
+
+/** The key an image value's bytes are inlined under in the page design. */
+export function imageAssetKey(image: Pick<ImageValue, "artifactId">): string {
+  return `img-${image.artifactId}`;
+}
+
+/**
+ * Every image the blocks and page settings use, with the scope it belongs to: "" is the document's (or template's)
+ * own content, any other scope an included template's. Whoever renders reads these files and inlines them in the
+ * page design under `imageAssetKey`, so the page itself never fetches.
+ */
+export function pageImages(blocks: readonly PageBlock[], layouts: PageLayouts = {}): { scope: string; image: ImageValue }[] {
+  const found = new Map<string, { scope: string; image: ImageValue }>();
+  const add = (scope: string, value: unknown) => { if (isImageValue(value)) found.set(`${scope}|${value.artifactId}`, { scope, image: value }); };
+  for (const block of blocks) if (block.definitionKey === "ImageBlock") add(block.scope ?? "", block.values.asset);
+  for (const [scope, layout] of Object.entries(layouts)) add(scope, layout.backgroundImage);
+  return [...found.values()];
+}
+
+/** The design with the bytes of the given images inlined under their asset keys. */
+export function withImages(design: PageDesign, images: readonly { artifactId: string; mediaType: string; fileName: string; data: string }[]): PageDesign {
+  if (!images.length) return design;
+  const assets: Record<string, PageAsset> = { ...design.assets };
+  for (const image of images) assets[`img-${image.artifactId}`] = { mediaType: image.mediaType as PageAsset["mediaType"], data: image.data, label: image.fileName };
+  return { ...design, assets };
 }
 
 function imageBlock(block: PageBlock, design: PageDesign): string {
   const v = block.values;
-  const key = optionalKey(v.asset, "Image.asset") ?? fail("Image.asset is required.");
+  if (!isImageValue(v.asset)) fail("Image.asset must be an uploaded image.");
+  const key = imageAssetKey(v.asset);
   const width = px(v.width, "Image.width", 1, 4000);
   const height = px(v.height, "Image.height", 1, 4000);
   const align = option(v.align, "Image.align", ALIGN, "left");
@@ -139,17 +187,22 @@ function spacerBlock(block: PageBlock): string {
 }
 
 /** Block types the paged renderer lays out itself. A section break is not one: it decides the page, it is not on it. */
-export const PAGE_BLOCK_KEYS = ["TextBlock", "TextColumns", "ImageBlock", "SpacerBlock"] as const;
+export const PAGE_BLOCK_KEYS = ["TextBlock", "TextColumns", "ImageBlock", "SpacerBlock", "SectionBreak", "PageBreak"] as const;
 
 /**
  * One block as the HTML both the print engine and an editor preview show.
  * Text is escaped and every key is checked, so the result is safe to insert.
  */
 export function renderPageBlock(block: PageBlock, design: PageDesign): string {
+  if (block.definitionKey === "SectionBreak" || block.definitionKey === "PageBreak") return "";
   return renderBlock(block, design);
 }
 
 function renderBlock(block: PageBlock, design: PageDesign): string {
+  if (block.typed) {
+    try { return typedPageBlock(block.values, block.typed.schema, block.typed.locale, styleClass(design, undefined, `${block.definitionKey}.style`)); }
+    catch (error) { if (error instanceof TypedPageBlockError) fail(`${block.definitionKey}: ${error.message}`); throw error; }
+  }
   switch (block.definitionKey) {
     case "TextBlock": return textBlock(block, design);
     case "TextColumns": return textColumns(block, design);
@@ -190,7 +243,6 @@ export function withPaletteColors(values: Readonly<Record<string, unknown>>, pal
   return found ? { ...rest, background: found } : rest;
 }
 
-type Section = PageSettings & { scope: string; body: PageBlock[] };
 
 /**
  * Reads a variant's page fields into page settings, with the defaults a
@@ -203,9 +255,10 @@ export function pageSettings(values: Readonly<Record<string, unknown>> | undefin
   const v = values ?? {};
   // The background is a color code: whoever reads the settings resolves the palette color the document chose
   // (the organization's or a standard one) first. Anything else, such as a color that no longer exists, leaves
-  // the page white rather than refusing it; so does an image the theme does not have.
+  // the page white rather than refusing it; so does an image whose file was not supplied.
   const background = typeof v.background === "string" && /^#[0-9A-Fa-f]{6}$/.test(v.background) ? v.background : undefined;
-  const image = typeof v.backgroundImage === "string" && KEY.test(v.backgroundImage) && Object.hasOwn(design.assets, v.backgroundImage) ? v.backgroundImage : undefined;
+  const imageKey = isImageValue(v.backgroundImage) ? imageAssetKey(v.backgroundImage) : undefined;
+  const image = imageKey && Object.hasOwn(design.assets, imageKey) ? imageKey : undefined;
   const format = typeof v.format === "string" ? v.format : "";
   const page = format === "custom" ? { width: px(v.width, "Page.width", 100, 5000, design.page.width), height: px(v.height, "Page.height", 100, 5000, design.page.height) }
     : Object.hasOwn(PAGE_FORMATS, format) ? PAGE_FORMATS[format as keyof typeof PAGE_FORMATS] : undefined;
@@ -248,7 +301,7 @@ function textStyleRules(design: PageDesign, scope: string): string {
 function blockRules(scope: string): string {
   return [
     ".b{flex:none;width:100%}", ".cols{display:flex}", ".col{display:flex}", ".col.end{justify-content:flex-end}", ".image{display:flex}", ".image img{display:block}",
-    ".text{overflow-wrap:break-word}", ".text p{margin:0}", ".text p+p{margin-top:1em}",
+    ".text{overflow-wrap:break-word}", ...TYPED_BLOCK_RULES, ".text p{margin:0;white-space:pre-wrap}", ".text p+p{margin-top:1em}",
   ].map((rule) => scope + rule).join("");
 }
 
@@ -276,6 +329,7 @@ const BASE_CSS = [
   ".region{position:fixed;left:var(--m);width:calc(var(--w) - 2*var(--m));display:flex;flex-direction:column;gap:var(--bg)}",
   ".region.header{top:var(--m)}.region.footer{top:calc(var(--h) - var(--m) - var(--osf-footer-height,0px))}",
   "table.flow{width:var(--w);border-collapse:collapse;border-spacing:0}table.flow td{padding:0;vertical-align:top}",
+  ".osf-page-number::after{content:var(--osf-page-number,\"\")}",
   ".space-top{height:var(--top)}.space-bottom{height:var(--bottom)}",
   ".body{position:relative;display:flex;flex-direction:column;gap:var(--bg);padding:0 var(--m);min-height:calc(var(--h) - var(--top) - var(--bottom))}",
 ].join("");
@@ -310,9 +364,28 @@ function sectionHtml(input: PagedDocumentInput, section: PageSettings, header: r
 }
 
 const scopedKey = (scope: string, layout: string) => `${scope}\n${layout}`;
+/**
+ * A header or footer of a section: its own template's, else that of the
+ * nearest including template with one for the same layout. An included
+ * chapter with pages of its own but no header of its own keeps the
+ * document's header; one with a header of its own (a cover) keeps that.
+ */
+/**
+ * The header and footer of a section: its own template's, or else the nearest enclosing template's. A template
+ * that brings a header or a footer brings its whole page frame, so a letter with only a footer of its own does
+ * not take the document's header.
+ */
+function pageFrame(regions: { header: ReadonlyMap<string, PageBlock[]>; footer: ReadonlyMap<string, PageBlock[]> }, scope: string, layout: string): { header: PageBlock[]; footer: PageBlock[] } {
+  for (let at = scope; ; at = at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "") {
+    const key = scopedKey(at, layout);
+    const header = regions.header.get(key), footer = regions.footer.get(key);
+    if (header || footer) return { header: header ?? [], footer: footer ?? [] };
+    if (!at) return { header: [], footer: [] };
+  }
+}
 
 /** One section of a paged document: its page settings and the blocks of its three zones. */
-export type PagedSectionLayout = Readonly<{ settings: PageSettings; header: readonly PageBlock[]; body: readonly PageBlock[]; footer: readonly PageBlock[] }>;
+export type PagedSectionLayout = Readonly<{ settings: PageSettings; header: readonly PageBlock[]; body: readonly PageBlock[]; footer: readonly PageBlock[]; sectionId?: string; sectionName?: string }>;
 
 /**
  * Splits the ordered blocks into sections.
@@ -331,46 +404,54 @@ export type PagedSectionLayout = Readonly<{ settings: PageSettings; header: read
 export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDesign, layouts: PageLayouts = {}): PagedSectionLayout[] {
   if (blocks.length > MAX_BLOCKS) fail(`A paged document holds at most ${MAX_BLOCKS} blocks.`);
   const regions = { header: new Map<string, PageBlock[]>(), footer: new Map<string, PageBlock[]>() };
-  const sections: Section[] = [];
-  const owners = new Map<string, string>();
   const owner = (scope: string): string => {
-    const known = owners.get(scope);
-    if (known !== undefined) return known;
     let at = scope;
     while (at && !Object.hasOwn(layouts, at)) at = at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "";
-    owners.set(scope, at);
     return at;
   };
-  const settings = new Map<string, PageSettings>();
-  const settingsOf = (scope: string): PageSettings => {
-    const known = settings.get(scope);
-    if (known) return known;
-    const made = pageSettings(Object.hasOwn(layouts, scope) ? layouts[scope] : undefined, design);
-    settings.set(scope, made);
-    return made;
+  type State = { scope: string; settings: PageSettings; sectionId?: string; sectionName?: string };
+  const states = new Map<string, State>();
+  const stateFor = (scope: string): State => {
+    let state = states.get(scope);
+    if (!state) { state = { scope, settings: pageSettings(layouts[scope], design) }; states.set(scope, state); }
+    return state;
   };
-  const open = (scope: string) => { sections.push({ ...settingsOf(scope), scope, body: [] }); };
+  const sections: (State & { body: PageBlock[]; force: boolean })[] = [];
+  const open = (state: State, force = false) => { const section = { ...state, body: [] as PageBlock[], force }; sections.push(section); return section; };
+  // Headers and footers are records, keyed by their declared section layout. They may occur anywhere in stored order.
   for (const block of blocks) {
     const scope = block.scope ?? "";
     if (scope.length > 4000 || /[\n]/.test(scope)) fail("A block scope is not valid.");
-    const owned = owner(scope);
-    if (block.region === "body") {
-      if (sections.at(-1)?.scope !== owned) open(owned);
-      sections.at(-1)!.body.push(block);
-      continue;
-    }
-    const key = scopedKey(owned, optionalKey(block.layoutKey, "Block.layoutKey") ?? DEFAULT_PAGE_LAYOUT);
+    if (block.region === "body") continue;
+    if (block.definitionKey === "SectionBreak" || block.definitionKey === "PageBreak") fail("A page or section break belongs in the body.");
+    const key = scopedKey(owner(scope), optionalKey(block.layoutKey, "Block.layoutKey") ?? DEFAULT_PAGE_LAYOUT);
     const list = regions[block.region].get(key) ?? [];
-    list.push(block);
-    regions[block.region].set(key, list);
+    list.push(block); regions[block.region].set(key, list);
   }
-  if (!sections.length) open("");
-  const selectedLayouts = new Set(sections.map(section => scopedKey(section.scope, section.layout)));
+  for (const block of blocks) {
+    if (block.region !== "body") continue;
+    const owned = owner(block.scope ?? "");
+    let state = stateFor(owned);
+    if (block.definitionKey === "SectionBreak") {
+      const layout = optionalKey(block.values.layout, "SectionBreak.layout");
+      if (!layout || layout === DEFAULT_PAGE_LAYOUT) fail("A section must name its own layout.");
+      if (sections.some(section => section.scope === owned && section.settings.layout === layout)) fail("Section layouts must be unique within a template.");
+      const settings = pageSettings({ ...(layouts[owned] ?? {}), ...block.values, layout }, design);
+      state = { scope: owned, settings, sectionId: block.id, ...(typeof block.values.name === "string" ? { sectionName: block.values.name } : {}) };
+      states.set(owned, state); open(state, true); continue;
+    }
+    if (block.definitionKey === "PageBreak") { open(state, true); continue; }
+    const last = sections.at(-1);
+    const section = last && last.scope === owned && last.sectionId === state.sectionId ? last : open(state);
+    section.body.push(block);
+  }
+  if (!sections.length) open(stateFor(""), true);
+  const selectedLayouts = new Set(sections.map(section => scopedKey(section.scope, section.settings.layout)));
   for (const region of [regions.header, regions.footer]) for (const key of region.keys()) {
     if (!selectedLayouts.has(key)) fail("A header or footer names a page layout that this document does not select.");
   }
-  return sections.filter((section, index) => section.body.length || index === sections.length - 1).map(({ scope, body, ...rest }) => ({
-    settings: rest, body, header: regions.header.get(scopedKey(scope, rest.layout)) ?? [], footer: regions.footer.get(scopedKey(scope, rest.layout)) ?? [],
+  return sections.filter(section => section.body.length || section.force).map(({ scope, settings, body, sectionId, sectionName }) => ({
+    settings, body, ...pageFrame(regions, scope, settings.layout), ...(sectionId ? { sectionId } : {}), ...(sectionName ? { sectionName } : {}),
   }));
 }
 

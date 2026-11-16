@@ -1,4 +1,5 @@
 import m0026ColorPaletteReferences from "./0026_color-palette-references.js";
+import m0027PageBackgroundImageFiles from "./0027_page-background-image-files.js";
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Explicit, ordered registry of versioned migrations.
@@ -51,5 +52,6 @@ export const versionedMigrations: VersionedMigration[] = [
   m0024RemoveTaskForm,
   m0025CheckStoredFieldPatterns,
   m0026ColorPaletteReferences,
+  m0027PageBackgroundImageFiles,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

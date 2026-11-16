@@ -72,7 +72,7 @@ const refusal = (slotValue: VariableSlot, offer: VariableValueShape, usage: "who
 };
 
 describe("variable references", () => {
-  test("only the two authored namespaces parse, with their scope", () => {
+  test("only the authored namespaces parse, with their scope", () => {
     expect(parseVariableReference("chips.brand.name")).toEqual({
       namespace: "chips",
       scope: "global",
@@ -83,7 +83,8 @@ describe("variable references", () => {
       scope: "local",
       key: "amount",
     });
-    expect(VARIABLE_NAMESPACE_SCOPES).toEqual({ chips: "global", local: "local" });
+    expect(parseVariableReference("page.number")).toEqual({ namespace: "page", scope: "page", key: "number" });
+    expect(VARIABLE_NAMESPACE_SCOPES).toEqual({ chips: "global", local: "local", page: "page" });
   });
 
   test("a key in one namespace never resolves through the other", () => {

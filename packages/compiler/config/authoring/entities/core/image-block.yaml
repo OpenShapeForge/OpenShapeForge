@@ -3,26 +3,25 @@ kind: coreEntity
 module: core
 entity: ImageBlock
 title: Image
-description: A block definition placing one image asset of the document theme at a fixed size.
+description: A block definition placing one uploaded image at a fixed size.
 language: en
 labels: { en: Image, nl: Afbeelding }
 pluralLabels: { en: Images, nl: Afbeeldingen }
 domains: [documents]
 # The Block placement supplies identity. This definition supplies its fields.
 baseEntity: false
-displayTemplate: "{{asset}}"
+displayTemplate: "{{width}} × {{height}}"
 authorization:
   roles:
     read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
 fields:
   - key: asset
-    osfType: string
+    osfType: image
     required: true
-    label: { en: Asset, nl: Beeld }
+    label: { en: Image, nl: Beeld }
     description:
-      en: Key of an image asset in the document theme's page design.
-      nl: Sleutel van een beeld in het paginaontwerp van het documentthema.
-    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+      en: An image uploaded to the template or document this block belongs to.
+      nl: Een beeld dat is geüpload bij de template of het document waar dit blok bij hoort.
   - key: width
     osfType: number
     required: true

@@ -1,0 +1,85 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: TemplateVersionImage
+title: Template version image
+language: en
+labels: { en: Template version image, nl: Beeld van een templateversie }
+pluralLabels: { en: Template version images, nl: Beelden van templateversies }
+description: >-
+  The bytes of one image a published template version uses, frozen by Template.publish. A document reaches its pinned
+  version's images the way it reaches the version's content, so reading a document never needs access to its template,
+  and a document keeps the image it was made with when the template's image is replaced.
+domains: [documents]
+displayTemplate: "{{fileName}}"
+authorization:
+  roles:
+    read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
+indexes:
+  - { name: template_version_images_version_artifact_uidx, fields: [tenantId, templateVersion, artifactId], unique: true }
+fields:
+  - key: templateVersion
+    osfType: TemplateVersion
+    required: true
+    immutable: true
+    readOnly: true
+    writtenBy: [Template.publish]
+    label: { en: Template version, nl: Templateversie }
+    persisted: { column: template_version_id, storageClass: core }
+    relationship: { ownership: reference, inverse: false }
+  - key: artifactId
+    osfType: string
+    required: true
+    immutable: true
+    readOnly: true
+    writtenBy: [Template.publish]
+    label: { en: File, nl: Bestand }
+    persisted: { column: artifact_id, storageClass: core }
+  - key: sha256
+    osfType: string
+    required: true
+    immutable: true
+    readOnly: true
+    writtenBy: [Template.publish]
+    label: { en: Content hash, nl: Inhoudshash }
+    persisted: { column: sha256, storageClass: core }
+  - key: mediaType
+    osfType: string
+    required: true
+    immutable: true
+    readOnly: true
+    writtenBy: [Template.publish]
+    label: { en: Media type, nl: Mediatype }
+    persisted: { column: media_type, storageClass: core }
+  - key: fileName
+    osfType: string
+    required: true
+    immutable: true
+    readOnly: true
+    writtenBy: [Template.publish]
+    label: { en: File name, nl: Bestandsnaam }
+    persisted: { column: file_name, storageClass: core }
+  - key: data
+    osfType: string
+    required: true
+    immutable: true
+    readOnly: true
+    writtenBy: [Template.publish]
+    label: { en: Contents, nl: Inhoud }
+    description:
+      en: The image bytes, base64-encoded.
+      nl: De bytes van het beeld, base64-gecodeerd.
+    validation: { maxLength: 7000000 }
+    persisted: { column: data, storageClass: core }
+operations:
+  get:
+    name: Read template version image
+    description: Read one frozen image of a published template version.
+    implementation: { type: entity, action: get }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: { tools: generic }

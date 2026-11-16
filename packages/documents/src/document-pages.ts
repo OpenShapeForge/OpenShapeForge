@@ -1,17 +1,30 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
-import type { MaterializedContentBlock, MaterializedDocumentContent, MaterializedTemplateContent } from "./content/types.js";
+import type { CompiledContentBlockRegistry, MaterializedContentBlock, MaterializedDocumentContent, MaterializedTemplateContent } from "./content/types.js";
 import { materializeDocument } from "./document-materialize.js";
-import { buildPagedDocument, PagedDocumentError, withPaletteColors } from "./page/html.js";
+import { buildPagedDocument, PAGE_BLOCK_KEYS, pageImages, PagedDocumentError, withImages, withPaletteColors } from "./page/html.js";
+import { contentImages } from "./images.js";
 import { pageDesignFromStored } from "./page-design.js";
 import { DEFAULT_PAGE_DESIGN, type PageBlock, type PageLayouts } from "./page/types.js";
 import { themeIdFromTemplateSnapshot, themeIdValue } from "./theme-resolution.js";
 import { refuse, uuid } from "./validation.js";
 
-function pageBlock(block: MaterializedContentBlock): PageBlock {
+/** The value schema a block's materialization is drawn by, when its definition renders its fields as document content. */
+export function typedSchema(block: MaterializedContentBlock, definitions: CompiledContentBlockRegistry): Readonly<Record<string, unknown>> | undefined {
+  // The page renderer draws its own block types from their fields; only the others are drawn from their output schema.
+  if ((PAGE_BLOCK_KEYS as readonly string[]).includes(block.definitionKey)) return undefined;
+  if (block.materialization?.result.kind !== "block" || !Object.hasOwn(definitions, block.definitionKey)) return undefined;
+  const definition = definitions[block.definitionKey]!;
+  if (definition.renderers?.document !== "entityFields") return undefined;
+  const value = (definition.materializationSchema?.properties as Record<string, unknown> | undefined)?.value;
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : undefined;
+}
+
+function pageBlock(block: MaterializedContentBlock, definitions: CompiledContentBlockRegistry, locale: string): PageBlock {
   const values = block.materialization?.result.kind === "block" ? block.materialization.result.value : block.values;
-  return {
+  const schema = typedSchema(block, definitions);
+  return { ...(schema ? { typed: { schema, locale } } : {}),
     id: block.id, definitionKey: block.definitionKey, values: values as Record<string, unknown>,
     region: block.region ?? "body", ...(block.layoutKey ? { layoutKey: block.layoutKey } : {}),
     // Every block an inclusion expands to carries the including blocks before its own id.
@@ -70,9 +83,13 @@ export const renderDocumentPages: ModuleOperationHandler = async (input, context
     const palette = (listed.data as { colors: { reference: string; value: string }[] }).colors;
     for (const scope of Object.keys(layouts)) layouts[scope] = withPaletteColors(layouts[scope]!, palette);
   }
+  // Every image is inlined: the document's own files, and the frozen images of the template versions it was made from.
+  const blocks = content.blocks.map((block) => pageBlock(block, content.definitions, content.locale));
+  const images = await contentImages(context, content, pageImages([], layouts).map((entry) => entry.image), { entity: "Document", id: documentId });
   try {
     const paged = buildPagedDocument({
-      title: source.title, locale: content.locale, blocks: content.blocks.map(pageBlock), layouts: layouts as PageLayouts, design, fonts: [],
+      title: source.title, locale: content.locale, blocks, layouts: layouts as PageLayouts,
+      design: withImages(design, images), fonts: [],
     });
     return { value: { documentId, themeId: source.themeId, compositionHash: content.compositionHash, ...paged } };
   } catch (error) {

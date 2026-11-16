@@ -22,6 +22,7 @@ export type {
   VariableReference,
   VariableRefusalCode,
   VariableScope,
+  PageVariableKey,
   VariableSlot,
   VariableUsage,
   VariableValueShape,
@@ -40,6 +41,8 @@ export {
   MAX_VARIABLE_REFERENCE_LENGTH,
   VARIABLE_NAMESPACE_SCOPES,
   VARIABLE_NAMESPACES,
+  PAGE_VARIABLE_KEYS,
+  isPageVariableKey,
   VARIABLE_REFERENCE_PATTERN,
   VARIABLE_TOKEN,
   VariableError,
@@ -196,3 +199,18 @@ export * from "./schema-regexp.js";
 
 export * from "./colors.js";
 export { PRIVATE_OUTPUT_TOOL_NAME, hasSensitiveOutput, assertSensitiveOutputSchema, splitSensitiveOutput, type SensitiveOutputField } from "./sensitive-output.js";
+export {
+  compileValuePath,
+  valuePathChoices,
+  ValuePathError,
+  ENTITY_GRAPH_VERSION,
+  MAX_PATH_RELATIONSHIPS,
+} from "./value-paths.js";
+export type {
+  CompiledValuePath,
+  EntityGraph,
+  EntityGraphEntity,
+  EntityGraphField,
+  EntityGraphRelationship,
+  ValuePathStep,
+} from "./value-paths.js";

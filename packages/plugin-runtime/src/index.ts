@@ -788,6 +788,8 @@ export type RuntimeConnectionResolution =
       message: string };
 
 export type PluginPlatformServices = {
+  /** Diagnostic journal access requires a live verified tenant session and McpInsights.Manage. */
+  readonly mcpDiagnostics?: import("./diagnostics.js").RuntimeMcpDiagnosticServices<PluginSessionContext>;
   readonly readProgress?: RuntimeReadProgressServices<PluginSessionContext>;
   /**
    * What the host's declarative Service engine enforces (see
@@ -842,6 +844,12 @@ export type PluginPlatformServices = {
     versioning?: RuntimeVersioningRegistry;
     /** Absent on hosts without extensible entities; a snapshot of an extensible head then fails closed. */
     extensions?: RuntimeExtensionSnapshotService;
+    /**
+     * Generated fields, relationships and canonical read Operations per stored
+     * entity, for `compileValuePath`. Absent on hosts without it; a caller that
+     * would follow a relationship must fail closed.
+     */
+    entityGraph?: import("@openshapeforge/operations").EntityGraph;
   };
   events: {
     append(

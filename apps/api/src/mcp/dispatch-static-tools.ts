@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import {hasSensitiveOutput} from "@openshapeforge/operations";
+import { observeDiagnosticOperation } from "./diagnostics/observer.js";
 import { PRIVATE_OUTPUT_TOOL, completePrivateOutput, startPrivateOutput, needsPrivateOutput } from "./private-output.js";
 import { ARTIFACT_UPLOAD_TOOL_NAME, artifactUploadToolResult, mintArtifactUpload } from "./artifact-upload.js";
 import { callEditLeaseTool } from "./edit-lease-tools.js";
@@ -182,6 +183,7 @@ export async function staticToolCall(
         throw new HttpError(404, "NOT_FOUND", "The requested Operation is not available.");
       }
       assertOperationExecutionRoute(definition, name === searchableOperationToolNames.secureExecute, searchableOperationToolNames);
+      observeDiagnosticOperation(definition);
       if (needsPrivateOutput(definition)) return await startPrivateOutput(ctx, definition, parsed.input);
       const entity = entities.get(definition.id);
       if (entity) {

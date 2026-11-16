@@ -288,6 +288,7 @@ export type ModuleConnectionValues = RuntimeConnectionValues;
 export type ModuleConnectionResolution = RuntimeConnectionResolution;
 
 export type ModulePlatformServices = {
+  readonly mcpDiagnostics?: import("@openshapeforge/plugin-runtime/diagnostics").RuntimeMcpDiagnosticServices<TrustedSessionContext>;
   /** Present only once an enforcing declarative engine is registered. */
   readonly declarativeServiceCapabilities?: RuntimeDeclarativeServiceCapabilities;
   readonly readProgress?: RuntimeReadProgressServices<TrustedSessionContext>;

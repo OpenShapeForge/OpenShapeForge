@@ -29,7 +29,9 @@ describe("entity field suggestions come from the compiled contract", () => {
   test("every base entity has readable fields, and the tenant fence is not one of them", () => {
     expect(Object.keys(COMPILER_ENTITY_FIELDS).length).toBeGreaterThan(100);
     for (const [entity, fields] of Object.entries(COMPILER_ENTITY_FIELDS)) {
-      expect(fields.length, entity).toBeGreaterThan(0);
+      // PageBreak is a fieldless value marker, not a persisted base entity.
+      if (entity === "PageBreak") expect(fields).toEqual([]);
+      else expect(fields.length, entity).toBeGreaterThan(0);
       expect(fields.some((field) => field.key === "tenantId" || field.osfType === "tenantId"), entity).toBe(false);
     }
   });

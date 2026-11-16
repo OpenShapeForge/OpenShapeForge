@@ -267,6 +267,17 @@ describe("Document.materialize", () => {
     expect(g.validated).toEqual([{ name: "Reader" }]);
     expect((response as any).value.blocks[0].values.markdown).toBe("First Reader");
   });
+  test("keeps a page number for the page renderer, alone in a field or inside a text, and refuses an unknown page fact", async () => {
+    for (const text of ["{{page.number}}", "Page {{page.number}} of {{local.name}}"]) {
+      const f = fixture();
+      f.data.firstText = text;
+      const response = (await materializeDocument(request, f.context)) as any;
+      expect(response.value.blocks[0].values.markdown).toBe(text.replace("{{local.name}}", "Ada"));
+    }
+    const g = fixture();
+    g.data.firstText = "{{page.count}}";
+    await expect(materializeDocument(request, g.context)).rejects.toMatchObject({ operationError: { code: "INVALID_VALUE" } });
+  });
   test("resolves an included template version from its frozen snapshot while the root stays live", async () => {
     const f = fixture({ withInclusion: true });
     const response = await materializeDocument(request, f.context);

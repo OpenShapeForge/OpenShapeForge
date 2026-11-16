@@ -16,7 +16,7 @@ authorization:
     create: [Templates.Manage]
     update: [Templates.Manage]
     delete: [Templates.Manage]
-displayTemplate: "{{versionNumber}}"
+displayTemplate: "{{templateName}} · v{{versionNumber}}"
 indexes:
   - { name: template_versions_tenant_number_uidx, fields: [tenantId, template, versionNumber], unique: true }
 fields:
@@ -31,6 +31,18 @@ fields:
           en: Versions
           nl: Versies
         ownership: owned
+  - key: templateName
+    osfType: string
+    immutable: true
+    label: { en: Template name, nl: Templatenaam }
+    description:
+      en: The name the template carried when this version was published, read from the frozen content, so a version
+        reads as "Proposal · v7" wherever it is referenced. Set by the database on publication; never written by a
+        caller.
+      nl: De naam die de template droeg toen deze versie werd gepubliceerd, gelezen uit de vastgelegde inhoud, zodat
+        een versie overal als "Voorstel · v7" leest. De database zet die bij publicatie; een aanroeper schrijft hem
+        nooit.
+    persisted: { column: template_name, storageClass: core }
   - key: versionNumber
     osfType: integer
     required: true

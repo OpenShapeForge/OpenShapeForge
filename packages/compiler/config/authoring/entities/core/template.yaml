@@ -68,6 +68,155 @@ fields:
         waarden tegen deze declaraties.
     persisted: { column: parameters, storageClass: core }
 operations:
+  images:
+    name: { en: Read template images, nl: Templatebeelden lezen }
+    description: >-
+      Returns the bytes of the named images of the template: its own uploads, and the frozen images of published
+      template versions it includes. For the template editor, which draws the pages itself.
+    implementation: { type: plugin, plugin: documents, handler: templateImages }
+    target: { scope: record, inputField: id }
+    auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
+    tenancy: { mode: required }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, images]
+        properties:
+          id: { type: string, format: uuid, x-osf-reference: { entity: Template }, x-osf-i18n: { title: { en: Template, nl: Template } } }
+          images:
+            type: array
+            maxItems: 200
+            x-osf-i18n: { title: { en: Images, nl: Beelden } }
+            items:
+              type: object
+              required: [artifactId, sha256, mediaType, fileName]
+              properties:
+                artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: File, nl: Bestand } } }
+                sha256: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Content hash, nl: Inhoudshash } } }
+                mediaType: { type: string, x-osf-i18n: { title: { en: Media type, nl: Mediatype } } }
+                fileName: { type: string, x-osf-i18n: { title: { en: File name, nl: Bestandsnaam } } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [images]
+        properties:
+          images:
+            type: array
+            x-osf-i18n: { title: { en: Images, nl: Beelden } }
+            items:
+              type: object
+              additionalProperties: false
+              required: [artifactId, mediaType, fileName, data]
+              properties:
+                artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: File, nl: Bestand } } }
+                mediaType: { type: string, x-osf-i18n: { title: { en: Media type, nl: Mediatype } } }
+                fileName: { type: string, x-osf-i18n: { title: { en: File name, nl: Bestandsnaam } } }
+                data: { type: string, x-osf-i18n: { title: { en: Contents (base64), nl: Inhoud (base64) } } }
+    errors:
+      - { status: 403, code: FORBIDDEN, description: The template is not accessible. }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  variablePaths:
+    name: { en: Browse variable paths, nl: Variabelenpaden bladeren }
+    description: >-
+      What a template variable can name from a record of one entity, one step at a time: the fields of the record a
+      path leads to and the relationships it can follow next. Returns metadata only, never a record's values; reading
+      values happens when content is materialized, with the reader's own rights.
+    implementation: { type: plugin, plugin: documents, handler: variablePaths }
+    target: { scope: collection }
+    auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
+    tenancy: { mode: required }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [entity]
+        properties:
+          entity: { type: string, pattern: "^[A-Z][A-Za-z0-9]{0,127}$", x-osf-i18n: { title: { en: Entity, nl: Entiteit } } }
+          path: { type: string, maxLength: 700, x-osf-i18n: { title: { en: Path so far, nl: Pad tot nu toe } } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [entity, label, fields, relationships]
+        properties:
+          entity: { type: string, x-osf-i18n: { title: { en: Entity, nl: Entiteit } } }
+          label: { type: object, additionalProperties: { type: string }, x-osf-i18n: { title: { en: Label, nl: Label } } }
+          fields:
+            type: array
+            x-osf-i18n: { title: { en: Fields, nl: Velden } }
+            items:
+              type: object
+              additionalProperties: false
+              required: [key, label, osfType, many]
+              properties:
+                key: { type: string, x-osf-i18n: { title: { en: Key, nl: Sleutel } } }
+                label: { type: object, additionalProperties: { type: string }, x-osf-i18n: { title: { en: Label, nl: Label } } }
+                osfType: { type: string, x-osf-i18n: { title: { en: Type, nl: Type } } }
+                many: { type: boolean, x-osf-i18n: { title: { en: List, nl: Lijst } } }
+          relationships:
+            type: array
+            x-osf-i18n: { title: { en: Relationships, nl: Relaties } }
+            items:
+              type: object
+              additionalProperties: false
+              required: [key, label, target, many]
+              properties:
+                key: { type: string, x-osf-i18n: { title: { en: Key, nl: Sleutel } } }
+                label: { type: object, additionalProperties: { type: string }, x-osf-i18n: { title: { en: Label, nl: Label } } }
+                target: { type: string, x-osf-i18n: { title: { en: Leads to, nl: Leidt naar } } }
+                many: { type: boolean, x-osf-i18n: { title: { en: List, nl: Lijst } } }
+    errors:
+      - { status: 400, code: VALIDATION, description: The path cannot be followed from this entity. }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+  addImage:
+    name: { en: Add image, nl: Beeld toevoegen }
+    description: >-
+      Keeps an uploaded PNG, JPEG, WebP or SVG image as a file of this template and returns the image value that an image
+      field of the template, its variants or its blocks stores. Only readers of the template can read the file.
+    implementation: { type: plugin, plugin: documents, handler: addTemplateImage }
+    target: { scope: record, inputField: id }
+    auth: { mode: session, roles: [Templates.Manage] }
+    tenancy: { mode: required }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [id, artifact]
+        properties:
+          id: { type: string, format: uuid, x-osf-reference: { entity: Template }, x-osf-i18n: { title: { en: Template, nl: Template } } }
+          artifact:
+            type: object
+            x-osf-control: artifact-upload
+            x-osf-i18n: { title: { en: Image, nl: Beeld } }
+            additionalProperties: false
+            required: [artifactId, expectedArtifactVersion]
+            properties:
+              artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: Upload, nl: Upload } } }
+              expectedArtifactVersion: { type: integer, minimum: 1, x-osf-i18n: { title: { en: Upload version, nl: Uploadversie } } }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [artifactId, sha256, mediaType, fileName]
+        properties:
+          artifactId: { type: string, format: uuid, x-osf-i18n: { title: { en: File, nl: Bestand } } }
+          sha256: { type: string, pattern: "^[a-f0-9]{64}$", x-osf-i18n: { title: { en: Content hash, nl: Inhoudshash } } }
+          mediaType: { type: string, x-osf-i18n: { title: { en: Media type, nl: Mediatype } } }
+          fileName: { type: string, x-osf-i18n: { title: { en: File name, nl: Bestandsnaam } } }
+    errors:
+      - { status: 400, code: VALIDATION, description: The file is not a supported image. }
+      - { status: 403, code: FORBIDDEN, description: The template cannot be changed by this session. }
+      - { status: 404, code: NOT_FOUND, description: The template does not exist. }
+      - { status: 503, code: STORAGE_UNAVAILABLE, description: File storage is unavailable. }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
   insertVariant:
     name: { en: Add channel variant, nl: Kanaalvariant toevoegen }
     description: Create an owned channel and language variant in the editable template.
@@ -112,7 +261,11 @@ operations:
     concurrency: { version: { mode: required, field: updatedAt } }
     confirmation: { mode: none }
 interfaces:
-  rest: {}
+  rest:
+    operations:
+      images: { method: POST, path: "/api/template-content/:id/images" }
+      addImage: { method: POST, path: "/api/template-content/:id/add-image" }
+      variablePaths: { method: POST, path: "/api/template-content/variable-paths" }
   graphql: {}
   mcp: { tools: generic }
   web:

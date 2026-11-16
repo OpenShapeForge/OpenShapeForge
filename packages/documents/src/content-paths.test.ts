@@ -61,7 +61,7 @@ function context(denied: ReadonlySet<string> = new Set(), entityGraph: EntityGra
           if (request.operation.intent === "get") return { data: table[request.input.id as string] ?? null };
           listed.push(request.input.filter);
           const [field, rule] = Object.entries(request.input.filter as Record<string, { in: string[] }>)[0]!;
-          return { data: { items: Object.values(table).filter((row) => rule!.in.includes(row[field!] as string) && !denied.has(`${request.operation.entityName}:${row.id}`)) } };
+          return { data: { items: Object.values(table).filter((row) => rule!.in.includes(row[field!] as string) && !denied.has(`${request.operation.entityName}:${row.id}`)).map((data) => ({ data, operations: [] })) } };
         },
       },
     },

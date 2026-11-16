@@ -194,7 +194,7 @@ export function pathResolver(context: ModuleOperationContext, operationDefinitio
       const page = object(result.data, "list result");
       if (!Array.isArray(page.items)) refuse("DEPENDENCY_INVALID", `${entityName} listed no items.`);
       for (const item of page.items) {
-        const row = object(item, "listed record");
+        const row = object(object(item, "listed item").data, "listed record");
         if (row.tenantId !== undefined && row.tenantId !== tenantId) refuse("DEPENDENCY_INVALID", "A listed record belongs to another tenant.");
         found.push(row);
         if (found.length > PATH_RECORD_LIMIT) refuse("CONTENT_LIMIT_EXCEEDED", `A variable may read at most ${PATH_RECORD_LIMIT} records.`);

@@ -26,7 +26,7 @@ const children = (child: CoreEntity) => child.fields.find((field) => field.key =
 
 test("real authored template collection Operations compile the direct-edit variant flow under strict AJV", () => {
   const authoringDir = join(import.meta.dir, "../../config/authoring");
-  const entries = ["template", "template-version", "template-variant", "block", "text-block", "youtube-embed", "template-block", "text-columns", "image-block", "spacer-block"].map((slug) => {
+  const entries = ["template", "template-version", "template-variant", "block", "text-block", "youtube-embed", "template-block", "text-columns", "image-block", "spacer-block", "page-break", "section-break"].map((slug) => {
     const contract = compileEntity(loadEntity(authoringDir, slug));
     // This regression owns native schema lowering, not separately authored plugin routes.
     contract.pluginOperations = contract.pluginOperations?.filter((operation) => operation.definition.implementation.type === "collection") ?? [];
@@ -53,7 +53,7 @@ test("real authored template collection Operations compile the direct-edit varia
 
 test("a block's owner keys and the document lock never enter the owner-scoped values contracts", () => {
   const authoringDir = join(import.meta.dir, "../../config/authoring");
-  const entries = ["template", "template-version", "template-variant", "document", "document-version", "document-variant", "block", "text-block", "youtube-embed", "template-block", "text-columns", "image-block", "spacer-block",
+  const entries = ["template", "template-version", "template-variant", "document", "document-version", "document-variant", "block", "text-block", "youtube-embed", "template-block", "text-columns", "image-block", "spacer-block", "page-break", "section-break",
     "document-type", "case-file", "case", "relation", "account"].map((slug) => {
     const contract = compileEntity(loadEntity(authoringDir, slug));
     contract.pluginOperations = contract.pluginOperations?.filter((operation) => operation.definition.implementation.type === "collection") ?? [];

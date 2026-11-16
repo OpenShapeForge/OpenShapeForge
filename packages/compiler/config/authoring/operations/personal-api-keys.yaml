@@ -91,6 +91,7 @@ operations:
             items: &personalKey
               type: object
               additionalProperties: false
+              x-osf-i18n: { title: { en: API key, nl: API-sleutel } }
               required: [id, displayName, status, ownerUserId, ownerName, roleSubset, createdAt, expiresAt, revokedAt, revokedByAdministrator, lastUsedAt]
               properties:
                 id:

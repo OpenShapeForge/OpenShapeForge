@@ -1,0 +1,52 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: PageBreak
+title: Page break
+description: Starts a new page in the same section, retaining its page settings, header and footer.
+language: en
+labels: { en: Page break, nl: Pagina-einde }
+pluralLabels: { en: Page breaks, nl: Pagina-eindes }
+domains: [documents]
+baseEntity: false
+authorization:
+  roles:
+    read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
+fields:
+  []
+operations:
+  materialize:
+    name: Materialize page break
+    description: Validate the canonical page boundary without rendering configuration as content.
+    implementation: { type: plugin, plugin: documents, handler: materializeFields }
+    target: { scope: collection }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [definitionKey, values]
+        properties:
+          definitionKey: { type: string, const: PageBreak }
+          values: { type: object }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [kind, value]
+        properties:
+          kind: { type: string, const: block }
+          value:
+            type: object
+            additionalProperties: false
+            properties: {}
+    errors: []
+    auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: none }
+interfaces:
+  rest:
+    operations:
+      materialize: { method: POST, path: /api/content-blocks/page-break/materialize }
+  mcp: { tools: generic }

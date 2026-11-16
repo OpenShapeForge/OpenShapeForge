@@ -64,6 +64,8 @@ fields:
           - TextColumns
           - ImageBlock
           - SpacerBlock
+          - SectionBreak
+          - PageBreak
   - key: documentVariant
     label: { en: Document variant, nl: Documentvariant }
     description:
@@ -97,6 +99,8 @@ fields:
           - TextColumns
           - ImageBlock
           - SpacerBlock
+          - SectionBreak
+          - PageBreak
   - key: definitionKey
     osfType: string
     required: true

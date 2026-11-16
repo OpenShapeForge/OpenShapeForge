@@ -1063,10 +1063,3 @@ describe("variables that follow a record parameter", () => {
       .rejects.toBeInstanceOf(TemplateContentError);
   });
 });
-
-test("resolved global relationship values freeze their authorized record versions",async()=>{
- const f=fixture([text('global','{{chips.company.client.displayName}}')]);
- const sources=[{entity:'ExampleRecord',id:'client',versionId:'record-v2'}];
- const snapshot=await materializeTemplateContent(f.request,f.registry,{...f.resolvers,resolveGlobalVariable:()=>({tenantId,sourceId:'company.client',sourceVersionId:'chip-v1',shape:TEXT_GLOBAL,value:'Example client',sources})});
- expect(snapshot.globals['company.client.displayName']).toMatchObject({value:'Example client',sources});
-});

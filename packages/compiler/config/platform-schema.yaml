@@ -739,6 +739,16 @@ tables:
       # reads it until row scoping ships; recorded now so that decision has
       # somewhere to land instead of silently defaulting to "self".
       - { name: intended_scope, type: text, required: true, default: "'tenant'::text" }
+      # Optional network allowlist: a JSON array of IP addresses and CIDR
+      # ranges. NULL (or empty) means any address. Checked on every request
+      # against the address the API derived through its trusted proxy hops.
+      - { name: allowed_ips, type: jsonb }
+      # Optional browser origins: a JSON array of exact origins
+      # (`https://shop.example.com`). Non-empty makes every key of this
+      # integration a BROWSER key: usable only from those origins, and only
+      # for Operations whose declared effects are reads. NULL (or empty) is a
+      # server key, which a browser request is refused.
+      - { name: allowed_origins, type: jsonb }
       - { name: created_by, type: uuid, required: true }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: updated_at, type: timestamptz, required: true, default: now() }
@@ -862,6 +872,10 @@ tables:
       # live. Shown to the owner so a key an administrator withdrew does not
       # look like one that simply stopped working.
       - { name: revoked_by, type: uuid }
+      # Optional network allowlist, as on api_key_integrations. A personal key
+      # has no browser origins: it acts as a person and is never usable from a
+      # web page.
+      - { name: allowed_ips, type: jsonb }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: first_used_at, type: timestamptz }
       - { name: last_used_at, type: timestamptz }

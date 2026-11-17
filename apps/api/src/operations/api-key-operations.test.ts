@@ -243,7 +243,7 @@ describe("integration catalog Operations", () => {
       "createIntegration", "createMyPersonalKey", "disableIntegration", "getCredential",
       "getIntegration", "getMyPersonalKey", "getPersonalKey", "issueCredential",
       "listCredentials", "listIntegrations", "listMyPersonalKeys", "listPersonalKeys",
-      "revokeCredential", "revokeMyPersonalKey", "revokePersonalKey", "updateIntegrationRoles",
+      "revokeCredential", "revokeMyPersonalKey", "revokePersonalKey", "updateIntegrationRestrictions", "updateIntegrationRoles",
     ]);
     expect([...contracts.keys()].sort()).toEqual([...apiKeyOperationHandlerNames()]);
     expect(() => apiKeyOperationHandler({ key: "api-keys.unknown", handler: "mintEverything" }))
@@ -274,6 +274,8 @@ describe("integration catalog Operations", () => {
         displayName: "Partner portal",
         status: "active",
         grantedRoles: [READ_ROLE, WRITE_ROLE],
+        allowedIps: [],
+        allowedOrigins: [],
         createdAt: store.integrations[0]!.createdAt.toISOString(),
       });
 

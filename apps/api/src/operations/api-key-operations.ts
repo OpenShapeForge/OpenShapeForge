@@ -47,6 +47,7 @@ import {
   pageKeys,
   revokeKey,
   updateIntegrationRoles,
+  updateIntegrationRestrictions,
   type ApiKeyServiceDeps,
   type ListedIntegration,
   type ListedKey,
@@ -232,6 +233,28 @@ function roleList(value: unknown, name: string, allowEmpty = false): string[] {
 }
 
 /**
+ * An optional allowlist from the input: the shape only. What each entry may
+ * be is the service's to decide (auth/api-key/restrictions.ts).
+ */
+function allowlist(value: unknown, name: string): { present: boolean; list: string[] } {
+  if (value === undefined || value === null) return { present: false, list: [] };
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    throw new ApiKeyValidationError(`${name} must be a list of strings.`);
+  }
+  return { present: true, list: value as string[] };
+}
+
+/** The create-time allowlist fields, spread into a service input. */
+function restrictionInput(input: Record<string, unknown>, origins: boolean) {
+  const ips = allowlist(input.allowedIps, "allowedIps");
+  const sites = origins ? allowlist(input.allowedOrigins, "allowedOrigins") : { present: false, list: [] };
+  return {
+    ...(ips.present ? { allowedIps: ips.list } : {}),
+    ...(sites.present ? { allowedOrigins: sites.list } : {}),
+  };
+}
+
+/**
  * Response headers for a result that carries a live credential.
  *
  * `no-store` is the one that matters: without it a shared cache, a browser
@@ -276,6 +299,8 @@ type ProjectedIntegration = {
   displayName: string;
   status: ListedIntegration["status"];
   grantedRoles: string[];
+  allowedIps: string[];
+  allowedOrigins: string[];
   credentialCount: number;
   activeCredentialCount: number;
   createdAt: string;
@@ -288,6 +313,8 @@ function projectIntegration(integration: ListedIntegration): ProjectedIntegratio
     displayName: integration.displayName,
     status: integration.status,
     grantedRoles: integration.grantedRoles,
+    allowedIps: integration.allowedIps,
+    allowedOrigins: integration.allowedOrigins,
     credentialCount: integration.keyCount,
     activeCredentialCount: integration.activeKeyCount,
     createdAt: integration.createdAt.toISOString(),
@@ -408,6 +435,7 @@ function projectPersonalKey(key: ListedPersonalKey, now: Date) {
     ownerUserId: key.ownerUserId,
     ownerName: key.ownerName,
     roleSubset: key.roleSubset,
+    allowedIps: key.allowedIps,
     createdAt: key.createdAt.toISOString(),
     expiresAt: key.expiresAt.toISOString(),
     revokedAt: iso(key.revokedAt),
@@ -496,6 +524,7 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
         displayName: text(input.displayName),
         ...(input.expiresInDays === undefined ? {} : { expiresInDays: input.expiresInDays as number }),
         ...(input.roleSubset === undefined ? {} : { roleSubset: roleList(input.roleSubset, "roleSubset") }),
+        ...restrictionInput(input, false),
       }, now);
       return oneTimeCredential({
         key: projectPersonalKey(created.key, now),
@@ -612,6 +641,7 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
         ...(input.roleSubset === undefined
           ? {}
           : { roleSubset: roleList(input.roleSubset, "roleSubset") }),
+        ...restrictionInput(input, true),
       }, now);
       // The metadata comes out of the SAME transaction that minted the
       // credential, not from a read-back after it. A read-back is a step
@@ -627,6 +657,8 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
           displayName: created.integration.displayName,
           status: created.integration.status,
           grantedRoles: created.integration.grantedRoles,
+          allowedIps: created.integration.allowedIps,
+          allowedOrigins: created.integration.allowedOrigins,
           createdAt: created.integration.createdAt.toISOString(),
         },
         credential: mintedCredential(created),
@@ -677,6 +709,22 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
       const updated = await updateIntegrationRoles(resolved.deps, resolved.session, {
         integrationId: text(input.integrationId),
         roles: roleList(input.roles, "roles", true),
+      });
+      return { value: projectIntegration(updated) };
+    } catch (error) {
+      return declaredServiceFailure(error);
+    }
+  },
+
+  async updateIntegrationRestrictions(input, context): Promise<ModuleOperationResult> {
+    const resolved = resolve(context);
+    if (isFailure(resolved)) return resolved;
+    try {
+      // The complete new lists; an omitted list clears that restriction.
+      const updated = await updateIntegrationRestrictions(resolved.deps, resolved.session, {
+        integrationId: text(input.integrationId),
+        allowedIps: allowlist(input.allowedIps, "allowedIps").list,
+        allowedOrigins: allowlist(input.allowedOrigins, "allowedOrigins").list,
       });
       return { value: projectIntegration(updated) };
     } catch (error) {

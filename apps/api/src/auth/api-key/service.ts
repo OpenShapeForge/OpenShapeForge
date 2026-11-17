@@ -62,6 +62,12 @@ import {
   type CredentialLifetimePolicy,
 } from "./lifetime.js";
 import { parseRoleSubset } from "./store.js";
+import {
+  ApiKeyRestrictionInputError,
+  normalizeAllowedIps,
+  normalizeAllowedOrigins,
+  storedList,
+} from "./restrictions.js";
 
 export type ProvisioningSession = CeilingSession & {
   tenantId: string;
@@ -200,6 +206,10 @@ export type CreateIntegrationInput = {
   expiresInDays?: number | null;
   /** Optional narrowing for the first key. null → the integration's full role set. */
   roleSubset?: string[] | null;
+  /** Optional network allowlist (IP addresses and CIDR ranges); restrictions.ts. */
+  allowedIps?: string[] | null;
+  /** Optional browser origins; non-empty makes this a browser key; restrictions.ts. */
+  allowedOrigins?: string[] | null;
 };
 
 export type CreatedApiKey = {
@@ -230,6 +240,8 @@ export type CreatedIntegration = CreatedApiKey & {
     displayName: string;
     status: IntegrationStatus;
     grantedRoles: string[];
+    allowedIps: string[];
+    allowedOrigins: string[];
     createdAt: Date;
     updatedAt: Date;
   };
@@ -256,6 +268,7 @@ export async function createIntegration(
   }
 
   const displayName = displayNameOrThrow(input.displayName, "An integration");
+  const restrictions = restrictionsOrThrow(input.allowedIps, input.allowedOrigins);
   // Resolved here rather than beside the mint below: a lifetime the
   // deployment's policy refuses must leave neither an intent row nor a realm
   // client behind, and everything from the insert onwards is external.
@@ -275,10 +288,11 @@ export async function createIntegration(
     await sql`
       insert into platform.api_key_integrations
         (id, tenant_id, display_name, keycloak_client_id, status, granted_roles,
-         created_by, created_at, updated_at)
+         allowed_ips, allowed_origins, created_by, created_at, updated_at)
       values
         (${integrationId}, ${session.tenantId}, ${displayName}, ${keycloakClientId},
-         'pending', ${jsonbLiteral(input.roles)}, ${session.userId}, ${now}, ${now})
+         'pending', ${jsonbLiteral(input.roles)}, ${storedRestriction(restrictions.allowedIps)},
+         ${storedRestriction(restrictions.allowedOrigins)}, ${session.userId}, ${now}, ${now})
     `.execute(trx);
   }, { independent: true });
 
@@ -339,6 +353,8 @@ export async function createIntegration(
       display_name: string;
       status: string;
       granted_roles: unknown;
+      allowed_ips: unknown;
+      allowed_origins: unknown;
       created_at: Date;
       updated_at: Date;
     }>`
@@ -351,7 +367,7 @@ export async function createIntegration(
        where id = ${integrationId}
          and tenant_id = ${session.tenantId}
          and status = 'pending'
-      returning display_name, status, granted_roles, created_at, updated_at
+      returning display_name, status, granted_roles, allowed_ips, allowed_origins, created_at, updated_at
     `.execute(trx);
 
     const row = updated.rows[0];
@@ -410,6 +426,8 @@ export async function createIntegration(
       displayName: activated.row.display_name,
       status: integrationStatus(activated.row.status),
       grantedRoles: grantedRolesOf(activated.row.granted_roles),
+      allowedIps: storedList(activated.row.allowed_ips),
+      allowedOrigins: storedList(activated.row.allowed_origins),
       createdAt: activated.row.created_at,
       updatedAt: activated.row.updated_at,
     },
@@ -900,6 +918,10 @@ export type ListedIntegration = {
   status: IntegrationStatus;
   /** Roles the service account holds, as the provisioning caller authorized them. */
   grantedRoles: string[];
+  /** Network allowlist; empty means any address. */
+  allowedIps: string[];
+  /** Browser origins; non-empty means its keys are browser keys. */
+  allowedOrigins: string[];
   createdAt: Date;
   updatedAt: Date;
   keyCount: number;
@@ -912,6 +934,8 @@ type IntegrationRow = {
   display_name: string;
   status: string;
   granted_roles: unknown;
+  allowed_ips: unknown;
+  allowed_origins: unknown;
   created_at: Date;
   updated_at: Date;
   key_count: string | number;
@@ -928,7 +952,8 @@ type IntegrationRow = {
  */
 function integrationMetadataColumns(now: Date) {
   return sql`
-    i.id, i.display_name, i.status, i.granted_roles, i.created_at, i.updated_at,
+    i.id, i.display_name, i.status, i.granted_roles, i.allowed_ips, i.allowed_origins,
+    i.created_at, i.updated_at,
     count(k.id) as key_count,
     count(k.id) filter (
       where k.revoked_at is null and (k.expires_at is null or k.expires_at > ${now})
@@ -953,6 +978,8 @@ function listedIntegration(row: IntegrationRow): ListedIntegration {
     displayName: row.display_name,
     status: integrationStatus(row.status),
     grantedRoles: grantedRolesOf(row.granted_roles),
+    allowedIps: storedList(row.allowed_ips),
+    allowedOrigins: storedList(row.allowed_origins),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     // Postgres counts arrive as bigint, which the driver hands back as text.
@@ -1135,6 +1162,95 @@ export async function disableIntegration(
 
 /** The audit trail's name for an integration, in `platform.entity_events`. */
 export const API_KEY_INTEGRATION_AGGREGATE = "ApiKeyIntegration";
+
+/**
+ * Validate both allowlists from a create or edit request, as the caller's 400
+ * rather than a server error.
+ */
+function restrictionsOrThrow(
+  allowedIps: unknown,
+  allowedOrigins: unknown,
+): { allowedIps: string[]; allowedOrigins: string[] } {
+  try {
+    return {
+      allowedIps: normalizeAllowedIps(allowedIps),
+      allowedOrigins: normalizeAllowedOrigins(allowedOrigins),
+    };
+  } catch (error) {
+    if (error instanceof ApiKeyRestrictionInputError) throw new ApiKeyValidationError(error.message);
+    throw error;
+  }
+}
+
+/** An empty allowlist is stored as NULL: "no restriction", one spelling. */
+function storedRestriction(list: readonly string[]) {
+  return list.length === 0 ? null : jsonbLiteral([...list]);
+}
+
+export type UpdateIntegrationRestrictionsInput = {
+  integrationId: string;
+  /** The complete new allowlist, not a delta. Empty or omitted: any address. */
+  allowedIps?: string[] | null;
+  /** The complete new origin list. Empty or omitted: a server key again. */
+  allowedOrigins?: string[] | null;
+};
+
+/**
+ * Replace where an integration's keys may be used from. Takes effect on the
+ * next request of every key of the integration: the resolver reads the row on
+ * every request and caches nothing about it.
+ */
+export async function updateIntegrationRestrictions(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+  input: UpdateIntegrationRestrictionsInput,
+  now: Date = new Date(),
+): Promise<ListedIntegration> {
+  assertMayManageApiKeys(session);
+  const restrictions = restrictionsOrThrow(input.allowedIps, input.allowedOrigins);
+  return withSession(deps, session, async (trx) => {
+    const locked = await lockIntegration(trx, session.tenantId, input.integrationId);
+    if (!locked || locked.status === "pending") {
+      throw new ApiKeyNotFoundError("No such integration in this organization.");
+    }
+    const previous = await sql<{ allowed_ips: unknown; allowed_origins: unknown }>`
+      select allowed_ips, allowed_origins
+        from platform.api_key_integrations
+       where id = ${input.integrationId} and tenant_id = ${session.tenantId}
+    `.execute(trx);
+    await sql`
+      update platform.api_key_integrations
+         set allowed_ips = ${storedRestriction(restrictions.allowedIps)},
+             allowed_origins = ${storedRestriction(restrictions.allowedOrigins)},
+             updated_at = ${now}
+       where id = ${input.integrationId}
+         and tenant_id = ${session.tenantId}
+    `.execute(trx);
+    await appendScopedEntityEventInTransaction(trx, {
+      aggregateType: API_KEY_INTEGRATION_AGGREGATE,
+      aggregateId: input.integrationId,
+      eventType: "api_key_integration_restrictions_changed",
+      payload: {
+        previousAllowedIps: storedList(previous.rows[0]?.allowed_ips),
+        previousAllowedOrigins: storedList(previous.rows[0]?.allowed_origins),
+        allowedIps: restrictions.allowedIps,
+        allowedOrigins: restrictions.allowedOrigins,
+        actor: session.userId,
+      },
+    });
+    const result = await sql<IntegrationRow>`
+      select ${integrationMetadataColumns(now)}
+        from platform.api_key_integrations i
+        left join platform.api_keys k
+          on k.integration_id = i.id and k.tenant_id = i.tenant_id
+       where i.tenant_id = ${session.tenantId}
+         and i.id = ${input.integrationId}
+       group by i.id
+       limit 1
+    `.execute(trx);
+    return listedIntegration(result.rows[0]!);
+  });
+}
 
 export type UpdateIntegrationRolesInput = {
   integrationId: string;

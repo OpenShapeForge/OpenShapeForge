@@ -30,6 +30,7 @@
  * unreachable realm, which is the deployment being unable to decide (503),
  * not a refusal.
  */
+import { assertKeyUsableHere, type KeyRequestContext } from "./restrictions.js";
 import { realmFromIssuer } from "@openshapeforge/auth";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { withDbSession } from "../../db/session.js";
@@ -57,6 +58,7 @@ export type PersonalKeyResolverDeps = {
 export async function resolvePersonalKeySession(
   deps: PersonalKeyResolverDeps,
   candidate: string,
+  request: KeyRequestContext = { clientAddress: null, origin: null },
 ): Promise<TrustedSessionContext | undefined> {
   const parsed = parsePersonalApiKey(candidate);
   if (!parsed) return undefined;
@@ -64,6 +66,10 @@ export async function resolvePersonalKeySession(
   const resolved = await resolvePersonalApiKey(deps.db, parsed.lookupId, parsed.secret);
   if (!resolved.ok) return undefined;
   const key = resolved.key;
+
+  // Network allowlist, and never from a browser (restrictions.ts). Before the
+  // realm read, so a refused address costs the identity provider nothing.
+  assertKeyUsableHere({ allowedIps: key.allowedIps, allowedOrigins: [] }, request, "personal");
 
   // A key belongs to the identity (issuer, subject) that minted it. Under a
   // different issuer the same subject is somebody else.

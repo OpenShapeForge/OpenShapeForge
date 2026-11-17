@@ -92,7 +92,7 @@ operations:
               type: object
               additionalProperties: false
               x-osf-i18n: { title: { en: API key, nl: API-sleutel } }
-              required: [id, displayName, status, ownerUserId, ownerName, roleSubset, createdAt, expiresAt, revokedAt, revokedByAdministrator, lastUsedAt]
+              required: [id, displayName, status, ownerUserId, ownerName, roleSubset, allowedIps, createdAt, expiresAt, revokedAt, revokedByAdministrator, lastUsedAt]
               properties:
                 id:
                   type: string
@@ -119,6 +119,11 @@ operations:
                   items: { type: string }
                   description: The roles the key is narrowed to. Null means everything its owner holds at the time of each request.
                   x-osf-i18n: { title: { en: Role narrowing, nl: Rolbeperking } }
+                allowedIps:
+                  type: array
+                  items: { type: string }
+                  description: Network allowlist of IP addresses and CIDR ranges. Empty means any address.
+                  x-osf-i18n: { title: { en: Allowed IP addresses, nl: Toegestane IP-adressen } }
                 createdAt:
                   type: string
                   format: date-time
@@ -223,6 +228,18 @@ operations:
               description:
                 en: Leave empty to let the key do everything you can do.
                 nl: Laat leeg om de sleutel alles te laten doen wat jij kunt.
+          allowedIps:
+            type: array
+            maxItems: 20
+            uniqueItems: true
+            items: { type: string, minLength: 2, maxLength: 64 }
+            description: 'Optional network allowlist: IP addresses or CIDR ranges (IPv4 or IPv6), at most 20. The key is
+              refused with 403 from any other address. A personal key is never usable from a web browser.'
+            x-osf-i18n:
+              title: { en: Allowed IP addresses, nl: Toegestane IP-adressen }
+              description:
+                en: Optional. Only these IP addresses or ranges (such as 203.0.113.7 or 203.0.113.0/24) may use the key.
+                nl: Optioneel. Alleen deze IP-adressen of reeksen (zoals 203.0.113.7 of 203.0.113.0/24) mogen de sleutel gebruiken.
     output:
       schema:
         type: object
@@ -398,7 +415,7 @@ interfaces:
         recordRoute: /my-api-keys/:id
         idField: id
         displayField: displayName
-        fields: [displayName, status, roleSubset, createdAt, expiresAt, lastUsedAt, revokedAt, revokedByAdministrator, id]
+        fields: [displayName, status, roleSubset, allowedIps, createdAt, expiresAt, lastUsedAt, revokedAt, revokedByAdministrator, id]
         columns: [displayName, status, expiresAt, lastUsedAt]
         operations:
           list: { operation: listMyPersonalKeys, resultField: keys }
@@ -413,7 +430,7 @@ interfaces:
         recordRoute: /personal-api-keys/:id
         idField: id
         displayField: displayName
-        fields: [displayName, ownerName, status, roleSubset, createdAt, expiresAt, lastUsedAt, revokedAt, revokedByAdministrator, ownerUserId, id]
+        fields: [displayName, ownerName, status, roleSubset, allowedIps, createdAt, expiresAt, lastUsedAt, revokedAt, revokedByAdministrator, ownerUserId, id]
         columns: [ownerName, displayName, status, expiresAt, lastUsedAt]
         operations:
           list: { operation: listPersonalKeys, resultField: keys }

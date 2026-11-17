@@ -357,6 +357,44 @@ describe.skipIf(!ready)("personal API keys end to end", () => {
     expect(widen.status).toBe(403);
   });
 
+  test("an IP allowlist fences the key to its networks, and no browser may present it", async () => {
+    const created = await op("mine/create", { displayName: "fenced script", allowedIps: ["203.0.113.0/24", "2001:db8::/32"] }, ownerToken);
+    expect(created.status).toBe(200);
+    expect(created.body.key.allowedIps).toEqual(["203.0.113.0/24", "2001:db8::/32"]);
+    const secret = created.body.credential.secret as string;
+    const rest = (headers: Record<string, string>) => app!.inject({
+      method: "GET",
+      url: "/api/rest/v1/relations",
+      headers: { authorization: `Bearer ${secret}`, ...headers },
+    });
+    const code = (response: { body: string }) => (JSON.parse(response.body) as { error?: { code?: string } }).error?.code;
+
+    // The test client's own address (127.0.0.1) is not on the list.
+    const outside = await rest({});
+    expect(outside.statusCode).toBe(403);
+    expect(code(outside)).toBe("API_KEY_RESTRICTED");
+    // A client cannot claim an address by naming the server's own header.
+    const forged = await rest({ "x-openshapeforge-client-address": "203.0.113.5" });
+    expect(forged.statusCode).toBe(403);
+    // Through the one trusted proxy hop, a listed address is admitted.
+    expect((await rest({ "x-forwarded-for": "203.0.113.5" })).statusCode).toBe(200);
+    expect((await rest({ "x-forwarded-for": "2001:db8::7" })).statusCode).toBe(200);
+    // Only the hop the API trusts counts: an address a client prepends does not.
+    expect((await rest({ "x-forwarded-for": "203.0.113.5, 192.0.2.1" })).statusCode).toBe(403);
+    // From a listed network, but presented by a browser: a personal key never works there.
+    const browser = await rest({ "x-forwarded-for": "203.0.113.5", origin: "https://shop.example.com" });
+    expect(browser.statusCode).toBe(403);
+    expect(code(browser)).toBe("API_KEY_RESTRICTED");
+    expect(browser.headers["access-control-allow-origin"]).toBeUndefined();
+
+    const listed = await op("mine/list", {}, ownerToken);
+    const row = listed.body.keys.find((key: { id: string }) => key.id === created.body.credential.id);
+    expect(row.allowedIps).toEqual(["203.0.113.0/24", "2001:db8::/32"]);
+
+    const invalid = await op("mine/create", { displayName: "bad fence", allowedIps: ["example.com"] }, ownerToken);
+    expect(invalid.status).toBe(400);
+  });
+
   test("a lifetime past 90 days is refused", async () => {
     const tooLong = await op("mine/create", { displayName: "forever", expiresInDays: 365 }, ownerToken);
     expect(tooLong.status).toBe(400);

@@ -5,6 +5,7 @@
  * through to another. `identity.ts` composes this with the acting Relation
  * and the organization address check into `resolveSessionContext`.
  */
+import { keyRequestContext } from "./api-key/restrictions.js";
 import { mcpResourceHeader } from "./mcp-resource-header.js";
 import { BearerVerifierUnavailableError } from "@openshapeforge/auth";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -212,7 +213,11 @@ export async function resolveCredentialSession(
           "Personal API keys cannot be verified: the key path needs a database, a bearer issuer and the Keycloak admin settings.",
         );
       }
-      const session = await resolvePersonalKeySession({ db: options.db, issuer, ownerAccount }, presented);
+      const session = await resolvePersonalKeySession(
+        { db: options.db, issuer, ownerAccount },
+        presented,
+        keyRequestContext(headers),
+      );
       return session ?? EMPTY_SESSION;
     }
 
@@ -251,6 +256,7 @@ export async function resolveCredentialSession(
           resolveScope,
         },
         presented,
+        keyRequestContext(headers),
       );
       return session ?? EMPTY_SESSION;
     }

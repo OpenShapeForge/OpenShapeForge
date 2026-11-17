@@ -35,5 +35,6 @@ export function apiE2eTestFiles() {
     "src/mcp/__tests__",
     "src/auth/api-key/__tests__/api-key.e2e.test.ts",
     "src/auth/api-key/__tests__/personal-api-key.e2e.test.ts",
+    "src/auth/api-key/__tests__/api-key-restrictions.e2e.test.ts",
   ];
 }

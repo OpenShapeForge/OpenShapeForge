@@ -75,21 +75,35 @@ fields:
           - { key: locked, osfType: boolean }
 operations:
   materialize:
-    name: Materialize included template
-    description: Include the typed template reference using the same materialization cycle and size limits.
+    name: Prepare included template
+    description: Prepare the complete copy an inclusion would store for the given template version, inputs and local
+      draft, in the named host and optionally for a saved block or an inclusion nested in it. Reads only; saving the
+      block is what stores a copy.
     implementation: { type: plugin, plugin: documents, handler: composeTemplate }
     target: { scope: collection }
     input:
       schema:
         type: object
         additionalProperties: false
-        required: [definitionKey, values, references, referenceField, parametersField]
+        required: [definitionKey, values, references, referenceField, parametersField, host]
         properties:
           definitionKey: { type: string, const: TemplateBlock }
           values: { type: object }
           references: { type: object }
           referenceField: { type: string, const: version }
           parametersField: { type: string, const: parameters }
+          host:
+            type: object
+            additionalProperties: false
+            required: [entity, id]
+            properties:
+              entity: { type: string, enum: [TemplateVariant, DocumentVariant] }
+              id: { type: string, format: uuid }
+          blockId: { type: string, format: uuid }
+          path:
+            type: array
+            maxItems: 8
+            items: { type: string, minLength: 1, maxLength: 128 }
     output: { schema: { type: object } }
     errors: []
     auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }

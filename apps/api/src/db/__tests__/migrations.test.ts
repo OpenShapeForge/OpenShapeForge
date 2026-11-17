@@ -21,7 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { SQL } from "bun";
-import { fingerprintSnapshot, parseSnapshot } from "@openshapeforge/versioning/snapshot";
+import { fingerprintSnapshot, parseSnapshot, type PublishedSnapshot } from "@openshapeforge/versioning/snapshot";
 import { type Kysely, sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { DB } from "../../generated/db/types.js";
@@ -236,7 +236,7 @@ describe("generated schema migration", () => {
           for (const check of checks.rows) await sql`alter table erp.blocks drop constraint ${sql.id(check.name)}`.execute(db);
           const values = { left: 'Preserved text', leftStyle: 'body', right: '' };
           await sql`insert into erp.blocks(id,tenant_id,variant_id,variant_id_position,definition_key,"values",locked) values(${ids.block}::uuid,${ids.tenant}::uuid,${ids.variant}::uuid,0,'TextColumns',${JSON.stringify(values)}::text::jsonb,true)`.execute(db);
-          const snapshot = { schemaVersion: 1 as const, entity: 'Template', head: { table: 'erp.templates', row: { id: ids.template, tenant_id: ids.tenant }, children: { blocks: [{ table: 'erp.blocks', row: { id: ids.block, tenant_id: ids.tenant, definition_key: 'TextColumns', values, locked: true }, children: {} }] } } };
+          const snapshot = { schemaVersion: 1 as const, entity: 'Template', head: { table: 'erp.templates', row: { id: ids.template, tenant_id: ids.tenant }, extensions: { retained: 'Extension content' }, extensionDefinitions: [{ key: 'retained', osfType: 'string' }], children: { blocks: [{ table: 'erp.blocks', row: { id: ids.block, tenant_id: ids.tenant, definition_key: 'TextColumns', values, locked: true }, children: {} }] } } };
           const frozen = fingerprintSnapshot(snapshot);
           await sql`insert into erp.template_versions(id,tenant_id,template_id,version_number,snapshot,content_hash,published_by,published_at) values(${id()}::uuid,${ids.tenant}::uuid,${ids.template}::uuid,1,${frozen.canonical}::text::jsonb,${frozen.contentHash},${id()}::uuid,now())`.execute(db);
           await sql`insert into erp.document_types(tenant_id,code,name) values(${ids.tenant}::uuid,'outgoing_mail','Outgoing mail')`.execute(db);
@@ -260,7 +260,10 @@ describe("generated schema migration", () => {
             expect(rows.rows).toHaveLength(1);
             for (const row of rows.rows) {
               expect(row.tenant_id).toBe(ids.tenant);
-              const frozen = fingerprintSnapshot(parseSnapshot(row.snapshot));
+              parseSnapshot(row.snapshot);
+              const frozen = fingerprintSnapshot(row.snapshot as PublishedSnapshot);
+              expect((row.snapshot as any).head.extensions).toEqual({ retained: 'Extension content' });
+              expect((row.snapshot as any).head.extensionDefinitions).toEqual([{ key: 'retained', osfType: 'string' }]);
               expect(row.content_hash).toBe(frozen.contentHash);
               expect(JSON.stringify(row.snapshot)).toContain('Preserved text');
               expect((row.snapshot as any).head.children.blocks[0].row.values.left[0].values).toEqual({ markdown:'Preserved text', style:'body' });

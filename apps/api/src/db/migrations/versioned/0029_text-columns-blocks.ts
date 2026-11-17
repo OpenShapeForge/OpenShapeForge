@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import { migrateColumnBlocks } from "@openshapeforge/documents/migrations/column-blocks";
-import { fingerprintSnapshot, parseSnapshot } from "@openshapeforge/versioning/snapshot";
+import { fingerprintSnapshot, parseSnapshot, type PublishedSnapshot } from "@openshapeforge/versioning/snapshot";
 import type { VersionedMigration } from "../versioned-runner.js";
 
 /** Representation-only upgrade: retain text, style, locks and divergent copies. */
@@ -28,7 +28,9 @@ const migration: VersionedMigration = {
           await sql`update erp.blocks set "values" = ${JSON.stringify(after)}::text::jsonb
             where id = ${row.id}::uuid and tenant_id = ${row.tenant_id}::uuid`.execute(db);
         } else {
-          const frozen = fingerprintSnapshot(parseSnapshot(after));
+          // Validate the core shape without projecting away captured extensions.
+          parseSnapshot(after);
+          const frozen = fingerprintSnapshot(after as PublishedSnapshot);
           await sql`update ${sql.id("erp", table)} set snapshot = ${frozen.canonical}::text::jsonb, content_hash = ${frozen.contentHash}
             where id = ${row.id}::uuid and tenant_id = ${row.tenant_id}::uuid`.execute(db);
         }

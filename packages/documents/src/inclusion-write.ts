@@ -15,16 +15,17 @@ import { operationFailure } from "@openshapeforge/operations";
 import type { ModuleOperationContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import { parseSnapshot } from "@openshapeforge/versioning/snapshot";
 import { contextServices, rows } from "./commands.js";
-import { blockCollection, canonicalReader, compiledContentRegistry, contentResolvers, parameterShapes, pathResolver } from "./content-runtime.js";
+import { blockCollection, canonicalReader, compiledContentRegistry, contentResolvers, validatedValues, parameterShapes, pathResolver } from "./content-runtime.js";
 import { captureInclusionContent, type CaptureHost, type CapturedInclusion } from "./content/capture.js";
 import { contentError, TemplateContentError } from "./content/errors.js";
 import { canonicalJson, CONTENT_LIMITS, type JsonObject } from "./content/json.js";
 import {
   assertProtectedContentKept, holdsProtectedContent, inclusionCopyContent, isInclusionCopy, mergeInclusionCopy, nestedCopy, normalizeLocalDraft, protectedPaths, readInclusionCopy, templateComposition,
-  type CompositionOf, type InclusionCopy,
+  sourceRecord, type CompositionOf, type InclusionCopy,
 } from "./content/inclusion-copy.js";
 import type { ContentBlock, ContentResolvers } from "./content/types.js";
-import { selectContentTemplateVariant } from "./content/validation.js";
+import { columnBlocks, COLUMN_SLOTS, isColumns, mapColumns } from "./content/columns.js";
+import { selectContentTemplateVariant, validateContentBlockReferences } from "./content/validation.js";
 import { contentVariableCatalogue } from "./content/variables.js";
 import { templateParameterFields, withDocumentCommand } from "./document-blocks.js";
 import { isObject, refuse } from "./validation.js";
@@ -49,6 +50,7 @@ type Prepared = Settled & { readonly baseline: InclusionCopy };
 
 type Environment = {
   readonly compositionOf: CompositionOf;
+  validate(block: ContentBlock): Promise<void>;
   capture(identity: Identity): Promise<CapturedInclusion>;
   /** The source variant's own blocks at `versionId`, or undefined when the acting session can no longer read it. */
   authored(versionId: string): Promise<readonly ContentBlock[] | undefined>;
@@ -62,7 +64,7 @@ const record = (value: unknown): JsonObject => (isObject(value) ? value : {}) as
 
 function countBlocks(copy: InclusionCopy, compositionOf: CompositionOf, depth = 0): number {
   if (depth >= CONTENT_LIMITS.templateDepth) refuse("CONTENT_LIMIT_EXCEEDED", "Included content exceeds the maximum depth.");
-  return copy.blocks.reduce((total, block) => { const nested = nestedCopy(block, compositionOf); return total + 1 + (nested ? countBlocks(nested, compositionOf, depth + 1) : 0); }, 0);
+  return copy.blocks.reduce((total, block) => { const nested = nestedCopy(block, compositionOf); return total + 1 + (nested ? countBlocks(nested, compositionOf, depth + 1) : 0) + (isColumns(block.definitionKey) ? COLUMN_SLOTS.reduce((count, slot) => count + countBlocks({source:[],blocks:columnBlocks(block.values[slot])}, compositionOf, depth + 1), 0) : 0); }, 0);
 }
 
 const sameIdentity = (stored: Stored | undefined, next: Identity): boolean =>
@@ -102,7 +104,7 @@ async function settle(environment: Environment, stored: Stored | undefined, next
   if (stored?.copy && sameIdentity(stored, next) && !prepared && !explicit) {
     // An ordinary edit: the stored source record and page settings stay, the draft is checked against them.
     if (next.draft === undefined) return { parameters: stored.parameters, copy: stored.copy };
-    return { parameters: stored.parameters, copy: { ...stored.copy, blocks: await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested }) } };
+    return { parameters: stored.parameters, copy: { ...stored.copy, blocks: await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate }) } };
   }
   if (prepared && explicit)
     contentError("INVALID_VALUE", "This draft was already prepared from another source record than the saved one. Send the baseline that preparation returned to prepare it again; the existing inclusion has been kept.");
@@ -111,20 +113,20 @@ async function settle(environment: Environment, stored: Stored | undefined, next
     // Nothing was captured before. A draft that arrives with the insertion is local content over the baseline captured now.
     const drafted = isObject(next.draft) && Array.isArray(next.draft.blocks) && next.draft.blocks.length > 0;
     if (!drafted) return { parameters: captured.parameters, copy: captured.copy, baseline: captured.copy };
-    return { parameters: captured.parameters, baseline: captured.copy, copy: { ...captured.copy, blocks: await normalizeLocalDraft(captured.copy, next.draft, { compositionOf, settleNested, freshBaseline: true }) } };
+    return { parameters: captured.parameters, baseline: captured.copy, copy: { ...captured.copy, blocks: await normalizeLocalDraft(captured.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate, freshBaseline: true }) } };
   }
   if (prepared) {
     const draft = next.draft as Record<string, unknown>;
     const fresh = inclusionCopyContent(captured.copy);
     if (canonicalJson(draft.source) !== canonicalJson(fresh.source) || canonicalJson(draft.page ?? null) !== canonicalJson(fresh.page ?? null))
       contentError("INVALID_VALUE", "The prepared update no longer matches its source or the records it names. Prepare it again; the existing inclusion has been kept.");
-    const blocks = await normalizeLocalDraft(captured.copy, draft, { compositionOf, settleNested });
+    const blocks = await normalizeLocalDraft(captured.copy, draft, { compositionOf, settleNested, validateNestedBlock: environment.validate });
     assertProtectedContentKept(protectedPaths(stored.copy.source, stored.copy.blocks, compositionOf), blocks, compositionOf,
       "The update no longer holds content that is protected here. The existing inclusion has been kept.");
     return { parameters: captured.parameters, copy: { ...captured.copy, blocks } };
   }
   // The version or an input changed: the current local content, the stored baseline and the new capture are merged, or the write is refused whole.
-  const current = next.draft === undefined ? stored.copy.blocks : await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested });
+  const current = next.draft === undefined ? stored.copy.blocks : await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate });
   const authoredOld = await environment.authored(stored.versionId);
   const copy = await mergeInclusionCopy({ baseline: stored.copy.source, current, ...(authoredOld ? { authoredOld } : {}), authoredNew: captured.authored, captured: captured.copy, compositionOf });
   return { parameters: captured.parameters, copy, baseline: captured.copy };
@@ -155,7 +157,7 @@ async function settlePrepared(environment: Environment, stored: Stored | undefin
     contentError("INVALID_VALUE", "The earlier preparation no longer matches its source or the records it names, so the draft made of it cannot be carried to another source. Nothing has been changed; the existing inclusion has been kept.");
   const required = stored?.copy ? protectedPaths(stored.copy.source, stored.copy.blocks, compositionOf) : [];
   assertProtectedContentKept(required, base.copy.blocks, compositionOf, kept);
-  const current = next.draft === undefined ? base.copy.blocks : await normalizeLocalDraft(base.copy, next.draft, { compositionOf, settleNested });
+  const current = next.draft === undefined ? base.copy.blocks : await normalizeLocalDraft(base.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate });
   const captured = await environment.capture(next);
   const authoredOld = await environment.authored(baseline.versionId);
   const copy = await mergeInclusionCopy({ baseline: base.copy.source, current, ...(authoredOld ? { authoredOld } : {}), authoredNew: captured.authored, captured: captured.copy, compositionOf });
@@ -173,7 +175,15 @@ function identityOf(block: ContentBlock, compositionOf: CompositionOf): Identity
 
 async function settleBlock(environment: Environment, previous: ContentBlock | undefined, draft: ContentBlock): Promise<ContentBlock> {
   const { compositionOf } = environment;
-  const composition = compositionOf(draft.definitionKey)!;
+  if (isColumns(draft.definitionKey)) await environment.validate(draft);
+  if (isColumns(draft.definitionKey)) return { ...draft, values: await mapColumns(draft.values, async (children, slot) => {
+    const old = previous && isColumns(previous.definitionKey) ? columnBlocks(previous.values[slot]) : [];
+    return normalizeLocalDraft({ source: await sourceRecord(old), blocks: old }, { blocks: children }, {
+      compositionOf, validateBlock: environment.validate, settleNested: ({ stored, draft }) => settleBlock(environment, stored, draft),
+    });
+  }) };
+  const composition = compositionOf(draft.definitionKey);
+  if (!composition) return draft;
   const stored = previous ? { ...identityOf(previous, compositionOf), copy: nestedCopy(previous, compositionOf) } : undefined;
   const settled = await settle(environment, stored, { ...identityOf(draft, compositionOf), draft: draft.values.content });
   return { ...draft, values: { ...draft.values, ...(composition.parametersField ? { [composition.parametersField]: settled.parameters } : {}), content: inclusionCopyContent(settled.copy) } };
@@ -223,6 +233,24 @@ function environment(trx: unknown, tenantId: string, carrier: RuntimeEntityValue
   };
   return {
     compositionOf: compositionFor(carrier),
+    validate: (block) => acting(async (context, host, resolvers) => {
+      const registry = await compiledContentRegistry(context, carrier);
+      const definition = registry[block.definitionKey];
+      const allowed = blockCollection(context, carrier, row.document_variant_id ? "DocumentVariant" : "TemplateVariant").allowedDefinitions;
+      if (!definition || (allowed && !allowed.includes(block.definitionKey))) refuse("INVALID_DEFINITION", "This block is not allowed in its owning collection.");
+      if (block.schemaVersion !== definition!.schemaVersion) refuse("INVALID_DEFINITION", "The block definition version is unsupported.");
+      validatedValues(context, block.definitionKey, block.values);
+      validateContentBlockReferences(block, definition!);
+      const composition = compositionFor(carrier)(block.definitionKey);
+      for (const [key, value] of Object.entries(block.references)) {
+        if (key === composition?.templateVersionField) continue;
+        for (const reference of Array.isArray(value) ? value : [value]) {
+          if (!reference || !("id" in reference)) continue;
+          const resolved = await resolvers.resolveEntity(reference, { tenantId });
+          if (!resolved || resolved.tenantId !== tenantId || resolved.id !== reference.id || resolved.entity !== reference.entity) refuse("FORBIDDEN", "The nested block reference is unavailable.");
+        }
+      }
+    }),
     capture: (identity) => acting(async (context, host, resolvers) => captureInclusionContent({
       tenantId, channel: host.channel, locale: host.locale, templateVersionId: identity.versionId, parameters: identity.parameters, host: host.host,
       ...(typeof parameterVariables === "string" ? { parameterVariables: parameterVariables as "whole" | "template" | "both" } : {}),
@@ -277,6 +305,10 @@ function lockedRow(carrier: RuntimeEntityValueCarrier, before: Row | undefined, 
 async function prepare(trx: unknown, tenantId: string, carrier: RuntimeEntityValueCarrier, before: Row | undefined, after: Row, options: InclusionWriteOptions): Promise<JsonObject | undefined> {
   if (carrier.entityName !== "Block") return undefined;
   lockedRow(carrier, before, after);
+  if (before && isColumns(String(before[carrier.definitionColumn])) && !isColumns(String(after[carrier.definitionColumn]))) {
+    const blocks = COLUMN_SLOTS.flatMap(slot => columnBlocks(record(before[carrier.valuesColumn])[slot]));
+    if (protectedPaths(await sourceRecord(blocks), blocks, compositionFor(carrier)).length) refuse("INVALID_STATE", "Protected nested content cannot be replaced through its columns.");
+  }
   const next = inclusionOf(carrier, after);
   const previous = inclusionOf(carrier, before);
   const compositionOf = compositionFor(carrier);
@@ -284,6 +316,15 @@ async function prepare(trx: unknown, tenantId: string, carrier: RuntimeEntityVal
   // an inclusion of another kind, while its copy holds protected content there would be no place left for.
   if (previous?.copy && holdsProtectedContent(previous.copy, compositionOf) && (!next || before![carrier.definitionColumn] !== after[carrier.definitionColumn]))
     refuse("INVALID_STATE", "Protected template content cannot be removed or replaced through its enclosing block.");
+  if (isColumns(String(after[carrier.definitionColumn]))) {
+    const env = environment(trx, tenantId, carrier, after, undefined, options.actor);
+    const make = (row: Row): ContentBlock => ({ id: String(row.id), definitionKey: String(row[carrier.definitionColumn]), schemaVersion: Number(row.definition_version ?? 1), values: record(row[carrier.valuesColumn]), references: {} });
+    canonicalJson(after[carrier.valuesColumn]);
+    if (countBlocks({source:[],blocks:[make(after)]}, compositionOf) > CONTENT_LIMITS.blocks) refuse("CONTENT_LIMIT_EXCEEDED", "Nested content contains too many blocks.");
+    const block = await settleBlock(env, before ? make(before) : undefined, make(after));
+    canonicalJson(block.values);
+    return block.values;
+  }
   if (!next) return undefined;
   if (next.bound || !next.versionId) refuse("INVALID_STATE", "An inclusion captures one published template version; choose the version instead of leaving it to a variable.");
   if (before && previous?.copy && holdsProtectedContent(previous.copy, compositionOf)
@@ -395,21 +436,19 @@ export async function prepareInclusionCopy(context: ModuleOperationContext, trx:
       // A block of another host, or of another tenant, is not found: nothing about it is confirmed.
       if (!row || row[ownerColumn] !== host.id) refuse("NOT_FOUND", "The inclusion is not a block of this host.");
       const root = inclusionOf(carrier, row);
-      if (!root?.versionId) refuse("INVALID_STATE", "The block is not a template inclusion.");
-      let found: Stored | undefined = { versionId: root!.versionId!, parameters: record(root!.values[root!.composition.parametersField]), copy: root!.copy };
-      let key = String(row![carrier.definitionColumn]);
+      let node: ContentBlock | undefined = root ? {id:String(row.id),definitionKey:String(row[carrier.definitionColumn]),schemaVersion:Number(row.definition_version??1),values:root.values,references:{[root.composition.templateVersionField]:{entity:"TemplateVersion",id:root.versionId!}}}
+        : isColumns(String(row[carrier.definitionColumn])) ? {id:String(row.id),definitionKey:"TextColumns",schemaVersion:Number(row.definition_version??1),values:record(row[carrier.valuesColumn]),references:{}} : undefined;
+      if (!node) refuse("INVALID_STATE", "The block does not contain template content.");
       for (const id of request.path) {
-        const inner: ContentBlock | undefined = found?.copy?.blocks.find((block) => block.id === id);
-        // A step that is stored must be an inclusion with a complete copy to walk on in.
-        if (!found?.copy || (inner && !compositionOf(inner.definitionKey))) refuse("NOT_FOUND", "The path does not lead to an inclusion of this block.");
-        key = inner?.definitionKey ?? request.definitionKey;
-        found = inner ? { ...identityOf(inner, compositionOf), copy: nestedCopy(inner, compositionOf) } : undefined;
-        // A step that is not stored names an inclusion the draft adds. Nothing is stored below it, so nothing stored
-        // is protected there: the rest of the path names unsaved content as well.
-        if (!inner) break;
+        const children: readonly ContentBlock[] = node && isColumns(node.definitionKey) ? COLUMN_SLOTS.flatMap(slot => columnBlocks(node!.values[slot])) : node ? nestedCopy(node, compositionOf)?.blocks ?? [] : [];
+        const matches = children.filter(child => child.id === id);
+        if (matches.length > 1) refuse("INVALID_STATE", "The nested block identity is ambiguous.");
+        node = matches[0];
+        if (node && !isColumns(node.definitionKey) && !compositionOf(node.definitionKey)) refuse("NOT_FOUND", "The path does not lead to an inclusion of this block.");
+        if (!node) break;
       }
-      if (key !== request.definitionKey) refuse("INVALID_STATE", "The stored block is an inclusion of another kind.");
-      stored = found;
+      if (node && node.definitionKey !== request.definitionKey) refuse("INVALID_STATE", "The stored block is an inclusion of another kind.");
+      stored = node ? {...identityOf(node, compositionOf),copy:nestedCopy(node, compositionOf)} : undefined;
     } else if (request.path.length) refuse("VALIDATION", "A path selects an inclusion nested in a saved block; name that block.");
     const parametersField = definition!.fields.find((field) => field.key === composition!.parametersField);
     const acting = environment(trx, tenantId, carrier, { [ownerColumn]: host.id }, parametersField?.variables, (work) => work(context));
@@ -430,6 +469,10 @@ export async function assertBlockInclusionRemoval(carrier: RuntimeEntityValueCar
   if (carrier.entityName !== "Block" || !row) return;
   try {
     lockedRow(carrier, row, undefined);
+    if (isColumns(String(row[carrier.definitionColumn]))) {
+      const blocks = COLUMN_SLOTS.flatMap(slot => columnBlocks(record(row[carrier.valuesColumn])[slot]));
+      if (protectedPaths(await sourceRecord(blocks), blocks, compositionFor(carrier)).length) refuse("INVALID_STATE", "A column containing protected content cannot be removed or moved.");
+    }
     const stored = inclusionOf(carrier, row);
     if (stored?.copy && holdsProtectedContent(stored.copy, compositionFor(carrier))) refuse("INVALID_STATE", "A block containing protected template content cannot be removed or moved.");
   } catch (error) { contentRefusal(error); }

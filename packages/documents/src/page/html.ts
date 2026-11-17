@@ -119,15 +119,20 @@ function textColumns(block: PageBlock, design: PageDesign): string {
   const items = { top: "flex-start", center: "center", bottom: "flex-end" }[vertical];
   const slots: string[] = [];
   for (const slot of ["left", "center", "right"] as const) {
-    const markdown = text(v[slot], `TextColumns.${slot}`);
-    if (!markdown.trim()) continue;
+    const children = v[slot];
+    if (children === undefined) continue;
+    if (!Array.isArray(children)) return fail(`TextColumns.${slot} must contain blocks.`);
     const width = v[`${slot}Width`] === undefined || v[`${slot}Width`] === null ? undefined : px(v[`${slot}Width`], `TextColumns.${slot}Width`, 1, 4000);
     const grows = width === undefined && (distribution === "fill" || slot === "left");
     const flex = width !== undefined ? `flex:0 0 ${width}px;` : grows ? "flex:1 1 0;min-width:0;" : "flex:0 0 auto;white-space:nowrap;";
     // Filled columns share the row as equal, wrapping columns 24px apart (the Figma letter's address and
     // reference); fitted columns keep the right one on one line against the right edge.
     const end = slot === "right" && distribution === "fit";
-    const cell = `<div class="text ${styleClass(design, v[`${slot}Style`], `TextColumns.${slot}Style`)}"${end ? ' style="white-space:nowrap"' : ""}>${paragraphs(markdown)}</div>`;
+    const cell = children.map((child) => {
+      if (!child || typeof child !== 'object' || typeof child.definitionKey !== 'string' || !child.values) return fail('A column contains an invalid block.');
+      if (child.definitionKey === 'PageBreak' || child.definitionKey === 'SectionBreak') return fail('Page boundaries cannot stand inside a column.');
+      return renderBlock({...child, region:'body'} as PageBlock, design);
+    }).join('');
     slots.push(`<div class="col${end ? " end" : ""}" style="${flex}">${cell}</div>`);
   }
   return `<div class="b cols" style="align-items:${items};gap:${distribution === "fit" ? 16 : 24}px">${slots.join("")}</div>`;
@@ -158,7 +163,17 @@ export function imageAssetKey(image: Pick<ImageValue, "artifactId">): string {
 export function pageImages(blocks: readonly PageBlock[], layouts: PageLayouts = {}): { scope: string; image: ImageValue }[] {
   const found = new Map<string, { scope: string; image: ImageValue }>();
   const add = (scope: string, value: unknown) => { if (isImageValue(value)) found.set(`${scope}|${value.artifactId}`, { scope, image: value }); };
-  for (const block of blocks) if (block.definitionKey === "ImageBlock") add(block.scope ?? "", block.values.asset);
+  const visit = (items: readonly PageBlock[], scope = "") => {
+    for (const block of items) {
+      const ownScope = block.scope ?? scope;
+      if (block.definitionKey === "ImageBlock") add(ownScope, block.values.asset);
+      if (block.definitionKey === "TextColumns") for (const slot of ["left", "center", "right"]) {
+        const children = block.values[slot];
+        if (Array.isArray(children)) visit(children as unknown as PageBlock[], ownScope);
+      }
+    }
+  };
+  visit(blocks);
   for (const [scope, layout] of Object.entries(layouts)) add(scope, layout.backgroundImage);
   return [...found.values()];
 }

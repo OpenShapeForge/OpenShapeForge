@@ -22,7 +22,7 @@ export function typedSchema(block: MaterializedContentBlock, definitions: Compil
 }
 
 function pageBlock(block: MaterializedContentBlock, definitions: CompiledContentBlockRegistry, locale: string): PageBlock {
-  const values = block.materialization?.result.kind === "block" ? block.materialization.result.value : block.values;
+  const values = block.columns ? {...block.values,...Object.fromEntries(Object.entries(block.columns).map(([slot, children])=>[slot,children.map(child=>pageBlock(child,definitions,locale))]))} : block.materialization?.result.kind === "block" ? block.materialization.result.value : block.values;
   const schema = typedSchema(block, definitions);
   return { ...(schema ? { typed: { schema, locale } } : {}),
     id: block.id, definitionKey: block.definitionKey, values: values as Record<string, unknown>,

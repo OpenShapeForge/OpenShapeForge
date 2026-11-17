@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { isColumns, columnBlocks, COLUMN_SLOTS } from './columns.js';
 import { createContentEngine, type VariableScope } from "./engine.js";
 import { contentError } from "./errors.js";
 import { CONTENT_LIMITS, hashCanonicalJson, immutableContent, type JsonObject, type JsonValue } from "./json.js";
@@ -60,8 +61,10 @@ async function materializeContent(
     scope: VariableScope,
     path: readonly string[],
     bindingOf: (block: ContentBlock) => CopyBinding,
+    output: MaterializedContentBlock[] = blocks,
   ) {
     for (const sourceBlock of source.blocks) {
+      if (path.length > CONTENT_LIMITS.templateDepth) contentError("CONTENT_LIMIT_EXCEEDED", "Nested content exceeds the maximum depth.");
       engine.countBlock();
       const definition = Object.hasOwn(registry, sourceBlock.definitionKey)
         ? registry[sourceBlock.definitionKey]
@@ -120,7 +123,18 @@ async function materializeContent(
           references: await engine.resolveReferences(block, composition.templateVersionField),
           ...(copy.page ? { page: copy.page } : {}),
         });
-        await visitBlocks({ blocks: copy.blocks }, scope, blockPath, copyBinding(copy, concrete));
+        await visitBlocks({ blocks: copy.blocks }, scope, blockPath, copyBinding(copy, concrete), output);
+        continue;
+      }
+      if (isColumns(block.definitionKey)) {
+        validateContentValues(block.values, valueFields, 'column values');
+        const columns: Record<string, MaterializedContentBlock[]> = {};
+        for (const slot of COLUMN_SLOTS) if (block.values[slot] !== undefined) {
+          const children: MaterializedContentBlock[] = [];
+          await visitBlocks({ blocks: columnBlocks(block.values[slot]), ...(source.allowedDefinitions ? {allowedDefinitions: source.allowedDefinitions} : {}) }, scope, [...blockPath, slot], () => bindingOf(block), children);
+          columns[slot] = children;
+        }
+        output.push({ id:block.id, path:blockPath, definitionKey:block.definitionKey, schemaVersion:block.schemaVersion, renderer:renderer!, authoredValues:block.values, values:block.values, references:{}, columns, ...(block.region?{region:block.region}:{}), ...(block.layoutKey?{layoutKey:block.layoutKey}:{}) });
         continue;
       }
       const binding = bindingOf(block);
@@ -155,7 +169,7 @@ async function materializeContent(
           contentError("INVALID_VALUE", "Materialization must return block values.");
         assertContentRecord(materialization.result.value, "materialized block values");
       }
-      blocks.push({
+      output.push({
         path: blockPath,
         id: block.id,
         definitionKey: block.definitionKey,

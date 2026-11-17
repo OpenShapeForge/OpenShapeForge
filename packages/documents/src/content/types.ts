@@ -217,6 +217,7 @@ export type MaterializeTemplateContentInput = {
 };
 
 export type MaterializedContentBlock = {
+  readonly columns?: Readonly<Record<string, readonly MaterializedContentBlock[]>>;
   readonly path: readonly string[];
   readonly id: string;
   readonly definitionKey: string;

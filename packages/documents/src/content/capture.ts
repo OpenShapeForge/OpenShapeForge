@@ -13,6 +13,7 @@
  * A typed block keeps its definition and its concrete `{entity, id}`
  * references. It is executed when the content is read, under the reader.
  */
+import { isColumns, mapColumns } from './columns.js';
 import { variableTokens, wholeVariableExpression, type VariableCatalogue, type VariableReference } from "@openshapeforge/operations";
 import { createContentEngine, holdsBraces, type CaptureState, type ContentEngine, type VariableScope } from "./engine.js";
 import { contentError } from "./errors.js";
@@ -112,6 +113,21 @@ async function captureBlock(capturer: Capturer, source: ContentBlock, variant: P
   if (!definition) contentError("BLOCK_UNKNOWN", "Block definition is absent from the compiled entity metadata.");
   if (variant.allowedDefinitions && !variant.allowedDefinitions.includes(source.definitionKey)) contentError("BLOCK_NOT_ALLOWED", "Block definition is not allowed in this collection.");
   if (source.schemaVersion !== definition.schemaVersion) contentError("BLOCK_SCHEMA_UNSUPPORTED", "Block requires a different compiled definition version.");
+  if (depth > CONTENT_LIMITS.templateDepth) contentError('CONTENT_LIMIT_EXCEEDED', 'Nested content exceeds the maximum depth.');
+  if (isColumns(source.definitionKey)) {
+    let deferred = false;
+    const values = await mapColumns(source.values, async children => {
+      const kept: ContentBlock[] = [];
+      for (const child of children) {
+        const result = await captureBlock(capturer, child, variant, scopeOf, rules, depth + 1, binding);
+        kept.push(result.block); deferred ||= result.deferred;
+      }
+      return kept;
+    });
+    validateContentValues(values, Object.fromEntries(Object.entries(definition.fields).filter(([, field]) => !field.relationship)), "column values");
+    await resolvers.validateBlockValues?.(source.definitionKey, immutableContent(values));
+    return {block:{...source,values},deferred};
+  }
   const capture = state(rules);
   const scope = scopeOf(capture);
   const bound = engine.bindReferences(source, definition, scope);

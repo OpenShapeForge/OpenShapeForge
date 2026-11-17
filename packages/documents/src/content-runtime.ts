@@ -475,6 +475,9 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
   const templateVersionId = uuid(input.templateVersionId, "templateVersionId");
   const channel = text(input.channel, "channel");
   const locale = text(input.locale, "locale");
+  // A preview resolves the version with the given values and stores nothing. Local content is not an input: an
+  // inclusion's content is the copy its own block stores, and a preview can never stand in for that capture.
+  if (input.content !== undefined) refuse("VALIDATION", "A template version is previewed without local content; an inclusion is read from the copy its block stores.");
   const carrier = contentCarrier(context);
   const collection = blockCollection(context, carrier, "TemplateVariant");
   const registry = await compiledContentRegistry(context, carrier);

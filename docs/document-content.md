@@ -312,17 +312,29 @@ typed variable and every host:
   the capture: an inclusion in a document holds no pending binding.
 
 Captured text is data. A value that reads like `{{local.title}}` stays that
-text: a captured block that is not `deferred` is never bound again, in a
-template or in a document, and a Markdown destination escapes it. A `deferred`
-block is bound by the host when it is read, so it cannot also hold a resolved
-value containing `{{` or `}}`; that one combination is refused at capture.
+text; how the host reads a block of a copy follows from what the host is
+(`copyBinding`):
+
+- **In a document nothing in a copy is bound.** A document is concrete: text
+  typed into it later — into a captured block or as a new paragraph — is text,
+  braces included.
+- **In a template, Markdown fields of a captured block are bound** in the
+  template's scope. A value captured into Markdown is escaped (`\{\{`), which
+  prints the same text and is never a variable, so a variable the author
+  writes into copied text works and the captured values around it stay data.
+- **In a template, the other fields of a captured block are data**, unless
+  the capture left a binding pending there (`deferred`), in which case the
+  whole block is bound. A plain field has no spelling for a brace that is
+  data, so two things follow, and only there: a variable typed later into a
+  captured plain field is text, and a block cannot hold, outside Markdown, a
+  pending variable together with a resolved value containing `{{` or `}}`
+  (refused at capture).
+- A block the template's author added to a copy is the template's own content
+  and is bound like any other block of it.
+
 `{{page.…}}` stays as written everywhere and is filled by the page renderer.
 A typed block keeps its definition and its concrete `{entity, id}` references
 and is executed on every read, under the reader's authorization.
-
-A block the host added to a copy itself is the host's own content and is read
-in the host's scope like any other block of the host. Tokens typed into a
-captured block later are text.
 
 **Writing** goes through the generic Block Operations; there is no separate
 action. Every insert and update of a Block row passes
@@ -333,17 +345,54 @@ removal or move `assertBlockInclusionRemoval`
 | Write | What the server does |
 |---|---|
 | Insert `{ definitionKey: "TemplateBlock", values: { version, parameters } }` | Captures the source and stores `parameters` (resolved where concrete) and the complete `content`. Leave `content` out. If one is sent, its blocks are local content over the baseline captured in this write; its `source` and `page` are ignored and protected blocks come from the capture. |
-| Update with the same `version` and `parameters` | An ordinary edit. `content.blocks` is the new local content; `source` and `page` may be sent back as read or left out. Leaving `content` out keeps the stored copy. No template is read. |
-| Update with another `version` or changed `parameters` | The explicit update: captures the new source with the given inputs and merges three ways (below). `content`, when sent, is the current local draft and is checked against the stored baseline first; left out, the stored blocks are the draft. |
+| Update with the same `version` and `parameters`, `content` carrying the stored `source` (or none) | An ordinary edit. `content.blocks` is the new local content; `source` and `page` may be sent back as read or left out. Leaving `content` out keeps the stored copy. No template is read. |
+| Update with another `version` or changed `parameters`, `content` carrying the stored `source` (or left out) | The explicit update: captures the new source with the given inputs and merges three ways (below). `content`, when sent, is the current local draft and is checked against the stored baseline first; left out, the stored blocks are the draft. |
+| Update whose `content.source` differs from the stored one | A prepared copy (next section). The source is captured again as the writing session and `source` and `page` must equal that capture exactly; no hash or lock is adopted from the caller. The blocks are then checked against the new record and against what the stored copy protects. With the same `version` and `parameters` this is the deliberate refresh. |
 | Remove or move the row | Refused while the copy, at any depth, holds content its source protects. |
 
-Refused on every write: a `source` or `page` that differs from the stored
-one, a lock that is lowered or invented, a locked block that is changed,
-removed or reordered against other locked blocks, and removing or replacing a
-nested inclusion that still holds protected content. A nested inclusion that
-is new, or whose `version` or `parameters` changed, is captured or merged by
-the same rules inside the same write. The host cannot leave an inclusion's
-version to a variable: a copy is captured from one version.
+Refused on every write: a `source` or `page` that is neither the stored one
+nor what a capture yields now, a lock that is lowered or invented, a locked
+block that is changed, removed or reordered against other locked blocks, and
+removing an inclusion that holds protected content, replacing it, or turning
+it into another kind of block under the same identity — as a row or nested in
+a copy. A nested inclusion that is new, or whose `version` or `parameters`
+changed, is captured or merged by the same rules inside the same write. The
+host cannot leave an inclusion's version to a variable: a copy is captured
+from one version. A template's author still edits the locks of the template's
+own blocks; protection applies to the copies hosts hold.
+
+### Preparing an inclusion before Save
+
+`TemplateBlock.materialize` (REST `POST /api/content-blocks/template/materialize`)
+is the read behind an insertion or update dialog: it returns the complete
+content the inclusion would hold if it were saved with the given version,
+inputs and draft. It reuses the settlement a write runs and performs no write:
+no row, no `diverged` mark, no staged or bound file. Cancel therefore needs
+no server call, and a refusal leaves the caller's draft as it was.
+
+Input: `definitionKey`, `referenceField`, `parametersField` (the constants of
+the definition), `references.<referenceField>` (the template version to
+capture), `values` (the inputs, and `content` when a saved inclusion has a
+local draft), and
+
+- `host` `{ entity: "TemplateVariant" | "DocumentVariant", id }` — required;
+  the collection the inclusion is or will be a block of. Update access to it
+  is checked first, through the record access of that entity.
+- `blockId` — the saved root block. It must be a block of `host`; anything
+  else is `NOT_FOUND`. Left out for an inclusion that is not stored yet.
+- `path` — at most eight block ids from that root down to an inclusion nested
+  in its copy. The last step may name an inclusion the draft adds.
+
+`values.content` must be the draft of the *saved* copy (its `source` as read,
+or none): a copy that was already prepared is not prepared again. Result:
+`{ kind: "template", referenceField, version: { entity, id }, parameters, content }`
+with `parameters` as resolved and `content` the complete prepared copy. The
+caller replaces its draft with it and, on Save, writes the Block with exactly
+these `version`, `parameters` and `content` (edited further if the user did).
+
+A prepare with unchanged version and inputs captures again and merges: that
+is how a copy is refreshed with the current record values. Ordinary reads and
+edits never do.
 
 **The three-way update** (`mergeInclusionCopy`) compares the stored source
 record with the current blocks to find local changes, the source's own blocks
@@ -355,6 +404,11 @@ as authored then and now to find source changes, and adopts the new capture:
 - local additions stay behind the block they followed, local removals stay
   removed, new source blocks arrive at their source position, and a block the
   source dropped goes unless it was changed here;
+- content the stored copy protects, at any depth, must still be offered by
+  the new source. A version (or another template) that no longer holds it
+  cannot replace the stored one: the update is refused, the block is never
+  dropped and never kept as unprotected local text. The same holds when
+  `Document.linkTemplate` would remove an inclusion that holds such content;
 - a nested inclusion both sides changed is merged by the same rule from its
   own source record;
 - a block both sides changed, a new lock on content that was changed or
@@ -380,6 +434,14 @@ and the source's file is never bound to it. A document reads images from the
 version it is linked to and from the exact source version of each inclusion
 it holds — the server's own record of provenance, not a lookup across the
 tenant — which needs no access to any template.
+
+Those frozen rows are durable by the schema itself, so no second copy of the
+bytes is staged: a `TemplateVersionImage` is immutable, has no delete
+Operation, and its foreign key to `TemplateVersion` does not cascade, so a
+version that holds images cannot be deleted (nor its template, whose delete
+cascades to its versions and stops there). A linked document and a root
+inclusion row hold their version by foreign key as well. Publishing a newer
+version or archiving the template changes none of these rows.
 
 ## Published snapshot
 

@@ -58,7 +58,7 @@ export type PersonalKeyResolverDeps = {
 export async function resolvePersonalKeySession(
   deps: PersonalKeyResolverDeps,
   candidate: string,
-  request: KeyRequestContext = { clientAddress: null, origin: null },
+  request: KeyRequestContext = { clientAddress: null, origin: null, target: null },
 ): Promise<TrustedSessionContext | undefined> {
   const parsed = parsePersonalApiKey(candidate);
   if (!parsed) return undefined;
@@ -69,7 +69,7 @@ export async function resolvePersonalKeySession(
 
   // Network allowlist, and never from a browser (restrictions.ts). Before the
   // realm read, so a refused address costs the identity provider nothing.
-  assertKeyUsableHere(key.allowedIps, request, "personal");
+  assertKeyUsableHere({ allowedIps: key.allowedIps, allowedOrigins: [], allowedEndpoints: [] }, request, "personal");
 
   // A key belongs to the identity (issuer, subject) that minted it. Under a
   // different issuer the same subject is somebody else.

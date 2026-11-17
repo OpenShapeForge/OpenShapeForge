@@ -114,7 +114,7 @@ operations:
             items: &integration
               type: object
               additionalProperties: false
-              required: [integrationId, displayName, status, grantedRoles, allowedIps, credentialCount, activeCredentialCount, createdAt, updatedAt]
+              required: [integrationId, displayName, status, grantedRoles, allowedIps, allowedOrigins, allowedEndpoints, credentialCount, activeCredentialCount, createdAt, updatedAt]
               properties:
                 integrationId:
                   type: string
@@ -140,6 +140,16 @@ operations:
                   items: { type: string }
                   description: Network allowlist of IP addresses and CIDR ranges. Empty means any address.
                   x-osf-i18n: { title: { en: Allowed IP addresses, nl: Toegestane IP-adressen } }
+                allowedOrigins:
+                  type: array
+                  items: { type: string }
+                  description: Web sites (exact origins) whose pages may use this integration's keys. Non-empty makes them browser keys, limited to allowedEndpoints; empty means server keys.
+                  x-osf-i18n: { title: { en: Allowed web sites, nl: Toegestane websites } }
+                allowedEndpoints:
+                  type: array
+                  items: { type: string }
+                  description: The only endpoints a browser key may call, as "<GET|POST> /api/<path>". Empty means none.
+                  x-osf-i18n: { title: { en: Allowed endpoints, nl: Toegestane endpoints } }
                 credentialCount:
                   type: integer
                   minimum: 0
@@ -403,6 +413,28 @@ operations:
               description:
                 en: Optional. Only these IP addresses or ranges (such as 203.0.113.7 or 203.0.113.0/24) may use the key.
                 nl: Optioneel. Alleen deze IP-adressen of reeksen (zoals 203.0.113.7 of 203.0.113.0/24) mogen de sleutel gebruiken.
+          allowedOrigins:
+            type: array
+            maxItems: 10
+            uniqueItems: true
+            items: { type: string, minLength: 8, maxLength: 255 }
+            description: 'Optional web sites, as exact origins such as https://shop.example.com (https except for localhost; no paths or wildcards), at most 10. Non-empty makes every key of this integration a BROWSER key: usable only from pages on these sites, and only for the endpoints in allowedEndpoints. A key in a web page is public, so it can do nothing that is not listed there.'
+            x-osf-i18n:
+              title: { en: Allowed web sites, nl: Toegestane websites }
+              description:
+                en: Only for use in a web page. Keys with web sites can call only the endpoints listed below, because anyone visiting the site can see them.
+                nl: Alleen voor gebruik in een webpagina. Sleutels met websites kunnen alleen de endpoints hieronder aanroepen, omdat iedere bezoeker van de site ze kan zien.
+          allowedEndpoints:
+            type: array
+            maxItems: 50
+            uniqueItems: true
+            items: { type: string, minLength: 10, maxLength: 300 }
+            description: 'The only endpoints a browser key may call, at most 50, each "<GET|POST> /api/<path>" where a segment written :name matches any one segment ("GET /api/rest/v1/relations/:id"). Empty means a browser key can call nothing. GraphQL, MCP, the control plane and key management can never be listed. Ignored for server keys.'
+            x-osf-i18n:
+              title: { en: Allowed endpoints, nl: Toegestane endpoints }
+              description:
+                en: For keys with web sites. One per line, such as GET /api/rest/v1/relations. Nothing else can be called.
+                nl: Voor sleutels met websites. Eén per regel, zoals GET /api/rest/v1/relations. Verder kan niets worden aangeroepen.
     output:
       schema:
         type: object
@@ -412,7 +444,7 @@ operations:
           integration:
             type: object
             additionalProperties: false
-            required: [integrationId, displayName, status, grantedRoles, allowedIps, createdAt]
+            required: [integrationId, displayName, status, grantedRoles, allowedIps, allowedOrigins, allowedEndpoints, createdAt]
             description: Ordinary metadata, identical to what the integration list and read report.
             properties:
               integrationId:
@@ -438,6 +470,16 @@ operations:
                 items: { type: string }
                 description: Network allowlist of IP addresses and CIDR ranges. Empty means any address.
                 x-osf-i18n: { title: { en: Allowed IP addresses, nl: Toegestane IP-adressen } }
+              allowedOrigins:
+                type: array
+                items: { type: string }
+                description: Web sites (exact origins) whose pages may use this integration's keys. Non-empty makes them browser keys, limited to allowedEndpoints; empty means server keys.
+                x-osf-i18n: { title: { en: Allowed web sites, nl: Toegestane websites } }
+              allowedEndpoints:
+                type: array
+                items: { type: string }
+                description: The only endpoints a browser key may call, as "<GET|POST> /api/<path>". Empty means none.
+                x-osf-i18n: { title: { en: Allowed endpoints, nl: Toegestane endpoints } }
               createdAt:
                 type: string
                 format: date-time
@@ -656,12 +698,12 @@ operations:
       - { status: 503, code: NOT_CONFIGURED, description: 'This deployment has no API key provisioning configuration, so no integration can be managed here.' }
   updateIntegrationRestrictions:
     id: api-keys.update-integration-restrictions
-    name: { en: Edit allowed IP addresses, nl: Toegestane IP-adressen wijzigen }
+    name: { en: Edit where keys work, nl: Gebruiksplekken wijzigen }
     description:
-      en: Replaces the IP addresses and ranges from which this integration's API keys may be used. Takes effect on the
-        next request of every key. Leave the list empty to allow any address.
-      nl: Vervangt de IP-adressen en reeksen van waaruit de API-sleutels van deze integratie gebruikt mogen worden.
-        Geldt vanaf het volgende verzoek van elke sleutel. Laat de lijst leeg om elk adres toe te staan.
+      en: Replaces the IP addresses, web sites and browser endpoints of this integration's API keys. A list you leave
+        out keeps its current value. Takes effect on the next request of every key.
+      nl: Vervangt de IP-adressen, websites en browser-endpoints van de API-sleutels van deze integratie. Een lijst die
+        je weglaat houdt de huidige waarde. Geldt vanaf het volgende verzoek van elke sleutel.
     implementation: { type: plugin, plugin: osf-api-keys, handler: updateIntegrationRestrictions }
     input:
       schema:
@@ -675,13 +717,37 @@ operations:
             maxItems: 20
             uniqueItems: true
             items: { type: string, minLength: 2, maxLength: 64 }
-            description: The complete new network allowlist, not a delta. Omit or leave empty for any address.
+            description: The complete new network allowlist; omit to keep the current one, leave empty for any address.
             x-osf-sourceField: allowedIps
             x-osf-i18n:
               title: { en: Allowed IP addresses, nl: Toegestane IP-adressen }
               description:
                 en: Only these IP addresses or ranges (such as 203.0.113.7 or 203.0.113.0/24) may use the keys. Leave empty for any address.
                 nl: Alleen deze IP-adressen of reeksen (zoals 203.0.113.7 of 203.0.113.0/24) mogen de sleutels gebruiken. Laat leeg voor elk adres.
+          allowedOrigins:
+            type: array
+            maxItems: 10
+            uniqueItems: true
+            items: { type: string, minLength: 8, maxLength: 255 }
+            description: The complete new list of web sites; omit to keep the current one, leave empty for server keys.
+            x-osf-sourceField: allowedOrigins
+            x-osf-i18n:
+              title: { en: Allowed web sites, nl: Toegestane websites }
+              description:
+                en: Only for use in a web page. Keys with web sites can call only the endpoints listed below, because anyone visiting the site can see them.
+                nl: Alleen voor gebruik in een webpagina. Sleutels met websites kunnen alleen de endpoints hieronder aanroepen, omdat iedere bezoeker van de site ze kan zien.
+          allowedEndpoints:
+            type: array
+            maxItems: 50
+            uniqueItems: true
+            items: { type: string, minLength: 10, maxLength: 300 }
+            description: The complete new list of endpoints; omit to keep the current one, leave empty for none.
+            x-osf-sourceField: allowedEndpoints
+            x-osf-i18n:
+              title: { en: Allowed endpoints, nl: Toegestane endpoints }
+              description:
+                en: For keys with web sites. One per line, such as GET /api/rest/v1/relations. Nothing else can be called.
+                nl: Voor sleutels met websites. Eén per regel, zoals GET /api/rest/v1/relations. Verder kan niets worden aangeroepen.
     output: { schema: *integration }
     auth: *manageAuth
     tenancy: { mode: required }
@@ -689,7 +755,7 @@ operations:
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: acknowledgement }
     errors:
-      - { status: 400, code: VALIDATION, description: 'An address or range is not valid, or the list is too long.' }
+      - { status: 400, code: VALIDATION, description: 'An address, range, web site or endpoint is not valid, or a list is too long.' }
       - { status: 401, code: UNAUTHENTICATED, description: An authenticated tenant session is required. }
       - { status: 403, code: FORBIDDEN, description: 'The session may not manage API keys: it lacks the management role or is not a verified person.' }
       - { status: 404, code: NOT_FOUND, description: The integration does not exist in this organization. }
@@ -716,7 +782,7 @@ interfaces:
         recordRoute: /api-key-integrations/:integrationId
         idField: integrationId
         displayField: displayName
-        fields: [integrationId, displayName, status, grantedRoles, allowedIps, activeCredentialCount, credentialCount, createdAt, updatedAt]
+        fields: [integrationId, displayName, status, grantedRoles, allowedIps, allowedOrigins, allowedEndpoints, activeCredentialCount, credentialCount, createdAt, updatedAt]
         columns: [displayName, status, activeCredentialCount, createdAt]
         operations:
           list: { operation: listIntegrations, resultField: integrations }

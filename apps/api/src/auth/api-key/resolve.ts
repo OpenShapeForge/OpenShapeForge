@@ -71,7 +71,7 @@ export function integrationRoles(granted: readonly string[], subset: readonly st
 export async function resolveApiKeySession(
   deps: ApiKeyResolverDeps,
   candidate: string,
-  request: KeyRequestContext = { clientAddress: null, origin: null },
+  request: KeyRequestContext = { clientAddress: null, origin: null, target: null },
 ): Promise<TrustedSessionContext | undefined> {
   const parsed = parseApiKey(candidate);
   if (!parsed) return undefined;
@@ -84,7 +84,7 @@ export async function resolveApiKeySession(
   // token exchange, so a refused address or browser never costs the realm a
   // client-credentials grant. A refusal is a 403 naming the rule: the caller
   // has already proved they hold a valid key (restrictions.ts).
-  assertKeyUsableHere(key.allowedIps, request, "integration");
+  assertKeyUsableHere(key.restrictions, request, "integration");
 
   let token: string | undefined;
   try {

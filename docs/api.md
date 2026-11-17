@@ -1232,28 +1232,49 @@ The end-to-end proof is
 `apps/api/src/auth/api-key/__tests__/personal-api-key.e2e.test.ts`, against the
 real realm and database.
 
-### Where an API key may be used from
+### Where an API key may be used from, and browser keys
 
-Both key kinds take an optional network allowlist, `allowedIps`: at most 20
-IPv4/IPv6 addresses or CIDR ranges, set at creation
-(`api-keys.create-integration`, `api-keys.create-my-personal-key`). An
-integration's list is replaced as a whole with
+Both key kinds take an optional network allowlist, `allowedIps`. Integration
+keys also take `allowedOrigins` (web sites) and `allowedEndpoints`, which
+together make a **browser key**. All are set at creation
+(`api-keys.create-integration`; personal: `allowedIps` on
+`api-keys.create-my-personal-key`). An integration's lists are edited with
 `api-keys.update-integration-restrictions`
-(`POST /api/api-key-integrations/update-restrictions`, the management role) and
-applies to every key of the integration from its next request. The rules live
-in `apps/api/src/auth/api-key/restrictions.ts`:
+(`POST /api/api-key-integrations/update-restrictions`, the management role): a
+list that is given replaces that list whole, a list left out keeps its value.
+Changes apply to every key of the integration from its next request. The rules
+live in `apps/api/src/auth/api-key/restrictions.ts`:
 
-- **Network allowlist** — any address outside the list is refused with
-  `403 API_KEY_RESTRICTED`. The address is the one the API derived through its
-  trusted proxy hops (`API_TRUST_PROXY`, default one hop): the server stamps
-  `request.ip` into `x-openshapeforge-client-address` on every request and
-  discards whatever a client sent under that name. A deployment whose proxy
-  chain does not put the caller's address in the trusted `X-Forwarded-For` hop
-  must fix that first, or every allowlisted key sees the proxy's address.
-- **Never from a web browser** — an API key is a server credential; one in a
-  web page is visible to everyone who opens it. A request that carries an
-  `Origin` header is refused with `403 API_KEY_RESTRICTED` for every key kind,
-  and the REST surface answers no CORS preflight for it.
+- **`allowedIps`** — at most 20 IPv4/IPv6 addresses or CIDR ranges; any other
+  address is refused with `403 API_KEY_RESTRICTED`. The address is the one the
+  API derived through its trusted proxy hops (`API_TRUST_PROXY`, default one
+  hop): the server stamps `request.ip` into `x-openshapeforge-client-address`
+  on every request and discards whatever a client sent under that name. A
+  deployment whose proxy chain does not put the caller's address in the
+  trusted `X-Forwarded-For` hop must fix that first.
+- **Browser keys** — non-empty `allowedOrigins` (at most 10 exact origins,
+  https except for localhost, no paths or wildcards). A key in a web page is
+  public, so origins do not protect the key; they stop other sites from using
+  it in their visitors' browsers. What protects the organization is that a
+  browser key is **deny by default**: it may call only the endpoints in
+  `allowedEndpoints` (at most 50, each `<GET|POST> /api/<path>`, a `:name`
+  segment matching one path segment, e.g. `GET /api/rest/v1/relations/:id`).
+  An empty list means it can call nothing. The request is matched against
+  `x-openshapeforge-request-target`, which the server stamps from the routed
+  method and path (after the `/<alias>/api/...` short-address rewrite) and a
+  client cannot set. GraphQL, MCP, the control plane and key management can
+  never be listed. The key also needs an `Origin` naming one of its sites, and
+  its roles still apply on top.
+- **Every other key** — an integration without web sites and every personal
+  key — is refused when a browser presents it (any `Origin` header).
+
+CORS (`apps/api/src/rest/api-key-cors.ts`) covers the REST surface under
+`/api/`, not GraphQL, MCP, the control plane or routes with their own
+`OPTIONS`. The preflight carries no key, so it is answered for any origin with
+`GET, POST` and the `authorization, content-type` headers, never with
+`Access-Control-Allow-Credentials`. Only a response to a request carrying an
+integration key gets `Access-Control-Allow-Origin`; the resolver has already
+refused every such key that does not admit that origin and endpoint.
 
 The end-to-end proof is
 `apps/api/src/auth/api-key/__tests__/api-key-restrictions.e2e.test.ts` (and the

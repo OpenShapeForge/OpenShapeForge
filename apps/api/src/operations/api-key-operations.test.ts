@@ -275,6 +275,8 @@ describe("integration catalog Operations", () => {
         status: "active",
         grantedRoles: [READ_ROLE, WRITE_ROLE],
         allowedIps: [],
+        allowedOrigins: [],
+        allowedEndpoints: [],
         createdAt: store.integrations[0]!.createdAt.toISOString(),
       });
 

@@ -11,7 +11,8 @@ import type {
   ModuleSocketGrant,
   RuntimeModule,
 } from "../contract.js";
-import { mintSocketGrant, socketAllowed } from "../socket-egress.js";
+import { connectSocket, mintSocketGrant, socketAllowed } from "../socket-egress.js";
+import { entitySecretScope, mintRecordEgressGrant, secureTargetUrl } from "../entity-secrets.js";
 
 const TENANT = "11111111-1111-4111-8111-111111111111";
 const CONNECTION = "22222222-2222-4222-8222-222222222222";
@@ -406,5 +407,116 @@ describe("grant-bound connection HTTP", () => {
   it("keeps the socket grant semantics of the same allow-list apart", () => {
     expect(socketAllowed("mcp.example.com", 443, ["mcp.example.com"])).toBe(false);
     expect(socketAllowed("mcp.example.com", 443, ["mcp.example.com:443"])).toBe(true);
+  });
+});
+
+describe("record-bound grant", () => {
+  const RECORD = "33333333-3333-4333-8333-333333333333";
+  const STORED = "https://hooks.example.com/in/abc?channel=7";
+  const recordGrant = (owner: TrustedSessionContext, stored = STORED, expiresAtMs = Date.now() + 60_000) =>
+    mintRecordEgressGrant({ session: owner, entity: "SecureEndpoint", id: RECORD, table: "core.secure_endpoints",
+      url: secureTargetUrl(stored)!, expiresAtMs });
+  const post = (owner: TrustedSessionContext, url: string, dependencies = harness().dependencies, stored = STORED) =>
+    requestConnectionHttp(owner, recordGrant(owner, stored), call({ url }), dependencies);
+
+  it("accepts only an HTTPS URL naming one exact host as a destination", () => {
+    expect(secureTargetUrl(STORED)?.origin).toBe("https://hooks.example.com");
+    for (const refused of [
+      "http://hooks.example.com/in", "https://user:pw@hooks.example.com/in", "https://hooks.example.com/in#part",
+      "https://*.example.com/in", "https://**.example.com/in", "ftp://hooks.example.com", "hooks.example.com", "", null, 7,
+    ]) expect(secureTargetUrl(refused)).toBeUndefined();
+  });
+
+  it("seals for one tenant, table and origin", () => {
+    const scope = entitySecretScope(TENANT, "core.secure_endpoints", "https://hooks.example.com");
+    expect(scope).not.toBe(entitySecretScope(CONNECTION, "core.secure_endpoints", "https://hooks.example.com"));
+    expect(scope).not.toBe(entitySecretScope(TENANT, "core.other", "https://hooks.example.com"));
+    expect(scope).not.toBe(entitySecretScope(TENANT, "core.secure_endpoints", "https://hooks.example.com:8443"));
+    expect(scope).not.toBe(entitySecretScope(TENANT, "core.secure_endpoints", "https://other.example.com"));
+  });
+
+  it("sends to the stored URL and tells the owner which entity it is for", async () => {
+    const live = session();
+    const { seen, dependencies } = harness();
+    const response = await requestConnectionHttp(live, recordGrant(live), call({
+      url: STORED, headers: { "x-api-key": FAKE_AUTHORIZATION },
+    }), dependencies);
+    expect(response.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    const sent = seen[0]!;
+    expect(sent.url.href).toBe(STORED);
+    expect(sent.allowlist).toEqual(["hooks.example.com"]);
+    expect(sent.resolvedAddresses).toEqual(["93.184.216.34"]);
+    expect(sent.purpose).toBe("provider");
+    expect(sent.source).toBeUndefined();
+    expect(sent.scope).toEqual({ tenantId: TENANT, actorId: "person-a", provider: "SecureEndpoint", operation: "entity.http", kind: "mutation" });
+    expect(sent.init.redirect).toBe("manual");
+    // A sub-path of the stored URL, with its query retained, is still the record's own destination.
+    expect((await post(live, "https://hooks.example.com/in/abc/events?channel=7&attempt=2")).status).toBe(200);
+  });
+
+  it("refuses every origin, path and query but the stored URL's own, before any network step", async () => {
+    const live = session();
+    for (const url of [
+      "https://other.example.com/in/abc?channel=7",
+      "https://sub.hooks.example.com/in/abc?channel=7",
+      "https://hooks.example.com:8443/in/abc?channel=7",
+      "https://hooks.example.com/in/abcd?channel=7",
+      "https://hooks.example.com/in?channel=7",
+      "https://hooks.example.com/in/abc/../other?channel=7",
+      "https://hooks.example.com/in/abc",
+      "https://hooks.example.com/in/abc?channel=8",
+      "http://hooks.example.com/in/abc?channel=7",
+      "https://user:pw@hooks.example.com/in/abc?channel=7",
+    ]) {
+      const { seen, dependencies } = harness();
+      const failure = await post(live, url, dependencies).then(() => undefined, (error: unknown) => error as { code?: string; message: string });
+      expect(failure?.code).toBe("EGRESS_DENIED");
+      expect(failure?.message).not.toContain("abc");
+      expect(seen).toHaveLength(0);
+    }
+    const other = await post(live, "https://other.example.com/x").catch((error: Error) => error.message);
+    expect(other).toBe("This SecureEndpoint record grants no outbound host but its own stored URL.");
+  });
+
+  it("refuses private, loopback, link-local and metadata answers for the stored host", async () => {
+    const live = session();
+    for (const address of ["127.0.0.1", "10.0.0.5", "192.168.1.9", "169.254.169.254", "::1", "fe80::1", "fd00::1", "100.64.0.1"]) {
+      const { seen, dependencies } = harness();
+      const failure = await post(live, STORED, { ...dependencies, resolve: async () => ["93.184.216.34", address] })
+        .then(() => undefined, (error: unknown) => error as { code?: string });
+      expect(failure?.code).toBe("EGRESS_DENIED");
+      expect(seen).toHaveLength(0);
+    }
+    const literal = harness();
+    expect(await post(live, "https://169.254.169.254/latest", literal.dependencies, "https://169.254.169.254/latest")
+      .then(() => undefined, (error: unknown) => (error as { code?: string }).code)).toBe("EGRESS_DENIED");
+    expect(literal.seen).toHaveLength(0);
+  });
+
+  it("refuses a redirect, a second use, another session, an expired grant and a non-pinning owner", async () => {
+    const live = session();
+    const redirect = harness(async () => new Response(null, { status: 307, headers: { location: "https://other.example.com/" } }));
+    expect(await post(live, STORED, redirect.dependencies).then(() => undefined, (error: unknown) => (error as Error).message))
+      .toBe("The provider answered with a redirect, which is never followed.");
+    expect(redirect.seen).toHaveLength(1);
+
+    const once = recordGrant(live);
+    const { dependencies } = harness();
+    await requestConnectionHttp(live, once, call({ url: STORED }), dependencies);
+    expect(await requestConnectionHttp(live, once, call({ url: STORED }), dependencies).then(() => undefined, (error: unknown) => (error as Error).message))
+      .toContain("already used");
+
+    expect(await requestConnectionHttp(session(), recordGrant(live), call({ url: STORED }), dependencies)
+      .then(() => undefined, (error: unknown) => (error as Error).message)).toBe("This egress grant belongs to another session.");
+    expect(await requestConnectionHttp(live, recordGrant(live, STORED, Date.now() - 1), call({ url: STORED }), dependencies)
+      .then(() => undefined, (error: unknown) => (error as Error).message)).toContain("expired");
+    expect(await requestConnectionHttp(live, recordGrant(live), call({ url: STORED }), { ...dependencies, owner: { fetch: dependencies.owner.fetch } })
+      .then(() => undefined, (error: unknown) => (error as { code?: string }).code)).toBe("EGRESS_OWNER_REQUIRED");
+  });
+
+  it("grants no socket", async () => {
+    expect(await connectSocket(recordGrant(session()), { host: "hooks.example.com", port: 443, tls: true })
+      .then(() => undefined, (error: unknown) => (error as { code?: string }).code)).toBe("EGRESS_DENIED");
   });
 });

@@ -44,6 +44,12 @@ type GrantState = {
   allowlist: readonly string[];
   adapterKey: string;
   adapterName: string;
+  /**
+   * What the allow-list was read off. Absent for an Adapter. A `record` grant
+   * (`entity-secrets.ts`) names its entity in `adapterKey` and admits only
+   * that record's own stored URL.
+   */
+  subject?: "record";
   tenantId: string | null;
   /**
    * What ties a grant to the resolution that minted it. Only the HTTP path
@@ -221,6 +227,12 @@ export async function connectSocket(
   if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
     throw new SocketEgressDenied(
       "An outbound connection needs a host and a port between 1 and 65535.",
+    );
+  }
+  if (state.subject === "record") {
+    // A record grant admits one HTTPS URL; it never names a port to dial.
+    throw new SocketEgressDenied(
+      `Connecting to ${host}:${port} is not allowed: a ${state.adapterKey} record grants one HTTPS request to its stored URL and no socket.`,
     );
   }
   if (!socketAllowed(host, port, state.allowlist)) {

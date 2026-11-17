@@ -138,6 +138,9 @@ describe("runtime module platform session authority", () => {
     await expect(runtime.services.secrets.resolveConnectionValues(live!, {
       connectionId: "33333333-3333-4333-8333-333333333333",
     })).rejects.toThrow("Module connection resolution requires a live verified session.");
+    await expect(runtime.services.secrets.resolveEntityValues(live!, {
+      entity: "SecureEndpoint", id: "33333333-3333-4333-8333-333333333333",
+    })).rejects.toThrow("Module secure value resolution requires a live verified session.");
   });
 
   it("ends a discovery when the caller's request is cancelled", async () => {

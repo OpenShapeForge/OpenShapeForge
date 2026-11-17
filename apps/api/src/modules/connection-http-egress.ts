@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * One finite HTTPS POST on behalf of a resolved Connection.
+ * One finite HTTPS POST on behalf of a resolved Connection, or of a record
+ * whose static secure values were resolved (`entity-secrets.ts`).
  *
  * `fetchValidatedOutbound` stays the only outbound gate: this module adds what
  * a module-initiated request needs in front of it, and nothing that decides
@@ -71,8 +72,10 @@ type ConnectionHttpDependencies = {
 };
 
 const denied = (message: string) => new HttpError(403, "EGRESS_DENIED", message);
-const grantRefusal = (adapterKey: string) =>
-  denied(`The "${adapterKey}" Adapter does not grant this outbound host.`);
+const grantRefusal = (state: { adapterKey: string; subject?: "record" }) =>
+  denied(state.subject === "record"
+    ? `This ${state.adapterKey} record grants no outbound host but its own stored URL.`
+    : `The "${state.adapterKey}" Adapter does not grant this outbound host.`);
 const unavailable = () =>
   new HttpError(502, "PROVIDER_ERROR", "The provider could not be reached.");
 const timedOut = () =>
@@ -240,7 +243,7 @@ export async function requestConnectionHttp(
   // Read once: a value validated here is the value sent.
   const { url: target, headers: rawHeaders, json, exposeHeaders, signal } = request;
   const url = parseTarget(target);
-  if (!hostAllowed(url.hostname, state.allowlist)) throw grantRefusal(state.adapterKey);
+  if (!hostAllowed(url.hostname, state.allowlist)) throw grantRefusal(state);
   if (binding.resource) {
     let resource: URL;
     try { resource = new URL(binding.resource); }
@@ -255,7 +258,9 @@ export async function requestConnectionHttp(
     });
     if (resource.protocol !== "https:" || resource.username || resource.password || resource.hash ||
         resource.origin !== url.origin || !queryMatches || (url.pathname !== resource.pathname && !url.pathname.startsWith(base))) {
-      throw denied("The outbound URL is outside the Connection's protected resource.");
+      throw denied(state.subject === "record"
+        ? "The outbound URL is outside this record's stored URL."
+        : "The outbound URL is outside the Connection's protected resource.");
     }
   }
   const headers = requestHeaders(rawHeaders);
@@ -281,7 +286,7 @@ export async function requestConnectionHttp(
       tenantId: session.tenantId,
       actorId: session.userId,
       provider: state.adapterKey,
-      operation: "connection.http",
+      operation: state.subject === "record" ? "entity.http" : "connection.http",
       kind: "mutation",
     },
   });
@@ -296,7 +301,7 @@ export async function requestConnectionHttp(
         fallback: (next, init) => transport(next, init),
         resolvedAddresses,
         ...(invocation.dispatch ? { dispatch: invocation.dispatch } : {}),
-        denied: () => grantRefusal(state.adapterKey),
+        denied: () => grantRefusal(state),
       }),
       bounded,
       (late) => void late.body?.cancel().catch(() => {}),

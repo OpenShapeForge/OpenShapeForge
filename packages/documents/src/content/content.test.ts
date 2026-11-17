@@ -914,6 +914,19 @@ describe("canonical block materialization", () => {
 });
 
 describe("reading an inclusion from its stored copy", () => {
+  test("refuses stored header/footer inclusions instead of silently losing their placement", async () => {
+    const copied = await include("nested", "child", {}, [text("child-text", "Child")]);
+    for (const region of ["header", "footer"] as const) {
+      await expect(fixture([{ ...copied, region }]).run()).rejects.toThrow("template inclusion must be a body");
+      // The same holds one level down, for an inclusion nested in a copy.
+      await expect(fixture([await include("outer", "parent", {}, [{ ...copied, region }])]).run()).rejects.toThrow("template inclusion must be a body");
+    }
+    await expect(fixture([{ ...copied, region: "header", layoutKey: "cover" }]).run()).rejects.toThrow("template inclusion must be a body");
+    const f = fixture([copied]);
+    expect((await f.run()).blocks).toHaveLength(1);
+    expect(f.calls.template).toBe(1);
+  });
+
   test("walks the copied blocks in order and never resolves the source template", async () => {
     const f = fixture([
       text("before", "Before"),

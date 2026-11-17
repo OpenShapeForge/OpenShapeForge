@@ -46,11 +46,26 @@ import {
   pageIntegrations,
   pageKeys,
   revokeKey,
+  updateIntegrationRoles,
   type ApiKeyServiceDeps,
   type ListedIntegration,
   type ListedKey,
   type ProvisioningSession,
 } from "../auth/api-key/service.js";
+import {
+  createPersonalKey,
+  getMyPersonalKey,
+  getOrganizationPersonalKey,
+  pageMyPersonalKeys,
+  pageOrganizationPersonalKeys,
+  PERSONAL_KEY_MAX_TTL_DAYS,
+  personalKeyStatus,
+  revokeMyPersonalKey,
+  revokeOrganizationPersonalKey,
+  type ListedPersonalKey,
+  type PersonalKeyServiceDeps,
+  type PersonalKeySession,
+} from "../auth/api-key/personal-service.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type {
   ModuleOperationContext,
@@ -146,9 +161,10 @@ function declaredServiceFailure(error: unknown): ModuleOperationErrorResult {
     return declaredFailure(400, "VALIDATION", error.message);
   }
   if (error instanceof ApiKeyProvisioningError) {
-    // Only `createIntegration` mutates the realm, and only its contract
-    // declares this status; every other Operation here would be a handler
-    // contract violation if it reached this branch, which is the intent.
+    // Only `createIntegration` and `updateIntegrationRoles` mutate the realm,
+    // and only their contracts declare this status; every other Operation
+    // here would be a handler contract violation if it reached this branch,
+    // which is the intent.
     return declaredFailure(502, "PROVISIONING_FAILED", error.message);
   }
   throw error;
@@ -204,7 +220,7 @@ function lifetime(value: unknown): { expiresInDays?: number } {
   return { expiresInDays: value };
 }
 
-/** Role names, with empty allowed only for an integration's initial roles. */
+/** Role names, with empty allowed only for an integration's own role set. */
 function roleList(value: unknown, name: string, allowEmpty = false): string[] {
   if (!Array.isArray(value) || value.some((role) => typeof role !== "string")) {
     throw new ApiKeyValidationError(`${name} must be a list of role names.`);
@@ -351,7 +367,145 @@ function filter(value: unknown, name: string): string | undefined {
   return value;
 }
 
+// ---------------------------------------------------------------------------
+// Personal keys (personal-api-keys.yaml). They need a database and nothing
+// else: no keyring, because no client secret is stored, and no realm write,
+// because the person already has an identity. So their availability does not
+// hang on the integration provisioning configuration above.
+
+type ResolvedPersonal = { deps: PersonalKeyServiceDeps; session: PersonalKeySession };
+
+function resolvePersonal(context: ModuleOperationContext): ResolvedPersonal | ModuleOperationErrorResult {
+  const db = context.db as OpenShapeForgeDatabase | undefined;
+  if (!db) return declaredFailure(503, "NOT_CONFIGURED", "This deployment has no database for API keys.");
+  const session = context.session as TrustedSessionContext | undefined;
+  if (!session?.tenantId || !session.userId) {
+    return declaredFailure(401, "UNAUTHENTICATED", "An authenticated tenant session is required.");
+  }
+  return {
+    deps: { db },
+    session: {
+      tenantId: session.tenantId,
+      userId: session.userId,
+      ...(session.issuer ? { issuer: session.issuer } : {}),
+      roles: session.roles,
+      groups: session.groups,
+      credential: session.credential,
+      ...(session.principalKind ? { principalKind: session.principalKind } : {}),
+    },
+  };
+}
+
+function isPersonalFailure(value: ResolvedPersonal | ModuleOperationErrorResult): value is ModuleOperationErrorResult {
+  return "ok" in value && value.ok === false;
+}
+
+function projectPersonalKey(key: ListedPersonalKey, now: Date) {
+  return {
+    id: key.id,
+    displayName: key.displayName,
+    status: personalKeyStatus(key, now),
+    ownerUserId: key.ownerUserId,
+    ownerName: key.ownerName,
+    roleSubset: key.roleSubset,
+    createdAt: key.createdAt.toISOString(),
+    expiresAt: key.expiresAt.toISOString(),
+    revokedAt: iso(key.revokedAt),
+    revokedByAdministrator: key.revokedByAdministrator,
+    lastUsedAt: iso(key.lastUsedAt),
+  };
+}
+
+const PERSONAL_KEY_SORTS = ["displayName", "status", "createdAt", "expiresAt", "lastUsedAt"] as const;
+
+async function personalPage(
+  input: Record<string, unknown>,
+  context: ModuleOperationContext,
+  scope: "mine" | "organization",
+): Promise<ModuleOperationResult> {
+  const resolved = resolvePersonal(context);
+  if (isPersonalFailure(resolved)) return resolved;
+  const now = new Date();
+  try {
+    const sort = readSort(input, PERSONAL_KEY_SORTS, { field: "createdAt", direction: "desc" });
+    const displayName = filter(input.displayName, "displayName");
+    const status = filter(input.status, "status");
+    const ownerUserId = scope === "organization" ? filter(input.ownerUserId, "ownerUserId") : undefined;
+    const identity = { f: sort.field, d: sort.direction };
+    // The scope IS in the fingerprint: a cursor from the caller's own list
+    // must not resume the organization-wide one, or the other way round.
+    const query = fingerprint(["personal-keys", scope, ownerUserId, displayName, status]);
+    const pageQuery = {
+      sortField: sort.field,
+      sortDirection: sort.direction,
+      first: sort.first,
+      ...cursorSpread(decodeCursor(input.after, identity, query)),
+      ...(displayName === undefined ? {} : { displayName }),
+      ...(status === undefined ? {} : { status }),
+    };
+    const page = scope === "mine"
+      ? await pageMyPersonalKeys(resolved.deps, resolved.session, pageQuery, now)
+      : await pageOrganizationPersonalKeys(resolved.deps, resolved.session, {
+        ...pageQuery, ...(ownerUserId === undefined ? {} : { ownerUserId }),
+      }, now);
+    return {
+      value: {
+        keys: page.rows.map((key) => projectPersonalKey(key, now)),
+        totalCount: page.totalCount,
+        nextCursor: encodeCursor(page.nextCursor, identity, query),
+      },
+    };
+  } catch (error) {
+    return declaredServiceFailure(error);
+  }
+}
+
+async function personalOne(
+  input: Record<string, unknown>,
+  context: ModuleOperationContext,
+  run: (deps: PersonalKeyServiceDeps, session: PersonalKeySession, id: string) => Promise<ListedPersonalKey>,
+): Promise<ModuleOperationResult> {
+  const resolved = resolvePersonal(context);
+  if (isPersonalFailure(resolved)) return resolved;
+  try {
+    const key = await run(resolved.deps, resolved.session, text(input.id));
+    return { value: projectPersonalKey(key, new Date()) };
+  } catch (error) {
+    return declaredServiceFailure(error);
+  }
+}
+
 const HANDLERS: Record<string, ModuleOperationHandler> = {
+  listMyPersonalKeys: (input, context) => personalPage(input, context, "mine"),
+  listPersonalKeys: (input, context) => personalPage(input, context, "organization"),
+  getMyPersonalKey: (input, context) => personalOne(input, context, getMyPersonalKey),
+  getPersonalKey: (input, context) => personalOne(input, context, getOrganizationPersonalKey),
+  revokeMyPersonalKey: (input, context) => personalOne(input, context, revokeMyPersonalKey),
+  revokePersonalKey: (input, context) => personalOne(input, context, revokeOrganizationPersonalKey),
+
+  async createMyPersonalKey(input, context): Promise<ModuleOperationResult> {
+    const resolved = resolvePersonal(context);
+    if (isPersonalFailure(resolved)) return resolved;
+    const now = new Date();
+    try {
+      if (input.expiresInDays !== undefined &&
+          (typeof input.expiresInDays !== "number" || !Number.isInteger(input.expiresInDays))) {
+        throw new ApiKeyValidationError(`expiresInDays must be an integer from 1 through ${PERSONAL_KEY_MAX_TTL_DAYS}.`);
+      }
+      const created = await createPersonalKey(resolved.deps, resolved.session, {
+        displayName: text(input.displayName),
+        ...(input.expiresInDays === undefined ? {} : { expiresInDays: input.expiresInDays as number }),
+        ...(input.roleSubset === undefined ? {} : { roleSubset: roleList(input.roleSubset, "roleSubset") }),
+      }, now);
+      return oneTimeCredential({
+        key: projectPersonalKey(created.key, now),
+        credential: { id: created.key.id, secret: created.token, expiresAt: created.key.expiresAt.toISOString() },
+      });
+    } catch (error) {
+      return declaredServiceFailure(error);
+    }
+  },
+
   async listIntegrations(input, context): Promise<ModuleOperationResult> {
     const resolved = resolve(context);
     if (isFailure(resolved)) return resolved;
@@ -509,6 +663,22 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
     try {
       const revoked = await revokeKey(resolved.deps, resolved.session, text(input.id));
       return { value: { id: revoked.id, status: "revoked", revokedAt: revoked.revokedAt.toISOString() } };
+    } catch (error) {
+      return declaredServiceFailure(error);
+    }
+  },
+
+  async updateIntegrationRoles(input, context): Promise<ModuleOperationResult> {
+    const resolved = resolve(context);
+    if (isFailure(resolved)) return resolved;
+    try {
+      // The full new set; the ceiling bounds it inside the service, exactly as
+      // at creation.
+      const updated = await updateIntegrationRoles(resolved.deps, resolved.session, {
+        integrationId: text(input.integrationId),
+        roles: roleList(input.roles, "roles", true),
+      });
+      return { value: projectIntegration(updated) };
     } catch (error) {
       return declaredServiceFailure(error);
     }

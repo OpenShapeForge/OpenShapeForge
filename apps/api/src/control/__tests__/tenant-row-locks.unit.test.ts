@@ -41,7 +41,7 @@ function recordingDatabase() {
   const connection: DatabaseConnection = {
     async executeQuery<R>(query: CompiledQuery): Promise<QueryResult<R>> {
       queries.push(query.sql);
-      return { rows: (/from platform\.tenants/.test(query.sql) ? [TENANT] : []) as R[] };
+      return { rows: (query.sql === "select app.bypass_rls() as accepted" ? [{accepted:true}] : /from platform\.tenants/.test(query.sql) ? [TENANT] : []) as R[] };
     },
     async *streamQuery<R>(): AsyncIterableIterator<QueryResult<R>> { throw new Error("Unexpected stream"); },
   };

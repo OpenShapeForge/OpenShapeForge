@@ -384,7 +384,7 @@ if (process.env.OSF_FIELD_POLICY_DB_ISOLATED !== "1") {
       const routes = new Map<string, (...args: any[]) => Promise<unknown>>();
       const gets = new Map<string, (...args: any[]) => Promise<any>>();
       await registerConfigurationHandoffRoutes({
-        instance: { addContentTypeParser() {}, get: (path: string, handler: (...args: any[]) => Promise<any>) => gets.set(path, handler), post: (path: string, handler: (...args: any[]) => Promise<unknown>) => routes.set(path, handler) },
+        instance: { addContentTypeParser() {}, options() {}, get: (path: string, handler: (...args: any[]) => Promise<any>) => gets.set(path, handler), post: (path: string, handler: (...args: any[]) => Promise<unknown>) => routes.set(path, handler) },
         options: { db: runtime.db }, requireMcpSession: async () => ({ db: runtime.db, session: writer, resource: "fixture" }),
       } as never);
       const post = routes.get("/api/entity-configuration/:token")!;

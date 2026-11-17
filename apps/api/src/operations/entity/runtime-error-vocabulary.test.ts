@@ -128,7 +128,8 @@ describe("declared errors per entity Operation", () => {
       expect_("CONFIRMATION_STALE", operation.interaction.confirmation.mode === "challenge");
       expect_("INTERACTION_REQUIRED", operation.intent === "create" && operation.interaction.secureInput !== undefined);
       expect_("REFERENCE_IN_USE", operation.intent === "delete");
-      expect_("NOT_FOUND", operation.intent !== "list" && operation.intent !== "create");
+      // Document.create resolves an optional published template version before creating.
+      expect_("NOT_FOUND", operation.intent !== "list" && (operation.intent !== "create" || operation.id === "Document.create"));
     }
   });
 });

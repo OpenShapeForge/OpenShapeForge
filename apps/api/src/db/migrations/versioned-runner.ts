@@ -214,6 +214,12 @@ export async function applyVersionedMigrations(
 
     await sql`begin`.execute(db);
     try {
+      // Trusted compiler-plugin transitions move rows across every tenant.
+      // Keep their immutable SQL intact and scope this migration authority to
+      // the transaction: commit/rollback also restore pooled session state.
+      // The chain verifies the migrate role before reaching this runner;
+      // app.bypass_rls() separately refuses this literal on runtime logins.
+      if (migration.namespace) await sql`select set_config('app.bypass_rls', 'true', true)`.execute(db);
       await migration.up(db);
       await sql`
         insert into platform.schema_migrations (version, checksum, applied_by)

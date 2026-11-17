@@ -26,8 +26,9 @@
  *   - a session that did NOT log in as a runtime role — a seed or a fixture
  *     run by an administrator. That is a fact about the connection
  *     (`session_user`), which neither `SET ROLE` nor a SECURITY DEFINER
- *     function changes. A login that is a member of a runtime role counts as
- *     one; a superuser does not;
+ *     function changes. A login that can use runtime-role privileges, directly
+ *     or after SET ROLE, counts as runtime; an ADMIN-only membership does
+ *     not confer those privileges. A superuser does not count as runtime;
  *   - while acting as a role that is neither declared nor a runtime login
  *     (`current_user`): the migrate role in its own statements, and the
  *     SECURITY DEFINER functions it owns. Plugins raise `'true'` for one statement inside such

@@ -9,6 +9,8 @@ import { WEB_URL } from "./e2e/support/environment";
 
 export default defineConfig({
   testDir: "./e2e",
+  // The refresh-failure fixture has its own server, realm and CI step.
+  testIgnore: "**/recovery/**",
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: false,

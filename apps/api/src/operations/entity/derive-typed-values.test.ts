@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import {test, expect} from 'bun:test';
 import {deriveTypedValue} from './derive-typed-values.js';
 const schema = {type:'array',items:{type:'object',properties:{key:{type:'string',maxLength:64,'x-osf-derive-on-create':{from:'name',transform:'slug',onConflict:'suffix'}},name:{type:'string'}}}};

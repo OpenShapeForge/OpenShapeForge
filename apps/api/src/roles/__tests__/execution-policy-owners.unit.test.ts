@@ -32,9 +32,8 @@ import { startWorkerRole } from "../worker.js";
 const OWNER = "core-versioning";
 const admitting: ModuleExecutionPolicy = { name: "tenant-write-deadline", evaluate: () => ({ admitted: true }) };
 
-// Deliberately unreachable: nothing below issues a query. The API runs with no
-// operation catalog and the worker's stub does no work, so neither opens a
-// connection (as roles/__tests__/worker-role.unit.test.ts relies on too).
+// The API is database-free for this policy-owner unit test. The stub worker
+// opens no connection (as roles/__tests__/worker-role.unit.test.ts relies on too).
 const databaseUrl = "postgres://unused:unused@127.0.0.1:1/no-connection-is-opened";
 const silentLog = { info: () => {}, warn: () => {}, error: () => {} };
 
@@ -78,7 +77,6 @@ function loadWith(outcomes: Partial<Record<string, Outcome>>): Promise<ModuleReg
 function apiApp(modules: ModuleRegistry, required: readonly string[]): FastifyInstance {
   return createApiApp({
     cors: false,
-    databaseUrl,
     modules,
     // Isolate the rule under test: with no operation catalog, the canonical
     // binding invariant cannot be what refuses this boot.

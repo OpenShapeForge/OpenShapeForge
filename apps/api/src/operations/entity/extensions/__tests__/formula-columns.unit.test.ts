@@ -21,7 +21,7 @@ const spec = getGeneratedCrudTables().find((table) => table.source?.authoringEnt
 
 describe("formula columns", () => {
   test("never the tenant, the source, the write clock or a reference", () => {
-    expect(names(formulaColumns(asset))).toEqual(["id", "created_at", "external_id", "source_authority", "source_organization",
+    expect(names(formulaColumns(asset))).toEqual(["id", "created_at", "color", "icon", "external_id", "source_authority", "source_organization",
       "source_administration", "source_administration_name", "source_version", "name"]);
     // The spec's foreign key reads as its owner: a reference, not an input.
     expect(names(formulaColumns(spec))).not.toContain("asset_id");

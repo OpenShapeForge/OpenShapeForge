@@ -78,7 +78,7 @@ const AUTHORED: readonly Authored[] = [
     id: "control.whoami", handler: "whoami", title: "Who am I",
     description: "Describes the signed-in platform operator: name, role, scope (the whole platform), how many tenants exist and when the sign-in expires. Takes no arguments.",
     roles: CONTROL_ROLES, effects: READ, idempotency: "natural",
-    output: { type: "object", additionalProperties: true, properties: { name: { type: "string" }, role: { type: "string" }, scope: { type: "string" }, tenants: { type: "integer" } } },
+    output: { type: "object", additionalProperties: true, properties: { name: { type: "string" }, role: { type: "string" }, scope: { type: "string" }, tenants: { type: ["integer", "null"] } } },
     rest: { method: "GET", path: "/api/control/v1/whoami", status: 200 }, mcp: "whoami",
   },
   {

@@ -818,6 +818,60 @@ tables:
       - name: api_keys_tenant_idx
         columns: [tenant_id]
 
+  # One row per PERSONAL key: a credential a person minted for themselves. It
+  # names no integration and no service account — it names its OWNER, and a
+  # request made with it acts as that person with the organization roles they
+  # hold at the time of the request (auth/api-key/personal-resolve.ts),
+  # narrowed by `role_subset`, never widened by it.
+  #
+  # Kept apart from platform.api_keys on purpose. An integration key is the
+  # organization's credential for an external party; a personal key is the
+  # person's own and dies with their access. Sharing one table would make
+  # every reader of one kind a potential reader of the other.
+  #
+  # tenantScoped: FALSE for the same reason as platform.api_keys — the
+  # authentication path reads it before any tenant is known. It is fenced by
+  # tenant all the same: db/migrations/api-keys.ts forces RLS on it and
+  # provides `app.personal_api_key_tenant(lookup_id)`, the one point lookup
+  # that runs without a tenant. Owner-versus-administrator visibility is the
+  # service's decision (auth/api-key/personal-service.ts), carried as an
+  # explicit predicate on every statement.
+  #
+  # The owner is the identity (issuer, subject); `owner_user_id` is the
+  # subject, which IS the session's user id. `secret_hash` is SHA-256 of the
+  # secret half; the plaintext is returned once and never stored. `expires_at`
+  # is required: a personal key always expires.
+  - schema: platform
+    name: personal_api_keys
+    tenantScoped: false
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: owner_issuer, type: text, required: true }
+      - { name: owner_user_id, type: uuid, required: true }
+      - { name: lookup_id, type: text, required: true }
+      - { name: secret_hash, type: text, required: true }
+      - { name: display_name, type: text, required: true }
+      # NULL means "whatever the owner holds when the key is used".
+      - { name: role_subset, type: jsonb }
+      - { name: expires_at, type: timestamptz, required: true }
+      - { name: revoked_at, type: timestamptz }
+      # Who revoked it: the owner themselves, or an administrator. NULL while
+      # live. Shown to the owner so a key an administrator withdrew does not
+      # look like one that simply stopped working.
+      - { name: revoked_by, type: uuid }
+      - { name: created_at, type: timestamptz, required: true, default: now() }
+      - { name: first_used_at, type: timestamptz }
+      - { name: last_used_at, type: timestamptz }
+    indexes:
+      - name: personal_api_keys_lookup_uidx
+        columns: [lookup_id]
+        unique: true
+      - name: personal_api_keys_tenant_owner_idx
+        columns: [tenant_id, owner_user_id]
+
   # Per-tenant entitlement grants. The signed deployment license is the CEILING
   # (what this deployment may offer at all); a row here is the GRANT (what this
   # tenant actually has). Effective availability is the intersection, so neither
@@ -1029,6 +1083,9 @@ tables:
         columns: [tenant_id, subject_entity, subject_id]
       - name: connection_use_grants_connection_idx
         columns: [tenant_id, connection_id]
+      - name: connection_use_grants_issued_identity_idx
+        columns: [tenant_id, issued_identity_id]
+        where: revoked_at IS NULL
 
   # ---------------------------------------------------------------------------
   # Runtime bookkeeping

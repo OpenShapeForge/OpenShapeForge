@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
+import { COLOR_REFERENCE_PATTERN } from "@openshapeforge/operations";
 import {
   DOCUMENT_COLOR_ROLES,
   DOCUMENT_FONT_FAMILIES,
   DOCUMENT_FONT_WEIGHTS,
-  DOCUMENT_THEME_COLOR,
   type DocumentColorRole,
   type DocumentFontFamily,
   type DocumentTextStyle,
@@ -58,9 +58,9 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[], labe
   if (missing) throw new Error(`DocumentTheme seed ${label} is missing field ${missing}.`);
 }
 
-function hex(value: unknown, label: string): string {
-  if (typeof value !== "string" || !DOCUMENT_THEME_COLOR.test(value)) {
-    throw new Error(`DocumentTheme seed ${label} must be a six-digit hex color.`);
+function colorReference(value: unknown, label: string): string {
+  if (typeof value !== "string" || !new RegExp(COLOR_REFERENCE_PATTERN).test(value)) {
+    throw new Error(`DocumentTheme seed ${label} must be a canonical color reference.`);
   }
   return value;
 }
@@ -153,9 +153,9 @@ function parseCatalog(source: string): Catalog {
       key: entry.key,
       isDefault: entry.isDefault,
       names: { en: names.en as string, nl: names.nl as string, fr: names.fr as string },
-      surfaceColor: hex(entry.surfaceColor, `themes[${index}].surfaceColor`),
-      textColor: hex(entry.textColor, `themes[${index}].textColor`),
-      accentColor: hex(entry.accentColor, `themes[${index}].accentColor`),
+      surfaceColor: colorReference(entry.surfaceColor, `themes[${index}].surfaceColor`),
+      textColor: colorReference(entry.textColor, `themes[${index}].textColor`),
+      accentColor: colorReference(entry.accentColor, `themes[${index}].accentColor`),
       fontFamily: entry.fontFamily as DocumentFontFamily,
       typography: typography(entry.typography, `themes[${index}].typography`),
     } satisfies DocumentThemeCatalogEntry;

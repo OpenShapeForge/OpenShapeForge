@@ -38,7 +38,7 @@ describe("generated MCP server: operation-written references", () => {
       const targetTable = referenceTarget(reference);
       const target = (identity: Identity) => createRow(targetTable, identity);
 
-      test(`${prefix}: ${field} is written by ${writers.join(", ")} only — a filter, never create or update input`, async () => {
+      test(`${prefix}: ${field} is written by ${writers.join(", ")} only — filtered and checked by its declared writers`, async () => {
         const { body } = await rpc(tenantA, "tools/list");
         const tools = body.result.tools as { name: string; inputSchema: any }[];
         expect((await advertisedSchema(tenantA, tools, table, "list")).properties.filter.properties[field]).toMatchObject({ type: "string", format: "uuid" });

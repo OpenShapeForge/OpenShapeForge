@@ -94,6 +94,9 @@ async function materializeContent(
       if (composition) {
         // The inclusion's inputs are a record of what it was captured with, not text to bind.
         validateContentValues(block.values, valueFields, "block values");
+        // An inclusion lays its copy out in the body; as a header or footer its own pages and frames would be lost.
+        if ((block.region ?? "body") !== "body" || block.layoutKey)
+          contentError("DEPENDENCY_INVALID", "A template inclusion must be a body block; header and footer inclusions are not supported.");
         if (!Object.hasOwn(definition.fields, composition.templateVersionField) ||
             definition.fields[composition.templateVersionField]?.relationship?.target !== "TemplateVersion")
           contentError("DEPENDENCY_INVALID", "Template inclusion must select a declared template-version relationship.");

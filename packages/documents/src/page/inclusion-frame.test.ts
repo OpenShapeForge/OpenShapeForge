@@ -159,3 +159,29 @@ describe("the frame of an included template with pages of its own", () => {
     expect(JSON.stringify([first, layouts])).toBe(snapshot);
   });
 });
+
+describe("a header or footer must belong to a layout the document has", () => {
+  const cover = within("cover");
+
+  test("the host's default frame is declared even when every page is printed by a paginated inclusion", () => {
+    // The host holds nothing but the inclusion: no host page is emitted, yet its default frame is what the
+    // inclusion inherits for the region it leaves out. It is not an orphan.
+    const blocks = [text("host-head", "header"), text("host-foot", "footer"), cover("cover-body"), cover("cover-foot", "footer")];
+    const laidOut = layout(blocks, { "": {}, cover: { format: "a5" } });
+    expect(frames(laidOut)).toEqual([["cover-body", ["host-head"], ["cover-foot"]]]);
+    // The same holds for an inclusion's own default frame when its only body content is a nested paginated inclusion.
+    const inner = within("cover/inner");
+    const nested = [cover("cover-head", "header"), inner("inner-body")];
+    expect(frames(layout(nested, { "": {}, cover: { format: "a5" }, "cover/inner": { format: "a4" } }))).toEqual([["inner-body", ["cover-head"], []]]);
+  });
+
+  test("a layout nobody declares is refused, in the host and in an inclusion", () => {
+    const layouts: PageLayouts = { "": {}, cover: { format: "a5" } };
+    expect(() => layout([text("ghost-head", "header", "ghost"), text("body")], layouts)).toThrow("does not select");
+    expect(() => layout([text("body"), cover("cover-body"), cover("ghost-foot", "footer", "ghost")], layouts)).toThrow("does not select");
+    // A named layout of the host is not a layout of the inclusion, and the reverse.
+    const report = [text("intro"), section("report", { layout: "report" }), text("report-head", "header", "report"), text("before"), cover("cover-body")];
+    expect(layout(report, layouts)).toHaveLength(3);
+    expect(() => layout([...report, cover("stray", "header", "report")], layouts)).toThrow("does not select");
+  });
+});

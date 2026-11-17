@@ -9,7 +9,7 @@ import type { VersionedMigration } from "../versioned-runner.js";
  * page keeps its color and loses only the image until one is uploaded.
  */
 const migration: VersionedMigration = {
-  version: "0026_page-background-image-files",
+  version: "0027_page-background-image-files",
   fileUrl: import.meta.url,
   async up(db) {
     for (const table of ["template_variants", "document_variants"]) {

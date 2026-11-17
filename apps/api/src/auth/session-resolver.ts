@@ -9,7 +9,14 @@ import { mcpResourceHeader } from "./mcp-resource-header.js";
 import { BearerVerifierUnavailableError } from "@openshapeforge/auth";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { __resetBearerVerifiersForTests, getApiKeyKeyring, getBearerVerifier } from "./bearer-verifier.js";
-import { looksLikeApiKey } from "./api-key/format.js";
+import { looksLikeApiKey, looksLikePersonalApiKey } from "./api-key/format.js";
+import { KeycloakAdmin } from "./api-key/keycloak-admin.js";
+import {
+  __resetPersonalKeyAccountCacheForTests,
+  cachedOwnerAccount,
+  resolvePersonalKeySession,
+  type OwnerAccount,
+} from "./api-key/personal-resolve.js";
 import { __resetBearerSessionForTests, resolveVerifiedBearerSession, sessionIdentityRoles } from "./bearer-session.js";
 // ---- identity ↔ Relation link (auth/identity-link.ts) ----
 import { NotInvitedError } from "./identity-link.js";
@@ -70,6 +77,30 @@ export function __resetSessionResolverForTests(): void {
   __resetBearerVerifiersForTests();
   __resetTenantResolutionForTests();
   __resetOrganizationAddressForTests();
+  __resetPersonalKeyAccountCacheForTests();
+  personalKeyAdmin = undefined;
+}
+
+/**
+ * The realm lookup a personal key needs, over the same admin client API key
+ * provisioning uses (`OPENSHAPEFORGE_KEYCLOAK_*`). One instance per
+ * configuration so its admin token is reused. Undefined when the deployment
+ * names no admin client: it then cannot tell a disabled account from a live
+ * one, and refuses personal keys rather than guessing.
+ */
+let personalKeyAdmin: { config: string; lookup: (userId: string) => Promise<OwnerAccount | null> } | undefined;
+function personalKeyOwnerLookup(): ((userId: string) => Promise<OwnerAccount | null>) | undefined {
+  const baseUrl = process.env.OPENSHAPEFORGE_KEYCLOAK_BASE_URL?.trim();
+  const realm = process.env.OPENSHAPEFORGE_KEYCLOAK_REALM?.trim();
+  const clientId = process.env.OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_ID?.trim();
+  const clientSecret = process.env.OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_SECRET?.trim();
+  if (!baseUrl || !realm || !clientId || !clientSecret) return undefined;
+  const config = JSON.stringify([baseUrl, realm, clientId, clientSecret]);
+  if (personalKeyAdmin?.config !== config) {
+    const admin = new KeycloakAdmin({ baseUrl, realm, clientId, clientSecret });
+    personalKeyAdmin = { config, lookup: cachedOwnerAccount((userId) => admin.userAccount(userId)) };
+  }
+  return personalKeyAdmin.lookup;
 }
 
 const BEARER_AUTHORIZATION = /^Bearer\s+(.+)$/i;
@@ -84,11 +115,16 @@ async function verifyBearerIdentity(
   credential: { tenantId: string; keycloakClientId: string },
   db: OpenShapeForgeDatabase,
 ) {
-  const verifier = getBearerVerifier();
+  // The stored credential names this dynamically provisioned service client;
+  // an interactive client's static azp allowlist is not its authority.
+  const verifier = getBearerVerifier(true);
   if (!verifier) {
     throw new Error("Bearer verifier is not configured.");
   }
   const { identity, claims } = await verifier(token);
+  if (claims.azp !== credential.keycloakClientId) {
+    throw new Error("API key token authorized party does not match its integration.");
+  }
   const tenantId = hostOrganizationContext()
     ? await resolveScopedServiceTenant(identity, claims, {
         tenantId: credential.tenantId, clientId: credential.keycloakClientId,
@@ -156,6 +192,30 @@ export async function resolveCredentialSession(
     // the JWKS verifier with arbitrary strings, and — worse — a deployment that
     // forgot to configure the keyring would silently start treating API keys as
     // JWTs, which is the same downgrade the bearer path already refuses.
+    // A personal key: same routing rule as an integration key — once the
+    // prefix says it is ours, it is accepted or refused here and never
+    // retried as a JWT — but it resolves to the PERSON who minted it.
+    if (looksLikePersonalApiKey(presented)) {
+      if (options.organization || options.requiredAudience !== undefined) {
+        console.warn("[auth] A personal API key was presented to a bearer-only resource. Rejecting.");
+        return EMPTY_SESSION;
+      }
+      const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER?.trim();
+      const ownerAccount = personalKeyOwnerLookup();
+      if (!options.db || !issuer || !ownerAccount) {
+        console.warn(
+          "[auth] A personal API key was presented but the key path is not fully configured " +
+            "(needs a database, OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER and the Keycloak admin " +
+            "settings). Rejecting.",
+        );
+        throw new SessionAuthenticationUnavailableError(
+          "Personal API keys cannot be verified: the key path needs a database, a bearer issuer and the Keycloak admin settings.",
+        );
+      }
+      const session = await resolvePersonalKeySession({ db: options.db, issuer, ownerAccount }, presented);
+      return session ?? EMPTY_SESSION;
+    }
+
     if (looksLikeApiKey(presented)) {
       if (options.organization || options.requiredAudience !== undefined) {
         // An API key proves a tenant, not an Organization membership, and

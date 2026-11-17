@@ -68,13 +68,16 @@ const EXPECTED_SCHEMA_COVERAGE = Object.freeze({
   // the two entities of the notebook example plugin's authoring layer.
   // Five authorization profile and operation-policy entities are included.
   // The optional CI record-action layer adds two more (accounted for below).
-  "core-entity.schema.json": 170,
+  // ReferenceValueAppearance adds one canonical core entity.
+  // Shared Tag and TagGroup add two canonical classification entities.
+  // PageBreak, SectionBreak and TemplateVersionImage add three definitions to released main.
+  "core-entity.schema.json": 172,
   // The platform's own administration (operations/control.yaml): the 23
   // control-realm Operations behind /api/control/v1 and the control MCP —
   // and the operator side of capability grants (operations/grants.yaml),
   // plus accounts, members, groups, permissions, roles, source-sync,
   // edit-lease, record-action and record-action-assignment catalogs.
-  "operation-catalog.schema.json": 12,
+  "operation-catalog.schema.json": 13,
   // No event contracts are authored by the core repository yet.
   "event-contract.schema.json": 0,
   "settings-definition.schema.json": 0,

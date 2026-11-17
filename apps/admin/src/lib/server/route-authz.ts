@@ -3,6 +3,7 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 import type { Session } from "next-auth";
+import { operatorSessionRedirect } from "./operator-session-policy";
 import { getCachedSession } from "@/lib/cached-session";
 import { isKnownPublicPath } from "@/lib/public-routes";
 
@@ -33,17 +34,6 @@ import { isKnownPublicPath } from "@/lib/public-routes";
 /** A session that has been checked, so pages can stop re-checking. */
 export type OperatorSession = Session & { isPlatformOperator: true };
 
-function safeCallbackUrl(pathname: string): string {
-  if (
-    pathname.startsWith("/") &&
-    !pathname.startsWith("//") &&
-    !pathname.includes("://")
-  ) {
-    return pathname;
-  }
-  return "/";
-}
-
 /**
  * Resolve the session for a gated route, or redirect.
  *
@@ -66,14 +56,8 @@ export async function requireOperatorSession(
 
   const session = await getCachedSession();
 
-  if (!session || session.error === "RefreshTokenError") {
-    const reason = session?.error === "RefreshTokenError" ? "&reason=session_expired" : "";
-    redirect(`/login?callbackUrl=${encodeURIComponent(safeCallbackUrl(pathname))}${reason}`);
-  }
-
-  if (!session.isPlatformOperator) {
-    redirect("/not-authorized");
-  }
+  const destination = operatorSessionRedirect(session, pathname);
+  if (destination) redirect(destination);
 
   return session as OperatorSession;
 }

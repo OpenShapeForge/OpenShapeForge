@@ -18,7 +18,7 @@ export const ARTIFACT_UPLOAD_TTL_SECONDS = 10 * 60;
 export type PendingArtifactUpload = {
   tenantId: string;
   userId: string;
-  credential: "bearer" | "api-key" | "trusted-context";
+  credential: "bearer" | "api-key" | "personal-key" | "trusted-context";
 };
 
 export async function mintArtifactUpload(input: {
@@ -47,6 +47,7 @@ export async function mintArtifactUpload(input: {
       userId: input.session.userId,
       credential:
         input.session.credential === "api-key" ||
+        input.session.credential === "personal-key" ||
         input.session.credential === "trusted-context"
           ? input.session.credential
           : "bearer",

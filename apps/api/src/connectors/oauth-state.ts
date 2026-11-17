@@ -44,7 +44,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /**
  * `state` is `<tenantId>.<userId>.<secret>`.
  *
- * Only the secret is hashed and stored. The two ids in front are routing
+ * The tenant, user and secret are hashed together and stored. The two ids in front are routing
  * information the callback needs BEFORE it can open a database session, and it
  * needs both: `createDbSessionContext` refuses a session with no user at all —
  * "refusing anonymous access" — which is the correct rule and one the callback

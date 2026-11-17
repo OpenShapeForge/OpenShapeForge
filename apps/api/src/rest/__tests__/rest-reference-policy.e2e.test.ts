@@ -15,7 +15,7 @@ import { expect } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { REST_MOUNT_PATH, REST_OPENAPI_PATH } from "../generated-rest-routes.js";
 import { createRow } from "../../graphql/__tests__/e2e/entity-factory.js";
-import { isEntityBackedCreate } from "../../graphql/__tests__/e2e/operations.js";
+import { createOffersField, isEntityBackedCreate, operationIdFor } from "../../graphql/__tests__/e2e/operations.js";
 import { expectCreateWriteRefusal, expectWriterRefusal, operationWrittenReferences, plantReference, referenceTarget } from "../../graphql/__tests__/e2e/reference-policy.js";
 import { describe, registerSuiteLifecycle, tenantA, tenantB, test, type Identity } from "../../graphql/__tests__/e2e/harness.js";
 import {
@@ -35,7 +35,7 @@ describe("REST transport: operation-written references", () => {
       // A partial-policy target (no create of its own) is seeded through the engine fixture.
       const target = (identity: Identity) => createRow(referenceTarget(reference), identity);
 
-      test(`${table.source!.rest!.basePath}: ${field} is written by ${writers.join(", ")} only — a filter, never POST or PATCH input`, async () => {
+      test(`${table.source!.rest!.basePath}: ${field} is written by ${writers.join(", ")} only — filtered and checked by its declared writers`, async () => {
         const spec = await rest(null, "GET", REST_OPENAPI_PATH);
         expect(spec.status).toBe(200);
         const bodySchema = (operation: "post" | "patch", path: string) => {
@@ -47,7 +47,7 @@ describe("REST transport: operation-written references", () => {
 
         const body = await buildCreateBody(table, tenantA);
         const refusedCreate = await rest(tenantA, "POST", base, { ...body, [field]: randomUUID() });
-        expect(refusedCreate.status).toBe(400);
+        expect(refusedCreate.status).toBe(writers.includes(operationIdFor(table, "create")) && createOffersField(table, field) ? 404 : 400);
         expectCreateWriteRefusal(table, refusedCreate.body.error, field, writers);
 
         const id = await createRestRow(table, tenantA, body);

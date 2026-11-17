@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/overlay/dialog";
-import { readSessionContinuation } from "@/lib/auth/session-continuation";
+import { readSessionContinuation, sessionContinuationRetryAt } from "@/lib/auth/session-continuation";
 import { useAppSession, useSetAppSession } from "./session-provider";
 
 const WARNING_BEFORE_EXPIRY_S = 120;
@@ -28,6 +28,8 @@ const COPY = {
     logout: "Log out",
     continue: "Continue",
     refreshing: "Refreshing...",
+    reconnectTitle: "Reconnecting your session",
+    reconnectDescription: "The sign-in service is temporarily unavailable. We are retrying automatically; your work remains open.",
   },
   nl: {
     title: "Sessie verloopt binnenkort",
@@ -36,6 +38,8 @@ const COPY = {
     logout: "Uitloggen",
     continue: "Doorgaan",
     refreshing: "Bezig...",
+    reconnectTitle: "Sessie opnieuw verbinden",
+    reconnectDescription: "De inlogdienst is tijdelijk niet beschikbaar. We proberen automatisch opnieuw; uw werk blijft open.",
   },
 } as const;
 
@@ -58,6 +62,8 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   const warningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const redirectingRef = useRef(false);
+  const recoveryAttemptRef = useRef(0);
+  const continuingRef = useRef(false);
   const lastActivityRef = useRef(Date.now());
   const handleContinueRef = useRef(() => {});
   const copy = lang === "nl" ? COPY.nl : COPY.en;
@@ -119,6 +125,8 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   }, [clearTimers, logout, setSession]);
 
   const handleContinue = useCallback(async () => {
+    if (continuingRef.current || redirectingRef.current) return;
+    continuingRef.current = true;
     setRefreshing(true);
 
     try {
@@ -127,7 +135,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
         if (result.session) setSession?.(result.session);
         clearTimers();
         setShowDialog(false);
-        setRetryAt(Math.max(Date.now() + 1000, result.session?.refreshRetryAt ?? Date.now() + 5000));
+        setRetryAt(sessionContinuationRetryAt(Date.now(), recoveryAttemptRef.current++, result.session?.refreshRetryAt));
         return;
       }
       if (result.state === "expired") {
@@ -136,6 +144,7 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
         return;
       }
       const refreshedSession = result.session;
+      recoveryAttemptRef.current = 0;
       setRetryAt(null);
       setSession?.(refreshedSession);
       setShowDialog(false);
@@ -173,7 +182,13 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
 
       setSession?.(null);
       logout("session_expired");
+    } catch {
+      // Unexpected client-side failures must settle the click handler too.
+      clearTimers();
+      setShowDialog(false);
+      setRetryAt(sessionContinuationRetryAt(Date.now(), recoveryAttemptRef.current++));
     } finally {
+      continuingRef.current = false;
       if (!redirectingRef.current) {
         setRefreshing(false);
       }
@@ -190,11 +205,13 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
 
   useEffect(() => {
     if (session?.error === "RefreshTokenUnavailable") {
-      setRetryAt(Math.max(Date.now() + 1000, session.refreshRetryAt ?? Date.now() + 5000));
+      setRetryAt((current) => Math.max(current ?? 0, sessionContinuationRetryAt(Date.now(), Math.max(0, recoveryAttemptRef.current - 1), session.refreshRetryAt)));
     }
   }, [session?.error, session?.refreshRetryAt]);
 
-  const monitorExpiry = session?.refreshExpiresAt ?? session?.expiresAt;
+  const reconnecting = retryAt !== null || session?.error === "RefreshTokenUnavailable";
+  const monitorExpiry = session?.error === "RefreshTokenUnavailable"
+    ? session.refreshExpiresAt : session?.refreshExpiresAt ?? session?.expiresAt;
 
   useEffect(() => {
     if (session?.error === "RefreshTokenError") {
@@ -263,40 +280,41 @@ export function SessionExpiryGuard({ lang }: { lang: string }) {
   }, [showDialog]);
 
   useEffect(() => {
-    if (!showDialog || countdown > 0) {
+    if (reconnecting || !showDialog || countdown > 0) {
       return;
     }
 
     setSession?.(null);
     logout("session_expired");
-  }, [countdown, logout, setSession, showDialog]);
+  }, [countdown, logout, reconnecting, setSession, showDialog]);
 
-  if (!showDialog) {
+  if (!showDialog && !reconnecting) {
     return null;
   }
 
   return (
-    <Dialog open={showDialog} onOpenChange={() => {}}>
+    <Dialog open={showDialog || reconnecting} onOpenChange={() => {}}>
       <DialogContent
-        className="sm:max-w-md [&>.absolute]:hidden"
+        className="sm:max-w-md"
+        showCloseButton={false}
         onPointerDownOutside={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => event.preventDefault()}
         onInteractOutside={(event) => event.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle>{copy.title}</DialogTitle>
+          <DialogTitle>{reconnecting ? copy.reconnectTitle : copy.title}</DialogTitle>
           <DialogDescription>
-            {copy.description}{" "}
+            {reconnecting ? copy.reconnectDescription : <>{copy.description}{" "}
             <span className="font-semibold tabular-nums">{countdown}</span>{" "}
-            {copy.suffix}
+            {copy.suffix}</>}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => logout()}>
             {copy.logout}
           </Button>
-          <Button onClick={handleContinue} disabled={refreshing}>
-            {refreshing ? copy.refreshing : copy.continue}
+          <Button onClick={handleContinue} disabled={refreshing || reconnecting}>
+            {refreshing || reconnecting ? copy.refreshing : copy.continue}
           </Button>
         </DialogFooter>
       </DialogContent>

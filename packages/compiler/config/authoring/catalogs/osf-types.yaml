@@ -7,14 +7,14 @@ types:
     label: { en: Icon, nl: Icoon }
     baseType: string
     validation:
-      pattern: "^[a-z][a-z0-9-]{0,63}$"
+      pattern: "^[a-z][a-z0-9\\-]{0,63}$"
       maxLength: 64
 
   color:
     label: { en: Palette color, nl: Paletkleur }
     baseType: string
     validation:
-      pattern: "^(standard|tenant):[a-z][a-z0-9-]{0,63}$"
+      pattern: "^(standard|tenant):[a-z][a-z0-9\\-]{0,63}$"
       maxLength: 73
     render:
       display: FieldColorIcon
@@ -46,7 +46,7 @@ types:
             required: true
             deriveOnCreate: { from: name, transform: slug, onConflict: suffix }
             label: { en: Stable key, nl: Vaste sleutel }
-            validation: { pattern: "^[a-z][a-z0-9-]{0,63}$", maxLength: 64 }
+            validation: { pattern: "^[a-z][a-z0-9\\-]{0,63}$", maxLength: 64 }
           - key: name
             osfType: string
             required: true

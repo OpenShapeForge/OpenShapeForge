@@ -28,6 +28,8 @@ export type ExchangeConfig = {
 };
 
 type CacheEntry = {
+  /** The integration row's roles version the token was exchanged under. */
+  rolesVersion: string;
   token: string;
   /** Epoch ms after which this entry must not be served. */
   expiresAtMs: number;
@@ -42,10 +44,17 @@ const EXPIRY_SAFETY_MARGIN_MS = 30_000;
 /** Floor on a cache entry's life, so a pathological `expires_in` cannot thrash. */
 const MIN_CACHE_MS = 5_000;
 
+/** Tokens keyed by integration and roles version; retain at most one cached version per integration. */
 const cache = new Map<string, CacheEntry>();
 
-/** In-flight exchanges, so N concurrent requests for one integration do one fetch. */
+/**
+ * In-flight exchanges, so N concurrent requests for one integration do one
+ * fetch — keyed by integration AND roles version, so a request made after a
+ * role change never joins an exchange that started before it.
+ */
 const inFlight = new Map<string, Promise<string | undefined>>();
+
+const flightKey = (integrationId: string, rolesVersion: string) => `${integrationId}\u0000${rolesVersion}`;
 
 /** Test-only: drop cached tokens so a test can observe a fresh exchange. */
 export function __resetExchangeCacheForTests(): void {
@@ -73,27 +82,38 @@ type TokenResponse = {
  * rotated secret, a client that no longer exists. That is a normal outcome of a
  * credential whose backing identity has been withdrawn, and the caller turns it
  * into the same 401 as any other rejection rather than a 500.
+ *
+ * `rolesVersion` is the integration row's version of its roles, read on the
+ * same request (store.ts). A token is served only for the version it was
+ * exchanged under, so once a role change commits, a token minted before it —
+ * cached, or still in flight when the change landed — is never handed out
+ * again, on this process or any other one reading the same row.
  */
 export async function exchangeForToken(
   config: ExchangeConfig,
   integrationId: string,
   keycloakClientId: string,
   clientSecret: StoredSecret,
+  rolesVersion: string,
   nowMs: number = Date.now(),
 ): Promise<string | undefined> {
-  const cached = cache.get(integrationId);
-  if (cached && cached.expiresAtMs > nowMs) {
+  const key = flightKey(integrationId, rolesVersion);
+  const cached = cache.get(key);
+  if (cached && cached.rolesVersion === rolesVersion && cached.expiresAtMs > nowMs) {
     return cached.token;
   }
 
-  const pending = inFlight.get(integrationId);
+  const pending = inFlight.get(key);
   if (pending) return pending;
 
-  const exchange = performExchange(config, integrationId, keycloakClientId, clientSecret, nowMs)
+  const exchange: Promise<string | undefined> = performExchange(
+    config, integrationId, keycloakClientId, clientSecret, rolesVersion, nowMs,
+    () => inFlight.get(key) === exchange,
+  )
     .finally(() => {
-      inFlight.delete(integrationId);
+      if (inFlight.get(key) === exchange) inFlight.delete(key);
     });
-  inFlight.set(integrationId, exchange);
+  inFlight.set(key, exchange);
   return exchange;
 }
 
@@ -102,7 +122,9 @@ async function performExchange(
   integrationId: string,
   keycloakClientId: string,
   clientSecret: StoredSecret,
+  rolesVersion: string,
   nowMs: number,
+  mayCache: () => boolean,
 ): Promise<string | undefined> {
   // The AAD binds the ciphertext to this integration and this field, so a row
   // copied from another integration fails here rather than yielding a token for
@@ -143,7 +165,13 @@ async function performExchange(
     expiresInSeconds * 1000 - EXPIRY_SAFETY_MARGIN_MS,
   );
 
-  cache.set(integrationId, { token, expiresAtMs: nowMs + lifetimeMs });
+  // Overwrites whatever version was cached. A late exchange from before a role
+  // change can thereby displace a newer token, which costs that version one
+  // extra exchange; it can never be served for the newer version.
+  if (mayCache()) {
+    dropCachedIntegration(integrationId);
+    cache.set(flightKey(integrationId, rolesVersion), { rolesVersion, token, expiresAtMs: nowMs + lifetimeMs });
+  }
   return token;
 }
 
@@ -153,6 +181,17 @@ async function performExchange(
  * Called when an integration is disabled or its roles change, so a narrowing
  * takes effect on the next request instead of at the end of the token's life.
  */
+function dropCachedIntegration(integrationId: string): void {
+  const prefix = flightKey(integrationId, "");
+  for (const key of cache.keys()) if (key.startsWith(prefix)) cache.delete(key);
+}
+
 export function invalidateIntegrationToken(integrationId: string): void {
-  cache.delete(integrationId);
+  dropCachedIntegration(integrationId);
+  // An exchange already in flight still answers the requests that joined it,
+  // but no later request joins it.
+  const prefix = flightKey(integrationId, "");
+  for (const key of inFlight.keys()) {
+    if (key.startsWith(prefix)) inFlight.delete(key);
+  }
 }

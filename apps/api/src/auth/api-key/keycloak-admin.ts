@@ -208,17 +208,7 @@ export class KeycloakAdmin {
       implicitFlowEnabled: false,
       directAccessGrantsEnabled: false,
       enabled: true,
-      protocolMappers: [TENANT_CLAIM_MAPPER, ...(this.config.apiAudience ? [{
-        name: `${this.config.apiAudience}-audience`,
-        protocol: "openid-connect",
-        protocolMapper: "oidc-audience-mapper",
-        consentRequired: false,
-        config: {
-          "included.custom.audience": this.config.apiAudience,
-          "id.token.claim": "false",
-          "access.token.claim": "true",
-        },
-      }] : [])],
+      protocolMappers: [TENANT_CLAIM_MAPPER, ...(this.config.apiAudience ? [this.apiAudienceMapper(this.config.apiAudience)] : [])],
     });
 
     if (response.status === 409) {
@@ -335,6 +325,150 @@ export class KeycloakAdmin {
     }
   }
 
+  private apiAudienceMapper(audience: string) {
+    return {
+      name: `${audience}-audience`,
+      protocol: "openid-connect",
+      protocolMapper: "oidc-audience-mapper",
+      consentRequired: false,
+      config: {
+        "included.custom.audience": audience,
+        "id.token.claim": "false",
+        "access.token.claim": "true",
+      },
+    };
+  }
+
+  /**
+   * Attach the API audience mapper to an existing integration client unless it
+   * already carries one for this audience.
+   *
+   * Clients created before the deployment configured an audience have none,
+   * and for those the token's audience comes only from its entity-role-client
+   * roles: withdrawing the last role would make every key under it fail
+   * verification. A no-op when no audience is configured.
+   */
+  async ensureApiAudience(clientId: string): Promise<void> {
+    const audience = this.config.apiAudience;
+    if (!audience) return;
+    const clients = await this.json<Array<{ id: string }>>(
+      "GET",
+      `/clients?clientId=${encodeURIComponent(clientId)}`,
+    );
+    const internalId = clients[0]?.id;
+    if (!internalId) {
+      throw new KeycloakAdminError(`Keycloak client "${clientId}" does not exist.`, 404);
+    }
+    const mappers = await this.json<Array<{ id?: string; name?: string; protocol?: string; protocolMapper?: string; config?: Record<string, unknown> }>>(
+      "GET",
+      `/clients/${internalId}/protocol-mappers/models`,
+    );
+    if (mappers.some((mapper) => mapper.protocol === "openid-connect" &&
+      mapper.protocolMapper === "oidc-audience-mapper" &&
+      mapper.config?.["included.custom.audience"] === audience &&
+      mapper.config?.["access.token.claim"] === "true")) return;
+    const desired = this.apiAudienceMapper(audience);
+    const existing = mappers.find((mapper) => mapper.name === desired.name);
+    const response = await this.request(
+      existing?.id ? "PUT" : "POST",
+      `/clients/${internalId}/protocol-mappers/models${existing?.id ? `/${existing.id}` : ""}`,
+      existing?.id ? { ...desired, id: existing.id } : desired,
+    );
+    if (!response.ok) {
+      throw new KeycloakAdminError(
+        `Adding the API audience to "${clientId}" failed with ${response.status}.`,
+        response.status,
+      );
+    }
+  }
+
+  /** The service-account user of an existing integration client. */
+  async serviceAccountUserId(clientId: string): Promise<string> {
+    const clients = await this.json<Array<{ id: string }>>(
+      "GET",
+      `/clients?clientId=${encodeURIComponent(clientId)}`,
+    );
+    const internalId = clients[0]?.id;
+    if (!internalId) {
+      throw new KeycloakAdminError(`Keycloak client "${clientId}" does not exist.`, 404);
+    }
+    const serviceAccount = await this.json<{ id?: string }>(
+      "GET",
+      `/clients/${internalId}/service-account-user`,
+    );
+    if (!serviceAccount.id) {
+      throw new KeycloakAdminError(`Client "${clientId}" has no service account user.`);
+    }
+    return serviceAccount.id;
+  }
+
+  /**
+   * Make the service-account user's roles on `roleClientId` exactly `roleNames`.
+   *
+   * The difference is taken against what the REALM maps now, not against what
+   * the database last recorded, so a repeated call after a partial failure
+   * converges instead of compounding it. Every requested role is checked to
+   * exist before anything changes, and roles are withdrawn before new ones are
+   * added: whichever request fails, the account never holds a role that
+   * neither the old nor the new set authorized.
+   */
+  async setClientRoles(
+    serviceAccountUserId: string,
+    roleClientId: string,
+    roleNames: readonly string[],
+  ): Promise<{ added: string[]; removed: string[] }> {
+    const clients = await this.json<Array<{ id: string }>>(
+      "GET",
+      `/clients?clientId=${encodeURIComponent(roleClientId)}`,
+    );
+    const roleClientInternalId = clients[0]?.id;
+    if (!roleClientInternalId) {
+      throw new KeycloakAdminError(`Role client "${roleClientId}" does not exist.`);
+    }
+
+    const available = await this.json<Array<{ id: string; name: string }>>(
+      "GET",
+      `/clients/${roleClientInternalId}/roles`,
+    );
+    const byName = new Map(available.map((role) => [role.name, role]));
+    const missing = roleNames.filter((name) => !byName.has(name));
+    if (missing.length > 0) {
+      throw new KeycloakAdminError(
+        `Roles do not exist on client "${roleClientId}": ${missing.sort().join(", ")}.`,
+      );
+    }
+
+    const mappingPath = `/users/${serviceAccountUserId}/role-mappings/clients/${roleClientInternalId}`;
+    const current = await this.json<Array<{ id: string; name: string }>>("GET", mappingPath);
+    const wanted = new Set(roleNames);
+    const held = new Set(current.map((role) => role.name));
+    const toRemove = current.filter((role) => !wanted.has(role.name));
+    const toAdd = roleNames.filter((name) => !held.has(name)).map((name) => byName.get(name)!);
+
+    if (toRemove.length > 0) {
+      const response = await this.request("DELETE", mappingPath, toRemove);
+      if (!response.ok) {
+        throw new KeycloakAdminError(
+          `Withdrawing roles from ${serviceAccountUserId} failed with ${response.status}.`,
+          response.status,
+        );
+      }
+    }
+    if (toAdd.length > 0) {
+      const response = await this.request("POST", mappingPath, toAdd);
+      if (!response.ok) {
+        throw new KeycloakAdminError(
+          `Granting roles to ${serviceAccountUserId} failed with ${response.status}.`,
+          response.status,
+        );
+      }
+    }
+    return {
+      added: toAdd.map((role) => role.name).sort(),
+      removed: toRemove.map((role) => role.name).sort(),
+    };
+  }
+
   /** Remove a client. Used by the reconciler to sweep a half-provisioned integration. */
   async deleteClient(clientId: string): Promise<void> {
     const clients = await this.json<Array<{ id: string }>>(
@@ -351,6 +485,28 @@ export class KeycloakAdmin {
         response.status,
       );
     }
+  }
+
+  /**
+   * A realm user as a personal key needs to know it: whether the account may
+   * still sign in, and the group paths a login's `groups` claim would carry.
+   * Null when the user no longer exists. Read-only; `manage-users` covers it.
+   */
+  async userAccount(userId: string): Promise<{ enabled: boolean; groups: string[] } | null> {
+    const response = await this.request("GET", `/users/${encodeURIComponent(userId)}`);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new KeycloakAdminError(`Reading realm user failed with ${response.status}.`, response.status);
+    }
+    const user = (await response.json()) as { enabled?: unknown };
+    const groups = await this.json<Array<{ path?: unknown }>>(
+      "GET",
+      `/users/${encodeURIComponent(userId)}/groups?briefRepresentation=true&max=1000`,
+    );
+    return {
+      enabled: user.enabled === true,
+      groups: groups.map((group) => group.path).filter((path): path is string => typeof path === "string").sort(),
+    };
   }
 
   /** Whether a client still exists. The reconciler's "was the realm reset?" probe. */

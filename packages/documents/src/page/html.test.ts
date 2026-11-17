@@ -201,6 +201,12 @@ describe("buildPagedDocument", () => {
   });
 });
 
+test("paged rendering refuses an unselected legacy header layout explicitly, but preserves selected legacy layouts", () => {
+ const blocks=[block("head","TextBlock",{markdown:"Header"},"header","cover"),block("body","TextBlock",{markdown:"Body"})];
+ expect(()=>build(blocks)).toThrow("does not select");
+ expect(build(blocks,{"":{layout:"cover"}}).sections[0]!.html).toContain("Header");
+});
+
 test('section boundaries own their frame, while page boundaries repeat it', () => {
   const pages = layoutPagedSections([
     block('header', 'TextBlock', {markdown:'First header'}, 'header'),

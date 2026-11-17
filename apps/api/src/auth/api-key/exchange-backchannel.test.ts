@@ -14,9 +14,9 @@ test("API key exchange uses the configured backchannel without changing the issu
   }) as typeof fetch;
   const issuer = "https://auth.example.test/realms/example";
   const tokenUrl = "http://keycloak.internal:8181/realms/example/protocol/openid-connect/token";
-  expect(await exchangeForToken({ issuer, tokenUrl, keyring, fetch: fakeFetch }, "integration-1", "client", secret)).toBe("synthetic-token");
+  expect(await exchangeForToken({ issuer, tokenUrl, keyring, fetch: fakeFetch }, "integration-1", "client", secret, "v1")).toBe("synthetic-token");
   expect(urls).toEqual([tokenUrl]);
   __resetExchangeCacheForTests();
-  expect(await exchangeForToken({ issuer, keyring, fetch: fakeFetch }, "integration-1", "client", secret)).toBe("synthetic-token");
+  expect(await exchangeForToken({ issuer, keyring, fetch: fakeFetch }, "integration-1", "client", secret, "v1")).toBe("synthetic-token");
   expect(urls[1]).toBe(`${issuer}/protocol/openid-connect/token`);
 });

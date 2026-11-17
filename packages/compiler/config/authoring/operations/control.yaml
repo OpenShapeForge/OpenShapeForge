@@ -58,7 +58,7 @@ operations:
                 en: Scope
                 nl: Reikwijdte
           tenants:
-            type: integer
+            type: [integer, "null"]
             x-osf-i18n:
               title: &id003
                 en: Tenants

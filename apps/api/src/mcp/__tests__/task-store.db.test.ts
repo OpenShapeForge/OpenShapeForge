@@ -51,13 +51,20 @@ test("persists idempotent handles across store reconstruction and isolates actor
 });
 test("the restricted database role cannot read another actor or tenant even without store predicates", async () => {
   const first = await createTaskStore(runtime.db, session, "raw-test").retain({ kind: "example-job", ref: randomUUID() });
-  const count = async (tenantId: string, userId: string) => runtime.db.transaction().execute(async trx => {
+  const count = async (tenantId: string, userId: string, authority = "raw-test", bypass = false) => runtime.db.transaction().execute(async trx => {
     await sql`set local role openshapeforge_app`.execute(trx);
-    await sql`select set_config('app.tenant_id', ${tenantId}, true), set_config('app.user_id', ${userId}, true)`.execute(trx);
+    await sql`select set_config('app.tenant_id', ${tenantId}, true), set_config('app.user_id', ${userId}, true),
+      set_config('app.mcp_task_authority', ${authority}, true), set_config('app.bypass_rls', ${String(bypass)}, true)`.execute(trx);
     const { rows } = await sql<{ count: string }>`select count(*)::text as count from platform.mcp_tasks where id = ${first.id}::uuid`.execute(trx);
     return Number(rows[0]!.count);
   });
   expect(await count(tenant, actor)).toBe(1);
   expect(await count(tenant, randomUUID())).toBe(0);
   expect(await count(randomUUID(), actor)).toBe(0);
+  expect(await count(tenant, actor, "other-authority")).toBe(0);
+  expect(await count(tenant, actor, "")).toBe(0);
+  expect(await count(tenant, actor, "raw-test", true)).toBe(1);
+  expect(await count(tenant, randomUUID(), "raw-test", true)).toBe(0);
+  expect(await count(randomUUID(), actor, "raw-test", true)).toBe(0);
+  expect(await count(tenant, actor, "other-authority", true)).toBe(0);
 });

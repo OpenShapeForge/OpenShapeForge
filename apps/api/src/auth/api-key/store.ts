@@ -36,6 +36,12 @@ export type ResolvedApiKey = {
   displayName: string;
   /** An integration explicitly configured without general roles. */
   roleFree: boolean;
+  /**
+   * The integration row's version of its roles: changes whenever its roles,
+   * status or realm client do. The exchanged-token cache is keyed on it, so a
+   * token minted before a role change is never served after it (exchange.ts).
+   */
+  rolesVersion: string;
   clientSecret: StoredSecret;
 };
 
@@ -66,6 +72,7 @@ type IntegrationRow = {
   display_name: string;
   status: string;
   granted_roles: unknown;
+  roles_version: string;
   client_secret_ciphertext: string | null;
   client_secret_key_id: string | null;
   client_secret_algorithm: string | null;
@@ -149,6 +156,7 @@ export async function resolveApiKey(
   const integration = await withCredentialResolutionSession(db, row.tenant_id, async (trx) => {
     const result = await sql<IntegrationRow>`
       select keycloak_client_id, display_name, status, granted_roles,
+             updated_at::text || '|' || granted_roles::text as roles_version,
              client_secret_ciphertext, client_secret_key_id, client_secret_algorithm
         from platform.api_key_integrations
        where id = ${row.integration_id}
@@ -179,6 +187,7 @@ export async function resolveApiKey(
       keycloakClientId: integration.keycloak_client_id,
       displayName: integration.display_name,
       roleFree: isRoleFreeIntegration(integration.granted_roles),
+      rolesVersion: integration.roles_version,
       clientSecret: {
         ciphertext: integration.client_secret_ciphertext,
         keyId: integration.client_secret_key_id,

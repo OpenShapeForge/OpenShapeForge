@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 /** Isolated HTTP host for the real Auth.js handlers, Redis store and Keycloak flow. */
 import { NextRequest } from "next/server";
+import { operatorSessionRedirect } from "../../../admin/src/lib/server/operator-session-policy.js";
 import { randomUUID } from "node:crypto";
 import { createSessionAuth, createSessionStore, createKeycloakSettings } from "../../../../packages/auth/src/session/index.js";
 
@@ -8,20 +9,26 @@ const issuer = process.env.AUTH_RECOVERY_ISSUER;
 if (!issuer || new URL(issuer).hostname !== "127.0.0.1" || !process.env.REDIS_URL) {
   throw new Error("An isolated loopback Keycloak issuer and REDIS_URL are required.");
 }
+const clientSecret = process.env.AUTH_RECOVERY_CLIENT_SECRET;
+const authSecret = process.env.AUTH_RECOVERY_AUTH_SECRET;
+if (!clientSecret || !authSecret) throw new Error("Generated fixture credentials are required.");
 const prefix = `recovery-${randomUUID()}`;
 const store = createSessionStore({ keyPrefix: prefix, logTag: "recovery-test" });
 let sessionId: string | undefined;
 let mode: "healthy" | "rate-limit" | "stalled" = "healthy";
 let calls = 0;
 let canceled = false;
-const settings = createKeycloakSettings({ issuer, clientId: "recovery-web", clientSecret: "isolated-test-secret", authSecret: "isolated-session-recovery-auth-secret" });
+const settings = createKeycloakSettings({ issuer, clientId: "recovery-web", clientSecret, authSecret });
 settings.issuerInternal = "http://localhost:3950/refresh-provider";
 const sessionAuth = createSessionAuth({
   logTag: "recovery-test", cookiePrefix: "recovery", keycloak: settings,
   store: { ...store, setSession: async (id, data) => { sessionId = id; await store.setSession(id, data); } },
   admit: claims => Boolean(claims.accessTokenClaims?.sub), initialFields: () => ({}),
-  refreshedFields: () => ({}), refreshInvariant: () => undefined, sessionFields: () => ({}),
+  refreshedFields: () => ({}), refreshInvariant: () => undefined, sessionFields: stored => ({ isPlatformOperator: stored.roles?.includes("review-reader") === true }),
 });
+const guardBundle=await Bun.build({entrypoints:[new URL('./guard-client.tsx',import.meta.url).pathname],target:'browser',define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'loopback-pathname',setup(build){build.onResolve({filter:/^next\/navigation$/},()=>({path:new URL('./guard-navigation.ts',import.meta.url).pathname}));}}]});
+if(!guardBundle.success)throw new AggregateError(guardBundle.logs,'Session guard fixture did not build');
+const guardScript=guardBundle.outputs.find(file=>file.path.endsWith('.js'))!;
 const server = Bun.serve({ hostname: "127.0.0.1", port: 3950, async fetch(request) {
   const url = new URL(request.url);
   if (url.pathname.startsWith("/api/auth/")) {
@@ -41,19 +48,28 @@ const server = Bun.serve({ hostname: "127.0.0.1", port: 3950, async fetch(reques
     const stored = sessionId ? await store.getSession(sessionId) : null;
     return Response.json({ exists: Boolean(stored), error: stored?.error ?? null, calls, canceled });
   }
+  if (url.pathname === "/admin/tenants") {
+    const response = await sessionAuth.handlers.GET(new NextRequest(new URL("/api/auth/session", request.url), { headers: request.headers }));
+    const session = await response.json();
+    const destination = operatorSessionRedirect(session, "/tenants");
+    if (destination) return Response.redirect(new URL(destination, request.url), 303);
+    return new Response("<h1>Authorized console fixture</h1>", { headers: { "content-type": "text/html" } });
+  }
   if (url.pathname === "/test/expire" && request.method === "POST") {
-    const requested = await request.json() as { mode: typeof mode };
+    const requested = await request.json() as { mode: typeof mode; omitRefreshExpiry?: boolean };
     if (!["healthy", "rate-limit", "stalled"].includes(requested.mode) || !sessionId) return new Response(null, { status: 400 });
     const stored = await store.getSession(sessionId);
     if (!stored) return new Response(null, { status: 404 });
     mode = requested.mode; calls = 0; canceled = false;
-    await store.updateSession(sessionId, { ...stored, expiresAt: Math.floor(Date.now() / 1000) - 1, error: undefined, refreshRetryAt: undefined });
+    await store.updateSession(sessionId, { ...stored, expiresAt: Math.floor(Date.now() / 1000) - 1, error: undefined, refreshRetryAt: undefined, ...(requested.omitRefreshExpiry ? {refreshExpiresAt:undefined} : {}) });
     return new Response(null, { status: 204 });
   }
   if (url.pathname === "/test/recover" && request.method === "POST") {
     mode = "healthy";
     return new Response(null, { status: 204 });
   }
+  if(url.pathname==='/guard.js')return new Response(guardScript,{headers:{'content-type':'application/javascript'}});
+  if(url.pathname==='/guard')return new Response('<!doctype html><html><body><div id="root"></div><script type="module" src="/guard.js"></script></body></html>',{headers:{'content-type':'text/html'}});
   if (url.pathname === "/login") {
     const csrf = await sessionAuth.handlers.GET(new NextRequest(new URL("/api/auth/csrf", request.url), { headers: request.headers }));
     const body = await csrf.json();

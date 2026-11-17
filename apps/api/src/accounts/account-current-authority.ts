@@ -24,7 +24,10 @@ export async function assertCurrentAccountAuthority(
 ): Promise<void> {
   if (session.credential === 'bearer' && session.principalKind === 'service') return; // Verified service token.
   if (session.credential === 'api-key') return; // Verified, intersected service credential.
-  if (session.credential !== 'bearer' && session.credential !== 'trusted-context') {
+  // A personal key acts as a person, so it gets the person's check: the
+  // membership as it stands now, not the roles it resolved with.
+  if (session.credential !== 'bearer' && session.credential !== 'trusted-context' &&
+      session.credential !== 'personal-key') {
     throw new HttpError(403, 'FORBIDDEN', 'Organization account permission required.');
   }
   if (!session.issuer) {

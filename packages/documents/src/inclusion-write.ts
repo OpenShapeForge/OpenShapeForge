@@ -1,49 +1,250 @@
-import {operationFailure} from '@openshapeforge/operations';
-import {TemplateContentError} from './content/errors.js';
 // SPDX-License-Identifier: BUSL-1.1
-import type {RuntimeEntityValueCarrier} from '@openshapeforge/plugin-runtime';
-import {rows} from './commands.js';
-import {templateSnapshotContent} from './content-snapshot.js';
-import {selectContentTemplateVariant} from './content/validation.js';
-import {includedContentProtection,assertIncludedProtection,templateComposition} from './content/inclusion-protection.js';
-import type {CompiledContentBlockRegistry,ContentTemplateVariant} from './content/types.js';
-import {refuse} from './validation.js';
-import {canonicalJson} from './content/json.js';
+/**
+ * The canonical write boundary of a template inclusion (docs/document-content.md,
+ * "Inclusions are host-owned copies").
+ *
+ * Every write of a Block row passes here inside the transaction that stores
+ * it. An inclusion's `content` is settled by the server: captured from its
+ * source when the block is inserted, merged three ways when its version or
+ * inputs change, and checked against the stored source record on every other
+ * edit. The caller's `source` and `page` are never adopted. Capturing reads
+ * the source and every record a variable names as the acting session; no
+ * other identity is ever used.
+ */
+import { operationFailure } from "@openshapeforge/operations";
+import type { ModuleOperationContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
+import { parseSnapshot } from "@openshapeforge/versioning/snapshot";
+import { contextServices, rows } from "./commands.js";
+import { blockCollection, canonicalReader, compiledContentRegistry, contentResolvers, parameterShapes, pathResolver } from "./content-runtime.js";
+import { captureInclusionContent, type CaptureHost, type CapturedInclusion } from "./content/capture.js";
+import { TemplateContentError } from "./content/errors.js";
+import { canonicalJson, CONTENT_LIMITS, type JsonObject } from "./content/json.js";
+import {
+  holdsProtectedContent, inclusionCopyContent, isInclusionCopy, mergeInclusionCopy, nestedCopy, normalizeLocalDraft, readInclusionCopy, templateComposition,
+  type CompositionOf, type InclusionCopy,
+} from "./content/inclusion-copy.js";
+import type { ContentBlock, ContentResolvers } from "./content/types.js";
+import { selectContentTemplateVariant } from "./content/validation.js";
+import { contentVariableCatalogue } from "./content/variables.js";
+import { templateParameterFields, withDocumentCommand } from "./document-blocks.js";
+import { isObject, refuse } from "./validation.js";
 
-/** Canonical writes check the same source graph as rendering. The transaction/caller already owns the block. */
-async function checkBlockInclusionWrite(trx:unknown,tenantId:string,carrier:RuntimeEntityValueCarrier,before:Readonly<Record<string,unknown>>|undefined,after:Readonly<Record<string,unknown>>|undefined,options:{sourceChange?:boolean}={}):Promise<void>{
- if(carrier.entityName!=='Block'||!(before?.document_variant_id||after?.document_variant_id))return;
- if(before?.locked===true&&!options.sourceChange){
-  const definition=carrier.definitions[String(before[carrier.definitionColumn])];
-  const columns=[carrier.definitionColumn,carrier.valuesColumn,'locked','definition_version','document_variant_id','document_variant_id_position','region','layout_key',...(definition?.references.flatMap(ref=>[ref.column,...(ref.parameterColumn?[ref.parameterColumn]:[])])??[])];
-  if(!after||columns.some(key=>canonicalJson(before[key]??null)!==canonicalJson(after[key]??null)))refuse('INVALID_STATE','This document block is locked by its source and cannot be changed, moved or removed.');
- }
- if(![before,after].some(row=>row&&templateComposition(carrier.definitions[String(row[carrier.definitionColumn])]?.fields??[])))return;
- const owner=String(before?.document_variant_id??after?.document_variant_id);
- const variant=(await rows<{channel:string;locale:string}>(trx,'select channel,locale from erp.document_variants where tenant_id=$1 and id=$2 for share',[tenantId,owner]))[0];
- if(!variant)refuse('NOT_FOUND','The owning document variant is not available.');
- const registry=Object.fromEntries(Object.entries(carrier.definitions).map(([key,entry])=>[key,{entityName:entry.entityName,schemaVersion:entry.schemaVersion,fields:{},renderers:{},...(templateComposition(entry.fields)?{composition:templateComposition(entry.fields)}:{})}])) as CompiledContentBlockRegistry;
- const versions=new Map<string,ContentTemplateVariant>();
- async function resolve(id:string):Promise<ContentTemplateVariant>{
-  if(versions.has(id))return versions.get(id)!;
-  const version=(await rows<{template_id:string;snapshot:unknown}>(trx,'select template_id,snapshot from erp.template_versions where tenant_id=$1 and id=$2 for share',[tenantId,id]))[0];
-  if(!version)refuse('DEPENDENCY_UNRESOLVED','The included template version is not available.');
-  const frozen=templateSnapshotContent(version!.snapshot,{tenantId,templateId:version!.template_id,channel:variant!.channel,carrier,allowedDefinitions:Object.keys(carrier.definitions),definitionVersionColumn:'definition_version'});
-  const selected=selectContentTemplateVariant({variants:frozen.variants} as any,variant!.channel,variant!.locale);versions.set(id,selected);return selected;
- }
- async function protection(row:Readonly<Record<string,unknown>>|undefined):Promise<ReadonlyMap<string,string>>{
-  if(!row)return new Map();
-  const definition=carrier.definitions[String(row[carrier.definitionColumn])];if(!definition)return new Map();
-  const composition=templateComposition(definition.fields);if(!composition)return new Map();
-  const reference=definition.references.find(ref=>ref.fieldKey===composition.templateVersionField);if(!reference)refuse('DEPENDENCY_INVALID','The inclusion has no typed source reference.');
-  const version=String(row[reference!.column]??'');const values=(row[carrier.valuesColumn]??{}) as Record<string,unknown>;
-  return includedContentProtection(await resolve(version),values.content,registry,resolve);
- }
- const required=await protection(before),actual=await protection(after);
- if(required.size&&before&&after&&['document_variant_id','document_variant_id_position'].some(key=>canonicalJson(before[key]??null)!==canonicalJson(after[key]??null)))refuse('INVALID_STATE','A block containing protected template content cannot be moved out of its placement.');
- assertIncludedProtection(required,actual,true);
+type Row = Readonly<Record<string, unknown>>;
+
+/**
+ * Runs work as the session that is writing, with the platform services of
+ * that session. The host supplies it; this module never builds a session.
+ */
+export type InclusionActor = <T>(work: (context: ModuleOperationContext) => Promise<T>) => Promise<T>;
+export type InclusionWriteOptions = { readonly actor?: InclusionActor };
+
+type Identity = { readonly versionId: string; readonly parameters: JsonObject };
+type Stored = Identity & { readonly copy: InclusionCopy | undefined };
+type Next = Identity & { readonly draft: unknown };
+type Settled = { readonly parameters: JsonObject; readonly copy: InclusionCopy };
+
+type Environment = {
+  readonly compositionOf: CompositionOf;
+  capture(identity: Identity): Promise<CapturedInclusion>;
+  /** The source variant's own blocks at `versionId`, or undefined when the acting session can no longer read it. */
+  authored(versionId: string): Promise<readonly ContentBlock[] | undefined>;
+};
+
+const compositionFor = (carrier: RuntimeEntityValueCarrier): CompositionOf => (definitionKey) => {
+  const entry = Object.hasOwn(carrier.definitions, definitionKey) ? carrier.definitions[definitionKey] : undefined;
+  return entry ? templateComposition(entry.fields) : undefined;
+};
+const record = (value: unknown): JsonObject => (isObject(value) ? value : {}) as JsonObject;
+
+function countBlocks(copy: InclusionCopy, compositionOf: CompositionOf, depth = 0): number {
+  if (depth >= CONTENT_LIMITS.templateDepth) refuse("CONTENT_LIMIT_EXCEEDED", "Included content exceeds the maximum depth.");
+  return copy.blocks.reduce((total, block) => { const nested = nestedCopy(block, compositionOf); return total + 1 + (nested ? countBlocks(nested, compositionOf, depth + 1) : 0); }, 0);
 }
 
-export async function assertBlockInclusionWrite(...args:Parameters<typeof checkBlockInclusionWrite>):Promise<void>{
- try{await checkBlockInclusionWrite(...args);}catch(error){if(error instanceof TemplateContentError)throw operationFailure({code:"INVALID_STATE",message:error.message,retryable:false});throw error;}
+/** One inclusion, at any depth: unchanged, edited, captured or updated to another source. */
+async function settle(environment: Environment, stored: Stored | undefined, next: Next): Promise<Settled> {
+  const { compositionOf } = environment;
+  const settleNested = (input: { stored: ContentBlock | undefined; draft: ContentBlock }) => settleBlock(environment, input.stored, input.draft);
+  if (stored?.copy && stored.versionId === next.versionId && canonicalJson(stored.parameters) === canonicalJson(next.parameters)) {
+    // An ordinary edit: the stored source record and page settings stay, the draft is checked against them.
+    if (next.draft === undefined) return { parameters: stored.parameters, copy: stored.copy };
+    return { parameters: stored.parameters, copy: { ...stored.copy, blocks: await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested }) } };
+  }
+  const captured = await environment.capture(next);
+  if (!stored?.copy) {
+    // Nothing was captured before. A draft that arrives with the insertion is local content over the baseline captured now.
+    const drafted = isObject(next.draft) && Array.isArray(next.draft.blocks) && next.draft.blocks.length > 0;
+    if (!drafted) return { parameters: captured.parameters, copy: captured.copy };
+    return { parameters: captured.parameters, copy: { ...captured.copy, blocks: await normalizeLocalDraft(captured.copy, next.draft, { compositionOf, settleNested, freshBaseline: true }) } };
+  }
+  // The version or an input changed: the current local content, the stored baseline and the new capture are merged, or the write is refused whole.
+  const current = next.draft === undefined ? stored.copy.blocks : await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested });
+  const authoredOld = await environment.authored(stored.versionId);
+  const copy = await mergeInclusionCopy({ baseline: stored.copy.source, current, ...(authoredOld ? { authoredOld } : {}), authoredNew: captured.authored, captured: captured.copy, compositionOf });
+  return { parameters: captured.parameters, copy };
+}
+
+function identityOf(block: ContentBlock, compositionOf: CompositionOf): Identity {
+  const composition = compositionOf(block.definitionKey)!;
+  const reference = block.references[composition.templateVersionField];
+  if (!reference || Array.isArray(reference) || !("id" in reference) || reference.entity !== "TemplateVersion" || typeof reference.id !== "string")
+    refuse("DEPENDENCY_INVALID", "A nested inclusion names one published template version.");
+  return { versionId: (reference as { id: string }).id, parameters: record(composition.parametersField ? block.values[composition.parametersField] : undefined) };
+}
+
+async function settleBlock(environment: Environment, previous: ContentBlock | undefined, draft: ContentBlock): Promise<ContentBlock> {
+  const { compositionOf } = environment;
+  const composition = compositionOf(draft.definitionKey)!;
+  const stored = previous ? { ...identityOf(previous, compositionOf), copy: nestedCopy(previous, compositionOf) } : undefined;
+  const settled = await settle(environment, stored, { ...identityOf(draft, compositionOf), draft: draft.values.content });
+  return { ...draft, values: { ...draft.values, ...(composition.parametersField ? { [composition.parametersField]: settled.parameters } : {}), content: inclusionCopyContent(settled.copy) } };
+}
+
+/** The scope the block's owner offers: a template's variables without values, a document's with the values it holds. */
+async function loadHost(context: ModuleOperationContext, trx: unknown, tenantId: string, row: Row): Promise<{ channel: string; locale: string; host: CaptureHost }> {
+  if (row.document_variant_id) {
+    const found = (await rows<{ channel: string; locale: string; template_version_id: string | null; parameters: unknown }>(trx,
+      `select v.channel, v.locale, d.template_version_id, d.parameters from erp.document_variants v
+        join erp.documents d on d.tenant_id = v.tenant_id and d.id = v.document_id
+        where v.tenant_id = $1 and v.id = $2 for share of v`, [tenantId, row.document_variant_id]))[0];
+    if (!found) refuse("NOT_FOUND", "The owning document variant is not available.");
+    let fields: readonly Record<string, unknown>[] = [];
+    if (found!.template_version_id) {
+      const version = (await rows<{ snapshot: unknown }>(trx, "select snapshot from erp.template_versions where tenant_id = $1 and id = $2 for share", [tenantId, found!.template_version_id]))[0];
+      if (version) fields = templateParameterFields(parseSnapshot(version.snapshot));
+    }
+    return { channel: found!.channel, locale: found!.locale, host: { catalogue: contentVariableCatalogue(parameterShapes(context, fields)), parameters: record(found!.parameters) } };
+  }
+  const found = (await rows<{ channel: string; locale: string; parameters: unknown }>(trx,
+    `select v.channel, v.locale, t.parameters from erp.template_variants v
+      join erp.templates t on t.tenant_id = v.tenant_id and t.id = v.template_id
+      where v.tenant_id = $1 and v.id = $2 for share of v`, [tenantId, row.variant_id]))[0];
+  if (!found) refuse("NOT_FOUND", "The owning template variant is not available.");
+  const fields = Array.isArray(found!.parameters) ? found!.parameters.filter(isObject) : [];
+  return { channel: found!.channel, locale: found!.locale, host: { catalogue: contentVariableCatalogue(parameterShapes(context, fields)) } };
+}
+
+function environment(trx: unknown, tenantId: string, carrier: RuntimeEntityValueCarrier, row: Row, parameterVariables: unknown, actor: InclusionActor | undefined): Environment {
+  const acting = <T>(work: (context: ModuleOperationContext, host: Awaited<ReturnType<typeof loadHost>>, resolvers: ContentResolvers) => Promise<T>): Promise<T> => {
+    if (!actor) refuse("OPERATION_UNAVAILABLE", "Capturing a template inclusion requires the session that inserts or updates it.");
+    return actor!(async (context) => {
+      const { platform, session } = contextServices(context);
+      if (session.tenantId !== tenantId) refuse("FORBIDDEN", "The inclusion belongs to another tenant.");
+      const host = await loadHost(context, trx, tenantId, row);
+      const operations = await platform.operations.list(session);
+      const read = canonicalReader(context, operations);
+      const resolveVariablePath = pathResolver(context, operations, read);
+      const resolvers = contentResolvers(context, trx, {
+        tenantId, channel: host.channel, locale: host.locale, carrier, read,
+        allowedDefinitions: blockCollection(context, carrier, "TemplateVariant").allowedDefinitions,
+        ...(resolveVariablePath ? { resolveVariablePath } : {}),
+      });
+      return work(context, host, resolvers);
+    });
+  };
+  return {
+    compositionOf: compositionFor(carrier),
+    capture: (identity) => acting(async (context, host, resolvers) => captureInclusionContent({
+      tenantId, channel: host.channel, locale: host.locale, templateVersionId: identity.versionId, parameters: identity.parameters, host: host.host,
+      ...(typeof parameterVariables === "string" ? { parameterVariables: parameterVariables as "whole" | "template" | "both" } : {}),
+    }, await compiledContentRegistry(context, carrier), resolvers)),
+    authored: (versionId) => acting(async (_context, host, resolvers) => {
+      try {
+        const version = await resolvers.resolveTemplateVersion(versionId, { tenantId });
+        return version ? selectContentTemplateVariant(version, host.channel, host.locale).blocks : undefined;
+      } catch {
+        // Without the earlier source there is no authored comparison; the merge then keeps every local change.
+        return undefined;
+      }
+    }),
+  };
+}
+
+function inclusionOf(carrier: RuntimeEntityValueCarrier, row: Row | undefined) {
+  if (!row) return undefined;
+  const definition = carrier.definitions[String(row[carrier.definitionColumn])];
+  const composition = definition ? templateComposition(definition.fields) : undefined;
+  if (!definition || !composition) return undefined;
+  const reference = definition.references.find((candidate) => candidate.fieldKey === composition.templateVersionField);
+  if (!reference) refuse("DEPENDENCY_INVALID", "The inclusion has no typed source reference.");
+  const values = record(row[carrier.valuesColumn]);
+  const parametersDefinition = definition.fields.find((field) => field.key === composition.parametersField);
+  return {
+    definition, composition, reference: reference!, values, parameterVariables: parametersDefinition?.variables,
+    versionId: typeof row[reference!.column] === "string" ? row[reference!.column] as string : undefined,
+    bound: reference!.parameterColumn ? row[reference!.parameterColumn] != null : false,
+    copy: isInclusionCopy(values.content) ? readInclusionCopy(values.content) : undefined,
+  };
+}
+
+/** A document block the document received from its template is marked once a canonical write changes it, so a later link keeps the change. */
+async function markLocalChange(trx: unknown, tenantId: string, carrier: RuntimeEntityValueCarrier, before: Row | undefined, after: Row, values: unknown): Promise<void> {
+  if (!before?.document_variant_id || before.origin !== "template" || before.diverged === true) return;
+  const definition = carrier.definitions[String(before[carrier.definitionColumn])];
+  const columns = ["region", "layout_key", ...(definition?.references.flatMap((reference) => [reference.column, ...(reference.parameterColumn ? [reference.parameterColumn] : [])]) ?? [])];
+  const changed = canonicalJson(before[carrier.valuesColumn] ?? null) !== canonicalJson(values ?? null)
+    || columns.some((key) => canonicalJson(before[key] ?? null) !== canonicalJson(after[key] ?? null));
+  if (!changed) return;
+  await withDocumentCommand(trx, "link", () => rows(trx, "update erp.blocks set diverged = true where tenant_id = $1 and id = $2", [tenantId, before.id]));
+}
+
+function lockedRow(carrier: RuntimeEntityValueCarrier, before: Row | undefined, after: Row | undefined): void {
+  if (!before?.document_variant_id || before.locked !== true) return;
+  const definition = carrier.definitions[String(before[carrier.definitionColumn])];
+  const columns = [carrier.definitionColumn, carrier.valuesColumn, "locked", "definition_version", "document_variant_id", "document_variant_id_position", "region", "layout_key", ...(definition?.references.flatMap((reference) => [reference.column, ...(reference.parameterColumn ? [reference.parameterColumn] : [])]) ?? [])];
+  if (!after || columns.some((key) => canonicalJson(before[key] ?? null) !== canonicalJson(after[key] ?? null))) refuse("INVALID_STATE", "This document block is locked by its source and cannot be changed, moved or removed.");
+}
+
+async function prepare(trx: unknown, tenantId: string, carrier: RuntimeEntityValueCarrier, before: Row | undefined, after: Row, options: InclusionWriteOptions): Promise<JsonObject | undefined> {
+  if (carrier.entityName !== "Block") return undefined;
+  lockedRow(carrier, before, after);
+  const next = inclusionOf(carrier, after);
+  if (!next) { await markLocalChange(trx, tenantId, carrier, before, after, after[carrier.valuesColumn]); return undefined; }
+  if (next.bound || !next.versionId) refuse("INVALID_STATE", "An inclusion captures one published template version; choose the version instead of leaving it to a variable.");
+  const previous = inclusionOf(carrier, before);
+  const compositionOf = compositionFor(carrier);
+  if (before && previous?.copy && holdsProtectedContent(previous.copy, compositionOf)
+    && ["document_variant_id", "document_variant_id_position", "variant_id", "variant_id_position"].some((key) => canonicalJson(before[key] ?? null) !== canonicalJson(after[key] ?? null)))
+    refuse("INVALID_STATE", "A block containing protected template content cannot be moved out of its placement.");
+  const parametersField = next.composition.parametersField;
+  const stored = previous?.versionId ? { versionId: previous.versionId, parameters: record(previous.values[parametersField]), copy: previous.copy } : undefined;
+  const settled = await settle(environment(trx, tenantId, carrier, after, next.parameterVariables, options.actor), stored,
+    { versionId: next.versionId!, parameters: record(next.values[parametersField]), draft: next.values.content });
+  if (countBlocks(settled.copy, compositionOf) > CONTENT_LIMITS.blocks) refuse("CONTENT_LIMIT_EXCEEDED", "Included content contains too many blocks.");
+  const values = { ...next.values, [parametersField]: settled.parameters, content: inclusionCopyContent(settled.copy) } as JsonObject;
+  // Also the size budget of what is stored.
+  canonicalJson(values);
+  await markLocalChange(trx, tenantId, carrier, before, after, values);
+  return values;
+}
+
+function contentRefusal(error: unknown): never {
+  if (error instanceof TemplateContentError) throw operationFailure({ code: error.code === "INVALID_VALUE" ? "INVALID_STATE" : error.code, message: error.message, retryable: false });
+  throw error;
+}
+
+/**
+ * Called for every insert and update of a Block row, before it is stored,
+ * with the row as it is (`before`, absent on insert) and as it would be
+ * written (`after`). Returns the values to store for an inclusion — its
+ * inputs as resolved and its complete server-settled content — and undefined
+ * for every other block. Any refusal leaves the transaction to roll back as a
+ * whole: no copy is ever partly written.
+ */
+export async function prepareBlockInclusionWrite(trx: unknown, tenantId: string, carrier: RuntimeEntityValueCarrier, before: Row | undefined, after: Row, options: InclusionWriteOptions = {}): Promise<JsonObject | undefined> {
+  try { return await prepare(trx, tenantId, carrier, before, after, options); } catch (error) { contentRefusal(error); }
+}
+
+/**
+ * Called before a Block row is removed, or moved within or out of its
+ * collection. A source-locked document block stays where it is, and so does
+ * any inclusion whose copy — at any depth — holds content its source protects.
+ */
+export async function assertBlockInclusionRemoval(carrier: RuntimeEntityValueCarrier, row: Row | undefined): Promise<void> {
+  if (carrier.entityName !== "Block" || !row) return;
+  try {
+    lockedRow(carrier, row, undefined);
+    const stored = inclusionOf(carrier, row);
+    if (stored?.copy && holdsProtectedContent(stored.copy, compositionFor(carrier))) refuse("INVALID_STATE", "A block containing protected template content cannot be removed or moved.");
+  } catch (error) { contentRefusal(error); }
 }

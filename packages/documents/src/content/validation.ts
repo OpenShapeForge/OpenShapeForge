@@ -335,7 +335,8 @@ export function validateContentVariants(variants: readonly ContentTemplateVarian
     const blockIds = new Set<string>();
     for (const block of variant.blocks) {
       assertContentRecord(block, "block");
-      exactKeys(block, ["id", "definitionKey", "schemaVersion", "values", "references", "region", "layoutKey", "locked"], "block");
+      exactKeys(block, ["id", "definitionKey", "schemaVersion", "values", "references", "region", "layoutKey", "locked", "captured"], "block");
+      if (block.captured !== undefined && block.captured !== true) contentError("INVALID_VALUE", "A captured mark must be true when present.");
       if (block.locked !== undefined && block.locked !== true) contentError("INVALID_VALUE", "A source lock must be true when present.");
       if (block.region !== undefined && block.region !== "header" && block.region !== "footer")
         contentError("INVALID_VALUE", "block region must be header or footer when present.");

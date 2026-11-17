@@ -484,7 +484,6 @@ export const materializeTemplate: ModuleOperationHandler = async (input, context
   try {
     const snapshot = await platform.db.withSession(session, async (trx) => materializeTemplateContent({
       tenantId, templateVersionId, channel, locale,
-      ...(input.content === undefined ? {} : {content: immutableContent(object(input.content, "included content")) as JsonObject}),
       ...(input.parameters === undefined ? {} : { parameters: immutableContent(object(input.parameters, "parameters")) as JsonObject }),
     }, registry, contentResolvers(context, trx, { tenantId, channel, locale, carrier, allowedDefinitions: collection.allowedDefinitions, read, ...(resolveVariablePath ? { resolveVariablePath } : {}) })));
     return { value: snapshot };

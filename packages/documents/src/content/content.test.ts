@@ -17,6 +17,7 @@ import {
   type JsonObject,
   type MaterializeTemplateContentInput,
 } from "./index.js";
+import { inclusionCopyContent, sourceRecord } from "./inclusion-copy.js";
 
 const tenantId = "tenant-example";
 // Each field states which variable shapes it accepts, as the authored
@@ -50,6 +51,7 @@ const metadata: CompiledContentBlockRegistry = {
     fields: {
       version: { baseType: "string", required: true, variables: "whole", relationship: { target: "TemplateVersion" } },
       parameters: { baseType: "object", variables: "both" },
+      content: { baseType: "object" },
     },
     renderers: {},
     composition: { templateVersionField: "version", parametersField: "parameters" },
@@ -63,12 +65,20 @@ function text(
   return { id, definitionKey: "TextSection", schemaVersion: 3, values: { body }, references: {} };
 }
 
-function include(id: string, templateId: string, parameters: JsonObject = {}): ContentBlock {
+/**
+ * An inclusion as it is stored: a complete copy of `blocks` with the server's
+ * source record. `manifest` names the blocks that were captured (default: all
+ * of them); a block outside it is one the host added itself.
+ */
+async function include(id: string, templateId: string, parameters: JsonObject = {}, blocks: readonly ContentBlock[] = [],
+  options: { deferred?: readonly string[]; manifest?: readonly string[]; page?: JsonObject } = {}): Promise<ContentBlock> {
+  const captured = blocks.filter((block) => !options.manifest || options.manifest.includes(block.id));
+  const content = inclusionCopyContent({ ...(options.page ? { page: options.page } : {}), source: await sourceRecord(captured, new Set(options.deferred ?? [])), blocks });
   return {
     id,
     definitionKey: "TemplateSlot",
     schemaVersion: 3,
-    values: { parameters },
+    values: { parameters, content },
     references: { version: { entity: "TemplateVersion", id: templateId } },
   };
 }
@@ -896,106 +906,74 @@ describe("canonical block materialization", () => {
     expect(first.blocks[0]!.materialization?.result).toEqual({ kind: "block", value: { title: "First" } });
     expect(first.compositionHash).not.toBe(second.compositionHash);
   });
-  test("Operation-driven inclusion uses the same cycle and reference guards", async () => {
-    const f = fixture([include("nested", "child")]);
-    const { composition: _composition, ...definition } = f.registry.TemplateSlot!;
-    f.registry.TemplateSlot = { ...definition, renderers: { document: "fields" } };
-    f.versions.child = version("child", [text("childText", "Child")]);
-    let materializeBlock: NonNullable<ContentResolvers["materializeBlock"]> = async (input) => input.definitionKey === "TemplateSlot"
-      ? { operationId: "TemplateSlot.materialize", result: { kind: "template", referenceField: "version", parameters: {} } }
-      : { operationId: "TextSection.materialize", result: { kind: "block", value: input.values } };
-    const run = () => materializeTemplateContent(f.request, f.registry, { ...f.resolvers, materializeBlock });
-    expect((await run()).blocks[0]!.id).toBe("childText");
-    f.versions.child = version("child", [include("cycle", "root")]);
-    await rejectsCode(run(), "TEMPLATE_CYCLE");
-    materializeBlock = async () => ({ operationId: "TemplateSlot.materialize", result: { kind: "template", referenceField: "untracked", parameters: {} } });
-    await rejectsCode(run(), "DEPENDENCY_INVALID");
+  test("a block Operation cannot turn an ordinary block into an inclusion", async () => {
+    const f = fixture();
+    const materializeBlock = (async () => ({ operationId: "TextSection.materialize", result: { kind: "template", referenceField: "version", parameters: {} } })) as NonNullable<ContentResolvers["materializeBlock"]>;
+    await rejectsCode(materializeTemplateContent(f.request, f.registry, { ...f.resolvers, materializeBlock }), "INVALID_VALUE");
   });
 });
 
-describe("template composition", () => {
-  test("expands nested templates in order and pins local/global values and source versions", async () => {
+describe("reading an inclusion from its stored copy", () => {
+  test("walks the copied blocks in order and never resolves the source template", async () => {
     const f = fixture([
       text("before", "Before"),
-      include("nested", "child", { name: "{{local.name}}" }),
+      await include("nested", "child", { name: "Ada" }, [text("child-text", "Hello Ada from Example.")]),
       text("after", "After"),
     ]);
-    f.versions.child = version("child", [text("child-text")]);
-    const snapshot = await materializeTemplateContent(
-      { ...f.request, parameters: { name: "Example reader" } },
-      f.registry,
-      f.resolvers,
-    );
-    expect(snapshot.blocks.map((block) => block.path)).toEqual([
-      ["before"],
-      ["nested", "child-text"],
-      ["after"],
-    ]);
-    expect(snapshot.blocks[1]!.values.body).toBe("Hello Example reader from Example.");
-    expect(snapshot.templates.map((template) => template.version.id)).toEqual(["root", "child"]);
-    expect(snapshot.templates[1]!.parameters).toEqual({ name: "Example reader" });
-    expect(snapshot.globals["brand.name"]!.sourceVersionId).toBe("brand-v1");
-    expect(snapshot.compositions[0]!.values.parameters).toEqual({ name: "Example reader" });
-  });
-
-  test("permits repeated inclusion with different local parameters and collision-free paths", async () => {
-    const f = fixture([
-      include("left", "child", { name: "Left" }),
-      include("right", "child", { name: "Right" }),
-    ]);
-    f.versions.child = version("child", [text("child-text")]);
     const snapshot = await f.run();
-    expect(snapshot.blocks.map((block) => block.values.body)).toEqual([
-      "Hello Left from Example.",
-      "Hello Right from Example.",
-    ]);
-    expect(snapshot.blocks.map((block) => block.path)).toEqual([
-      ["left", "child-text"],
-      ["right", "child-text"],
-    ]);
-    expect(f.calls.template).toBe(2);
-    expect(f.calls.global).toBe(1);
+    expect(snapshot.blocks.map((block) => block.path)).toEqual([["before"], ["nested", "child-text"], ["after"]]);
+    expect(snapshot.blocks[1]!.values.body).toBe("Hello Ada from Example.");
+    // Only the root is a template that was read; the inclusion names its source without opening it.
+    expect(f.calls.template).toBe(1);
+    expect(f.calls.global).toBe(0);
+    expect(snapshot.templates.map((template) => template.version.id)).toEqual(["root"]);
+    expect(snapshot.compositions[0]).toMatchObject({ path: ["nested"], templateReference: { entity: "TemplateVersion", id: "child" }, values: { parameters: { name: "Ada" } } });
+    expect(snapshot.compositions[0]!.values.content).toBeUndefined();
   });
 
-  test("rejects direct and indirect cycles", async () => {
-    const direct = fixture([include("self", "root")]);
-    await rejectsCode(direct.run(), "TEMPLATE_CYCLE");
-    const indirect = fixture([include("nested", "child")]);
-    indirect.versions.child = version("child", [include("back", "root")]);
-    await rejectsCode(indirect.run(), "TEMPLATE_CYCLE");
+  test("captured text is data: a value that reads like a variable is never bound again", async () => {
+    const f = fixture([await include("nested", "child", {}, [text("child-text", "Client {{local.name}} of {{chips.brand.name}}")])]);
+    const snapshot = await materializeTemplateContent({ ...f.request, parameters: { name: "Ada" } }, f.registry, f.resolvers);
+    expect(snapshot.blocks[0]!.values.body).toBe("Client {{local.name}} of {{chips.brand.name}}");
+    expect(f.calls.global).toBe(0);
   });
 
-  test("requires the nested template to support the same channel/locale", async () => {
-    const f = fixture([include("nested", "child")]);
-    f.versions.child = {
-      ...version("child", [text()]),
-      variants: [{ id: "child-email", channel: "email", locale: "en", blocks: [text()] }],
-    };
-    await rejectsCode(f.run(), "UNSUPPORTED_CHANNEL");
+  test("binds a deferred block and a block the host added in the host's own scope", async () => {
+    const f = fixture([await include("nested", "child", { name: "{{local.name}}" },
+      [text("pending", "Dear {{local.name}}"), text("added", "Signed, {{local.name}}"), text("kept", "Literal {{local.name}}")], { deferred: ["pending"], manifest: ["pending", "kept"] })]);
+    const snapshot = await materializeTemplateContent({ ...f.request, parameters: { name: "Ada" } }, f.registry, f.resolvers);
+    expect(snapshot.blocks.map((block) => block.values.body)).toEqual(["Dear Ada", "Signed, Ada", "Literal {{local.name}}"]);
   });
 
-  test("rejects missing or cross-tenant template versions", async () => {
-    const f = fixture([include("nested", "child")]);
-    await rejectsCode(f.run(), "DEPENDENCY_UNRESOLVED");
-    f.versions.child = { ...version("child", []), tenantId: "other-tenant" };
-    await rejectsCode(f.run(), "DEPENDENCY_INVALID");
+  test("carries the copy's page settings and nested scopes", async () => {
+    const inner = await include("inner", "grandchild", {}, [text("deep", "Deep")], { page: { format: "a5" } });
+    const f = fixture([await include("outer", "child", {}, [text("cover", "Cover"), inner], { page: { format: "a4" } })]);
+    const snapshot = await f.run();
+    expect(snapshot.blocks.map((block) => block.path)).toEqual([["outer", "cover"], ["outer", "inner", "deep"]]);
+    expect(snapshot.compositions.map((entry) => [entry.path.join("/"), entry.page])).toEqual([["outer", { format: "a4" }], ["outer/inner", { format: "a5" }]]);
+    expect(f.calls.template).toBe(1);
+  });
+
+  test("refuses the earlier reference-only form by name instead of expanding it", async () => {
+    const reference = { id: "nested", definitionKey: "TemplateSlot", schemaVersion: 3, values: { parameters: {} }, references: { version: { entity: "TemplateVersion", id: "child" } } } as ContentBlock;
+    for (const values of [{ parameters: {} }, { parameters: {}, content: { blocks: [{ id: "child-text" }] } }]) {
+      const f = fixture([{ ...reference, values }]);
+      f.versions.child = version("child", [text("child-text", "Child")]);
+      await expect(f.run()).rejects.toMatchObject({ code: "DEPENDENCY_INVALID", message: expect.stringContaining("reference-only form") });
+      expect(f.calls.template).toBe(1);
+    }
   });
 
   test("bounds aggregate expansion and nesting depth", async () => {
-    const f = fixture([include("first", "child"), include("second", "child")]);
-    f.versions.child = version(
-      "child",
-      Array.from({ length: CONTENT_LIMITS.blocks / 2 }, (_, index) =>
-        text(`item-${index}`, "Plain"),
-      ),
-    );
+    const many = Array.from({ length: CONTENT_LIMITS.blocks / 2 }, (_, index) => text(`item-${index}`, "Plain"));
+    const f = fixture([await include("first", "child", {}, many), await include("second", "child", {}, many)]);
     await rejectsCode(f.run(), "CONTENT_LIMIT_EXCEEDED");
-    const deep = fixture([include("next", "depth-0")]);
-    for (let index = 0; index < CONTENT_LIMITS.templateDepth; index++)
-      deep.versions[`depth-${index}`] = version(`depth-${index}`, [
-        include("next", `depth-${index + 1}`),
-      ]);
-    await rejectsCode(deep.run(), "CONTENT_LIMIT_EXCEEDED");
+    // A copy nests its content in JSON, so the JSON depth budget bounds inclusion depth before the inclusion budget is reached.
+    await rejectsCode((async () => {
+      let deepest = await include("next", "depth", {}, [text("leaf", "Leaf")]);
+      for (let index = 0; index < CONTENT_LIMITS.templateDepth; index++) deepest = await include("next", "depth", {}, [deepest]);
+      return fixture([deepest]).run();
+    })(), "CONTENT_LIMIT_EXCEEDED");
   });
 
   test("bounds variable amplification before concatenating oversized text", async () => {

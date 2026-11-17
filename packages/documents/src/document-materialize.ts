@@ -2,7 +2,7 @@
 import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import { blockCollection, canonicalReader, compiledContentRegistry, pathResolver, contentCarrier, contentFailure, contentResolvers, DEFINITION_VERSION_COLUMN } from "./content-runtime.js";
-import { contentBlockFromRow, type BlockRowSelection } from "./content-snapshot.js";
+import { contentBlockFromRow, DOCUMENT_BLOCK_OWNER_COLUMN, type BlockRowSelection } from "./content-snapshot.js";
 import { immutableContent, hashCanonicalJson, type JsonObject } from "./content/json.js";
 import { materializeTemplateContent, materializeDocumentContent } from "./content/materialize.js";
 import type { ContentResolvers, ContentTemplateVariant } from "./content/types.js";
@@ -10,8 +10,7 @@ import { variantPageValues } from "./page/html.js";
 import { object, refuse, text, uuid } from "./validation.js";
 
 type DocumentRow = Readonly<{ id: string; template_version_id: string | null; parameters: unknown }>;
-/** Owning foreign key of a document block (entities/core/block.yaml, `documentVariant`). */
-const BLOCK_OWNER_COLUMN = "document_variant_id";
+const BLOCK_OWNER_COLUMN = DOCUMENT_BLOCK_OWNER_COLUMN;
 
 /**
  * The document head's variants for one channel, every locale, with their

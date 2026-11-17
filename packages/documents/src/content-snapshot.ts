@@ -20,6 +20,8 @@ const PARAMETER_NAME = /^[a-z][A-Za-z0-9]{0,127}$/;
 /** Owning foreign keys of the frozen tree (entities/core/template-variant.yaml and block.yaml). */
 const VARIANT_OWNER_COLUMN = "template_id";
 const BLOCK_OWNER_COLUMN = "variant_id";
+/** Owning foreign key of a document block (entities/core/block.yaml, `documentVariant`). */
+export const DOCUMENT_BLOCK_OWNER_COLUMN = "document_variant_id";
 const isObject = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 function invalid(message: string): never {
   throw operationFailure({ code: "DEPENDENCY_INVALID", message, retryable: false });
@@ -103,7 +105,9 @@ export function contentBlockFromRow(row: Record<string, unknown>, owner: { reado
   // Reference slots live in their own columns; a stray key in the JSON body
   // must not be able to smuggle a second binding for the same field.
   const values = Object.fromEntries(Object.entries(stored as Record<string, unknown>).filter(([key]) => !Object.hasOwn(bound, key)));
-  return { id, ...(row.locked === true ? {locked: true as const} : {}), definitionKey: definitionKey as string, schemaVersion: version, values: immutableContent(values) as JsonObject, references: bound, ...placement(row, origin) };
+  // A document block its template seeded holds text the server resolved when it was linked: data, not a template.
+  const captured = owner.column === DOCUMENT_BLOCK_OWNER_COLUMN && row.origin === "template";
+  return { id, ...(row.locked === true ? {locked: true as const} : {}), definitionKey: definitionKey as string, schemaVersion: version, values: immutableContent(values) as JsonObject, references: bound, ...placement(row, origin), ...(captured ? { captured: true as const } : {}) };
 }
 
 const LAYOUT_KEY = /^[a-z][A-Za-z0-9-]{0,63}$/;

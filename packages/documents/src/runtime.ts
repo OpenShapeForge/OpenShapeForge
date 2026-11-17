@@ -5,32 +5,30 @@ import { createDocument, createDocumentVersion } from "./commands.js";
 import { composeTemplate, materializeFields, materializeTemplate, variablePaths } from "./content-runtime.js";
 import { createDocumentFromTemplate } from "./template-document.js";
 import { renderSnapshot } from "./render-runtime.js";
-import { followTemplatePublish } from "./document-follow.js";
 import { linkTemplate } from "./document-link.js";
 import { materializeDocument } from "./document-materialize.js";
 import { renderDocumentPages } from "./document-pages.js";
 import { addDocumentImage, addTemplateImage, documentImages, freezeTemplateImages, templateImages } from "./images.js";
 import { resolveDocumentTheme, setDefaultDocumentTheme } from "./theme-runtime.js";
 
-let unregisterFollower: (() => void) | undefined;
 let unregisterImages: (() => void) | undefined;
 
 /**
- * Documents move to a republished template inside the publish transaction.
- * The follower registry is process-global, so registration is an explicit
- * lifecycle step here rather than an import side effect, and it is idempotent
- * for hosts that initialise the module more than once.
+ * Publishing a template freezes the images its version uses, inside the
+ * publish transaction. It changes no document: a document moves to another
+ * version only through Document.linkTemplate. The follower registry is
+ * process-global, so registration is an explicit lifecycle step here rather
+ * than an import side effect, and it is idempotent for hosts that initialise
+ * the module more than once.
  */
 export function registerDocumentFollowers(): void {
-  // The images are frozen first: a document that follows the new version reads them from it.
   unregisterImages ??= registerPublishFollower("Template", freezeTemplateImages);
-  unregisterFollower ??= registerPublishFollower("Template", followTemplatePublish);
 }
 
 const module = {
   name: "documents",
   async init() { registerDocumentFollowers(); },
-  async close() { unregisterFollower?.(); unregisterFollower = undefined; unregisterImages?.(); unregisterImages = undefined; },
+  async close() { unregisterImages?.(); unregisterImages = undefined; },
   operationHandlers: {
     createDocument,
     createDocumentVersion,

@@ -76,6 +76,11 @@ export type ContentBlock = {
   readonly region?: "header" | "footer";
   /** Page layout a header or footer block belongs to; absent means the default layout. */
   readonly layoutKey?: string;
+  /**
+   * Set by the adapter that read the block, never stored: the server captured
+   * this content from a source, so its text is data and is not bound again.
+   */
+  readonly captured?: true;
 };
 
 export type TemplateParameter = ContentValueShape & { readonly defaultValue?: JsonValue; readonly relationship?: { readonly target: string } };
@@ -199,8 +204,6 @@ export type ContentResolvers = {
 };
 
 export type MaterializeTemplateContentInput = {
-  /** Read-only preview of an inclusion-local composition. */
-  readonly content?: JsonObject;
   readonly tenantId: string;
   readonly templateVersionId: string;
   readonly channel: string;
@@ -214,7 +217,7 @@ export type MaterializedContentBlock = {
   readonly definitionKey: string;
   readonly schemaVersion: number;
   readonly renderer: string;
-  /** Effective authored content, including inclusion-local edits, before variable substitution. */
+  /** The block's stored values, before any variable of its scope is bound. */
   readonly authoredValues: JsonObject;
   readonly values: JsonObject;
   readonly references: Readonly<
@@ -241,8 +244,10 @@ export type MaterializedTemplateContent = {
     readonly values: JsonObject;
     readonly templateReference: ContentEntityReference;
     readonly references: MaterializedContentBlock["references"];
-    readonly materialization?: ContentBlockMaterialization;
+    /** The page settings the inclusion captured from its source; absent for continuous content. */
+    readonly page?: JsonObject;
   }[];
+  /** The template version the content is rooted in, when it is. An inclusion is read from its own copy and names no version here. */
   readonly templates: readonly {
     readonly path: readonly string[];
     readonly version: ContentTemplateVersion;

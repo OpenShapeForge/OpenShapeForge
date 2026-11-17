@@ -700,3 +700,11 @@ describe("column writes use the canonical child contract",()=>{
   await expect(assertBlockInclusionRemoval(carrier,before)).rejects.toBeDefined();
  });
 });
+
+test("a template maker may edit and set the locks of their own nested source blocks",async()=>{
+ const f=fixture({host:"template"});const child={id:"supplier",definitionKey:"TextBlock",schemaVersion:1,values:{markdown:"Supplier"},references:{},locked:true};
+ const row={...f.row(v1,{}),definition_key:"TextColumns",values:{left:[child]}};
+ expect(await f.write(undefined,row)).toEqual(row.values);
+ const changed={...row,values:{left:[{...child,values:{markdown:"Edited source"}}]}};
+ expect(await f.write(row,changed)).toEqual(changed.values);
+});

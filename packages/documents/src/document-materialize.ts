@@ -3,7 +3,7 @@ import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import { blockCollection, canonicalReader, compiledContentRegistry, pathResolver, contentCarrier, contentFailure, contentResolvers, DEFINITION_VERSION_COLUMN } from "./content-runtime.js";
 import { contentBlockFromRow, type BlockRowSelection } from "./content-snapshot.js";
-import { immutableContent, type JsonObject } from "./content/json.js";
+import { immutableContent, hashCanonicalJson, type JsonObject } from "./content/json.js";
 import { materializeTemplateContent, materializeDocumentContent } from "./content/materialize.js";
 import type { ContentResolvers, ContentTemplateVariant } from "./content/types.js";
 import { variantPageValues } from "./page/html.js";
@@ -98,7 +98,13 @@ export const materializeDocument: ModuleOperationHandler = async (input, context
           return { ...version, variants: await documentContentVariants(trx, { id: documentId, channel, defaultLocales, templatePages }, selection, documentCollection.allowedDefinitions) };
         },
       };
-      return materializeTemplateContent({ tenantId, templateVersionId, channel, locale, parameters }, registry, resolvers);
+      const resolved = await materializeTemplateContent({ tenantId, templateVersionId, channel, locale, parameters }, registry, resolvers);
+      // A linked document keeps its template provenance, but its editable content
+      // and images belong to the document, exactly as for an unlinked document.
+      const { compositionHash: _templateHash, ...content } = resolved;
+      const documentVariantId = resolved.templates.find(template => template.path.length === 0)!.variantId;
+      const snapshot = immutableContent({...content, documentId, documentVariantId, compositionHashVersion: "osf-document-content-v1" as const});
+      return immutableContent({...snapshot, compositionHash: await hashCanonicalJson(snapshot, snapshot.compositionHashVersion)});
     });
     return { value: snapshot };
   } catch (error) {

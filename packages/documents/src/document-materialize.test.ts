@@ -4,6 +4,7 @@ import type { ModuleOperationContext, RuntimeEntityValueCarrier } from "@opensha
 import { CONTENT_LIMITS } from "./content/index.js";
 import { composeTemplate, materializeFields } from "./content-runtime.js";
 import { contentBlockFromRow } from "./content-snapshot.js";
+import { hashCanonicalJson } from "./content/json.js";
 import { materializeDocument } from "./document-materialize.js";
 
 const ids = {
@@ -332,3 +333,10 @@ describe("Document.materialize", () => {
     expect(f.executions).toHaveLength(0);
   });
 });
+
+ test('linked document preview has document identity and an honest hash while retaining template provenance',async()=>{
+ const f=fixture();const result=await materializeDocument({id:ids.document,channel:'document',locale:'en'},f.context) as any;
+ const {compositionHash,...value}=result.value;
+ expect(value.documentId).toBe(ids.document);expect(value.documentVariantId).toBe(ids.documentVariant);expect(value.templateVersionId).toBe(ids.version);expect(value.compositionHashVersion).toBe('osf-document-content-v1');
+ expect(compositionHash).toBe(await hashCanonicalJson(value,'osf-document-content-v1'));
+ });

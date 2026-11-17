@@ -3,9 +3,9 @@ kind: coreEntity
 module: core
 entity: TemplateBlock
 title: Template block
-description: A block definition that includes another published template version in the content being composed,
-  resolved from that version's frozen snapshot. It carries no identity of its own; the Block placement selecting this
-  definition does.
+description: A block definition that includes another published template version in the content being composed, as
+  a complete copy the server captures from that version's frozen snapshot. It carries no identity of its own; the
+  Block placement selecting this definition does.
 language: en
 labels: { en: Template block, nl: Templateblok }
 pluralLabels: { en: Template blocks, nl: Templateblokken }
@@ -22,10 +22,10 @@ fields:
     options: { type: entity, source: Template, valueField: publishedVersionId }
     label: { en: Template version, nl: Templateversie }
     description:
-      en: The published template version this block includes. The inclusion resolves from that version's frozen
-        snapshot, so republishing the included template does not change it.
-      nl: De gepubliceerde templateversie die dit blok opneemt. De opname wordt opgelost uit de vastgelegde snapshot
-        van die versie, dus opnieuw publiceren van de opgenomen template verandert hem niet.
+      en: The published template version this block was captured from. Republishing the included template does not
+        change the copy; choosing another version updates it and keeps local changes.
+      nl: De gepubliceerde templateversie waaruit dit blok is overgenomen. Opnieuw publiceren van de opgenomen
+        template verandert de kopie niet; een andere versie kiezen werkt haar bij en behoudt lokale wijzigingen.
   - key: parameters
     osfType: object
     valueFieldsFrom: { reference: version, field: parameters }
@@ -37,28 +37,42 @@ fields:
     label: { en: Local values, nl: Lokale waarden }
     description:
       en: Values for the local variables of the included template version, used for this inclusion only. A value may
-        hold a `{{…}}` token of the including template; it is resolved there and handed on as data.
+        hold a `{{…}}` token of the including template; what depends on it stays open until that template has the value.
       nl: Waarden voor de lokale variabelen van de opgenomen templateversie, alleen voor deze opname. Een waarde mag
-        een `{{…}}`-token van de opnemende template bevatten; dat wordt daar opgelost en als data doorgegeven.
+        een `{{…}}`-token van de opnemende template bevatten; wat ervan afhangt blijft open tot die template de waarde heeft.
   - key: content
     osfType: object
     label: { en: Local block content, nl: Lokale blokinhoud }
     description:
-      en: Ordered inclusion-local source references and edits, validated against the pinned source version. Locked source blocks remain protected.
-      nl: Volgorde en lokale blokwijzigingen voor deze invoeging, gecontroleerd tegen de gekozen bronversie. Vergrendelde bronblokken blijven beschermd.
+      en: Complete host-owned content captured by the server on insertion or explicit update. Source locks remain protected.
+      nl: Volledige eigen inhoud, door de server vastgelegd bij invoegen of expliciet bijwerken. Bronvergrendelingen blijven beschermd.
     children:
+      - key: page
+        osfType: object
+      # The server's record of what was captured, one entry per source block in source order. `deferred` marks a
+      # block that still names a variable of the including template, which binds it when it is read.
+      - key: source
+        osfType: object
+        cardinality: collection
+        required: true
+        children:
+          - { key: id, osfType: string, required: true }
+          - { key: hash, osfType: string, required: true }
+          - { key: locked, osfType: boolean }
+          - { key: deferred, osfType: boolean }
       - key: blocks
         osfType: object
         cardinality: collection
         required: true
         children:
           - { key: id, osfType: string, required: true }
-          - { key: definitionKey, osfType: string }
-          - { key: schemaVersion, osfType: integer }
-          - { key: values, osfType: object }
+          - { key: definitionKey, osfType: string, required: true }
+          - { key: schemaVersion, osfType: integer, required: true }
+          - { key: values, osfType: object, required: true }
           - { key: references, osfType: object }
           - { key: region, osfType: string }
           - { key: layoutKey, osfType: string }
+          - { key: locked, osfType: boolean }
 operations:
   materialize:
     name: Materialize included template

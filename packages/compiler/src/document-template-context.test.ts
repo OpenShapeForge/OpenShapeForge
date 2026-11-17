@@ -138,3 +138,17 @@ test("authored block field descriptions reach the live typed value contract", as
   expect(i18n.en).toBe(text(authored));
   expect(i18n.nl).toBe(text(authored, "nl"));
 }, COMPILE_TIMEOUT_MS);
+
+test("preparing an inclusion asks for no role beyond reading the source it captures", async () => {
+  const { entities } = await loadActivePlatformCompile(repoRoot);
+  const version = entities.find(({ contract }) => contract.entity.name === "TemplateVersion")!.contract;
+  const catalog = await generated("apps/api/src/generated/operations/catalog.json");
+  const prepare = (catalog.operations as JsonObject[]).find((operation) => operation.id === "TemplateBlock.materialize");
+  expect(prepare).toBeDefined();
+  // The capture reads the source through TemplateVersion.get as the caller. The prepare read's own roles are exactly
+  // that Operation's: whoever may read a source may prepare a copy of it, and the Operation adds no further role.
+  const roles = object(prepare!.auth).roles as string[];
+  expect(version.authorization.roles.read.length).toBeGreaterThan(0);
+  expect([...roles].sort()).toEqual([...version.authorization.roles.read].sort());
+  expect(object(prepare!.effects).data).toBe("read");
+}, COMPILE_TIMEOUT_MS);

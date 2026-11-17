@@ -158,8 +158,8 @@ renaming a role renames the policy and no migration restates a role name.
   (`apps/api/src/operations/entity/collection-mutations.ts`, `safeOperation`
   with `via`). `TemplateVariant.blocks` does not set it. There is no generic
   `Block.delete`.
-- A documents command (`app.document_command` = `link`; the entity still
-  admits the retired `follow` value, which nothing sets) passes the read
+- A documents command (`app.document_command` = `link`, the only value the
+  entity admits) passes the read
   policy regardless of roles, so `Document.linkTemplate` can rewrite the blocks
   of the document it links; the setting is transaction-local and never set by
   generated CRUD.
@@ -345,7 +345,7 @@ removal or move `assertBlockInclusionRemoval`
 | Write | What the server does |
 |---|---|
 | Insert `{ definitionKey: "TemplateBlock", values: { version, parameters } }` | Captures the source and stores `parameters` (resolved where concrete) and the complete `content`. Leave `content` out. If one is sent, its blocks are local content over the baseline captured in this write; its `source` and `page` are ignored and protected blocks come from the capture. |
-| Update with the same `version` and `parameters`, `content` carrying the stored `source` (or none) | An ordinary edit. `content.blocks` is the new local content; `source` and `page` may be sent back as read or left out. Leaving `content` out keeps the stored copy. No template is read. |
+| Update with the same `version` and `parameters`, `content` carrying the stored `source` (or none) | An ordinary edit. `content.blocks` is the new local content; `source` and `page` may be sent back as read or left out. Leaving `content` out keeps the stored copy. No template is read and no role or record access on the source is needed (below). |
 | Update with another `version` or changed `parameters`, `content` carrying the stored `source` (or left out) | The explicit update: captures the new source with the given inputs and merges three ways (below). `content`, when sent, is the current local draft and is checked against the stored baseline first; left out, the stored blocks are the draft. |
 | Update whose `content.source` differs from the stored one | A prepared copy (next section). The source is captured again as the writing session and `source` and `page` must equal that capture exactly; no hash or lock is adopted from the caller. The blocks are then checked against the new record and against what the stored copy protects. With the same `version` and `parameters` this is the deliberate refresh. |
 | Remove or move the row | Refused while the copy, at any depth, holds content its source protects. |
@@ -360,6 +360,32 @@ changed, is captured or merged by the same rules inside the same write. The
 host cannot leave an inclusion's version to a variable: a copy is captured
 from one version. A template's author still edits the locks of the template's
 own blocks; protection applies to the copies hosts hold.
+
+**Access to the source.** A stored inclusion keeps its `version` and
+`parameters` as the provenance of its copy. Whether a write depends on the
+source is decided from the stored row alone
+(`retainedInclusionProvenance`, the same test `settle` applies):
+
+- An ordinary edit — the row already stores a complete copy, and the write
+  repeats the stored `version`, the stored `parameters` and the stored
+  `source` record (or sends no `content`). The source is not a dependency of
+  this write: `TemplateVersion.get` is not required, the version row is not
+  read or locked and its parameter definitions are not read again. Whoever
+  may update the host may edit the unprotected content of the copy. The stored
+  record and its locks are still enforced.
+- Every other write — an insertion, another `version`, changed `parameters`,
+  a prepared copy or refresh (`content.source` differs from the stored one),
+  and a row that stores no copy yet — reads the source as the writing
+  session: the role check of `TemplateVersion.get`, the tenant-scoped row and
+  its record permissions, the parameter definitions of that version, and then
+  the capture through the canonical Operations. Without that access the write
+  is refused (`FORBIDDEN`) and nothing is stored.
+
+Nothing the caller sends can turn the second case into the first: repeating
+the stored values is the only way to be an ordinary edit, and a `source` that
+is not the stored one is captured again and must equal that capture. Only the
+inclusion's own source reference is treated this way; every other typed
+reference of an entity-value row is authorized on every write, changed or not.
 
 ### Preparing an inclusion before Save
 
@@ -393,6 +419,22 @@ these `version`, `parameters` and `content` (edited further if the user did).
 A prepare with unchanged version and inputs captures again and merges: that
 is how a copy is refreshed with the current record values. Ordinary reads and
 edits never do.
+
+Roles. The prepare read needs update access to `host` and read access to the
+source. Its Operation roles (`Templates.Read`, `Templates.Manage`,
+`General.All.Read`, `General.All.ReadWrite`) are exactly the read roles of
+`TemplateVersion`, whose `get` the capture executes as the caller, so the
+Operation adds no role beyond the canonical read of the source; a compiler
+test keeps the two sets equal. The same roles gate the capturing writes above.
+The consequence is a product limitation, not an oversight of the prepare
+read: a document editor who holds only document roles (`CaseFile.All.*`,
+`Organization.All.*`) can edit the unprotected content of an inclusion a
+document already holds, but cannot insert an inclusion, choose another
+version, change its inputs or refresh it. `Document.linkTemplate` is
+different by design: it admits a published version on the document's update
+access alone. Letting document editors capture published templates the same
+way would be a change of the `TemplateVersion` read policy (or a dedicated
+published-version read), not of this Operation.
 
 **The three-way update** (`mergeInclusionCopy`) compares the stored source
 record with the current blocks to find local changes, the source's own blocks

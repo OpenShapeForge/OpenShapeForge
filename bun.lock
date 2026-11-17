@@ -183,7 +183,7 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.2.62",
+      "version": "0.2.63",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },

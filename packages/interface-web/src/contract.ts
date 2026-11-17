@@ -191,7 +191,17 @@ export type WebFieldProjection = {
   baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
-  valueFieldsFrom?: { reference: string; field: string };
+  /**
+   * This object field's sub-fields are the field definitions frozen in the
+   * version that the sibling `reference` field names: the stored collection
+   * `field` on the head entity of that version. `headEntity` is the name of
+   * that head entity as the compiler resolved it from the reference's
+   * version entity (a `TemplateVersion` reference yields `"Template"`); it
+   * is present on every compiled manifest and identifies what kind of
+   * versioned record supplies the definitions without inferring it from a
+   * definition's own name.
+   */
+  valueFieldsFrom?: { reference: string; field: string; headEntity?: string };
   typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean; organizationData?: boolean };
   allowedDefinitions?: string[];
   relationship?: {

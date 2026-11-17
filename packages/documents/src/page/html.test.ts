@@ -103,7 +103,7 @@ describe("buildPagedDocument", () => {
     expect(html).toContain("justify-content:flex-end;min-height:calc((var(--h) - var(--top) - var(--m)) / 2 - var(--bg))");
   });
 
-  test("a paginated inclusion owns its frame, including an intentionally empty frame", () => {
+  test("a paginated inclusion replaces only the regions it supplies and inherits the ones it leaves out", () => {
     const sections = layoutPagedSections([
       block("h", "TextBlock", { markdown: "Head" }, "header"), block("f", "TextBlock", { markdown: "Foot" }, "footer"),
       block("a", "TextBlock", { markdown: "Letter" }),
@@ -111,7 +111,7 @@ describe("buildPagedDocument", () => {
       { ...block("ch-h", "TextBlock", { markdown: "Cover head" }, "header"), scope: "cover" }, { ...block("cv", "TextBlock", { markdown: "Cover" }), scope: "cover" },
     ], design, { "": {}, ch: {}, cover: {} });
     expect(sections.map((section) => [section.body[0]!.id, section.header.map((entry) => entry.id), section.footer.map((entry) => entry.id)]))
-      .toEqual([["a", ["h"], ["f"]], ["c", [], []], ["cv", ["ch-h"], []]]);
+      .toEqual([["a", ["h"], ["f"]], ["c", ["h"], ["f"]], ["cv", ["ch-h"], ["f"]]]);
   });
 
   test("an included template without page settings flows inside the including page", () => {

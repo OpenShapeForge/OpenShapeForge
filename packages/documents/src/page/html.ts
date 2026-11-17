@@ -365,10 +365,17 @@ function sectionHtml(input: PagedDocumentInput, section: PageSettings, header: r
 }
 
 const scopedKey = (scope: string, layout: string) => `${scope}\n${layout}`;
-/** A paginated inclusion owns its whole frame. Continuous content has already joined its host's scope. */
-function pageFrame(regions: { header: ReadonlyMap<string, PageBlock[]>; footer: ReadonlyMap<string, PageBlock[]> }, scope: string, layout: string): { header: PageBlock[]; footer: PageBlock[] } {
-  const key = scopedKey(scope, layout);
-  return {header:regions.header.get(key)??[],footer:regions.footer.get(key)??[]};
+type PageFrame = Readonly<{ header: readonly PageBlock[]; footer: readonly PageBlock[] }>;
+const EMPTY_FRAME: PageFrame = { header: [], footer: [] };
+/**
+ * The frame of a section, one region at a time: a region switched off is blank, a region the section's own layout
+ * supplies replaces the host's, and a region it leaves out is the one `inherited` carries. The document itself
+ * inherits nothing, and continuous content has already joined its host's section.
+ */
+function pageFrame(regions: Readonly<Record<"header" | "footer", ReadonlyMap<string, PageBlock[]>>>, scope: string, settings: PageSettings, inherited: PageFrame): PageFrame {
+  const key = scopedKey(scope, settings.layout);
+  const region = (name: "header" | "footer", enabled: boolean | undefined) => enabled === false ? [] : regions[name].get(key) ?? inherited[name];
+  return { header: region("header", settings.headerEnabled), footer: region("footer", settings.footerEnabled) };
 }
 
 /** One section of a paged document: its page settings and the blocks of its three zones. */
@@ -381,12 +388,15 @@ export type PagedSectionLayout = Readonly<{ scope?: string; settings: PageSettin
  * settings of each template whose content is laid out as pages, keyed by the
  * scope its blocks arrive with ("" is the document itself). A block follows
  * the nearest enclosing scope that has settings, so an included template with
- * pages of its own (a cover) gets its own pages with its own header and
- * footer, an included continuous template flows on the pages around it, and
- * when the including document's blocks resume they continue on a new page
- * with the document's settings. A document without settings gets the default
- * page. A section without body blocks is left out unless it is the last one,
- * which still yields a page.
+ * pages of its own (a cover) gets its own pages, an included continuous
+ * template flows on the pages around it, and when the including document's
+ * blocks resume they continue on a new page in the section they left, with
+ * its settings and frame. On its own pages an included template's header or
+ * footer replaces the including section's; a region it leaves out is the one
+ * of the section active where it is included, through every level of
+ * inclusion, and a region it switches off stays blank. A document without
+ * settings gets the default page. A section without body blocks is left out
+ * unless it is the last one, which still yields a page.
  */
 export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDesign, layouts: PageLayouts = {}): PagedSectionLayout[] {
   if (blocks.length > MAX_BLOCKS) fail(`A paged document holds at most ${MAX_BLOCKS} blocks.`);
@@ -403,8 +413,14 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
     if (!state) { state = { scope, settings: pageSettings(layouts[scope], design) }; states.set(scope, state); }
     return state;
   };
-  const sections: (State & { body: PageBlock[]; force: boolean })[] = [];
-  const open = (state: State, force = false) => { const section = { ...state, body: [] as PageBlock[], force }; sections.push(section); return section; };
+  // The frame stack of an inclusion: its own section over the section active in each including template, read when
+  // its pages open, so a host that entered a named section lends that section's frame and not its default one.
+  const frameOf = (state: State): PageFrame => {
+    const host = state.scope ? owner(state.scope.includes("/") ? state.scope.slice(0, state.scope.lastIndexOf("/")) : "") : undefined;
+    return pageFrame(regions, state.scope, state.settings, host === undefined ? EMPTY_FRAME : frameOf(stateFor(host)));
+  };
+  const sections: (State & PageFrame & { body: PageBlock[]; force: boolean })[] = [];
+  const open = (state: State, force = false) => { const section = { ...state, ...frameOf(state), body: [] as PageBlock[], force }; sections.push(section); return section; };
   // Headers and footers are records, keyed by their declared section layout. They may occur anywhere in stored order.
   for (const block of blocks) {
     const scope = block.scope ?? "";
@@ -436,8 +452,8 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
     section.body.push(block);
   }
   if (!sections.length) open(stateFor(""), true);
-  return sections.filter(section => section.body.length || section.force).map(({ scope, settings, body, sectionId, sectionName }) => ({
-    ...(scope?{scope}:{}), settings, body, ...(() => { const frame = pageFrame(regions, scope, settings.layout); return {header: settings.headerEnabled === false ? [] : frame.header, footer: settings.footerEnabled === false ? [] : frame.footer}; })(), ...(sectionId ? { sectionId } : {}), ...(sectionName ? { sectionName } : {}),
+  return sections.filter(section => section.body.length || section.force).map(({ scope, settings, header, body, footer, sectionId, sectionName }) => ({
+    ...(scope ? { scope } : {}), settings, header, body, footer, ...(sectionId ? { sectionId } : {}), ...(sectionName ? { sectionName } : {}),
   }));
 }
 

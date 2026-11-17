@@ -244,14 +244,10 @@ function allowlist(value: unknown, name: string): { present: boolean; list: stri
   return { present: true, list: value as string[] };
 }
 
-/** The create-time allowlist fields, spread into a service input. */
-function restrictionInput(input: Record<string, unknown>, origins: boolean) {
+/** The create-time allowlist field, spread into a service input. */
+function restrictionInput(input: Record<string, unknown>) {
   const ips = allowlist(input.allowedIps, "allowedIps");
-  const sites = origins ? allowlist(input.allowedOrigins, "allowedOrigins") : { present: false, list: [] };
-  return {
-    ...(ips.present ? { allowedIps: ips.list } : {}),
-    ...(sites.present ? { allowedOrigins: sites.list } : {}),
-  };
+  return ips.present ? { allowedIps: ips.list } : {};
 }
 
 /**
@@ -300,7 +296,6 @@ type ProjectedIntegration = {
   status: ListedIntegration["status"];
   grantedRoles: string[];
   allowedIps: string[];
-  allowedOrigins: string[];
   credentialCount: number;
   activeCredentialCount: number;
   createdAt: string;
@@ -314,7 +309,6 @@ function projectIntegration(integration: ListedIntegration): ProjectedIntegratio
     status: integration.status,
     grantedRoles: integration.grantedRoles,
     allowedIps: integration.allowedIps,
-    allowedOrigins: integration.allowedOrigins,
     credentialCount: integration.keyCount,
     activeCredentialCount: integration.activeKeyCount,
     createdAt: integration.createdAt.toISOString(),
@@ -524,7 +518,7 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
         displayName: text(input.displayName),
         ...(input.expiresInDays === undefined ? {} : { expiresInDays: input.expiresInDays as number }),
         ...(input.roleSubset === undefined ? {} : { roleSubset: roleList(input.roleSubset, "roleSubset") }),
-        ...restrictionInput(input, false),
+        ...restrictionInput(input),
       }, now);
       return oneTimeCredential({
         key: projectPersonalKey(created.key, now),
@@ -641,7 +635,7 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
         ...(input.roleSubset === undefined
           ? {}
           : { roleSubset: roleList(input.roleSubset, "roleSubset") }),
-        ...restrictionInput(input, true),
+        ...restrictionInput(input),
       }, now);
       // The metadata comes out of the SAME transaction that minted the
       // credential, not from a read-back after it. A read-back is a step
@@ -658,7 +652,6 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
           status: created.integration.status,
           grantedRoles: created.integration.grantedRoles,
           allowedIps: created.integration.allowedIps,
-          allowedOrigins: created.integration.allowedOrigins,
           createdAt: created.integration.createdAt.toISOString(),
         },
         credential: mintedCredential(created),
@@ -724,7 +717,6 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
       const updated = await updateIntegrationRestrictions(resolved.deps, resolved.session, {
         integrationId: text(input.integrationId),
         allowedIps: allowlist(input.allowedIps, "allowedIps").list,
-        allowedOrigins: allowlist(input.allowedOrigins, "allowedOrigins").list,
       });
       return { value: projectIntegration(updated) };
     } catch (error) {

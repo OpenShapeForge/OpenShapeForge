@@ -743,12 +743,6 @@ tables:
       # ranges. NULL (or empty) means any address. Checked on every request
       # against the address the API derived through its trusted proxy hops.
       - { name: allowed_ips, type: jsonb }
-      # Optional browser origins: a JSON array of exact origins
-      # (`https://shop.example.com`). Non-empty makes every key of this
-      # integration a BROWSER key: usable only from those origins, and only
-      # for Operations whose declared effects are reads. NULL (or empty) is a
-      # server key, which a browser request is refused.
-      - { name: allowed_origins, type: jsonb }
       - { name: created_by, type: uuid, required: true }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: updated_at, type: timestamptz, required: true, default: now() }
@@ -872,9 +866,7 @@ tables:
       # live. Shown to the owner so a key an administrator withdrew does not
       # look like one that simply stopped working.
       - { name: revoked_by, type: uuid }
-      # Optional network allowlist, as on api_key_integrations. A personal key
-      # has no browser origins: it acts as a person and is never usable from a
-      # web page.
+      # Optional network allowlist, as on api_key_integrations.
       - { name: allowed_ips, type: jsonb }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: first_used_at, type: timestamptz }

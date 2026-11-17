@@ -2,7 +2,6 @@
 /** REST projection of the central edit-lease service. */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { resolveSessionContext } from "../auth/identity.js";
-import { assertNotBrowserKey } from "../auth/api-key/restrictions.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DbSessionInput } from "../db/session.js";
 import { headersFromFastify } from "../http/headers.js";
@@ -37,7 +36,6 @@ export function registerEditLeaseRestRoutes(
       headersFromFastify(request.headers),
       { db: options.db, mcpAppResource: true },
     );
-    assertNotBrowserKey(resolved);
     if (!resolved.tenantId || !resolved.userId) {
       throw new HttpError(
         401,

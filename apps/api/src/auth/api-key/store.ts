@@ -24,7 +24,7 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { withCredentialResolutionSession } from "../../db/session.js";
 import type { StoredSecret } from "../../platform/secrets.js";
 import { secretMatches } from "./format.js";
-import { storedList, type KeyRestrictions } from "./restrictions.js";
+import { storedList } from "./restrictions.js";
 
 export type ResolvedApiKey = {
   keyId: string;
@@ -44,8 +44,8 @@ export type ResolvedApiKey = {
    */
   rolesVersion: string;
   clientSecret: StoredSecret;
-  /** Where the integration's keys may be used from (restrictions.ts). */
-  restrictions: KeyRestrictions;
+  /** The integration's network allowlist; empty means any address (restrictions.ts). */
+  allowedIps: string[];
 };
 
 /** Why a credential did not resolve. Never returned to the caller verbatim. */
@@ -80,7 +80,6 @@ type IntegrationRow = {
   client_secret_key_id: string | null;
   client_secret_algorithm: string | null;
   allowed_ips: unknown;
-  allowed_origins: unknown;
 };
 
 /** Only an explicitly stored empty array opts into a role-free session. */
@@ -163,7 +162,7 @@ export async function resolveApiKey(
       select keycloak_client_id, display_name, status, granted_roles,
              updated_at::text || '|' || granted_roles::text as roles_version,
              client_secret_ciphertext, client_secret_key_id, client_secret_algorithm,
-             allowed_ips, allowed_origins
+             allowed_ips
         from platform.api_key_integrations
        where id = ${row.integration_id}
        limit 1
@@ -199,10 +198,7 @@ export async function resolveApiKey(
         keyId: integration.client_secret_key_id,
         algorithm: integration.client_secret_algorithm,
       },
-      restrictions: {
-        allowedIps: storedList(integration.allowed_ips),
-        allowedOrigins: storedList(integration.allowed_origins),
-      },
+      allowedIps: storedList(integration.allowed_ips),
     },
   };
 }

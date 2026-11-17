@@ -29,7 +29,6 @@ import Fastify from "fastify";
 import { readApiLimits } from "../config/limits.js";
 import { readGraphqlCorsPolicy } from "../config/graphql-cors.js";
 import { CLIENT_ADDRESS_HEADER } from "../auth/api-key/restrictions.js";
-import { registerApiKeyCors } from "../rest/api-key-cors.js";
 import {
   ORGANIZATION_ADDRESS_HEADER,
   organizationAddressOf,
@@ -285,10 +284,6 @@ export function createApiApp(options: {
     if (request.ip) request.headers[CLIENT_ADDRESS_HEADER] = request.ip;
     else delete request.headers[CLIENT_ADDRESS_HEADER];
   });
-
-  // Browser API keys: the generic REST preflight and the per-key response
-  // header (rest/api-key-cors.ts). GraphQL keeps its own policy.
-  registerApiKeyCors(app);
 
   // Request-rate boundary, before GraphQL/REST execution — that ordering is
   // what protects the authentication path itself, so the tier is decided from

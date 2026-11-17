@@ -1234,47 +1234,26 @@ real realm and database.
 
 ### Where an API key may be used from
 
-Both key kinds take an optional network allowlist; integration keys also take
-optional browser origins. Both are set when the key is created (integration:
-`allowedIps` and `allowedOrigins` on `api-keys.create-integration`; personal:
-`allowedIps` on `api-keys.create-my-personal-key`). An integration's lists are
-replaced as a whole with `api-keys.update-integration-restrictions`
-(`POST /api/api-key-integrations/update-restrictions`, the management role),
-and apply to every key of the integration from its next request. The rules live
+Both key kinds take an optional network allowlist, `allowedIps`: at most 20
+IPv4/IPv6 addresses or CIDR ranges, set at creation
+(`api-keys.create-integration`, `api-keys.create-my-personal-key`). An
+integration's list is replaced as a whole with
+`api-keys.update-integration-restrictions`
+(`POST /api/api-key-integrations/update-restrictions`, the management role) and
+applies to every key of the integration from its next request. The rules live
 in `apps/api/src/auth/api-key/restrictions.ts`:
 
-- **`allowedIps`** — at most 20 IPv4/IPv6 addresses or CIDR ranges. Any other
-  address is refused with `403 API_KEY_RESTRICTED`. The address is the one the
-  API derived through its trusted proxy hops (`API_TRUST_PROXY`, default one
-  hop): the server stamps `request.ip` into `x-openshapeforge-client-address`
-  on every request and discards whatever a client sent under that name. A
-  deployment whose proxy chain does not put the caller's address in the
-  trusted `X-Forwarded-For` hop must fix that first, or every allowlisted key
-  sees the proxy's address.
-- **`allowedOrigins`** (integration keys only) — at most 10 exact origins
-  (`https://shop.example.com`; https except for localhost, no paths, no
-  wildcards). A non-empty list makes the integration's keys **browser keys**.
-  A key in a web page is public, so origins are not a control over who holds
-  it; they stop other sites from using it in their visitors' browsers. A
-  browser key therefore:
-  - is accepted only with an `Origin` header naming one of its sites;
-  - is admitted by core only to Operations whose declared effects are reads
-    (`EXECUTION_NOT_PERMITTED` otherwise, in `operations/execution-policy.ts`,
-    before and independent of any host policy), and is refused outright by the
-    routes outside canonical Operations (file transfer, edit leases, connector
-    administration).
-- **No origins** — a server key, and every personal key, is refused when a
-  browser presents it (any `Origin` header): it was never meant to leave a
-  server.
-
-CORS (`apps/api/src/rest/api-key-cors.ts`) covers the REST surface under
-`/api/`, not `/api/graphql`, MCP, the control plane or routes with their own
-`OPTIONS`. The preflight carries no key, so it is answered for any origin with
-`GET, POST` and the `authorization, content-type` headers, and never with
-`Access-Control-Allow-Credentials`. Only a response to a request carrying an
-integration key gets `Access-Control-Allow-Origin`, and the resolver has
-already refused every such key that does not admit that origin. GraphQL keeps
-its own deployment policy (`OPENSHAPEFORGE_GRAPHQL_CORS_*`).
+- **Network allowlist** — any address outside the list is refused with
+  `403 API_KEY_RESTRICTED`. The address is the one the API derived through its
+  trusted proxy hops (`API_TRUST_PROXY`, default one hop): the server stamps
+  `request.ip` into `x-openshapeforge-client-address` on every request and
+  discards whatever a client sent under that name. A deployment whose proxy
+  chain does not put the caller's address in the trusted `X-Forwarded-For` hop
+  must fix that first, or every allowlisted key sees the proxy's address.
+- **Never from a web browser** — an API key is a server credential; one in a
+  web page is visible to everyone who opens it. A request that carries an
+  `Origin` header is refused with `403 API_KEY_RESTRICTED` for every key kind,
+  and the REST surface answers no CORS preflight for it.
 
 The end-to-end proof is
 `apps/api/src/auth/api-key/__tests__/api-key-restrictions.e2e.test.ts` (and the

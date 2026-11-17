@@ -69,7 +69,7 @@ export async function resolvePersonalKeySession(
 
   // Network allowlist, and never from a browser (restrictions.ts). Before the
   // realm read, so a refused address costs the identity provider nothing.
-  assertKeyUsableHere({ allowedIps: key.allowedIps, allowedOrigins: [] }, request, "personal");
+  assertKeyUsableHere(key.allowedIps, request, "personal");
 
   // A key belongs to the identity (issuer, subject) that minted it. Under a
   // different issuer the same subject is somebody else.

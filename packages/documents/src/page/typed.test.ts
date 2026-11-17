@@ -25,6 +25,32 @@ describe("a materialized block on a page", () => {
     expect(html).not.toContain("Looptijd");
     expect(renderPageBlock(block("en"), DEFAULT_PAGE_DESIGN)).toContain(">Amount</div>");
   });
+  test("draws only the columns a list names, in that order, with their width and alignment", () => {
+    const item = { type: "object", properties: { amount: t("Amount", "Bedrag"), discount: t("Discount", "Korting"), product: t("Product", "Product"), quantity: t("Quantity", "Aantal") } };
+    const lines = { type: "array", title: "Lines", items: item, "x-osf-presentation": { columns: [{ field: "product" }, { field: "quantity", width: 72, align: "center" }, { field: "missing" }, { field: "amount", width: 140, align: "end" }] } };
+    const html = renderPageBlock({ id: "p", definitionKey: "QuotePricing", region: "body" as const, typed: { schema: { type: "object", properties: { lines } }, locale: "nl" },
+      values: { lines: [{ product: "Pentest", quantity: "17", amount: "EUR 10,200.00", discount: "10%" }] } }, DEFAULT_PAGE_DESIGN);
+    expect(html).toContain('<div role="columnheader" class="c">Product</div><div role="columnheader" class="c p" style="flex:0 0 72px">Aantal</div><div role="columnheader" class="c n" style="flex:0 0 140px">Bedrag</div>');
+    expect(html).toContain('<div role="cell" class="c">Pentest</div><div role="cell" class="c m" style="flex:0 0 72px">17</div><div role="cell" class="c n" style="flex:0 0 140px">EUR 10,200.00</div>');
+    expect(html).not.toContain("Korting");
+    expect(html).not.toContain("10%");
+  });
+  test("writes a money value with the currency its record names, in the notation the block states", () => {
+    const money = (title: string) => ({ type: ["number", "null"], title, "x-osf-type": "money", "x-osf-currency": "currency" });
+    const priced = { type: "object", "x-osf-presentation": { locale: "nl-NL" }, properties: {
+      currency: { type: "string", title: "Currency" },
+      lines: { type: "array", title: "Lines", items: { type: "object", properties: { product: t("Product", "Product"), amount: money("Amount") } } },
+      totals: { type: "object", title: "Totals", properties: { oneOff: money("One-off"), usage: money("Usage") } } } };
+    const draw = (values: unknown, schema: unknown = priced) => renderPageBlock({ id: "p", definitionKey: "QuotePricing", region: "body" as const, typed: { schema: schema as never, locale: "en" }, values: values as never }, DEFAULT_PAGE_DESIGN);
+    const html = draw({ currency: "EUR", lines: [{ product: "Pentest", amount: 2500 }], totals: { oneOff: 10200.5, usage: null } });
+    expect(html).toContain('<div role="cell" class="c n">€\u00a02.500,00</div>');
+    expect(html).toContain('<div role="cell" class="c n">€\u00a010.200,50</div>');
+    expect(html).not.toContain("Usage");
+    // Without a stated notation the document's own language decides.
+    const { "x-osf-presentation": _stated, ...plain } = priced;
+    expect(draw({ currency: "EUR", lines: [], totals: { oneOff: 2500 } }, plain)).toContain("€2,500.00");
+    expect(() => draw({ lines: [{ product: "Pentest", amount: 2500 }], totals: {} })).toThrow();
+  });
   test("refuses a value that does not match its schema", () => {
     expect(() => renderPageBlock({ ...block(), values: { lines: "x" } }, DEFAULT_PAGE_DESIGN)).toThrow();
   });

@@ -137,6 +137,10 @@
         "nl": "Icoon"
       },
       "baseType": "string",
+      "render": {
+        "display": "TextDisplay",
+        "input": "IconPicker"
+      },
       "validation": {
         "pattern": "^[a-z][a-z0-9\\-]{0,63}$",
         "maxLength": 64
@@ -19384,6 +19388,32 @@
           }
         },
         {
+          "key": "pageHeaderEnabled",
+          "label": {
+            "en": "Header on every page",
+            "nl": "Koptekst op elke pagina"
+          },
+          "osfType": "boolean",
+          "defaultValue": true,
+          "persisted": {
+            "column": "page_header_enabled",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "pageFooterEnabled",
+          "label": {
+            "en": "Footer on every page",
+            "nl": "Voettekst op elke pagina"
+          },
+          "osfType": "boolean",
+          "defaultValue": true,
+          "persisted": {
+            "column": "page_footer_enabled",
+            "storageClass": "core"
+          }
+        },
+        {
           "key": "pageFormat",
           "label": {
             "en": "Page format",
@@ -37970,6 +38000,24 @@
           }
         },
         {
+          "key": "headerEnabled",
+          "osfType": "boolean",
+          "defaultValue": true,
+          "label": {
+            "en": "Header on every page",
+            "nl": "Koptekst op elke pagina"
+          }
+        },
+        {
+          "key": "footerEnabled",
+          "osfType": "boolean",
+          "defaultValue": true,
+          "label": {
+            "en": "Footer on every page",
+            "nl": "Voettekst op elke pagina"
+          }
+        },
+        {
           "key": "format",
           "osfType": "string",
           "defaultValue": "a4",
@@ -41370,8 +41418,8 @@
             "nl": "Templateversie"
           },
           "description": {
-            "en": "The published template version this block includes. The inclusion resolves from that version's frozen snapshot, so republishing the included template does not change it.",
-            "nl": "De gepubliceerde templateversie die dit blok opneemt. De opname wordt opgelost uit de vastgelegde snapshot van die versie, dus opnieuw publiceren van de opgenomen template verandert hem niet."
+            "en": "The published template version this block was captured from. Republishing the included template does not change the copy; choosing another version updates it and keeps local changes.",
+            "nl": "De gepubliceerde templateversie waaruit dit blok is overgenomen. Opnieuw publiceren van de opgenomen template verandert de kopie niet; een andere versie kiezen werkt haar bij en behoudt lokale wijzigingen."
           }
         },
         {
@@ -41388,9 +41436,97 @@
             "nl": "Lokale waarden"
           },
           "description": {
-            "en": "Values for the local variables of the included template version, used for this inclusion only. A value may hold a `{{…}}` token of the including template; it is resolved there and handed on as data.",
-            "nl": "Waarden voor de lokale variabelen van de opgenomen templateversie, alleen voor deze opname. Een waarde mag een `{{…}}`-token van de opnemende template bevatten; dat wordt daar opgelost en als data doorgegeven."
+            "en": "Values for the local variables of the included template version, used for this inclusion only. A value may hold a `{{…}}` token of the including template; what depends on it stays open until that template has the value.",
+            "nl": "Waarden voor de lokale variabelen van de opgenomen templateversie, alleen voor deze opname. Een waarde mag een `{{…}}`-token van de opnemende template bevatten; wat ervan afhangt blijft open tot die template de waarde heeft."
           }
+        },
+        {
+          "key": "content",
+          "osfType": "object",
+          "label": {
+            "en": "Local block content",
+            "nl": "Lokale blokinhoud"
+          },
+          "description": {
+            "en": "Complete host-owned content captured by the server on insertion or explicit update. Source locks remain protected.",
+            "nl": "Volledige eigen inhoud, door de server vastgelegd bij invoegen of expliciet bijwerken. Bronvergrendelingen blijven beschermd."
+          },
+          "children": [
+            {
+              "key": "page",
+              "osfType": "object"
+            },
+            {
+              "key": "source",
+              "osfType": "object",
+              "cardinality": "collection",
+              "required": true,
+              "children": [
+                {
+                  "key": "id",
+                  "osfType": "string",
+                  "required": true
+                },
+                {
+                  "key": "hash",
+                  "osfType": "string",
+                  "required": true
+                },
+                {
+                  "key": "locked",
+                  "osfType": "boolean"
+                },
+                {
+                  "key": "deferred",
+                  "osfType": "boolean"
+                }
+              ]
+            },
+            {
+              "key": "blocks",
+              "osfType": "object",
+              "cardinality": "collection",
+              "required": true,
+              "children": [
+                {
+                  "key": "id",
+                  "osfType": "string",
+                  "required": true
+                },
+                {
+                  "key": "definitionKey",
+                  "osfType": "string",
+                  "required": true
+                },
+                {
+                  "key": "schemaVersion",
+                  "osfType": "integer",
+                  "required": true
+                },
+                {
+                  "key": "values",
+                  "osfType": "object",
+                  "required": true
+                },
+                {
+                  "key": "references",
+                  "osfType": "object"
+                },
+                {
+                  "key": "region",
+                  "osfType": "string"
+                },
+                {
+                  "key": "layoutKey",
+                  "osfType": "string"
+                },
+                {
+                  "key": "locked",
+                  "osfType": "boolean"
+                }
+              ]
+            }
+          ]
         }
       ],
       "render": {
@@ -41547,6 +41683,32 @@
           },
           "persisted": {
             "column": "page_layout",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "pageHeaderEnabled",
+          "label": {
+            "en": "Header on every page",
+            "nl": "Koptekst op elke pagina"
+          },
+          "osfType": "boolean",
+          "defaultValue": true,
+          "persisted": {
+            "column": "page_header_enabled",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "pageFooterEnabled",
+          "label": {
+            "en": "Footer on every page",
+            "nl": "Voettekst op elke pagina"
+          },
+          "osfType": "boolean",
+          "defaultValue": true,
+          "persisted": {
+            "column": "page_footer_enabled",
             "storageClass": "core"
           }
         },
@@ -42720,39 +42882,53 @@
         "format": "uuid"
       },
       "label": {
-        "en": "Text columns",
-        "nl": "Tekstkolommen"
+        "en": "Columns",
+        "nl": "Kolommen"
       },
       "pluralLabel": {
-        "en": "Text columns",
-        "nl": "Tekstkolommen"
+        "en": "Columns",
+        "nl": "Kolommen"
       },
       "shape": [
         {
           "key": "left",
-          "osfType": "markdown",
-          "required": false,
-          "variables": "template",
-          "label": {
-            "en": "Left text",
-            "nl": "Tekst links"
-          },
-          "validation": {
-            "maxLength": 20000
-          }
-        },
-        {
-          "key": "leftStyle",
-          "osfType": "string",
+          "osfType": "object",
+          "cardinality": "collection",
           "required": false,
           "label": {
-            "en": "Left text style",
-            "nl": "Tekststijl links"
+            "en": "Left column",
+            "nl": "Links"
           },
-          "validation": {
-            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
-            "maxLength": 64
-          }
+          "children": [
+            {
+              "key": "id",
+              "osfType": "string",
+              "required": true
+            },
+            {
+              "key": "definitionKey",
+              "osfType": "string",
+              "required": true
+            },
+            {
+              "key": "schemaVersion",
+              "osfType": "integer",
+              "required": true
+            },
+            {
+              "key": "values",
+              "osfType": "object",
+              "required": true
+            },
+            {
+              "key": "references",
+              "osfType": "object"
+            },
+            {
+              "key": "locked",
+              "osfType": "boolean"
+            }
+          ]
         },
         {
           "key": "leftWidth",
@@ -42769,29 +42945,43 @@
         },
         {
           "key": "center",
-          "osfType": "markdown",
-          "required": false,
-          "variables": "template",
-          "label": {
-            "en": "Center text",
-            "nl": "Tekst midden"
-          },
-          "validation": {
-            "maxLength": 20000
-          }
-        },
-        {
-          "key": "centerStyle",
-          "osfType": "string",
+          "osfType": "object",
+          "cardinality": "collection",
           "required": false,
           "label": {
-            "en": "Center text style",
-            "nl": "Tekststijl midden"
+            "en": "Center column",
+            "nl": "Midden"
           },
-          "validation": {
-            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
-            "maxLength": 64
-          }
+          "children": [
+            {
+              "key": "id",
+              "osfType": "string",
+              "required": true
+            },
+            {
+              "key": "definitionKey",
+              "osfType": "string",
+              "required": true
+            },
+            {
+              "key": "schemaVersion",
+              "osfType": "integer",
+              "required": true
+            },
+            {
+              "key": "values",
+              "osfType": "object",
+              "required": true
+            },
+            {
+              "key": "references",
+              "osfType": "object"
+            },
+            {
+              "key": "locked",
+              "osfType": "boolean"
+            }
+          ]
         },
         {
           "key": "centerWidth",
@@ -42808,29 +42998,43 @@
         },
         {
           "key": "right",
-          "osfType": "markdown",
-          "required": false,
-          "variables": "template",
-          "label": {
-            "en": "Right text",
-            "nl": "Tekst rechts"
-          },
-          "validation": {
-            "maxLength": 20000
-          }
-        },
-        {
-          "key": "rightStyle",
-          "osfType": "string",
+          "osfType": "object",
+          "cardinality": "collection",
           "required": false,
           "label": {
-            "en": "Right text style",
-            "nl": "Tekststijl rechts"
+            "en": "Right column",
+            "nl": "Rechts"
           },
-          "validation": {
-            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
-            "maxLength": 64
-          }
+          "children": [
+            {
+              "key": "id",
+              "osfType": "string",
+              "required": true
+            },
+            {
+              "key": "definitionKey",
+              "osfType": "string",
+              "required": true
+            },
+            {
+              "key": "schemaVersion",
+              "osfType": "integer",
+              "required": true
+            },
+            {
+              "key": "values",
+              "osfType": "object",
+              "required": true
+            },
+            {
+              "key": "references",
+              "osfType": "object"
+            },
+            {
+              "key": "locked",
+              "osfType": "boolean"
+            }
+          ]
         },
         {
           "key": "rightWidth",

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql, type Kysely } from "kysely";
+import { rlsBypassToken } from "../../rls-bypass.js";
 import type { VersionedMigration } from "../versioned-runner.js";
 
 /**
@@ -26,7 +27,7 @@ export async function makeConfigurationCodesUnique(
 ): Promise<void> {
   // Duplicates in rows the migration role could not see would still abort
   // the index; this context only makes them visible so they are resolved.
-  await sql`select set_config('app.bypass_rls', 'true', true)`.execute(db);
+  await sql`select set_config('app.bypass_rls', ${rlsBypassToken()}, true)`.execute(db);
   for (const { table, column } of targets) {
     const present = (await sql<{ ok: boolean }>`
       select exists (

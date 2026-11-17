@@ -12,3 +12,18 @@ export {
   validateContentRegistry,
   validateContentValue,
 } from "./validation.js";
+
+export { captureInclusionContent, captureTemplateBlocks } from "./capture.js";
+export type { CaptureHost, CaptureInclusionInput, CapturedInclusion, CaptureTemplateBlocksInput } from "./capture.js";
+export {
+  blockHash,
+  holdsProtectedContent,
+  inclusionCopyContent,
+  isInclusionCopy,
+  mergeInclusionCopy,
+  normalizeLocalDraft,
+  OBSOLETE_INCLUSION,
+  readInclusionCopy,
+  templateComposition,
+} from "./inclusion-copy.js";
+export type { CompositionOf, CopySourceEntry, InclusionCopy, InclusionMerge, LocalDraftOptions } from "./inclusion-copy.js";

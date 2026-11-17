@@ -77,6 +77,8 @@ export type WebSchemaOperationRef<
     conditions: Array<{ field: string; operator: "eq" | "neq" | "in" | "notIn" | "gt" | "lt" | "gte" | "lte" | "isEmpty" | "isNotEmpty"; value?: unknown }>;
     logic?: "and" | "or";
   };
+  /** Localized confirmation for a completed write; placeholders name declared scalar output fields. */
+  successMessage?: LocalizedText;
   /** Opaque result presentation key; absent uses structured schema rendering. */
   resultRenderer?: WebRendererKey;
   /** Unlisted inputs are available unless hidden. Defaults can contain { from: "uiLocale" }, resolved to the normalized web language before submission. */
@@ -189,7 +191,17 @@ export type WebFieldProjection = {
   baseType: "string" | "integer" | "number" | "boolean" | "date" | "datetime" | "object";
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
-  valueFieldsFrom?: { reference: string; field: string };
+  /**
+   * This object field's sub-fields are the field definitions frozen in the
+   * version that the sibling `reference` field names: the stored collection
+   * `field` on the head entity of that version. `headEntity` is the name of
+   * that head entity as the compiler resolved it from the reference's
+   * version entity (a `TemplateVersion` reference yields `"Template"`); it
+   * is present on every compiled manifest and identifies what kind of
+   * versioned record supplies the definitions without inferring it from a
+   * definition's own name.
+   */
+  valueFieldsFrom?: { reference: string; field: string; headEntity?: string };
   typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean; organizationData?: boolean };
   allowedDefinitions?: string[];
   relationship?: {

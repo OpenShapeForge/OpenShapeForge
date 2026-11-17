@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { operationFailure } from "@openshapeforge/operations";
 import type { ModuleOperationContext, ModuleOperationHandler, RuntimeModule, RuntimeVersioningBinding, RuntimeVersioningOwnedChild } from "@openshapeforge/plugin-runtime";
 import { publishFollowers, type PublishedVersionRow } from "./followers.js";
+import { fingerprintSnapshot } from "./snapshot.js";
 
 type RawQuery = { sql: string; parameters: readonly unknown[]; query: { kind: "RawNode"; sqlFragments: readonly string[]; parameters: readonly unknown[] }; queryId: { queryId: string } };
 type Executor = { executeQuery<T>(query: RawQuery): Promise<{ rows: readonly T[] }> };
@@ -27,11 +28,6 @@ function identifier(value: string): string {
 }
 function qualified(schema: string, table: string): string {
   return `${identifier(schema)}.${identifier(table)}`;
-}
-function stable(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value as Row).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${stable(child)}`).join(",")}}`;
-  return JSON.stringify(value);
 }
 
 /**
@@ -131,11 +127,10 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
       const service = context.platform?.schemas.extensions;
       if (extensible && !service) fail("OPERATION_UNAVAILABLE", `${sourceEntity} carries tenant fields this host cannot snapshot.`);
       const extension = extensible ? await service!.snapshot(transaction, session, sourceEntity, source) : undefined;
-      const snapshot = { schemaVersion: 1, entity: sourceEntity, head: {
+      const snapshot = { schemaVersion: 1 as const, entity: sourceEntity, head: {
         ...tree, row: content(tree.row, PUBLICATION), ...(extension ? { extensions: extension.extensions, extensionDefinitions: extension.extensionDefinitions } : {}),
       } };
-      const canonical = stable(snapshot);
-      const contentHash = createHash("sha256").update(canonical).digest("hex");
+      const { canonical, contentHash } = fingerprintSnapshot(snapshot);
       // Content is what a version is: a head whose content still hashes like
       // its latest version has nothing new to publish. It becomes published
       // again (a change edited back is no change), no row is added and no

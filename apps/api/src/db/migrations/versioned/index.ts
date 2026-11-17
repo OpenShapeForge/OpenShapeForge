@@ -1,3 +1,4 @@
+import m0029TextColumnsBlocks from "./0029_text-columns-blocks.js";
 import m0026ColorPaletteReferences from "./0026_color-palette-references.js";
 import m0027PageBackgroundImageFiles from "./0027_page-background-image-files.js";
 import m0028DropApiKeyAllowedOrigins from "./0028_drop-api-key-allowed-origins.js";
@@ -55,5 +56,6 @@ export const versionedMigrations: VersionedMigration[] = [
   m0026ColorPaletteReferences,
   m0027PageBackgroundImageFiles,
   m0028DropApiKeyAllowedOrigins,
+  m0029TextColumnsBlocks,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

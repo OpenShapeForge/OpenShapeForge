@@ -20,7 +20,7 @@ export type DocumentBlockRow = Readonly<Record<string, unknown>> & {
   readonly locked: boolean;
 };
 export type TemplateVersionRow = Readonly<{ id: string; template_id: string; version_number: number; status: string; snapshot: PublishedSnapshot }>;
-export type DocumentCommand = "link" | "follow";
+export type DocumentCommand = "link";
 
 /** Ownership and provenance, never block content: not copied down, not compared for divergence. */
 const RESERVED = new Set([

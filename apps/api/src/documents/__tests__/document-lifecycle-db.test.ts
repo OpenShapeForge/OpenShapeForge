@@ -74,13 +74,17 @@ describe("published-snapshot lifecycle against PostgreSQL", () => {
     await sql`update erp.templates set name = 'Welcome, renamed' where id = ${ids.template}::uuid`.execute(privileged());
     const second = await publishTemplate(context, ids.template);
     expect(second).not.toBe(first);
+    expect(await document(documentId)).toMatchObject({ lifecycle_status: "published", template_version_id: first });
+    await linked(handlers, context, { id: documentId, templateVersionId: second });
     expect(await document(documentId)).toMatchObject({ lifecycle_status: "published", template_version_id: second, follow_error: null });
 
     // A block change drafts it.
     await sql`update erp.blocks set "values" = ${jsonbLiteral({ markdown: "Hello there {{local.name}}" })} where id = ${ids.first}::uuid`.execute(privileged());
     const third = await publishTemplate(context, ids.template);
+    expect(await document(documentId)).toMatchObject({ lifecycle_status: "published", template_version_id: second });
+    await linked(handlers, context, { id: documentId, templateVersionId: third });
     expect(await document(documentId)).toMatchObject({ lifecycle_status: "draft", template_version_id: third });
-    expect((await variantBlocks((await variant(documentId, "document", "nl")).id))[0]!.markdown).toBe("Hello there {{local.name}}");
+    expect((await variantBlocks((await variant(documentId, "document", "nl")).id))[0]!.markdown).toBe("Hello there Reader");
   }, 60_000);
 
   test("the draft rule: a no-op update leaves a published head published; a field edit or an owned-collection change drafts it", async () => {

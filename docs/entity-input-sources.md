@@ -72,5 +72,23 @@ For an authorized version read, the definitions are returned as
 that field to present inputs for the referenced version; it is omitted when the
 source record or its definitions are not readable.
 
+The Web manifest projects the binding on the field
+(`WebFieldProjection.valueFieldsFrom` in `@openshapeforge/interface-web`),
+for entity fields and for the fields of `entityValueDefinitions` alike:
+
+```ts
+valueFieldsFrom?: { reference: string; field: string; headEntity?: string }
+```
+
+`reference` is the key of the sibling reference field, `field` the key of the
+field-definition collection on the head entity, and `headEntity` the name of
+that head entity as the compiler resolved it from the reference's version
+entity — `{ reference: "version", field: "parameters", headEntity: "Template" }`
+for `TemplateBlock.parameters`. The compiler sets `headEntity` on every binding
+it compiles; the type keeps it optional only for manifests built before it was
+projected. A client that needs to know which kind of versioned record supplies
+a definition's inputs reads `headEntity`; it does not infer that from the
+definition's name. The physical snapshot column is not projected.
+
 This describes the authored-content and file-binding path, not parity for
 managed document types or destructive document governance.

@@ -2,8 +2,9 @@
 import { describe, expect, test } from "bun:test";
 import type { ModuleOperationContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import { CONTENT_LIMITS } from "./content/index.js";
-import { composeTemplate, materializeFields } from "./content-runtime.js";
+import { materializeFields } from "./content-runtime.js";
 import { contentBlockFromRow } from "./content-snapshot.js";
+import { hashCanonicalJson } from "./content/json.js";
 import { materializeDocument } from "./document-materialize.js";
 
 const ids = {
@@ -29,8 +30,8 @@ const carrier: RuntimeEntityValueCarrier = {
     },
     IncludeBlock: {
       entityName: "IncludeBlock", schemaVersion: 1, definitionHash: "b".repeat(64),
-      fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, variables: "whole", relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object", variables: "both" }],
-      valueSchema: { type: "object", properties: { parameters: { type: "object" } }, additionalProperties: false },
+      fields: [{ key: "version", osfType: "TemplateVersion", baseType: "string", required: true, variables: "whole", relationship: { target: "TemplateVersion" } }, { key: "parameters", osfType: "object", baseType: "object", variables: "both", valueFieldsFrom: { reference: "version", headEntity: "Template", snapshotColumn: "parameters" } }, { key: "content", osfType: "object", baseType: "object" }],
+      valueSchema: { type: "object", properties: { parameters: { type: "object" }, content: { type: "object" } }, additionalProperties: false },
       references: [{ fieldKey: "version", targetEntity: "TemplateVersion", schema: "erp", table: "template_versions", column: "include_version_id", required: true }],
       materializeOperationId: "IncludeBlock.compose",
     },
@@ -60,7 +61,16 @@ function templateSnapshot(templateId: string, variantId: string, blocks: Record<
     ] } } };
 }
 
+/** The complete copy an inclusion stores, `depth` inclusions deep. The source record's hash only matters to a write. */
+function copy(text: string, depth = 0): Record<string, unknown> {
+  const block = depth > 0
+    ? { id: numberedId(8500, depth), definitionKey: "IncludeBlock", schemaVersion: 1, values: { parameters: {}, content: copy(text, depth - 1) }, references: { version: { entity: "TemplateVersion", id: numberedId(8100, depth) } } }
+    : { id: ids.includedBlock, definitionKey: "TextBlock", schemaVersion: 1, values: { markdown: text }, references: {} };
+  return { source: [{ id: block.id, hash: "0".repeat(64) }], blocks: [block] };
+}
+
 function fixture(options: {
+  seeded?: boolean;
   templateVersionId?: string | null;
   parameters?: unknown;
   withInclusion?: boolean;
@@ -81,9 +91,10 @@ function fixture(options: {
     chip: "a".repeat(options.amplifyVariable ? CONTENT_LIMITS.stringCharacters / 2 + 1 : 1),
   };
   const ordinaryBlocks = () => [
-    { id: ids.first, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 0, variant_id: null, origin: "template", template_block_id: ids.templateBlock, diverged: true, locked: false, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.firstText }, include_version_id: null },
-    ...(options.withInclusion || options.inclusionDepth || options.twoInclusions ? [{ id: ids.include, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 1, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "IncludeBlock", definition_version: 1, values: { parameters: options.twoInclusions ? { name: "Ada" } : {} }, include_version_id: options.inclusionDepth ? numberedId(8100, 0) : ids.included }] : []),
-    ...(options.twoInclusions ? [{ id: numberedId(8200, 1), tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 2, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "IncludeBlock", definition_version: 1, values: { parameters: { name: "Grace" } }, include_version_id: ids.included }] : []),
+    // A block the document authored itself binds its variables on every read; one its template seeded holds captured text.
+    { id: ids.first, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 0, variant_id: null, ...(options.seeded ? { origin: "template", template_block_id: ids.templateBlock } : { origin: "local", template_block_id: null }), diverged: false, locked: false, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.firstText }, include_version_id: null },
+    ...(options.withInclusion || options.inclusionDepth || options.twoInclusions ? [{ id: ids.include, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 1, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "IncludeBlock", definition_version: 1, values: { parameters: options.twoInclusions ? { name: "Ada" } : {}, content: copy(options.twoInclusions ? "Included Ada" : data.includedText, options.inclusionDepth ?? 0) }, include_version_id: ids.included }] : []),
+    ...(options.twoInclusions ? [{ id: numberedId(8200, 1), tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 2, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "IncludeBlock", definition_version: 1, values: { parameters: { name: "Grace" }, content: copy("Included Grace") }, include_version_id: ids.included }] : []),
     { id: ids.second, tenant_id: ids.tenant, document_variant_id: ids.documentVariant, document_variant_id_position: 2, variant_id: null, origin: "local", template_block_id: null, diverged: false, locked: false, definition_key: "TextBlock", definition_version: 1, values: { markdown: data.secondText }, include_version_id: null },
   ];
   const documentBlocks = () => !options.aggregateBlockOverflow ? ordinaryBlocks() : Array.from(
@@ -94,7 +105,7 @@ function fixture(options: {
         id: numberedId(8200, index), tenant_id: ids.tenant, document_variant_id: ids.documentVariant,
         document_variant_id_position: index, variant_id: null, origin: "local", template_block_id: null,
         diverged: false, locked: false, definition_key: inclusion ? "IncludeBlock" : "TextBlock", definition_version: 1,
-        values: inclusion ? { parameters: {} } : { markdown: `Block ${index}` }, include_version_id: inclusion ? ids.included : null,
+        values: inclusion ? { parameters: {}, content: copy("Included") } : { markdown: `Block ${index}` }, include_version_id: inclusion ? ids.included : null,
       };
     },
   );
@@ -178,9 +189,9 @@ function fixture(options: {
             return { data: null, operations: [] };
           }
           executions.push({ id: request.operation.id, input: request.input });
-          const result = request.operation.id === "IncludeBlock.compose"
-            ? await composeTemplate(request.input, context as unknown as ModuleOperationContext)
-            : await materializeFields(request.input, context as unknown as ModuleOperationContext);
+          // Reading never runs an inclusion's own Operation: that one prepares a copy for a write.
+          if (request.operation.id === "IncludeBlock.compose") throw new Error("A read prepared an inclusion.");
+          const result = await materializeFields(request.input, context as unknown as ModuleOperationContext);
           if (!("value" in result)) throw new Error(`Materialization refused: ${result.code}`);
           return { data: result.value, operations: [] };
         },
@@ -236,8 +247,14 @@ describe("Document.materialize", () => {
     const rendered = JSON.stringify(snapshot.blocks);
     expect(rendered).toContain("Included Ada");
     expect(rendered).toContain("Included Grace");
-    expect(f.validated).toContainEqual({ name: "Ada" });
-    expect(f.validated).toContainEqual({ name: "Grace" });
+    expect(snapshot.compositions.map((entry: { values: unknown }) => entry.values)).toEqual([{ parameters: { name: "Ada" } }, { parameters: { name: "Grace" } }]);
+    expect(f.reads).toEqual([]);
+  });
+  test("a block the template seeded is captured text: a value that reads like a variable stays as written", async () => {
+    const f = fixture({ seeded: true });
+    const snapshot = (await materializeDocument(request, f.context) as any).value;
+    expect(snapshot.blocks[0].values.markdown).toBe("First {{local.name}}");
+    expect(snapshot.blocks[0].authoredValues.markdown).toBe("First {{local.name}}");
   });
   test("materializes the root from the document's live variants and blocks, not the frozen snapshot", async () => {
     const f = fixture();
@@ -278,37 +295,33 @@ describe("Document.materialize", () => {
     g.data.firstText = "{{page.count}}";
     await expect(materializeDocument(request, g.context)).rejects.toMatchObject({ operationError: { code: "INVALID_VALUE" } });
   });
-  test("resolves an included template version from its frozen snapshot while the root stays live", async () => {
+  test("reads an inclusion from the document's own copy, with no access to its source template", async () => {
     const f = fixture({ withInclusion: true });
     const response = await materializeDocument(request, f.context);
     const snapshot = (response as any).value;
-    // An included template is another template: it keeps its TemplateVersion and Template read checks.
-    expect(f.reads.length).toBeGreaterThan(0);
-    expect(f.reads.every((read) => read === `TemplateVersion:${ids.included}`)).toBe(true);
-    expect(f.authorizations).toContain(`Template:${ids.include}`);
-    expect(f.authorizations).not.toContain(`Template:${ids.template}`);
-    expect(f.queries.filter((query) => query.includes("from erp.document_variants"))).toHaveLength(1);
-    expect(snapshot.templates.map((entry: { version: { id: string } }) => entry.version.id)).toEqual([ids.version, ids.included]);
-    const included = snapshot.templates[1].version;
-    expect(included.variants[0].id).toBe(ids.includedVariant);
-    expect(included.variants[0].blocks[0].id).toBe(ids.includedBlock);
-    expect(JSON.stringify(snapshot)).toContain("Included ");
+    // The copy is the document's content: neither the included version nor its template is read or authorized.
+    expect(f.reads).toEqual([]);
+    expect(f.authorizations).toEqual([`Document:${ids.document}`]);
+    expect(f.executions.map((execution) => execution.id)).not.toContain("IncludeBlock.compose");
+    expect(snapshot.templates.map((entry: { version: { id: string } }) => entry.version.id)).toEqual([ids.version]);
+    expect(snapshot.compositions[0].templateReference).toEqual({ entity: "TemplateVersion", id: ids.included });
+    expect(snapshot.blocks.map((block: { path: string[] }) => block.path)).toEqual([[ids.first], [ids.include, ids.includedBlock], [ids.second]]);
+    // Captured text is data, so the copied block keeps what reads like a variable.
+    expect(snapshot.blocks[1].values.markdown).toBe("Included {{local.name}}");
     expect(JSON.stringify(snapshot)).not.toContain(f.data.frozenText);
   });
-  test("enforces the aggregate block limit through the compiled registry and real block Operation", async () => {
+  test("enforces the aggregate block limit across a document and the copies it holds", async () => {
     const f = fixture({ aggregateBlockOverflow: true });
     await expect(materializeDocument(request, f.context))
       .rejects.toMatchObject({ operationError: { code: "CONTENT_LIMIT_EXCEEDED" } });
-    expect(f.executions).toHaveLength(CONTENT_LIMITS.blocks);
-    expect(f.executions.at(-1)?.id).toBe("IncludeBlock.compose");
+    expect(f.executions).toHaveLength(CONTENT_LIMITS.blocks - 1);
+    expect(f.executions.every((execution) => execution.id === "TextBlock.materialize")).toBe(true);
   });
-  test("enforces template inclusion depth through real compose Operations", async () => {
+  test("enforces the depth budget of nested copies", async () => {
     const f = fixture({ inclusionDepth: CONTENT_LIMITS.templateDepth });
     await expect(materializeDocument(request, f.context))
       .rejects.toMatchObject({ operationError: { code: "CONTENT_LIMIT_EXCEEDED" } });
-    expect(f.executions).toHaveLength(CONTENT_LIMITS.templateDepth + 1);
-    expect(f.executions.filter((execution) => execution.id === "IncludeBlock.compose"))
-      .toHaveLength(CONTENT_LIMITS.templateDepth);
+    expect(f.reads).toEqual([]);
   });
   test("enforces variable amplification before invoking a block Operation", async () => {
     const f = fixture({ amplifyVariable: true });
@@ -332,3 +345,10 @@ describe("Document.materialize", () => {
     expect(f.executions).toHaveLength(0);
   });
 });
+
+ test('linked document preview has document identity and an honest hash while retaining template provenance',async()=>{
+ const f=fixture();const result=await materializeDocument({id:ids.document,channel:'document',locale:'en'},f.context) as any;
+ const {compositionHash,...value}=result.value;
+ expect(value.documentId).toBe(ids.document);expect(value.documentVariantId).toBe(ids.documentVariant);expect(value.templateVersionId).toBe(ids.version);expect(value.compositionHashVersion).toBe('osf-document-content-v1');
+ expect(compositionHash).toBe(await hashCanonicalJson(value,'osf-document-content-v1'));
+ });

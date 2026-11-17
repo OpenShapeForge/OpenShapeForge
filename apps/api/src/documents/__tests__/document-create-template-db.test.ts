@@ -92,7 +92,7 @@ describe("Document.create with a template against PostgreSQL", () => {
     const blocks = (await sql<{ markdown: string }>`select b."values"->>'markdown' as markdown from erp.blocks b
       join erp.document_variants v on v.id = b.document_variant_id where v.document_id = ${created.id}::uuid
       order by b.document_variant_id_position`.execute(privileged())).rows;
-    expect(blocks.map((block) => block.markdown)).toEqual(["Hello {{local.name}}", "Second"]);
+    expect(blocks.map((block) => block.markdown)).toEqual(["Hello Nova Harbor", "Second"]);
   });
 
   test("a create without a template leaves the document unlinked", async () => {

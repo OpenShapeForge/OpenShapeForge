@@ -1,3 +1,4 @@
+import { assertBlockInclusionRemoval } from "@openshapeforge/documents/content-commands";
 // SPDX-License-Identifier: BUSL-1.1
 import { operationErrorOf } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
@@ -254,6 +255,7 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
         tables: catalog.tables,
         ...(catalog.derivedTools ? { entries: catalog.derivedTools } : {}),
       };
+      if (binding.action === "remove" || binding.action === "move") for (const carrier of carriers) await assertBlockInclusionRemoval(carrier, rows.find((row) => row.id === request.childId));
       if (editing) {
         const current = rows.find((row) => row.id === request.childId);
         if (current) {

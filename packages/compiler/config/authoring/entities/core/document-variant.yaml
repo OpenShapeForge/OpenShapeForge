@@ -67,6 +67,16 @@ fields:
         - { value: continuous, label: { en: Continuous, nl: Doorlopend } }
         - { value: pages, label: { en: Pages, nl: "Pagina's" } }
     persisted: { column: page_layout, storageClass: core }
+  - key: pageHeaderEnabled
+    label: { en: Header on every page, nl: Koptekst op elke pagina }
+    osfType: boolean
+    defaultValue: true
+    persisted: { column: page_header_enabled, storageClass: core }
+  - key: pageFooterEnabled
+    label: { en: Footer on every page, nl: Voettekst op elke pagina }
+    osfType: boolean
+    defaultValue: true
+    persisted: { column: page_footer_enabled, storageClass: core }
   - key: pageFormat
     label: { en: Page format, nl: Paginaformaat }
     description:
@@ -219,6 +229,11 @@ interfaces:
     operations:
       update: false
   web:
+    fields:
+      pageHeaderEnabled:
+        render: { component: FieldBoolean, props: {} }
+      pageFooterEnabled:
+        render: { component: FieldBoolean, props: {} }
     operations:
       update: false
     views:
@@ -234,14 +249,14 @@ interfaces:
           tabs:
             - id: variant
               label: { en: Variant, nl: Variant }
-              groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }, { title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]
+              groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }, { title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageHeaderEnabled, pageFooterEnabled, pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]
             - id: blocks
               label: { en: Blocks, nl: Blokken }
               relationship: { name: blocks, view: previewStack }
         modes:
           create:
             title: { en: Create, nl: Toevoegen }
-            groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }, { title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]
+            groups: [{ title: { en: Variant, nl: Variant }, fields: [document, channel, locale] }, { title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageHeaderEnabled, pageFooterEnabled, pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]
           update:
             title: { en: Edit, nl: Bewerken }
-            groups: [{ title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]
+            groups: [{ title: { en: Layout, nl: Indeling }, fields: [pageLayout] }, { title: { en: Page settings, nl: Pagina-instellingen }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }] }, fields: [pageHeaderEnabled, pageFooterEnabled, pageFormat, pageMargin, pageGap, pageBlockGap, pageBackground, pageBackgroundImage, pageBodyAlignment] }, { title: { en: Custom page size, nl: Eigen paginaformaat }, visibleWhen: { conditions: [{ field: pageLayout, operator: eq, value: pages }, { field: pageFormat, operator: eq, value: custom }] }, fields: [pageWidth, pageHeight] }]

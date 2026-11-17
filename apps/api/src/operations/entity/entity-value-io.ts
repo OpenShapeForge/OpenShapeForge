@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { prepareBlockInclusionWrite, retainedInclusionProvenance, type InclusionActor } from "@openshapeforge/documents/content-commands";
 import type { RuntimeEntityValueCarrier, RuntimeEntityValueRegistry } from "@openshapeforge/plugin-runtime";
 import { operationFailure } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
+import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
-import type { DbSessionInput } from "../../db/session.js";
+import { currentDbSessionDatabase, type DbSessionInput } from "../../db/session.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import { projectEntityValue, splitEntityValueInput } from "../../modules/entity-value-input.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../../modules/field-schemas.js";
@@ -21,6 +23,8 @@ export type EntityValueIOContext = {
   registry?: RuntimeEntityValueRegistry;
   tables?: readonly GeneratedCrudTable[];
   derivedTools?: readonly DerivedToolsCatalogEntry[];
+  /** Replaces how the writing session reaches its platform services for an inclusion capture; hosts leave it unset. */
+  inclusionActor?: InclusionActor;
 };
 
 /** Same unsupported policies as the compiler, including inherited/nested fields. */
@@ -132,6 +136,9 @@ export function assertEntityValueInput(table: GeneratedCrudTable, input: Record<
   }
 }
 
+const rowValues = (values: ReadonlyMap<GeneratedCrudColumn, unknown>): Record<string, unknown> =>
+  Object.fromEntries([...values].map(([column, value]) => [column.name, value]));
+
 /** Validate and authorize every reference while holding its row against edits/deletes. */
 export async function prepareEntityValueWriteInTransaction(
   trx: Transaction<DB>, session: DbSessionInput, table: GeneratedCrudTable,
@@ -151,7 +158,12 @@ export async function prepareEntityValueWriteInTransaction(
     result.set(valueColumn, split.values);
     for (const [name, value] of Object.entries(split.columns)) result.set(table.columns.find((column) => column.name === name)!, value);
     const definition = carrier.definitions[String(key)]!;
+    // An inclusion whose stored copy is kept names its source only as provenance: the owning module decides that
+    // from the locked stored row, and then neither the source nor its field definitions are read for this write.
+    // Every other reference of the row, and this one whenever the source is captured, is authorized below.
+    const retained = operation === "update" ? retainedInclusionProvenance(carrier, current, { ...current, ...rowValues(result) }) : undefined;
     for (const reference of split.references) {
+      if (reference.fieldKey === retained?.referenceField) continue;
       const descriptor = definition.references.find((item) => item.fieldKey === reference.fieldKey)!;
       references.push({ ...reference, schema: descriptor.schema, table: descriptor.table });
     }
@@ -166,6 +178,7 @@ export async function prepareEntityValueWriteInTransaction(
       const reference = split.references.find(item => item.fieldKey === binding.reference);
       // Parameter-bound references resolve later when the enclosing template is materialized.
       if (!reference) continue;
+      if (retained && binding.reference === retained.referenceField && field.key === retained.parametersField) continue;
       dynamicValues.push({ entityName: reference.entityName, id: reference.id, headEntity: binding.headEntity,
         snapshotColumn: binding.snapshotColumn, values: split.values[field.key] ?? {}, wholeBindings: field.variables === "whole" || field.variables === "both" });
     }
@@ -201,7 +214,33 @@ export async function prepareEntityValueWriteInTransaction(
     if (snapshot?.schemaVersion !== 1 || snapshot.entity !== dynamic.headEntity || !head || !Object.hasOwn(head, dynamic.snapshotColumn) || !Array.isArray(fields)) throw generatedCrudError("The frozen field definitions are unavailable.", "INVALID_DEFINITION");
     validateFrozenParameterValues(fields, dynamic.values, dynamic.wholeBindings);
   }
+  // The owning module settles what a template inclusion stores (its captured copy and source record) before the
+  // row is written, in this transaction. What it returns replaces the caller's value; a refusal rolls the write back.
+  if (session.tenantId) for (const carrier of entityValueCarriers(table, context.registry)) {
+    const valueColumn = table.columns.find((column) => column.name === carrier.valuesColumn)!;
+    const next = { ...(current ?? {}), ...rowValues(result) };
+    const settled = await prepareBlockInclusionWrite(trx, session.tenantId, carrier, current, next, { actor: context.inclusionActor ?? inclusionActor(session) });
+    if (settled && result.has(valueColumn)) result.set(valueColumn, settled);
+  }
   return result;
+}
+
+/**
+ * The writing session itself, with its own platform services, for a capture
+ * that reads a source template and the records its variables name. The
+ * session is the one this write is already running as: nothing is elevated
+ * and no other principal is constructed. Without a live tenant session the
+ * runtime refuses, and so does the capture.
+ */
+type InclusionActorContext = Parameters<Parameters<InclusionActor>[0]>[0];
+function inclusionActor(session: DbSessionInput): InclusionActor {
+  return async (work) => {
+    const db = currentDbSessionDatabase() as OpenShapeForgeDatabase | undefined;
+    if (!db) throw generatedCrudError("Capturing a template inclusion requires an active transaction.", "INVALID_DEFINITION");
+    // Imported here: the module platform itself dispatches into these entity operations.
+    const { withBlueprintDocumentServices } = await import("../../modules/platform.js");
+    return withBlueprintDocumentServices(db, session, (platform, live) => work({ transport: "operation", platform, session: live } as unknown as InclusionActorContext));
+  };
 }
 
 /** Projection is deliberately before classification redaction, never after it. */

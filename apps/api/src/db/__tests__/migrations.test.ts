@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { SQL } from "bun";
+import { fingerprintSnapshot, parseSnapshot, type PublishedSnapshot } from "@openshapeforge/versioning/snapshot";
 import { type Kysely, sql } from "kysely";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import type { DB } from "../../generated/db/types.js";
@@ -216,7 +217,60 @@ describe("generated schema migration", () => {
           );
         });
 
+        // Carry the previous TextColumns representation forward through the
+        // registered migration, without disabling any immutable/RLS guard.
+        let legacyIds: { tenant: string; template: string; variant: string; block: string; document: string };
+        await withDb(url, async (db) => {
+          const id = () => crypto.randomUUID();
+          legacyIds = { tenant: id(), template: id(), variant: id(), block: id(), document: "" };
+          const ids = legacyIds;
+          await sql`select set_config('app.bypass_rls','true',false), set_config('app.tenant_id',${ids.tenant},false), set_config('app.user_id',${id()},false)`.execute(db);
+          await sql`insert into platform.tenants(id,slug,name,status) values(${ids.tenant}::uuid,${ids.tenant},'Columns upgrade','active')`.execute(db);
+          await sql`insert into erp.tenants(id,tenant_id,slug,name) values(${ids.tenant}::uuid,${ids.tenant}::uuid,${ids.tenant},'Columns upgrade')`.execute(db);
+          await sql`insert into erp.templates(id,tenant_id,key,name,parameters) values(${ids.template}::uuid,${ids.tenant}::uuid,'columns-upgrade','Columns','[]'::jsonb)`.execute(db);
+          await sql`insert into erp.template_variants(id,tenant_id,template_id,channel,locale) values(${ids.variant}::uuid,${ids.tenant}::uuid,${ids.template}::uuid,'document','nl')`.execute(db);
+          // Model the pre-change column-value schema; keep all RLS, ownership,
+          // version immutability and other constraints active.
+          const checks = await sql<{ name: string }>`select conname as name from pg_constraint
+            where conrelid='erp.blocks'::regclass and contype='c' and conname like '%text_columns_values_check%'`.execute(db);
+          for (const check of checks.rows) await sql`alter table erp.blocks drop constraint ${sql.id(check.name)}`.execute(db);
+          const values = { left: 'Preserved text', leftStyle: 'body', right: '' };
+          await sql`insert into erp.blocks(id,tenant_id,variant_id,variant_id_position,definition_key,"values",locked) values(${ids.block}::uuid,${ids.tenant}::uuid,${ids.variant}::uuid,0,'TextColumns',${JSON.stringify(values)}::text::jsonb,true)`.execute(db);
+          const snapshot = { schemaVersion: 1 as const, entity: 'Template', head: { table: 'erp.templates', row: { id: ids.template, tenant_id: ids.tenant }, extensions: { retained: 'Extension content' }, extensionDefinitions: [{ key: 'retained', osfType: 'string' }], children: { blocks: [{ table: 'erp.blocks', row: { id: ids.block, tenant_id: ids.tenant, definition_key: 'TextColumns', values, locked: true }, children: {} }] } } };
+          const frozen = fingerprintSnapshot(snapshot);
+          await sql`insert into erp.template_versions(id,tenant_id,template_id,version_number,snapshot,content_hash,published_by,published_at) values(${id()}::uuid,${ids.tenant}::uuid,${ids.template}::uuid,1,${frozen.canonical}::text::jsonb,${frozen.contentHash},${id()}::uuid,now())`.execute(db);
+          await sql`insert into erp.document_types(tenant_id,code,name) values(${ids.tenant}::uuid,'outgoing_mail','Outgoing mail')`.execute(db);
+          ids.document = (await sql<{ document_id: string }>`select document_id from document_internal.create_with_first_version(${JSON.stringify({title:'Columns upgrade',documentType:'outgoing_mail',status:'draft',isExternal:false})}::text::jsonb,${JSON.stringify({versionLabel:'0',status:'draft',isMajorVersion:false})}::text::jsonb)`.execute(db)).rows[0]!.document_id;
+          const doc = fingerprintSnapshot({ ...snapshot, entity: 'Document', head: { ...snapshot.head, table: 'erp.documents', row: { id: ids.document, tenant_id: ids.tenant } } });
+          await sql`update erp.document_versions set snapshot=${doc.canonical}::text::jsonb, content_hash=${doc.contentHash} where document_id=${ids.document}::uuid`.execute(db);
+          await sql`delete from platform.schema_migrations where version='0029_text-columns-blocks'`.execute(db);
+        });
         const second = await runChain(url);
+        expect(second.versioned.applied).toContain('0029_text-columns-blocks');
+        await withDb(url, async (db) => {
+          const ids = legacyIds!;
+          await sql`select set_config('app.bypass_rls','true',false)`.execute(db);
+          const block = (await sql<{ tenant_id: string; values: { left: { values: unknown }[]; right: unknown[] }; locked: boolean }>`select tenant_id,"values",locked from erp.blocks where id=${ids.block}::uuid`.execute(db)).rows[0]!;
+          expect(block.tenant_id).toBe(ids.tenant);
+          expect(block.locked).toBe(true);
+          expect(block.values.left[0]!.values).toEqual({ markdown: 'Preserved text', style: 'body' });
+          expect(block.values.right).toEqual([]);
+          for (const table of ['template_versions','document_versions']) {
+            const rows = await sql<{ tenant_id: string; snapshot: unknown; content_hash: string }>`select tenant_id,snapshot,content_hash from ${sql.id('erp',table)} where tenant_id=${ids.tenant}::uuid`.execute(db);
+            expect(rows.rows).toHaveLength(1);
+            for (const row of rows.rows) {
+              expect(row.tenant_id).toBe(ids.tenant);
+              parseSnapshot(row.snapshot);
+              const frozen = fingerprintSnapshot(row.snapshot as PublishedSnapshot);
+              expect((row.snapshot as any).head.extensions).toEqual({ retained: 'Extension content' });
+              expect((row.snapshot as any).head.extensionDefinitions).toEqual([{ key: 'retained', osfType: 'string' }]);
+              expect(row.content_hash).toBe(frozen.contentHash);
+              expect(JSON.stringify(row.snapshot)).toContain('Preserved text');
+              expect((row.snapshot as any).head.children.blocks[0].row.values.left[0].values).toEqual({ markdown:'Preserved text', style:'body' });
+            }
+          }
+        });
+        expect((await runChain(url)).versioned.skipped).toContain('0029_text-columns-blocks');
         expect(second.applied).toBe(false);
         expect(second.checksum).toBe(manifest.checksum);
       });

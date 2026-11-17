@@ -187,6 +187,11 @@ components:
     description: Read-only color swatch with the hex value available on hover.
     props: []
 
+  IconPicker:
+    kind: field
+    description: Searchable icon selection with artwork loaded on demand.
+    props: []
+
   ColorPicker:
     kind: field
     description: Color picker for a hex color value.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import {expect,test} from 'bun:test';
 import {catalog} from '../catalog.js';
 import {staticToolCall} from '../dispatch-static-tools.js';

@@ -2,16 +2,15 @@
 import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices, rows } from "./commands.js";
 import { blockCollection, canonicalReader, compiledContentRegistry, pathResolver, contentCarrier, contentFailure, contentResolvers, DEFINITION_VERSION_COLUMN } from "./content-runtime.js";
-import { contentBlockFromRow, type BlockRowSelection } from "./content-snapshot.js";
-import { immutableContent, type JsonObject } from "./content/json.js";
+import { contentBlockFromRow, DOCUMENT_BLOCK_OWNER_COLUMN, type BlockRowSelection } from "./content-snapshot.js";
+import { immutableContent, hashCanonicalJson, type JsonObject } from "./content/json.js";
 import { materializeTemplateContent, materializeDocumentContent } from "./content/materialize.js";
 import type { ContentResolvers, ContentTemplateVariant } from "./content/types.js";
 import { variantPageValues } from "./page/html.js";
 import { object, refuse, text, uuid } from "./validation.js";
 
 type DocumentRow = Readonly<{ id: string; template_version_id: string | null; parameters: unknown }>;
-/** Owning foreign key of a document block (entities/core/block.yaml, `documentVariant`). */
-const BLOCK_OWNER_COLUMN = "document_variant_id";
+const BLOCK_OWNER_COLUMN = DOCUMENT_BLOCK_OWNER_COLUMN;
 
 /**
  * The document head's variants for one channel, every locale, with their
@@ -25,7 +24,7 @@ const BLOCK_OWNER_COLUMN = "document_variant_id";
 export async function documentContentVariants(trx: unknown, document: { readonly id: string; readonly channel: string; readonly defaultLocales?: ReadonlySet<string>; readonly templatePages?: (locale: string) => JsonObject | undefined },
   selection: BlockRowSelection, allowedDefinitions: readonly string[]): Promise<readonly ContentTemplateVariant[]> {
   const variants = await rows<{ id: string; channel: string; locale: string } & Record<string, unknown>>(trx,
-    "select id, channel, locale, page_layout, page_format, page_width, page_height, page_margin, page_gap, page_block_gap, page_background, page_background_image, page_body_alignment from erp.document_variants where tenant_id = $1 and document_id = $2 and channel = $3 order by locale, id for share",
+    "select id, channel, locale, page_layout, page_format, page_width, page_height, page_margin, page_gap, page_block_gap, page_background, page_background_image, page_body_alignment, page_header_enabled, page_footer_enabled from erp.document_variants where tenant_id = $1 and document_id = $2 and channel = $3 order by locale, id for share",
     [selection.tenantId, document.id, document.channel]);
   const result: ContentTemplateVariant[] = [];
   for (const variant of variants) {
@@ -98,7 +97,13 @@ export const materializeDocument: ModuleOperationHandler = async (input, context
           return { ...version, variants: await documentContentVariants(trx, { id: documentId, channel, defaultLocales, templatePages }, selection, documentCollection.allowedDefinitions) };
         },
       };
-      return materializeTemplateContent({ tenantId, templateVersionId, channel, locale, parameters }, registry, resolvers);
+      const resolved = await materializeTemplateContent({ document: true, tenantId, templateVersionId, channel, locale, parameters }, registry, resolvers);
+      // A linked document keeps its template provenance, but its editable content
+      // and images belong to the document, exactly as for an unlinked document.
+      const { compositionHash: _templateHash, ...content } = resolved;
+      const documentVariantId = resolved.templates.find(template => template.path.length === 0)!.variantId;
+      const snapshot = immutableContent({...content, documentId, documentVariantId, compositionHashVersion: "osf-document-content-v1" as const});
+      return immutableContent({...snapshot, compositionHash: await hashCanonicalJson(snapshot, snapshot.compositionHashVersion)});
     });
     return { value: snapshot };
   } catch (error) {

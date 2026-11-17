@@ -22,7 +22,7 @@ export function typedSchema(block: MaterializedContentBlock, definitions: Compil
 }
 
 function pageBlock(block: MaterializedContentBlock, definitions: CompiledContentBlockRegistry, locale: string): PageBlock {
-  const values = block.materialization?.result.kind === "block" ? block.materialization.result.value : block.values;
+  const values = block.columns ? {...block.values,...Object.fromEntries(Object.entries(block.columns).map(([slot, children])=>[slot,children.map(child=>pageBlock(child,definitions,locale))]))} : block.materialization?.result.kind === "block" ? block.materialization.result.value : block.values;
   const schema = typedSchema(block, definitions);
   return { ...(schema ? { typed: { schema, locale } } : {}),
     id: block.id, definitionKey: block.definitionKey, values: values as Record<string, unknown>,
@@ -71,11 +71,12 @@ export const renderDocumentPages: ModuleOperationHandler = async (input, context
   const layouts: Record<string, Readonly<Record<string, unknown>>> = {};
   // A document that follows no template carries its own page settings.
   if ("page" in content && content.page) layouts[""] = content.page;
-  // Every template the content was built from, the document's own first, under the scope its blocks carry.
+  // The document's own template first, then every inclusion that captured pages of its own, under the scope its blocks carry.
   for (const template of content.templates) {
     const page = template.version.variants[0]?.page;
     if (page) layouts[template.path.join("/")] = page;
   }
+  for (const inclusion of content.compositions) if (inclusion.page) layouts[inclusion.path.join("/")] = inclusion.page;
   // A page's background is a color of the organization's palette or a standard one, read live like the theme's.
   if (Object.values(layouts).some((layout) => typeof layout.background === "string")) {
     const listed = await platform.operations.execute(session, { operation: { id: "colors.list", intent: "invoke" }, input: {} });

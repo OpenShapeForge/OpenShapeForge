@@ -59,6 +59,9 @@ export type PageAsset = Readonly<{
 /** What a document's page settings decide for its pages. */
 export type PageSettings = Readonly<{
   layout: string;
+  /** Whether this section repeats the authored region on each page. */
+  headerEnabled?: boolean;
+  footerEnabled?: boolean;
   margin: number;
   gap: number;
   blockGap: number;

@@ -28,7 +28,8 @@ import type { GraphqlCorsPolicy } from "@openshapeforge/observability/yoga";
 import Fastify from "fastify";
 import { readApiLimits } from "../config/limits.js";
 import { readGraphqlCorsPolicy } from "../config/graphql-cors.js";
-import { CLIENT_ADDRESS_HEADER } from "../auth/api-key/restrictions.js";
+import { CLIENT_ADDRESS_HEADER, REQUEST_TARGET_HEADER, requestTarget } from "../auth/api-key/restrictions.js";
+import { registerApiKeyCors } from "../rest/api-key-cors.js";
 import {
   ORGANIZATION_ADDRESS_HEADER,
   organizationAddressOf,
@@ -283,7 +284,14 @@ export function createApiApp(options: {
     // overwritten, so whatever a client sent under this name is discarded.
     if (request.ip) request.headers[CLIENT_ADDRESS_HEADER] = request.ip;
     else delete request.headers[CLIENT_ADDRESS_HEADER];
+    // The routed request, for a browser key's endpoint allowlist: the path
+    // after the short-address rewrite, never a value the client chose.
+    request.headers[REQUEST_TARGET_HEADER] = requestTarget(request.method, request.url ?? "/");
   });
+
+  // Browser API keys: the generic REST preflight and the per-key response
+  // header (rest/api-key-cors.ts). GraphQL keeps its own policy.
+  registerApiKeyCors(app);
 
   // Request-rate boundary, before GraphQL/REST execution — that ordering is
   // what protects the authentication path itself, so the tier is decided from

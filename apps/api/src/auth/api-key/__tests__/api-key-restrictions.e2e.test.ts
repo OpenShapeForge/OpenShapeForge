@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * End-to-end proof for WHERE an integration key may be used from
- * (auth/api-key/restrictions.ts), against a real realm and database:
+ * End-to-end proof for WHERE an integration key may be used from and what a
+ * browser key may call (auth/api-key/restrictions.ts), against a real realm
+ * and database:
  *
  *   - an IP allowlist admits the listed networks and refuses the rest, the
  *     address being the one the API derived through its trusted proxy hop and
  *     never one a client names;
- *   - the allowlist is edited on the integration and applies to its keys on
- *     their next request;
- *   - a key is refused whenever a browser presents it, and the browser gets
- *     no CORS header to read anything with.
+ *   - a server key is refused whenever a browser presents it;
+ *   - a browser key works only from its web sites and only on its listed
+ *     endpoints (deny by default), gets the CORS handshake there, and cannot
+ *     reach GraphQL or any other route by naming an allowed site;
+ *   - the lists are edited on the integration and apply on the next request.
  *
  * Needs the compose Keycloak (8181) with the generated test realm, and a
  * migrated database. Skips wholesale when either is missing.
@@ -26,9 +28,11 @@ const DATABASE_URL =
 const ROLE_CLIENT = "erp-provider";
 const MANAGE_ROLE = "Platform.ApiKeys.Manage";
 const READ_ROLE = "Relations.All.Read";
+const WRITE_ROLE = "Relations.All.ReadWrite";
 const ADMIN_CLIENT = "openshapeforge-apikey-provisioner";
 const ADMIN_SECRET = process.env.E2E_KEYCLOAK_ADMIN_SECRET ?? "openshapeforge-apikey-provisioner-secret";
 const SHOP = "https://shop.example.com";
+const OTHER_SITE = "https://evil.example.com";
 
 async function discoverIssuer(): Promise<string | null> {
   try {
@@ -115,7 +119,7 @@ async function prepareRealm(): Promise<boolean> {
   const roleClient = ((await (await realmAdmin("GET", `/clients?clientId=${ROLE_CLIENT}`)).json()) as Array<{ id: string }>)[0];
   const user = ((await (await realmAdmin("GET", "/users?username=tenant-a-admin&exact=true")).json()) as Array<{ id: string }>)[0];
   if (!roleClient || !user) return false;
-  const wanted = [MANAGE_ROLE, READ_ROLE];
+  const wanted = [MANAGE_ROLE, READ_ROLE, WRITE_ROLE];
   const roles = (await (await realmAdmin("GET", `/clients/${roleClient.id}/roles?max=2000`)).json()) as Array<{ id: string; name: string }>;
   for (const name of wanted) {
     if (!roles.some((role) => role.name === name)) await realmAdmin("POST", `/clients/${roleClient.id}/roles`, { name });
@@ -212,18 +216,49 @@ function read(secret: string, headers: Record<string, string> = {}) {
 
 const code = (response: { body: string }) => (JSON.parse(response.body) as { error?: { code?: string } }).error?.code;
 
+async function graphqlWrite(secret: string, headers: Record<string, string> = {}) {
+  const response = await app!.inject({
+    method: "POST",
+    url: "/api/graphql",
+    headers: { "content-type": "application/json", authorization: `Bearer ${secret}`, ...headers },
+    payload: JSON.stringify({
+      query: `mutation { createRelation(input: { displayName: "rk-${randomUUID().slice(0, 8)}", relationType: "person" }) { data { id } error { code } } }`,
+    }),
+  });
+  const body = JSON.parse(response.body) as {
+    error?: { code?: string };
+    errors?: Array<{ extensions?: { code?: string } }>;
+    data?: { createRelation?: { data?: { id?: string } | null; error?: { code?: string } | null } | null } | null;
+  };
+  return {
+    status: response.statusCode,
+    code: body.error?.code ?? body.errors?.[0]?.extensions?.code ?? body.data?.createRelation?.error?.code,
+    id: body.data?.createRelation?.data?.id,
+  };
+}
+
+const RELATIONS = `${REST_MOUNT_PATH}/relations`;
+
 describe.skipIf(!ready)("API key restrictions end to end", () => {
-  test("an invalid address, or a web site, is refused when the integration is created", async () => {
-    expect((await catalog("create", { displayName: "bad ip", roles: [READ_ROLE], allowedIps: ["example.com"] })).status).toBe(400);
-    expect((await catalog("create", { displayName: "bad range", roles: [READ_ROLE], allowedIps: ["10.0.0.0/33"] })).status).toBe(400);
-    // Web sites are not a thing an API key can be configured with.
-    expect((await catalog("create", { displayName: "site", roles: [READ_ROLE], allowedOrigins: [SHOP] })).status).toBe(400);
-  }, 30_000);
+  test("invalid addresses, web sites and endpoints are refused when the integration is created", async () => {
+    for (const restriction of [
+      { allowedIps: ["example.com"] },
+      { allowedIps: ["10.0.0.0/33"] },
+      { allowedOrigins: ["http://shop.example.com"] },
+      { allowedOrigins: ["https://*.example.com"] },
+      { allowedEndpoints: ["/api/rest/v1/relations"] },
+      { allowedEndpoints: ["POST /api/graphql"] },
+      { allowedEndpoints: ["POST /api/api-key-integrations/create"] },
+    ]) {
+      expect((await catalog("create", { displayName: "invalid", roles: [READ_ROLE], ...restriction })).status).toBe(400);
+    }
+  }, 60_000);
 
   test("an IP allowlist admits only its networks, through the trusted proxy hop", async () => {
     const created = await integration({ roles: [READ_ROLE], allowedIps: ["203.0.113.0/24"] });
     expect(created.integration.allowedIps).toEqual(["203.0.113.0/24"]);
-    expect(created.integration.allowedOrigins).toBeUndefined();
+    expect(created.integration.allowedOrigins).toEqual([]);
+    expect(created.integration.allowedEndpoints).toEqual([]);
 
     const outside = await read(created.secret);
     expect(outside.statusCode).toBe(403);
@@ -241,20 +276,83 @@ describe.skipIf(!ready)("API key restrictions end to end", () => {
     expect((await read(created.secret)).statusCode).toBe(200);
   }, 60_000);
 
-  test("a key is refused when a browser presents it, and the browser can read nothing", async () => {
-    const created = await integration({ roles: [READ_ROLE], allowedIps: ["203.0.113.0/24"] });
-    expect((await read(created.secret, { "x-forwarded-for": "203.0.113.9" })).statusCode).toBe(200);
-    const fromBrowser = await read(created.secret, { "x-forwarded-for": "203.0.113.9", origin: SHOP });
+  test("a server key is refused when a browser presents it", async () => {
+    const created = await integration({ roles: [READ_ROLE] });
+    expect((await read(created.secret)).statusCode).toBe(200);
+    const fromBrowser = await read(created.secret, { origin: SHOP });
     expect(fromBrowser.statusCode).toBe(403);
     expect(code(fromBrowser)).toBe("API_KEY_RESTRICTED");
-    expect(fromBrowser.headers["access-control-allow-origin"]).toBeUndefined();
+  }, 30_000);
 
-    // No preflight is answered for the REST surface either.
+  test("a browser key calls only its listed endpoints, from its own sites, and nothing else", async () => {
+    const created = await integration({
+      roles: [READ_ROLE, WRITE_ROLE],
+      allowedOrigins: [SHOP],
+      allowedEndpoints: ["get /api/rest/v1/relations"],
+    });
+    expect(created.integration.allowedOrigins).toEqual([SHOP]);
+    expect(created.integration.allowedEndpoints).toEqual(["GET /api/rest/v1/relations"]);
+
+    // The preflight carries no key, so it is answered generically and never with credentials.
     const preflight = await app!.inject({
       method: "OPTIONS",
-      url: `${REST_MOUNT_PATH}/relations`,
+      url: RELATIONS,
       headers: { origin: SHOP, "access-control-request-method": "GET", "access-control-request-headers": "authorization" },
     });
-    expect(preflight.headers["access-control-allow-origin"]).toBeUndefined();
-  }, 30_000);
+    expect(preflight.statusCode).toBe(204);
+    expect(preflight.headers["access-control-allow-origin"]).toBe(SHOP);
+    expect(preflight.headers["access-control-allow-credentials"]).toBeUndefined();
+    const graphqlPreflight = await app!.inject({
+      method: "OPTIONS",
+      url: "/api/graphql",
+      headers: { origin: SHOP, "access-control-request-method": "POST" },
+    });
+    expect(graphqlPreflight.headers["access-control-allow-origin"]).toBeUndefined();
+
+    // The one listed endpoint, from the listed site.
+    const listed = await read(created.secret, { origin: SHOP });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers["access-control-allow-origin"]).toBe(SHOP);
+    expect(listed.headers["access-control-allow-credentials"]).toBeUndefined();
+
+    // Not listed: another endpoint, GraphQL (even a write its roles allow), a non-Operation route.
+    const other = await app!.inject({
+      method: "GET", url: `${RELATIONS}/${randomUUID()}`, headers: { authorization: `Bearer ${created.secret}`, origin: SHOP },
+    });
+    expect(other.statusCode).toBe(403);
+    expect(code(other)).toBe("API_KEY_RESTRICTED");
+    const write = await graphqlWrite(created.secret, { origin: SHOP });
+    expect(write.id).toBeUndefined();
+    expect(write.code).toBe("API_KEY_RESTRICTED");
+    const lease = await app!.inject({
+      method: "POST",
+      url: "/api/operation-leases",
+      headers: { "content-type": "application/json", authorization: `Bearer ${created.secret}`, origin: SHOP },
+      payload: JSON.stringify({ operationId: "relations.update", targetId: randomUUID() }),
+    });
+    expect(lease.statusCode).toBe(403);
+    expect(code(lease)).toBe("API_KEY_RESTRICTED");
+
+    // Another site, or none at all: refused.
+    expect((await read(created.secret, { origin: OTHER_SITE })).statusCode).toBe(403);
+    expect((await read(created.secret)).statusCode).toBe(403);
+
+    // Editing one list leaves the others as they were.
+    const fenced = await restrict(created.id, { allowedIps: ["203.0.113.0/24"] });
+    expect(fenced.body.allowedOrigins).toEqual([SHOP]);
+    expect(fenced.body.allowedEndpoints).toEqual(["GET /api/rest/v1/relations"]);
+    expect((await read(created.secret, { origin: SHOP })).statusCode).toBe(403);
+    expect((await read(created.secret, { origin: SHOP, "x-forwarded-for": "203.0.113.9" })).statusCode).toBe(200);
+
+    // Deny by default: with no endpoints listed it calls nothing.
+    expect((await restrict(created.id, { allowedIps: [], allowedEndpoints: [] })).status).toBe(200);
+    const nothing = await read(created.secret, { origin: SHOP });
+    expect(nothing.statusCode).toBe(403);
+    expect(code(nothing)).toBe("API_KEY_RESTRICTED");
+
+    // No web sites: a server key again, which writes and is refused from browsers.
+    expect((await restrict(created.id, { allowedOrigins: [] })).status).toBe(200);
+    expect((await graphqlWrite(created.secret)).id).toBeDefined();
+    expect((await read(created.secret, { origin: SHOP })).statusCode).toBe(403);
+  }, 90_000);
 });

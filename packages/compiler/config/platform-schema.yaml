@@ -743,6 +743,15 @@ tables:
       # ranges. NULL (or empty) means any address. Checked on every request
       # against the address the API derived through its trusted proxy hops.
       - { name: allowed_ips, type: jsonb }
+      # Optional web sites: a JSON array of exact origins
+      # (`https://shop.example.com`). Non-empty makes every key of this
+      # integration a BROWSER key: usable only from those sites, and only for
+      # the endpoints in `allowed_endpoints` (deny by default). NULL (or
+      # empty) is a server key, which a browser request is refused.
+      - { name: allowed_origins, type: jsonb }
+      # The endpoints a browser key may call, as `<GET|POST> /api/<path>`
+      # with `:name` segments. Empty means nothing. Ignored for a server key.
+      - { name: allowed_endpoints, type: jsonb }
       - { name: created_by, type: uuid, required: true }
       - { name: created_at, type: timestamptz, required: true, default: now() }
       - { name: updated_at, type: timestamptz, required: true, default: now() }

@@ -244,10 +244,18 @@ function allowlist(value: unknown, name: string): { present: boolean; list: stri
   return { present: true, list: value as string[] };
 }
 
-/** The create-time allowlist field, spread into a service input. */
-function restrictionInput(input: Record<string, unknown>) {
-  const ips = allowlist(input.allowedIps, "allowedIps");
-  return ips.present ? { allowedIps: ips.list } : {};
+/**
+ * The allowlist fields present in the input, spread into a service input. An
+ * absent list stays absent: on an edit that means "unchanged".
+ */
+function restrictionInput(input: Record<string, unknown>, integration: boolean) {
+  const names = integration ? ["allowedIps", "allowedOrigins", "allowedEndpoints"] as const : ["allowedIps"] as const;
+  const fields: Partial<Record<"allowedIps" | "allowedOrigins" | "allowedEndpoints", string[]>> = {};
+  for (const name of names) {
+    const parsed = allowlist(input[name], name);
+    if (parsed.present) fields[name] = parsed.list;
+  }
+  return fields;
 }
 
 /**
@@ -296,6 +304,8 @@ type ProjectedIntegration = {
   status: ListedIntegration["status"];
   grantedRoles: string[];
   allowedIps: string[];
+  allowedOrigins: string[];
+  allowedEndpoints: string[];
   credentialCount: number;
   activeCredentialCount: number;
   createdAt: string;
@@ -309,6 +319,8 @@ function projectIntegration(integration: ListedIntegration): ProjectedIntegratio
     status: integration.status,
     grantedRoles: integration.grantedRoles,
     allowedIps: integration.allowedIps,
+    allowedOrigins: integration.allowedOrigins,
+    allowedEndpoints: integration.allowedEndpoints,
     credentialCount: integration.keyCount,
     activeCredentialCount: integration.activeKeyCount,
     createdAt: integration.createdAt.toISOString(),
@@ -518,7 +530,7 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
         displayName: text(input.displayName),
         ...(input.expiresInDays === undefined ? {} : { expiresInDays: input.expiresInDays as number }),
         ...(input.roleSubset === undefined ? {} : { roleSubset: roleList(input.roleSubset, "roleSubset") }),
-        ...restrictionInput(input),
+        ...restrictionInput(input, false),
       }, now);
       return oneTimeCredential({
         key: projectPersonalKey(created.key, now),
@@ -635,7 +647,7 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
         ...(input.roleSubset === undefined
           ? {}
           : { roleSubset: roleList(input.roleSubset, "roleSubset") }),
-        ...restrictionInput(input),
+        ...restrictionInput(input, true),
       }, now);
       // The metadata comes out of the SAME transaction that minted the
       // credential, not from a read-back after it. A read-back is a step
@@ -652,6 +664,8 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
           status: created.integration.status,
           grantedRoles: created.integration.grantedRoles,
           allowedIps: created.integration.allowedIps,
+          allowedOrigins: created.integration.allowedOrigins,
+          allowedEndpoints: created.integration.allowedEndpoints,
           createdAt: created.integration.createdAt.toISOString(),
         },
         credential: mintedCredential(created),
@@ -713,10 +727,10 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
     const resolved = resolve(context);
     if (isFailure(resolved)) return resolved;
     try {
-      // The complete new lists; an omitted list clears that restriction.
+      // Each list given replaces that list whole; an omitted list is unchanged.
       const updated = await updateIntegrationRestrictions(resolved.deps, resolved.session, {
         integrationId: text(input.integrationId),
-        allowedIps: allowlist(input.allowedIps, "allowedIps").list,
+        ...restrictionInput(input, true),
       });
       return { value: projectIntegration(updated) };
     } catch (error) {

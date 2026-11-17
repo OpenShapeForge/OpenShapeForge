@@ -137,18 +137,31 @@ describe("document content against PostgreSQL", () => {
     // An older published version links too; nothing but a link moves a document to another version.
     await linked(handlers, context, { id: documentId, templateVersionId: firstVersion, parameters: { name: "Reader" } });
     const nl = await variant(documentId, "document", "nl");
-    await collections(restricted(), dbInput(editor), binding("insert"), { id: nl.id, expectedVersion: nl.updated_at, values: { definitionKey: "TextBlock", values: { markdown: "Mine" } } });
-    // Same template, newer version: followed, the local block survives.
+    const seeded = await variantBlocks(nl.id);
+    const inserted = await collections(restricted(), dbInput(editor), binding("insert"), { id: nl.id, expectedVersion: nl.updated_at, values: { definitionKey: "TextBlock", values: { markdown: "Mine" } } });
+    await collections(restricted(), dbInput(editor), binding("update"), { id: nl.id, expectedVersion: (await variant(documentId, "document", "nl")).updated_at, childId: seeded[1]!.id, values: { values: { markdown: "Second, edited here" } } });
+    // Same template, newer version: followed, the local block and the local edit survive.
     await linked(handlers, context, { id: documentId, templateVersionId: secondVersion });
-    expect((await variantBlocks(nl.id)).map((block) => block.markdown)).toEqual(["Changed", "Second", "Mine"]);
-    // Another template: refused while local blocks exist, replaced on request.
+    expect((await variantBlocks(nl.id)).map((block) => block.markdown)).toEqual(["Changed", "Second, edited here", "Mine"]);
+    // Another template: refused until replacement is chosen, and then nothing was changed.
+    const untouched = await variantBlocks(nl.id);
     await fails(handlers.linkTemplate!({ id: documentId, templateVersionId: otherVersion }, context), "INVALID_STATE");
     expect((await document(documentId)).template_version_id).toBe(secondVersion);
+    expect(await variantBlocks(nl.id)).toEqual(untouched);
+    // Replaced on request: the document keeps its variant and what was written in it. The edited block stays as a
+    // marked local edit and the inserted block stays the same row; only the untouched text of the template that
+    // was left goes, and the new template's blocks follow, captured with the document's values.
     const replaced = await linked(handlers, context, { id: documentId, templateVersionId: otherVersion, replace: true });
     expect(replaced.templateVersionId).toBe(otherVersion);
-    const fresh = await variant(documentId, "document", "nl");
-    expect(fresh.id).not.toBe(nl.id);
-    expect(shape(await variantBlocks(fresh.id))).toEqual([["template", other.first, false, "Hello Reader"], ["template", other.second, false, "Second"]]);
+    expect((await variants(documentId)).map((entry) => entry.id)).toEqual([nl.id]);
+    const kept = await variantBlocks(nl.id);
+    expect(shape(kept)).toEqual([
+      ["template", ids.second, true, "Second, edited here"], ["local", null, false, "Mine"],
+      ["template", other.first, false, "Hello Reader"], ["template", other.second, false, "Second"],
+    ]);
+    expect(kept.slice(0, 2).map((block) => block.id)).toEqual([seeded[1]!.id, inserted.childId]);
+    expect(kept.map((block) => block.markdown)).not.toContain("Changed");
+    expect(await document(documentId)).toMatchObject({ template_version_id: otherVersion, follow_error: null, parameters: { name: "Reader" } });
     // An unknown version is reported missing. (A TemplateVersion is published by construction: its status
     // admits no other value, so the unpublished refusal cannot be provoked on a real row.)
     await fails(handlers.linkTemplate!({ id: documentId, templateVersionId: randomUUID() }, context), "NOT_FOUND");

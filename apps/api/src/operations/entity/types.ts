@@ -10,6 +10,7 @@ import type {
   OperationAccepted,
   OperationResult,
 } from "@openshapeforge/operations";
+import type { RuntimeOperationSecureInput } from "@openshapeforge/plugin-runtime";
 
 export type GeneratedCrudOperation = "read" | "create" | "update" | "delete";
 export type GeneratedCrudExposureOperation = "list" | "get" | "create" | "update" | "delete";
@@ -215,13 +216,7 @@ export type GeneratedCrudTable = {
     crud?: {
       operations: Record<GeneratedCrudExposureOperation, boolean>;
     };
-    secureInputOnCreate?: {
-      sourceField: string;
-      sourceEntity: string;
-      definitionsField: string;
-      into: string;
-      message?: string;
-    };
+    secureInputOnCreate?: Omit<RuntimeOperationSecureInput, "type">;
     graphql?: {
       typeName: string;
       singleQueryName: string;
@@ -241,13 +236,7 @@ export type GeneratedCrudTable = {
       toolPrefix: string;
       tools: "dedicated" | "generic";
       operations: Record<GeneratedCrudExposureOperation, boolean>;
-      elicitOnCreate?: {
-        sourceField: string;
-        sourceEntity: string;
-        definitionsField: string;
-        into: string;
-        message?: string;
-      };
+      elicitOnCreate?: Omit<RuntimeOperationSecureInput, "type">;
     };
     authorization?: GeneratedCrudAuthorization;
   };
@@ -324,14 +313,7 @@ export type EntityOperationContract = EntityOperationRef & {
   }[];
   interaction: {
     confirmation: OperationConfirmation;
-    secureInput?: {
-      type: "secureInput";
-      sourceField: string;
-      sourceEntity: string;
-      definitionsField: string;
-      into: string;
-      message?: string;
-    };
+    secureInput?: RuntimeOperationSecureInput;
   };
 };
 

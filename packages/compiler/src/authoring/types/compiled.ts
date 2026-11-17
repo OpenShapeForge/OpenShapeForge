@@ -272,13 +272,7 @@ export interface McpSection {
     templateDescription?: string;
   };
   /** Authored create-time elicitation config, validated at compile. */
-  elicitOnCreate?: {
-    sourceField: string;
-    sourceEntity: string;
-    definitionsField: string;
-    into: string;
-    message?: string;
-  };
+  elicitOnCreate?: Omit<EntityOperationSecureInput, "type">;
 }
 
 export interface RestSection {
@@ -375,14 +369,7 @@ export type CompiledEntityOperation = OperationReference<EntityOperationIntent> 
   concurrency?: OperationConcurrency;
   interaction: {
     confirmation: OperationConfirmation;
-    secureInput?: {
-      type: "secureInput";
-      sourceField: string;
-      sourceEntity: string;
-      definitionsField: string;
-      into: string;
-      message?: string;
-    };
+    secureInput?: EntityOperationSecureInput;
   };
 };
 

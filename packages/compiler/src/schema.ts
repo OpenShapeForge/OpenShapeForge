@@ -512,13 +512,7 @@ export type TableSourceDefinition = {
    * sub-object below temporarily mirrors this metadata for its existing
    * secure browser/client handoff runtime.
    */
-  secureInputOnCreate?: {
-    sourceField: string;
-    sourceEntity: string;
-    definitionsField: string;
-    into: string;
-    message?: string;
-  };
+  secureInputOnCreate?: Omit<import("./authoring/types/authoring.js").EntityOperationSecureInput, "type">;
   /**
    * Opt-in generated REST exposure for this table. Present only when the
    * authoring entity declared a `rest:` block AND the table is generated-CRUD
@@ -563,13 +557,7 @@ export type TableSourceDefinition = {
      * runtime consumes `into` to project encrypted values as set markers on
      * every output path; the remaining fields drive MCP's create handoff.
      */
-    elicitOnCreate?: {
-      sourceField: string;
-      sourceEntity: string;
-      definitionsField: string;
-      into: string;
-      message?: string;
-    };
+    elicitOnCreate?: Omit<import("./authoring/types/authoring.js").EntityOperationSecureInput, "type">;
   };
   /**
    * Per-operation entity role allow-lists, bridged from the authored

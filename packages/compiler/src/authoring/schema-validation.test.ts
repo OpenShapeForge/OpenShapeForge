@@ -866,6 +866,46 @@ describe("coreEntity properties the compiler implements", () => {
     );
   });
 
+  it("accepts static secure input on create and its reference form on update", () => {
+    const interaction: Record<string, unknown> = {
+      type: "secureInput",
+      into: "secrets",
+      fields: [
+        { key: "apiKey", osfType: "string", required: true, label: { en: "API key" }, classification: { sensitivity: "confidential" } },
+      ],
+      resolve: { operations: ["SecureEndpoint.send", "fixture.send"], egress: { urlField: "url" } },
+    };
+    const document = coreEntity({
+      schemaVersion: 3,
+      fields: [
+        { key: "url", osfType: "string" },
+        { key: "secrets", osfType: "object" },
+      ],
+      operations: {
+        create: { ...v2Operation("create"), interaction },
+        update: { ...v2Operation("update"), interaction: { type: "secureInput", into: "secrets" } },
+      },
+      interfaces: { rest: {}, graphql: {}, mcp: {} },
+    });
+    const valid = () => validator.validate(document, "secure-endpoint.yaml");
+
+    expect(valid()).toBe("core-entity.schema.json");
+    // A static form never also names a source, and declares only primitives.
+    interaction.sourceEntity = "Adapter";
+    expect(valid).toThrow(/interaction/);
+    delete interaction.sourceEntity;
+    (interaction.fields as Record<string, unknown>[])[0]!.osfType = "object";
+    expect(valid).toThrow(/interaction/);
+    (interaction.fields as Record<string, unknown>[])[0]!.osfType = "string";
+    interaction.fields = [];
+    expect(valid).toThrow(/interaction/);
+    interaction.fields = [{ key: "apiKey", osfType: "string" }];
+    interaction.resolve = { operations: ["send"], egress: { urlField: "url" } };
+    expect(valid).toThrow(/interaction/);
+    interaction.resolve = { operations: ["SecureEndpoint.send"] };
+    expect(valid).toThrow(/interaction/);
+  });
+
   it("accepts login-session prerequisites only on a v2 entity create Operation", () => {
     const create = {
       ...v2Operation("create"),

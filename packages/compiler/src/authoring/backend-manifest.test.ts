@@ -481,6 +481,24 @@ describe("generated REST exposure (source.rest bridge)", () => {
     expect(table?.source?.graphql?.operations?.create).toBe(true);
   });
 
+  it("emits static secure input with its fields and resolve policy, without a source", () => {
+    const manifest = compileRestFixtures(["secure-endpoint"], {
+      generatedCrudAllowlist: ["secure-endpoint"],
+    });
+    const table = tableByName(manifest, "secure_endpoints");
+    const expected: NonNullable<NonNullable<typeof table>["source"]>["secureInputOnCreate"] = {
+      into: "secrets",
+      fields: [
+        { key: "apiKey", osfType: "string", required: true, label: { en: "API key" }, classification: { sensitivity: "confidential" } },
+        { key: "signingSecret", osfType: "string", label: { en: "Signing secret" }, classification: { sensitivity: "confidential" } },
+      ],
+      resolve: { operations: ["fixture.send"], egress: { urlField: "url" } },
+      rotation: true,
+    };
+    expect(table?.source?.secureInputOnCreate).toEqual(expected);
+    expect(table?.source?.mcp?.elicitOnCreate).toEqual(expected);
+  });
+
   it("fails closed when a rest-enabled entity is not generated-CRUD allowlisted", () => {
     expect(() => compileRestFixtures(["rest-enabled"])).toThrow(
       /declares a rest: block but is not generated-CRUD enabled/,

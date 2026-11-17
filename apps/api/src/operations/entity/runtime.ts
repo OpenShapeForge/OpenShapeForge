@@ -61,6 +61,7 @@ import {
   createGeneratedEntity,
   createGeneratedEntityAfterElicitation,
   deleteGeneratedEntity,
+  mergeGeneratedEntityObjectForTable,
   updateGeneratedEntity,
 } from "./mutations.js";
 import { fetchGeneratedEntityRow, getGeneratedEntity, listGeneratedEntities } from "./queries.js";
@@ -397,14 +398,33 @@ export function secureInputInteractionError(
     ...(secureInput.message ? { detail: secureInput.message } : {}),
     retryable: false,
     data: {
-      interaction: {
-        kind: "secureInput",
-        sourceField: secureInput.sourceField,
-        sourceEntity: secureInput.sourceEntity,
-        definitionsField: secureInput.definitionsField,
-      },
+      interaction: secureInput.fields
+        // Static definitions carry no secret, so a client can render the
+        // secure form from this answer alone.
+        ? {
+            kind: "secureInput",
+            into: secureInput.into,
+            fields: secureInput.fields.map((field) => ({ ...field })),
+            ...(secureInput.rotation ? { rotation: true } : {}),
+          }
+        : {
+            kind: "secureInput",
+            sourceField: secureInput.sourceField,
+            sourceEntity: secureInput.sourceEntity,
+            definitionsField: secureInput.definitionsField,
+          },
     },
   };
+}
+
+/**
+ * The static secure input an entity's update may replace: declared on its
+ * create Operation, with rotation compiled in because the update Operation
+ * declares secure input too. An ordinary update never asks for it.
+ */
+function rotatableSecureInput(table: GeneratedCrudTable) {
+  const secure = table.source?.secureInputOnCreate;
+  return secure?.fields && secure.rotation ? secure : undefined;
 }
 
 type PreparedMutationConfirmation =
@@ -979,7 +999,13 @@ function listPageInput(input: EntityOperationInput | undefined): ListPageInput {
 }
 
 /** Interface-neutral dispatcher used by REST, MCP and future transports. */
-type SecureCompletion = { into: string; value: unknown; existingId?: string };
+type SecureCompletion = {
+  into: string;
+  value: unknown;
+  existingId?: string;
+  /** Update only: decide whether the values may be replaced, and write nothing. */
+  admit?: true;
+};
 
 type MutationGuard = {
   operation: ChallengeProtectedOperation & LeaseProtectedOperation;
@@ -1358,6 +1384,49 @@ async function executeEntityOperationWithContext(
             permission,
           );
         }
+        if (completion) {
+          // Rotation: the update's own authorization and version guard, and a
+          // merge into the server-owned target under the row lock. Nothing
+          // else of the record is written through this path.
+          const secure = rotatableSecureInput(table);
+          const targetId = requireId(request.input);
+          if (!secure || secure.into !== completion.into || replayTakeoverId || operation.implementation?.type !== "entity" ||
+            Object.keys(request.input?.values ?? {}).length > 0 || request.input?.relatedChanges !== undefined ||
+            (!completion.admit && completion.existingId !== targetId)) {
+            throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion does not match this Operation." });
+          }
+          const rotationGuard = mutationConcurrencyGuard(operation, request.input);
+          if (!rotationGuard || operation.concurrency?.editLease || operation.interaction.confirmation.mode !== "none") {
+            throw operationFailure({ code: "BAD_USER_INPUT", message: "Replacing secure values requires a version-guarded update Operation." });
+          }
+          await requireOperationPrerequisites(db, session, operation);
+          if (completion.admit) {
+            if (!await fetchGeneratedEntityRow(db, session, table, targetId)) {
+              throw operationFailure({ code: "NOT_FOUND", message: "Record not found.", retryable: false });
+            }
+            return {
+              intent: "update",
+              error: {
+                code: "INTERACTION_REQUIRED",
+                message: `Secure input is required before the secure values of this ${operation.entityName} can be replaced.`,
+                retryable: false,
+                data: { interaction: { kind: "secureInput", into: secure.into, fields: secure.fields!.map((field) => ({ ...field, required: false })), rotation: true } },
+              },
+            };
+          }
+          if (!completion.value || typeof completion.value !== "object" || Array.isArray(completion.value)) {
+            throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion does not match this Operation." });
+          }
+          const data = await governed(async () => {
+            await requireOperationPrerequisites(db, session, operation);
+            return mergeGeneratedEntityObjectForTable(db, session, table, targetId, completion.into,
+              completion.value as Record<string, unknown>, {},
+              { ...rotationGuard, operation: operation as ChallengeProtectedOperation & LeaseProtectedOperation });
+          });
+          if (!data) throw operationFailure({ code: "NOT_FOUND", message: "Record not found.", retryable: false });
+          return { intent: "update", data, operations: await currentRecordOffers(db, session, entityName, table,
+            offerTarget(data, table), projectedOfferIntents(request, RECORD_OFFER_INTENTS)) };
+        }
         const controlOperation = replayTakeoverId ? replayControlOperation(operation) : operation;
         const concurrencyGuard = mutationConcurrencyGuard(controlOperation, request.input);
         // Before any confirmation or lease work: an illegal payload must not
@@ -1571,8 +1640,25 @@ export const executeEntityOperation = (db: OpenShapeForgeDatabase, session: DbSe
 /** Server-only continuation: secret values are never accepted through public Operation input. */
 export function completeEntitySecureInput(db: OpenShapeForgeDatabase, session: DbSessionInput,
   request: EntityOperationRequest, completion: SecureCompletion): Promise<EntityOperationResult> {
-  if (request.operation.intent !== "create") throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion requires a create Operation." });
+  if (request.operation.intent !== "create" && request.operation.intent !== "update") {
+    throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion requires a create or update Operation." });
+  }
+  // A plugin-implemented update never reaches the generated rotation branch;
+  // running its handler here would be an ordinary write the person did not ask for.
+  if (request.operation.intent === "update" && entityOperationContract(request.operation.id).implementation?.type !== "entity") {
+    throw operationFailure({ code: "BAD_USER_INPUT", message: "Secure completion does not match this Operation." });
+  }
   return withAuditContext(request.operation.id, (session as { credential?: import("../../auth/trusted-context.js").SessionCredential }).credential,
     async () => projectOfferTransport(await executeEntityOperationWithContext(db, session, request, completion), request.offerTransport),
     (session as { principalKind?: "person" | "service" }).principalKind);
+}
+
+/**
+ * Decide, without writing, whether this session may replace a record's static
+ * secure values: the update Operation's roles, record permissions, version
+ * control and prerequisites. Answers `INTERACTION_REQUIRED` when it may.
+ */
+export function admitEntitySecureUpdate(db: OpenShapeForgeDatabase, session: DbSessionInput,
+  request: EntityOperationRequest, into: string): Promise<EntityOperationResult> {
+  return completeEntitySecureInput(db, session, request, { into, value: undefined, admit: true });
 }

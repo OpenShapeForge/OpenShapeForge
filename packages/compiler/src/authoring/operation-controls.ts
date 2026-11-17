@@ -6,6 +6,8 @@
  */
 import type { CrudOperationKey, EntityOperationDefinition } from "./types.js";
 import type { OperationAuthoringContext } from "./operation-authoring.js";
+import { fieldCardinality } from "./compiler/helpers.js";
+import { operationByAction } from "./entity-model.js";
 
 function fixedDurationSeconds(value: string): number | undefined {
   const match = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(value);
@@ -30,17 +32,32 @@ export function assertOperationControls(
   const editLease = operation.concurrency?.editLease;
   const secureInput = operation.interaction;
   if (secureInput) {
-    if (action !== "create") {
-      throw new Error(
-        `${origin} operation "${operationKey}" declares secureInput for entity ` +
-          `action "${operationKind}"; secure input is currently supported only on create.`,
-      );
+    const fail = (message: string): never => {
+      throw new Error(`${origin} operation "${operationKey}" ${message}`);
+    };
+    const sourced = secureInput.sourceField !== undefined || secureInput.sourceEntity !== undefined ||
+      secureInput.definitionsField !== undefined;
+    const createInteraction = operationByAction(entity).create?.[1].interaction;
+    if (action === "update") {
+      // Rotation re-collects the static create fields; it never declares its own.
+      if (sourced || secureInput.fields || secureInput.resolve) {
+        fail(sourced
+          ? `declares source-form secureInput for entity action "${operationKind}"; a source entity is supported only on create.`
+          : "secureInput on update names only `into`; the fields are those of the create Operation.");
+      }
+      if (!createInteraction?.fields || createInteraction.into !== secureInput.into) {
+        fail(`secureInput on update requires the create Operation to declare static secureInput fields into "${secureInput.into}".`);
+      }
+      if (version?.mode !== "required" || editLease || operation.confirmation.mode !== "none") {
+        fail("secureInput on update requires version concurrency, no edit lease and no confirmation.");
+      }
+    } else if (action !== "create") {
+      fail(`declares secureInput for entity action "${operationKind}"; secure input is supported only on create and update.`);
     }
-    for (const [option, fieldKey] of [
-      ["sourceField", secureInput.sourceField],
-      ["into", secureInput.into],
-    ] as const) {
-      const field = fieldsByKey.get(fieldKey);
+    const required: (readonly [string, string | undefined])[] = [["into", secureInput.into]];
+    if (action === "create" && !secureInput.fields) required.push(["sourceField", secureInput.sourceField]);
+    for (const [option, fieldKey] of required) {
+      const field = fieldKey === undefined ? undefined : fieldsByKey.get(fieldKey);
       if (!field) {
         throw new Error(
           `${origin} operation "${operationKey}" secureInput ${option} ` +
@@ -54,17 +71,48 @@ export function assertOperationControls(
         );
       }
     }
-    if (secureInput.sourceField === secureInput.into) {
-      throw new Error(
-        `${origin} operation "${operationKey}" secureInput sourceField and into ` +
-          "must name different fields.",
-      );
-    }
-    if (!secureInput.sourceEntity || !secureInput.definitionsField) {
-      throw new Error(
-        `${origin} operation "${operationKey}" secureInput needs sourceEntity and ` +
-          "definitionsField naming where the secure field definitions live.",
-      );
+    if (action === "create" && secureInput.fields) {
+      if (sourced) fail("secureInput declares either static fields or a source entity, not both.");
+      const keys = new Set<string>();
+      for (const field of secureInput.fields) {
+        if (keys.has(field.key)) fail(`secureInput declares field "${field.key}" twice.`);
+        keys.add(field.key);
+      }
+      const resolve = secureInput.resolve;
+      if (resolve) {
+        if (!secureInput.fields.some((field) => field.classification?.sensitivity === "confidential")) {
+          fail("secureInput resolve requires at least one confidential field.");
+        }
+        const urlField = fieldsByKey.get(resolve.egress.urlField);
+        if (!urlField || !urlField.persisted || urlField.required !== true ||
+          resolve.egress.urlField === secureInput.into ||
+          !["string", "url", "webUrl"].includes(String(urlField.osfType)) || fieldCardinality(urlField) !== "single") {
+          fail(`secureInput resolve egress urlField "${resolve.egress.urlField}" must name a required, persisted, single string or url field other than the target.`);
+        }
+        for (const id of resolve.operations) {
+          // An id owned by another declaration is checked against the whole catalog.
+          if (!id.startsWith(`${entity.entity}.`)) continue;
+          const candidate = Object.entries(entity.operations ?? {})
+            .find(([key, definition]) => (definition.id ?? `${entity.entity}.${key}`) === id)?.[1];
+          if (!candidate || candidate.implementation.type !== "plugin") {
+            fail(`secureInput resolve names "${id}", which is not a plugin Operation of this entity.`);
+          }
+        }
+      }
+    } else if (action === "create") {
+      if (secureInput.resolve) fail("secureInput resolve is supported only with static fields.");
+      if (secureInput.sourceField === secureInput.into) {
+        throw new Error(
+          `${origin} operation "${operationKey}" secureInput sourceField and into ` +
+            "must name different fields.",
+        );
+      }
+      if (!secureInput.sourceEntity || !secureInput.definitionsField) {
+        throw new Error(
+          `${origin} operation "${operationKey}" secureInput needs sourceEntity and ` +
+            "definitionsField naming where the secure field definitions live, or static fields.",
+        );
+      }
     }
   }
   if (

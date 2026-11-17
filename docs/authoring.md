@@ -515,6 +515,21 @@ Per-Operation exposure is a prerequisite for immutable, versioned resources:
 it removes generic mutation entry points, but remains defense in depth and
 does not replace database-level immutability for published records.
 
+### `interaction: secureInput` — values a person enters, never a caller
+
+A create Operation may declare `interaction: { type: secureInput, into, ... }`.
+The `into` field then becomes server-owned on every interface: an ordinary
+create answers `INTERACTION_REQUIRED`, and the values arrive only through the
+secure form, encrypted where their definition is confidential. The definitions
+come either from a source entity's row (`sourceField`, `sourceEntity`,
+`definitionsField`) or from the Operation itself (`fields`, optionally with a
+`resolve` policy naming the plugin Operations that may open the stored values
+and the record field holding the one URL they may be sent to). Declaring
+`interaction: { type: secureInput, into }` on the update Operation as well lets
+the stored values be replaced through the same form. The full contract, the
+YAML and the REST flow are in [secure-input-browser.md](secure-input-browser.md);
+the runtime half for plugins is in [plugins.md](plugins.md).
+
 ### `interfaces.rest` — generated REST exposure
 
 REST is **opt-in per entity** (fail closed, like the generated-CRUD

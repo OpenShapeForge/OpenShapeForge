@@ -1,31 +1,145 @@
 # Secure entity input from an authenticated browser
 
-An entity create Operation may declare the existing `secureInput` interaction:
-a source entity carries canonical field definitions, and a server-owned target
-object receives their encrypted values. This is not a general encrypted scalar.
+An entity create Operation may declare the `secureInput` interaction: a
+server-owned target object receives values a person enters in a secure form,
+encrypted where their definition is confidential. This is not a general
+encrypted scalar. The field definitions come from one of two places:
 
-The browser can initiate this interaction without an MCP session or tool call:
+- **a source entity** (`sourceField`, `sourceEntity`, `definitionsField`): the
+  row the new record references carries canonical field definitions, as an
+  Adapter does for its Connections;
+- **the Operation itself** (`fields`): the definitions are declared statically
+  in the entity's YAML, and no second record is involved.
+
+## Static secure fields
+
+```yaml
+fields:
+  - { key: url, osfType: string, required: true, persisted: { column: url, storageClass: core } }
+  - { key: secrets, osfType: object, persisted: { column: secret_values, storageClass: core } }
+operations:
+  create:
+    name: Create secure endpoint
+    description: Creates an endpoint after server-issued secure input.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+    interaction:
+      type: secureInput
+      into: secrets
+      fields:
+        - key: apiKey
+          osfType: string
+          required: true
+          label: { en: API key }
+          classification: { sensitivity: confidential }
+        - key: signingSecret
+          osfType: string
+          label: { en: Signing secret }
+          classification: { sensitivity: confidential }
+      resolve:
+        operations: [ SecureEndpoint.send ]
+        egress: { urlField: url }
+  update:
+    name: Update secure endpoint
+    description: Updates an endpoint; its secrets are replaced through secure input.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    concurrency: { version: { mode: required, field: updatedAt } }
+    confirmation: { mode: none }
+    interaction: { type: secureInput, into: secrets }
+```
+
+- `fields` are primitive definitions: `key`, `osfType` (`string`, `integer`,
+  `number` or `boolean`), and optionally `required`, `label`, `description` and
+  `classification.sensitivity` (`public`, `internal` or `confidential`). A
+  `confidential` value is stored encrypted and read back only as `__set__`.
+- `resolve` is optional. `operations` lists the canonical ids of the plugin
+  Operations that may open the stored values at run time; `egress.urlField`
+  names the required, persisted string field holding the one HTTPS URL those
+  values may be sent to. See [plugins.md](plugins.md) for the runtime half.
+  With `resolve`, at least one field must be confidential.
+- `interaction: { type: secureInput, into }` on the entity's **update**
+  Operation makes the stored values replaceable. It names the same target,
+  declares no fields of its own, and requires version concurrency, no edit
+  lease and no confirmation. An ordinary update never asks for secure input and
+  can never write the target; the compiled create contract carries
+  `rotation: true`.
+- Values are sealed for the tenant, the table and, with `resolve`, the origin
+  of the record's URL. Pointing a record at another origin does not move its
+  secrets along: they must be entered again.
+- The URL is an ordinary field. **Credentials belong in a header, not in the
+  URL.** A URL that is not HTTPS, carries credentials or a fragment, or names a
+  wildcard host is refused before the form is offered.
+- The audit history hides the target column by this declaration, whatever the
+  column is called.
+
+## Creating a record
+
+The browser initiates the interaction without an MCP session or tool call:
 
 1. `POST /api/entity-configuration/start` with its ordinary bearer/session and
-   JSON `{ "entity": "Example", "values": { "key": "example", "definitionId": "<uuid>" } }`.
+   JSON `{ "entity": "Example", "values": { ... } }`.
    Supply only ordinary canonical create fields, never the secure target object.
    The response is `{ "id": "<opaque form id>", "expiresInSeconds": 1800 }`; it contains no handoff token.
 2. `GET /api/entity-configuration/pending/:id` with the returned id and same session returns
-   `{ id, displayName, messagePrefix?, definitions }`. Render those definitions
-   using the shared field registry; secret input stays in the browser form.
+   `{ id, displayName, messagePrefix?, mode: "create", definitions }`. Each
+   definition is the declared field plus `secret` (whether it is stored
+   encrypted) and `schema` (its JSON Schema property): for a static form
+   `{ key, osfType, required?, label?, description?, classification?, secret, schema }`.
+   Render those definitions using the shared field registry; secret input
+   stays in the browser form.
 3. `POST /api/entity-configuration/pending/:id` with the same session and
-   `application/x-www-form-urlencoded` values submits directly to encryption and
-   storage. Success returns `{ "saved": true, "id": "<record id>" }`. A failed validation returns
-   `INVALID_CONFIGURATION` with bounded field errors.
+   `application/x-www-form-urlencoded` values, one parameter per definition
+   key, submits directly to encryption and storage. Success returns
+   `{ "saved": true, "id": "<record id>" }`. A failed validation returns 400
+   `{ "error": { "code": "INVALID_CONFIGURATION", "message", "fields": { "<key>": "<reason>" } } }`
+   and leaves the form open.
 4. Read the created entity through its canonical get/list Operation. Encrypted
-   values appear only as `__set__`, never plaintext or ciphertext. Submitting
-   again for the same stable key rotates the entered values. Omitted optional
-   values retain their encrypted storage values under a row lock. Rotation checks
-   the source and every supplied identity against that locked row; the same key
-   cannot rebind a credential to another source or parent.
+   values appear only as `__set__`, never plaintext or ciphertext.
 
-Initiation runs canonical create admission (roles, input schema, prerequisites,
-confirmation) and an authorized source get before minting anything. The compiled contract determines the source entity and definition field.
+An ordinary create of such an entity answers `INTERACTION_REQUIRED`. For a
+static form its `data.interaction` is
+`{ kind: "secureInput", into, fields, rotation? }` with the declared fields, so
+a client can render the secure fields from that answer alone and then run the
+steps above. A source form answers with
+`{ kind: "secureInput", sourceField, sourceEntity, definitionsField }`.
+
+A create continuation never changes an existing record: submitting for a key
+that already exists is refused.
+
+## Replacing the secure values of an existing record
+
+Only for static fields whose entity declares secure input on its update
+Operation:
+
+1. `POST /api/entity-configuration/start` with
+   `{ "entity": "Example", "id": "<record id>", "expectedVersion": "<updatedAt>" }`
+   and no `values`. The response is the same
+   `{ "id": "<opaque form id>", "expiresInSeconds": 1800 }`.
+2. `GET /api/entity-configuration/pending/:id` returns
+   `{ id, displayName, mode: "rotate", recordId, definitions }`. Every
+   definition has `required: false`: what is entered replaces the stored value,
+   what is left empty is retained.
+3. `POST /api/entity-configuration/pending/:id` with the entered values returns
+   `{ "saved": true, "id": "<record id>" }`. Submitting nothing is refused with
+   `INVALID_CONFIGURATION`. A record changed since `expectedVersion` is refused
+   with 409 `VERSION_CONFLICT` and nothing is written; start again from the
+   current version.
+
+Initiation runs canonical update admission (update roles, record permissions,
+the version control and prerequisites) and the write repeats it under the row
+lock, merging into the target without touching any other field. After a change
+of the record's URL origin, enter every value again.
+
+## Guarantees
+
+Initiation runs canonical admission (roles, input schema, prerequisites,
+confirmation) and, for a source form, an authorized source get before minting
+anything. The compiled contract determines the source entity and definition
+field, or the static fields.
 Tenant IDs and actors cannot be overridden by the request. Pending forms are
 scoped to the verified tenant and user; the ordinary pending endpoint cannot
 read or consume another user's form. No occurrence jobs, generic expression

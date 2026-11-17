@@ -888,16 +888,88 @@
       }
     },
     "operationInteractionV2": {
+      "description": "Server-issued secure input. The source form reads its field definitions from another entity's row. The static form declares them here and may let named plugin Operations of the same entity resolve the stored values. The reference form (`type` and `into` only) is valid on the entity `update` Operation and re-collects the static create fields of the same target.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "sourceField", "sourceEntity", "definitionsField", "into"],
+          "properties": {
+            "type": { "const": "secureInput" },
+            "sourceField": { "$ref": "#/$defs/fieldKey" },
+            "sourceEntity": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
+            "definitionsField": { "$ref": "#/$defs/fieldKey" },
+            "into": { "$ref": "#/$defs/fieldKey" },
+            "message": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "into", "fields"],
+          "properties": {
+            "type": { "const": "secureInput" },
+            "into": { "$ref": "#/$defs/fieldKey" },
+            "fields": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/operationSecureInputFieldV2" }
+            },
+            "resolve": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["operations", "egress"],
+              "properties": {
+                "operations": {
+                  "description": "Canonical ids of the plugin Operations that may resolve the stored values.",
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*(\\.[A-Za-z0-9][A-Za-z0-9-]*)+$" }
+                },
+                "egress": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["urlField"],
+                  "properties": {
+                    "urlField": { "$ref": "#/$defs/fieldKey" }
+                  }
+                }
+              }
+            },
+            "message": { "type": "string", "minLength": 1 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "into"],
+          "properties": {
+            "type": { "const": "secureInput" },
+            "into": { "$ref": "#/$defs/fieldKey" },
+            "message": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "operationSecureInputFieldV2": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "sourceField", "sourceEntity", "definitionsField", "into"],
+      "required": ["key", "osfType"],
       "properties": {
-        "type": { "const": "secureInput" },
-        "sourceField": { "$ref": "#/$defs/fieldKey" },
-        "sourceEntity": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
-        "definitionsField": { "$ref": "#/$defs/fieldKey" },
-        "into": { "$ref": "#/$defs/fieldKey" },
-        "message": { "type": "string", "minLength": 1 }
+        "key": { "$ref": "#/$defs/fieldKey" },
+        "osfType": { "enum": ["string", "integer", "number", "boolean"] },
+        "required": { "type": "boolean" },
+        "label": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/localizedText" },
+        "description": { "$ref": "https://openshapeforge.example/schema-phase1/field-definition.schema.json#/$defs/localizedText" },
+        "classification": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["sensitivity"],
+          "properties": {
+            "sensitivity": { "enum": ["public", "internal", "confidential"] }
+          }
+        }
       }
     },
     "operationConcurrencyV2": {

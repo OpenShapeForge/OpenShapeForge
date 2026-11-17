@@ -47,6 +47,8 @@ import type {
   RuntimeConnectionSelector,
   RuntimeConnectionValues,
   RuntimeConnectionResolution,
+  RuntimeEntitySecretSelector,
+  RuntimeEntitySecretResolution,
   RuntimeConnectionGrant,
   RuntimeConnectionHttpRequest,
   RuntimeConnectionHttpResponse,
@@ -286,6 +288,8 @@ export type ModuleConnectionHttpResponse = RuntimeConnectionHttpResponse;
 /** One Connection's values, opened for the module core decided may see them. */
 export type ModuleConnectionValues = RuntimeConnectionValues;
 export type ModuleConnectionResolution = RuntimeConnectionResolution;
+export type ModuleEntitySecretSelector = RuntimeEntitySecretSelector;
+export type ModuleEntitySecretResolution = RuntimeEntitySecretResolution;
 
 export type ModulePlatformServices = {
   readonly mcpDiagnostics?: import("@openshapeforge/plugin-runtime/diagnostics").RuntimeMcpDiagnosticServices<TrustedSessionContext>;
@@ -369,6 +373,15 @@ export type ModulePlatformServices = {
       session: TrustedSessionContext,
       selector: ModuleConnectionSelector,
     ): Promise<ModuleConnectionResolution>;
+    /**
+     * One record's static secure-input values, for the plugin Operation its
+     * entity names, with a grant for that record's own URL. See
+     * `modules/entity-secrets.ts`.
+     */
+    resolveEntityValues(
+      session: TrustedSessionContext,
+      selector: ModuleEntitySecretSelector,
+    ): Promise<ModuleEntitySecretResolution>;
   };
   /**
    * Outbound connections that are not requests. `egressHosts` entries naming a

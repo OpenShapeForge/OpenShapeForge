@@ -6,7 +6,8 @@
  *
  * Split out of generated-mcp-server.ts.
  */
-import { startConfigurationForSession } from "./configuration-start.js";
+import { startConfigurationForSession, storedUrlValues } from "./configuration-start.js";
+import { staticElicitEntry, staticElicitScope } from "./elicitation.js";
 import { withDbSession } from "../db/session.js";
 import { configurationOwnerPatch } from "./configuration-ownership.js";
 import type { DbSessionInput } from "../db/session.js";
@@ -91,8 +92,32 @@ export async function registerConfigurationHandoffRoutes(
         "Table is missing from the manifest.",
       );
     const secureContract = entityOperationContract(entityOperationRef(tableDef, "create").id);
-    if (secureContract.implementation?.type !== "entity" || secureContract.interaction.secureInput?.into !== pending.elicit.into) {
+    if (secureContract.implementation?.type !== "entity" || secureContract.interaction.secureInput?.into !== pending.elicit.into ||
+      // A form minted for static fields saves only while the Operation still declares them.
+      (pending.elicit.fields !== undefined) !== (secureContract.interaction.secureInput?.fields !== undefined)) {
       throw new HttpError(409, "CONFLICT", "The secure Operation definition changed; start a new configuration.");
+    }
+    if (pending.existingId) {
+      // Rotation: the update Operation's own admission and version guard,
+      // repeated at the write, and a merge under the row lock.
+      const fixed = staticElicitEntry(tableDef.source?.secureInputOnCreate);
+      if (!fixed?.rotation || !pending.elicit.fields || !pending.expectedVersion) {
+        throw new HttpError(409, "CONFLICT", "The secure Operation definition changed; start a new configuration.");
+      }
+      if (Object.keys(content).length === 0) {
+        return { ok: false, errors: {}, errorBanner: "Enter at least one value to replace.", prefill: content };
+      }
+      const stored = await storedUrlValues(db, writeSession, tableDef, fixed, pending.existingId);
+      if (!stored) throw new HttpError(404, "NOT_FOUND", "This record is unavailable.");
+      const replaced = storeSubmission(pending, content, elicitedKeyring(),
+        staticElicitScope(fixed, tableDef.name, pending.tenantId, stored));
+      const rotated = await completeEntitySecureInput(db, writeSession, {
+        operation: entityOperationRef(tableDef, "update"),
+        input: { id: pending.existingId, expectedVersion: pending.expectedVersion, values: {} },
+      }, { into: fixed.into, value: replaced[fixed.into], existingId: pending.existingId });
+      if ("error" in rotated) throw operationFailure(rotated.error);
+      if (rotated.intent !== "update" || !rotated.data) throw new HttpError(500, "INTERNAL", "Secure update returned no record.");
+      return { ok: true, id: String(rotated.data.id) };
     }
     const admission = await executeEntityOperation(db, writeSession, {
       operation: entityOperationRef(tableDef, "create"), input: { values: pending.modelValues, ...(pending.confirmed ? { confirmed: true } : {}) },
@@ -101,12 +126,14 @@ export async function registerConfigurationHandoffRoutes(
       if ("error" in admission) throw operationFailure(admission.error);
       throw new HttpError(409, "CONFLICT", "Secure interaction is no longer declared for this Operation.");
     }
-    const values = storeSubmission(pending, content, elicitedKeyring());
+    const values = storeSubmission(pending, content, elicitedKeyring(), pending.elicit.fields
+      ? staticElicitScope(pending.elicit, tableDef.name, pending.tenantId, pending.modelValues)
+      : undefined);
     // Verify against the provider BEFORE the row exists: the person is
     // right here at the form, so a wrong subdomain or refused credential
     // comes back as a correctable banner instead of a stored dud.
-    const sourceRowId = pending.modelValues[pending.elicit.sourceField];
-    const sourceTable = tablesByName().get(pending.elicit.sourceTable);
+    const sourceRowId = pending.elicit.fields ? undefined : pending.modelValues[pending.elicit.sourceField];
+    const sourceTable = pending.elicit.fields ? undefined : tablesByName().get(pending.elicit.sourceTable);
     if (typeof sourceRowId === "string" && sourceTable) {
       const sourceResult = await listGeneratedEntitiesForTable(
         db,
@@ -120,7 +147,7 @@ export async function registerConfigurationHandoffRoutes(
       const sourceRow = sourceResult.rows[0]
         ? serializeRow(sourceTable, sourceResult.rows[0])
         : null;
-      if (sourceRow) {
+      if (sourceRow && !pending.elicit.fields) {
         // The atomic claim holds a pooled connection during this probe. Bound
         // the whole HTTP chain, in addition to the per-request timeout.
         const probeDeadline = AbortSignal.timeout(20_000);
@@ -185,6 +212,20 @@ export async function registerConfigurationHandoffRoutes(
     return { ok: true, id: String(result.data.id) };
   };
 
+  /**
+   * Everything a client needs to render the form. `mode` is `rotate` when the
+   * form replaces the secure values of the existing record `recordId`; omitted
+   * values are then retained, so no field is required.
+   */
+  const pendingForm = (found: { id: string; pending: PendingConfiguration }) => ({
+    id: found.id,
+    displayName: found.pending.displayName,
+    messagePrefix: found.pending.messagePrefix,
+    mode: found.pending.existingId ? "rotate" as const : "create" as const,
+    ...(found.pending.existingId ? { recordId: found.pending.existingId } : {}),
+    definitions: configurationFormDefinitions(found.pending),
+  });
+
   class SubmissionRejected extends Error {
     constructor(readonly outcome: Extract<ConfigurationSubmission, { ok: false }>) { super("Configuration values were refused."); }
   }
@@ -225,12 +266,7 @@ export async function registerConfigurationHandoffRoutes(
         "No pending configuration form was found for this user.",
       );
     }
-    return {
-      id: found.id,
-      displayName: found.pending.displayName,
-      messagePrefix: found.pending.messagePrefix,
-      definitions: configurationFormDefinitions(found.pending),
-    };
+    return pendingForm(found);
   });
   instance.get(`${ENTITY_CONFIGURATION_PATH}/pending/:id`, async (request) => {
     const { db, session } = await requireMcpSession(request);
@@ -238,8 +274,7 @@ export async function registerConfigurationHandoffRoutes(
     if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(id)) throw new HttpError(404, "NOT_FOUND", "This configuration form is unavailable.");
     const found = await latestConfigurationForSession(session, db, id);
     if (!found) throw new HttpError(404, "NOT_FOUND", "This configuration form is unavailable or expired.");
-    return { id: found.id, displayName: found.pending.displayName, messagePrefix: found.pending.messagePrefix,
-      definitions: configurationFormDefinitions(found.pending) };
+    return pendingForm(found);
   });
   instance.post(
     `${ENTITY_CONFIGURATION_PATH}/pending/:id`,

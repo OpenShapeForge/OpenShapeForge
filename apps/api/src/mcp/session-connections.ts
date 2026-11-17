@@ -155,7 +155,9 @@ export async function organizationConnectionProblem(input: {
   missingValues?: string[];
 }): Promise<HttpError> {
   const { execution, providerRow, session } = input;
-  const elicit = entityForTable(execution.connectionTable)?.elicitOnCreate;
+  const declared = entityForTable(execution.connectionTable)?.elicitOnCreate;
+  // A Connection's definitions always come from its Adapter row.
+  const elicit = declared && !declared.fields ? declared : undefined;
   const adapterId = String(providerRow.id ?? "");
   const administrator = isOrganizationAdministrator(session.roles);
   const problem: ConnectionProblem = {

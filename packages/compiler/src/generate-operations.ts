@@ -1204,6 +1204,17 @@ export function buildStaticOperationCatalog(
     .sort((left, right) => left.id.localeCompare(right.id));
   const byId = new Map(operations.map((operation) => [operation.id, operation]));
   for (const target of concreteEntityOperations) {
+    // Only an authored plugin handler may open stored secure-input values; a
+    // name nothing declares would make the values permanently unreachable.
+    for (const resolver of target.interaction.secureInput?.resolve?.operations ?? []) {
+      const source = byId.get(resolver);
+      if (!source || source.intent !== "invoke" || !("plugin" in source)) {
+        throw new Error(
+          `Canonical entity Operation "${target.id}" secureInput resolve names ` +
+            `"${resolver}", which is not a declared plugin Operation.`,
+        );
+      }
+    }
     for (const prerequisite of target.prerequisites ?? []) {
       const source = byId.get(prerequisite.operation);
       if (!source) {

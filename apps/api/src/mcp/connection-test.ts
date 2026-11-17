@@ -45,7 +45,7 @@ import {
   templatePlaceholders,
 } from "./declarative-execution.js";
 import { requiredAuthValueKeys } from "./publication-validation.js";
-import type { ElicitOnCreateEntry } from "./elicitation.js";
+import type { SourcedElicitEntry } from "./elicitation.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -88,7 +88,7 @@ export type TestElicitedRowInput = {
   row: JsonRecord;
   /** The source (provider) row its values configure. */
   sourceRow: JsonRecord;
-  elicit: ElicitOnCreateEntry;
+  elicit: SourcedElicitEntry;
   /** Physical table of the elicited entity, for the personal token scope. */
   table: string;
   /**

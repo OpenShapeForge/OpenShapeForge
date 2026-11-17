@@ -35,15 +35,75 @@ import {
 // (here) and what is barred from URL positions (declarative-execution).
 import { SECRET_SENSITIVITY } from "./declarative-execution.js";
 import { storedFieldBaseType } from "../modules/field-schemas.js";
+import { staticSecretScopeFor } from "../modules/entity-secrets.js";
+import type { RuntimeSecureInputField } from "@openshapeforge/plugin-runtime";
 
-export type ElicitOnCreateEntry = {
+/** The definitions live on another entity's row (a provider's configuration contract). */
+export type SourcedElicitEntry = {
   sourceField: string;
   sourceEntity: string;
   sourceTable: string;
   definitionsField: string;
   into: string;
   message?: string;
+  fields?: undefined;
+  resolve?: undefined;
+  rotation?: undefined;
 };
+
+/** The definitions are declared with the entity's own create Operation. */
+export type StaticElicitEntry = {
+  into: string;
+  message?: string;
+  fields: readonly RuntimeSecureInputField[];
+  resolve?: { operations: readonly string[]; egress: { urlField: string } };
+  rotation?: true;
+  sourceField?: undefined;
+  sourceEntity?: undefined;
+  sourceTable?: undefined;
+  definitionsField?: undefined;
+};
+
+export type ElicitOnCreateEntry = SourcedElicitEntry | StaticElicitEntry;
+
+/** The compiled secure-input declaration as a static entry, if it is one. */
+export function staticElicitEntry(
+  secure: { into: string; message?: string; fields?: readonly RuntimeSecureInputField[];
+    resolve?: StaticElicitEntry["resolve"]; rotation?: true } | undefined,
+): StaticElicitEntry | undefined {
+  if (!secure?.fields) return undefined;
+  return {
+    into: secure.into,
+    fields: secure.fields,
+    ...(secure.message ? { message: secure.message } : {}),
+    ...(secure.resolve ? { resolve: secure.resolve } : {}),
+    ...(secure.rotation ? { rotation: true as const } : {}),
+  };
+}
+
+/**
+ * The AAD scope a static entry's values are sealed under, from the ordinary
+ * values of the record being written. Refused before anyone is asked for a
+ * secret when the record's URL cannot be a destination at all.
+ */
+export function staticElicitScope(
+  elicit: StaticElicitEntry,
+  table: string,
+  tenantId: string | null | undefined,
+  values: Readonly<Record<string, unknown>>,
+): string {
+  if (!tenantId) throw new HttpError(403, "FORBIDDEN", "A tenant session is required.");
+  const scope = staticSecretScopeFor(elicit, table, tenantId, values);
+  if (!scope.ok) {
+    throw new HttpError(
+      400,
+      "VALIDATION",
+      `"${elicit.resolve!.egress.urlField}" must be an HTTPS URL naming one exact host, without credentials or a fragment. ` +
+        "Credentials belong in a header, not in the URL.",
+    );
+  }
+  return scope.scope;
+}
 
 type StoredFieldDefinition = {
   key?: unknown;
@@ -214,18 +274,23 @@ export async function collectElicitedValues(input: {
   messagePrefix?: string;
   /** The language the form's labels and descriptions are shown in. */
   locale?: ResolvedLocale;
+  /** The AAD scope of a static entry's values; a sourced entry seals under its source table. */
+  secretScope?: string;
 }): Promise<Record<string, unknown>> {
   const { server, elicit, sourceRow, values, relatedRequestId } = input;
-  if (!sourceRow) {
+  if (!elicit.fields && !sourceRow) {
     throw new HttpError(
       404,
       "NOT_FOUND",
       `The ${elicit.sourceEntity} referenced by "${elicit.sourceField}" was not found.`,
     );
   }
+  if (elicit.fields && !input.secretScope) {
+    throw new HttpError(500, "INTERNAL", "Static secure input requires its storage scope.");
+  }
 
   const { schema, elicitable, skipped } = elicitationSchemaFromDefinitions(
-    sourceRow[elicit.definitionsField],
+    elicit.fields ?? sourceRow![elicit.definitionsField],
     input.locale,
   );
   // Nothing to ask is not an error: a source without configuration fields
@@ -250,7 +315,7 @@ export async function collectElicitedValues(input: {
     .map((definition) => definition.key as string);
   const composedMessage =
     elicit.message ??
-    `Configuration for this ${elicit.sourceEntity}. ` +
+    `Configuration for this ${elicit.sourceEntity ?? "record"}. ` +
       (secretKeys.length > 0
         ? `Values for ${secretKeys.join(", ")} are stored encrypted and never shown back. `
         : "") +
@@ -282,7 +347,7 @@ export async function collectElicitedValues(input: {
   return {
     ...values,
     [elicit.into]: storeElicitedValues(
-      elicit.sourceTable,
+      elicit.fields ? input.secretScope! : elicit.sourceTable,
       elicitable,
       (result.content ?? {}) as Record<string, unknown>,
     ),

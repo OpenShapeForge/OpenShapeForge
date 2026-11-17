@@ -10,7 +10,7 @@ import { actingRelationId } from "../db/acting-relation.js";
 import { configurationOwnerPatch } from "./configuration-ownership.js";
 import { getEntityOperationContracts, getGeneratedEntity } from "../operations/entity/index.js";
 import { assertEntityValuesValid, valuesSchemaOf } from "../operations/entity/input-validation.js";
-import { collectElicitedValues } from "./elicitation.js";
+import { collectElicitedValues, staticElicitScope } from "./elicitation.js";
 import { mintConfiguration } from "./configuration-handoff.js";
 import { handoffModelValues } from "./configuration-submission.js";
 import {
@@ -121,8 +121,13 @@ export async function crudToolCall(
         if ("error" in admission) throw operationFailure(admission.error);
         throw new HttpError(409, "CONFLICT", "Secure interaction is no longer declared for this Operation.");
       }
-      const sourceId = modelArguments[elicit.sourceField];
-      const sourceTable = tables.get(elicit.sourceTable);
+      // A static entry carries its own definitions; nothing is read from a
+      // source row, and its values are sealed for the record's own URL.
+      const secretScope = elicit.fields
+        ? staticElicitScope(elicit, table.name, session.tenantId, modelArguments)
+        : undefined;
+      const sourceId = elicit.fields ? undefined : modelArguments[elicit.sourceField];
+      const sourceTable = elicit.fields ? undefined : tables.get(elicit.sourceTable);
       let sourceRow: Record<string, unknown> | null = null;
       if (typeof sourceId === "string" && sourceTable) {
         try {
@@ -142,7 +147,7 @@ export async function crudToolCall(
       // work. The error names the misclassified field and the fix.
       if (sourceRow) {
         const secretClassified = secretFieldKeys(
-          sourceRow[elicit.definitionsField],
+          sourceRow[elicit.definitionsField ?? ""],
         );
         for (const { context, template } of providerUrlTemplates(sourceRow)) {
           for (const key of templatePlaceholders(template)) {
@@ -176,6 +181,7 @@ export async function crudToolCall(
           relatedRequestId: extra.requestId,
           locale,
           ...(messagePrefix ? { messagePrefix } : {}),
+          ...(secretScope ? { secretScope } : {}),
         });
         elicitationCompleted = true;
         // Shared OAuth client configuration is organisation-owned; other
@@ -192,12 +198,15 @@ export async function crudToolCall(
         }
       } catch (error) {
         const reason = elicitationFallback(error);
-        if (!reason || !sourceRow) throw error;
+        if (!reason || (!sourceRow && !elicit.fields)) throw error;
         // The in-band form did not happen — hand the person a browser URL
         // to the same form instead of dead-ending the setup.
-        const definitions = Array.isArray(sourceRow[elicit.definitionsField])
-          ? (sourceRow[elicit.definitionsField] as Record<string, unknown>[])
-          : [];
+        const definitions = elicit.fields
+          ? elicit.fields.map((field) => ({ ...field }) as Record<string, unknown>)
+          : Array.isArray(sourceRow?.[elicit.definitionsField])
+            ? (sourceRow![elicit.definitionsField] as Record<string, unknown>[])
+            : [];
+        const displayName = String(sourceRow?.name ?? entity?.entity ?? "this record");
         const required = Array.isArray(
           (match.inputSchema as { required?: unknown } | undefined)?.required,
         )
@@ -217,12 +226,10 @@ export async function crudToolCall(
             accepted: Object.keys(valuesSchemaOf(secureContract)?.properties ?? {}),
             elicit,
             modelValues: withoutEnvelopeKeys(modelArguments),
-            sourceRow,
+            sourceRow: sourceRow ?? {},
           }),
           definitions,
-          displayName: String(
-            sourceRow.name ?? entity?.entity ?? "this record",
-          ),
+          displayName,
           messagePrefix,
         });
         const listToolName = catalog.tools.find(
@@ -254,7 +261,7 @@ export async function crudToolCall(
                 waitInstruction,
             },
             minted.token,
-            String(sourceRow.name ?? entity?.entity ?? "this record"),
+            displayName,
             definitions,
             messagePrefix,
             minted.id,
@@ -279,7 +286,7 @@ export async function crudToolCall(
       const storedValues = (
         callArguments as Record<string, unknown> | undefined
       )?.[elicit.into];
-      if (sourceRow && storedValues && typeof storedValues === "object") {
+      if (sourceRow && !elicit.fields && storedValues && typeof storedValues === "object") {
         const report = await testElicitedRow({
           row: { [elicit.into]: storedValues },
           sourceRow,

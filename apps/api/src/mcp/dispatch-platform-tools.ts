@@ -188,7 +188,8 @@ export async function platformToolCall(
         throw new HttpError(404, "NOT_FOUND", "Resource not found.");
       }
       const elicit = entityForTable(testTool.table)?.elicitOnCreate;
-      if (!elicit) {
+      // Static secure values have no provider row to be verified against.
+      if (!elicit || elicit.fields) {
         throw new HttpError(
           400,
           "NOT_TESTABLE",

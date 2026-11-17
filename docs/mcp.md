@@ -442,7 +442,10 @@ configuration handoff is returned under `data` with an Operation reference in
 `interaction.secureInput` and links the existing configuration MCP App for clients
 supporting it. Ordinary `osf_execute_operation` calls never advertise a UI. Each
 route rejects Operations belonging to the other route before execution. Clients
-without app support use the secure route with the existing browser URL handoff. Required prerequisites
+without app support use the secure route with the existing browser URL handoff. A create whose secure
+fields are declared statically asks for exactly those fields, with no source record. Replacing the
+secure values of an existing record is started from an authenticated browser
+([secure-input-browser.md](secure-input-browser.md)); no MCP tool starts it. Required prerequisites
 are invoked through the same executor. Dry runs can preview administrator-owned
 drafts and internal/restricted definitions without changing employee execution
 visibility, and resolve the requested definition directly rather than searching

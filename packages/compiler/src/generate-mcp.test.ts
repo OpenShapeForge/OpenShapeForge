@@ -1591,6 +1591,19 @@ describe("elicitOnCreate catalog", () => {
     expect(listProperties.sortField.enum).not.toContain("configurationValues");
   });
 
+  it("carries static fields and their resolve policy without resolving a source", () => {
+    const fixed = {
+      into: "configurationValues",
+      fields: [{ key: "apiKey", osfType: "string" as const, required: true, classification: { sensitivity: "confidential" as const } }],
+      resolve: { operations: ["fixture.send"], egress: { urlField: "adapterId" } },
+    };
+    const catalog = buildMcpCatalog([input(owner(fixed), "widget", "erp.widgets")], "test");
+    const entry = catalog.entities.find((entity) => entity.entity === "Widget");
+    expect(entry?.elicitOnCreate).toEqual(fixed);
+    const create = catalog.tools.find((tool) => tool.entity === "Widget" && tool.operation === "create");
+    expect((create?.inputSchema.properties as Record<string, unknown>).configurationValues).toBeUndefined();
+  });
+
   it("fails closed on a dangling source entity or field", () => {
     expect(() =>
       buildMcpCatalog([input(owner(elicit), "widget")], "test"),

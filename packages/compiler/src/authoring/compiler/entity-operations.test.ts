@@ -372,6 +372,106 @@ describe("canonical entity operations", () => {
     );
   });
 
+  test("compiles static secure input, its resolve policy and rotation on update", () => {
+    const source = relationSource();
+    const interaction = () => ({
+      type: "secureInput" as const,
+      into: "secrets",
+      fields: [
+        { key: "apiKey", osfType: "string" as const, required: true, classification: { sensitivity: "confidential" as const } },
+        { key: "note", osfType: "string" as const },
+      ],
+      resolve: { operations: ["SecureEndpoint.send"], egress: { urlField: "url" } },
+    });
+    const build = () => {
+      source.coreEntity = {
+        schemaVersion: 3,
+        kind: "coreEntity",
+        module: "core",
+        entity: "SecureEndpoint",
+        title: "Secure endpoint",
+        language: "en",
+        fields: [
+          { key: "url", osfType: "string", baseType: "string", required: true, persisted: { column: "url", storageClass: "core" } },
+          { key: "secrets", osfType: "object", baseType: "object", persisted: { column: "secret_values", storageClass: "core" } },
+          { key: "updatedAt", osfType: "datetime", baseType: "datetime", readOnly: true, persisted: { column: "updated_at", storageClass: "core" } },
+        ],
+        operations: {
+          create: {
+            name: "Create endpoint",
+            description: "Creates an endpoint from securely entered values.",
+            implementation: { type: "entity", action: "create" },
+            effects: { data: "write", external: "none" },
+            reliability: { idempotency: { mode: "none" } },
+            confirmation: { mode: "none" },
+            interaction: interaction(),
+          },
+          update: {
+            name: "Update endpoint",
+            description: "Updates an endpoint.",
+            implementation: { type: "entity", action: "update" },
+            effects: { data: "write", external: "none" },
+            reliability: { idempotency: { mode: "none" } },
+            concurrency: { version: { mode: "required", field: "updatedAt" } },
+            confirmation: { mode: "none" },
+            interaction: { type: "secureInput", into: "secrets" },
+          },
+          send: {
+            name: "Send",
+            description: "Sends one event to the endpoint.",
+            implementation: { type: "plugin", plugin: "fixture", handler: "send" },
+            target: { scope: "record", inputField: "endpointId" },
+            input: { schema: { type: "object", additionalProperties: false, required: ["endpointId"], properties: { endpointId: { type: "string", format: "uuid" } } } },
+            output: { schema: { type: "object", additionalProperties: false, properties: { status: { type: "integer" } } } },
+            errors: [],
+            auth: { mode: "session", roles: ["Relations.Write"] },
+            tenancy: { mode: "required" },
+            effects: { data: "write", external: "write" },
+            reliability: { idempotency: { mode: "none" } },
+            confirmation: { mode: "none" },
+          },
+        },
+        interfaces: { rest: {}, graphql: {}, mcp: {} },
+      } as never;
+      source.entity = { id: "core.SecureEndpoint", name: "SecureEndpoint" };
+      return source.coreEntity!;
+    };
+    const check = (mutate: (entity: NonNullable<typeof source.coreEntity>) => void) => () => {
+      const entity = build();
+      mutate(entity);
+      assertEntityAuthoring(entity, "secure-endpoint.yaml");
+    };
+
+    expect(check(() => {})).not.toThrow();
+    const operations = buildEntityOperations(source);
+    expect(operations.create?.interaction.secureInput).toEqual({ ...interaction(), rotation: true });
+    // Rotation is optional: an ordinary update must never ask for secure input.
+    expect(operations.update?.interaction.secureInput).toBeUndefined();
+    delete source.coreEntity!.operations!.update!.interaction;
+    expect(buildEntityOperations(source).create?.interaction.secureInput).toEqual(interaction());
+
+    expect(check((entity) => { entity.operations!.create!.interaction!.sourceEntity = "Other"; }))
+      .toThrow(/either static fields or a source entity/);
+    expect(check((entity) => { entity.operations!.create!.interaction!.fields!.push({ key: "apiKey", osfType: "string" }); }))
+      .toThrow(/declares field "apiKey" twice/);
+    expect(check((entity) => { entity.operations!.create!.interaction!.fields![0]!.classification = { sensitivity: "internal" }; }))
+      .toThrow(/at least one confidential field/);
+    expect(check((entity) => { entity.operations!.create!.interaction!.resolve!.egress.urlField = "secrets"; }))
+      .toThrow(/urlField "secrets" must name a required, persisted, single string or url field/);
+    expect(check((entity) => { entity.operations!.create!.interaction!.resolve!.operations = ["SecureEndpoint.update"]; }))
+      .toThrow(/"SecureEndpoint.update", which is not a plugin Operation of this entity/);
+    expect(check((entity) => { entity.operations!.create!.interaction!.resolve!.operations = ["SecureEndpoint.missing"]; }))
+      .toThrow(/not a plugin Operation of this entity/);
+    expect(check((entity) => { entity.operations!.update!.interaction = { ...interaction() }; }))
+      .toThrow(/secureInput on update names only `into`/);
+    expect(check((entity) => { entity.operations!.update!.interaction!.into = "url"; }))
+      .toThrow(/requires the create Operation to declare static secureInput fields into "url"/);
+    expect(check((entity) => { delete entity.operations!.update!.concurrency; }))
+      .toThrow(/requires version concurrency, no edit lease and no confirmation/);
+    expect(check((entity) => { delete entity.operations!.create!.interaction!.fields; delete entity.operations!.create!.interaction!.resolve; delete entity.operations!.update!.interaction; }))
+      .toThrow(/does not name an authored field/);
+  });
+
   test("compiles a create prerequisite once and rejects it on other actions", () => {
     const source = relationSource();
     source.coreEntity = {

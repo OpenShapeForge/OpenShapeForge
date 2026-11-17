@@ -6,7 +6,7 @@ import { listGeneratedEntityStorageRowsForTable } from "../operations/entity/que
 import { serializeRow } from "./catalog-rows.js";
 import { accessTokenNeedsRefresh, fieldNameForColumn, refreshConnectionRowLocked, refreshLeewaySeconds } from "./connection-token-refresh.js";
 import { resolveTemplate } from "./declarative-execution.js";
-import type { ElicitOnCreateEntry } from "./elicitation.js";
+import type { SourcedElicitEntry } from "./elicitation.js";
 import { oauthClientProfile, tokenBindingCurrent } from "./entity-oauth-profile.js";
 import { elicitedKeyring } from "./handoff-config.js";
 import { readClientCredentials, selectOAuthConnectionRow, urlSafeConnectionValues } from "./session-connections.js";
@@ -17,7 +17,7 @@ type TestScope = Pick<DirectCallScope, "db" | "session" | "tables" | "egressOwne
 
 /** Prepare exactly the authorized row under test, using execution's token lifecycle. */
 export async function prepareConnectionTest(
-  ctx: TestScope, row: Row, sourceRow: Row, elicit: ElicitOnCreateEntry, tableName: string,
+  ctx: TestScope, row: Row, sourceRow: Row, elicit: SourcedElicitEntry, tableName: string,
 ): Promise<{ row: Row; fallbackPlainValues?: Record<string, string> }> {
   const personal = row.ownerUserId != null;
   if (personal && !ownedByActingRelation(row.ownerUserId, ctx.session)) {

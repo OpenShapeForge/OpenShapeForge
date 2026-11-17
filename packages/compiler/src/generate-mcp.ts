@@ -746,13 +746,18 @@ export type McpResourceDefinition = {
 };
 
 export type McpElicitOnCreateDefinition = {
-  sourceField: string;
-  sourceEntity: string;
-  /** Physical table of the source entity, resolved at catalog build. */
-  sourceTable: string;
-  definitionsField: string;
   into: string;
   message?: string;
+  /** Source form. */
+  sourceField?: string;
+  sourceEntity?: string;
+  /** Physical table of the source entity, resolved at catalog build. */
+  sourceTable?: string;
+  definitionsField?: string;
+  /** Static form: the definitions themselves, and who may resolve the values. */
+  fields?: import("./authoring/types/authoring.js").EntityOperationSecureInputField[];
+  resolve?: import("./authoring/types/authoring.js").EntityOperationSecureInputResolve;
+  rotation?: true;
 };
 
 export type McpDerivedExecutionDefinition = {
@@ -1279,14 +1284,25 @@ export function buildMcpCatalog(
       ...(mcp.elicitOnCreate
         ? {
             elicitOnCreate: {
-              sourceField: mcp.elicitOnCreate.sourceField,
-              sourceEntity: mcp.elicitOnCreate.sourceEntity,
-              sourceTable: resolveSourceTable(
-                inputs,
-                mcp.elicitOnCreate,
-                contract.entity.name,
-              ),
-              definitionsField: mcp.elicitOnCreate.definitionsField,
+              ...(mcp.elicitOnCreate.fields
+                ? {
+                    fields: mcp.elicitOnCreate.fields,
+                    ...(mcp.elicitOnCreate.resolve ? { resolve: mcp.elicitOnCreate.resolve } : {}),
+                    ...(mcp.elicitOnCreate.rotation ? { rotation: true as const } : {}),
+                  }
+                : {
+                    sourceField: mcp.elicitOnCreate.sourceField!,
+                    sourceEntity: mcp.elicitOnCreate.sourceEntity!,
+                    sourceTable: resolveSourceTable(
+                      inputs,
+                      {
+                        sourceEntity: mcp.elicitOnCreate.sourceEntity!,
+                        definitionsField: mcp.elicitOnCreate.definitionsField!,
+                      },
+                      contract.entity.name,
+                    ),
+                    definitionsField: mcp.elicitOnCreate.definitionsField!,
+                  }),
               into: mcp.elicitOnCreate.into,
               ...(mcp.elicitOnCreate.message
                 ? { message: mcp.elicitOnCreate.message }

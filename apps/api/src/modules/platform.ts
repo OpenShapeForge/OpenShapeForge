@@ -56,6 +56,7 @@ import type {
 } from "./contract.js";
 import { parseModuleToolExecutionOptions } from "./invocation-sources.js";
 import { resolveConnectionValues } from "./connection-secrets.js";
+import { resolveEntitySecretValues } from "./entity-secrets.js";
 import { requestConnectionHttp } from "./connection-http-egress.js";
 import { connectSocket } from "./socket-egress.js";
 import { classifyDatabaseError } from "../db/database-refusals.js";
@@ -801,6 +802,20 @@ export class ModulePlatformRuntime {
             session,
             selector: parseConnectionSelector(selector),
             egressOwner: this.#egressOwner,
+          });
+        },
+        resolveEntityValues: async (session, selector) => {
+          // The same liveness rule; which Operation is executing, and for
+          // which record, is read from core's own invocation context.
+          if (!this.#acceptsScopedSession(session)) {
+            throw new Error(
+              "Module secure value resolution requires a live verified session.",
+            );
+          }
+          return resolveEntitySecretValues({
+            db: this.#db,
+            session,
+            selector: { entity: String(selector?.entity ?? ""), id: String(selector?.id ?? "") },
           });
         },
       },

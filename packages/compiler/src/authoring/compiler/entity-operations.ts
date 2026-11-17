@@ -104,6 +104,17 @@ function compileOperation(
   const confirmation = intent === "delete" && definition?.confirmation?.mode !== "challenge"
     ? { mode: "acknowledgement" as const }
     : definition?.confirmation ?? { mode: "none" as const };
+  // Secure input on update is rotation: optional, and never a condition of an
+  // ordinary update. The update contract therefore carries no secure input of
+  // its own; the create contract says that its values can be replaced.
+  const rotation = source.coreEntity
+    ? operationByAction(source.coreEntity).update?.[1].interaction !== undefined
+    : false;
+  const secureInput = intent === "update" || !definition?.interaction
+    ? undefined
+    : definition.interaction.fields && rotation
+      ? { ...definition.interaction, rotation: true as const }
+      : definition.interaction;
   const shared = {
     id: definition?.id ?? `${source.entity.name}.${key}`,
     key,
@@ -134,7 +145,7 @@ function compileOperation(
         concurrency,
         confirmation,
         recordPermissions: source.authorization.rowAccess?.recordPermissions !== undefined,
-        secureInput: definition?.interaction !== undefined,
+        secureInput: secureInput !== undefined,
         collections: (source.relationships ?? []).some((relationship) => relationship.kind === "hasMany"),
         ...(source.fieldBindings ? { fieldBindings: true } : {}),
       }),
@@ -172,7 +183,7 @@ function compileOperation(
     ...(concurrency ? { concurrency } : {}),
     interaction: {
       confirmation,
-      ...(definition?.interaction ? { secureInput: definition.interaction } : {}),
+      ...(secureInput ? { secureInput } : {}),
     },
   };
   switch (intent) {

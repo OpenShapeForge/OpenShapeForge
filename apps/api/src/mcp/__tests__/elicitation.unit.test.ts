@@ -9,9 +9,13 @@
 import { describe, expect, it } from "bun:test";
 import { redactElicitedValues } from "../../connectors/secrets.js";
 import {
+  collectElicitedValues,
   elicitationSchemaFromDefinitions,
+  staticElicitEntry,
+  staticElicitScope,
   storeElicitedValues,
 } from "../elicitation.js";
+import { entitySecretScope } from "../../modules/entity-secrets.js";
 import { decryptSecret, keyringFromEnv, type StoredSecret } from "../../connectors/secrets.js";
 import { resolveLocale } from "../locale.js";
 
@@ -222,5 +226,65 @@ describe("the language the form is asked in", () => {
     expect(dutch.schema.required).toEqual(english.schema.required);
     expect(Object.keys(dutch.schema.properties)).toEqual(Object.keys(english.schema.properties));
     expect((english.schema.properties.host as Record<string, unknown>).title).toBe("IMAP server");
+  });
+});
+
+describe("static secure input", () => {
+  const TENANT = "11111111-1111-4111-8111-111111111111";
+  const declared = {
+    into: "secrets",
+    fields: [
+      { key: "apiKey", osfType: "string" as const, required: true, label: { en: "API key" }, classification: { sensitivity: "confidential" as const } },
+      { key: "note", osfType: "string" as const },
+    ],
+    resolve: { operations: ["SecureEndpoint.send"], egress: { urlField: "url" } },
+    rotation: true as const,
+  };
+  const server = (answer: Record<string, unknown>, asked: unknown[] = []) => ({
+    getClientCapabilities: () => ({ elicitation: {} }),
+    elicitInput: async (request: unknown) => { asked.push(request); return { action: "accept", content: answer }; },
+  }) as never;
+
+  it("is recognised by its declared fields and by nothing else", () => {
+    expect(staticElicitEntry(declared)).toEqual(declared);
+    expect(staticElicitEntry({ into: "secrets" })).toBeUndefined();
+    expect(staticElicitEntry(undefined)).toBeUndefined();
+  });
+
+  it("derives the storage scope from the record's own URL and refuses a URL that cannot be a destination", () => {
+    expect(staticElicitScope(declared, "core.secure_endpoints", TENANT, { url: "https://hooks.example.com/in?x=1" }))
+      .toBe(entitySecretScope(TENANT, "core.secure_endpoints", "https://hooks.example.com"));
+    for (const url of ["http://hooks.example.com/in", "https://a:b@hooks.example.com/in", "https://*.example.com/in", undefined]) {
+      expect(() => staticElicitScope(declared, "core.secure_endpoints", TENANT, { url })).toThrow(/Credentials belong in a header/);
+    }
+    expect(() => staticElicitScope(declared, "core.secure_endpoints", null, { url: "https://hooks.example.com/in" })).toThrow(/tenant session/);
+    // Without a resolve policy there is no destination to bind to.
+    expect(staticElicitScope({ into: "secrets", fields: declared.fields }, "core.secure_endpoints", TENANT, {}))
+      .toBe(entitySecretScope(TENANT, "core.secure_endpoints", undefined));
+  });
+
+  it("asks the person for the declared fields without a source row and seals under the given scope", async () => {
+    const before = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+    process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = `test:${Buffer.alloc(32, 7).toString("base64")}`;
+    try {
+      const asked: { requestedSchema: { properties: Record<string, unknown>; required?: string[] } }[] = [];
+      const scope = entitySecretScope(TENANT, "core.secure_endpoints", "https://hooks.example.com");
+      const collected = await collectElicitedValues({
+        server: server({ apiKey: "tok-1", note: "plain" }, asked), elicit: declared, sourceRow: null,
+        // Whatever the model sent for the target is discarded.
+        values: { name: "Endpoint", url: "https://hooks.example.com/in", secrets: { apiKey: "from-the-model" } },
+        relatedRequestId: 1, secretScope: scope,
+      });
+      expect(Object.keys(asked[0]!.requestedSchema.properties)).toEqual(["apiKey", "note"]);
+      expect(asked[0]!.requestedSchema.required).toEqual(["apiKey"]);
+      const sealed = collected.secrets as { apiKey: StoredSecret; note: string };
+      expect(sealed.note).toBe("plain");
+      expect(decryptSecret(KEYRING!, scope, "apiKey", sealed.apiKey)).toBe("tok-1");
+      expect(() => decryptSecret(KEYRING!, entitySecretScope(TENANT, "core.secure_endpoints", "https://other.example.com"), "apiKey", sealed.apiKey)).toThrow();
+      await expect(collectElicitedValues({ server: server({ apiKey: "tok-1" }), elicit: declared, sourceRow: null, values: {}, relatedRequestId: 1 }))
+        .rejects.toThrow(/storage scope/);
+    } finally {
+      if (before === undefined) delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS; else process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = before;
+    }
   });
 });

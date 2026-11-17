@@ -105,6 +105,13 @@ export type VerifiedAppPrincipal = {
    * fence has to guess about, and it is never read from request input.
    */
   credentialId: string;
+  /**
+   * Set when the integration has browser origins (auth/api-key/restrictions.ts):
+   * its key is public by construction, so core admits only Operations whose
+   * declared effects are reads (operations/execution-policy.ts) and the
+   * non-Operation write routes refuse it. Absent on every server key.
+   */
+  readOnly?: true;
 };
 
 export type TrustedSessionContext = {

@@ -8,6 +8,7 @@ const MAX_TENANT_DOWNLOADS = 2;
 import type { RuntimeArtifactServices } from "@openshapeforge/plugin-runtime";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { resolveSessionContext } from "../auth/identity.js";
+import { assertNotBrowserKey } from "../auth/api-key/restrictions.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { headersFromFastify } from "../http/headers.js";
@@ -49,6 +50,7 @@ async function session(
   db: OpenShapeForgeDatabase | undefined,
 ): Promise<TrustedSessionContext> {
   const resolved = await resolveSessionContext(headersFromFastify(request.headers), { db });
+  assertNotBrowserKey(resolved);
   if (!resolved.tenantId || !resolved.userId) {
     throw new HttpError(401, "UNAUTHENTICATED", "File access requires an authenticated session.");
   }

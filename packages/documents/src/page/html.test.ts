@@ -28,7 +28,7 @@ describe("buildPagedDocument", () => {
       ({ ...block(id, definitionKey, values, region), scope: "cover" });
     const paged = build([
       cover("h1", "ImageBlock", { asset: MARK, width: 120, height: 24 }, "header"),
-      cover("f1", "TextColumns", { left: "left", center: "middle", right: "right", centerWidth: 140 }, "footer"),
+      cover("f1", "TextColumns", { left: [block("l", "TextBlock", {markdown:"left"})], center: [block("c", "TextBlock", {markdown:"middle"})], right: [block("r", "TextBlock", {markdown:"right"})], centerWidth: 140 }, "footer"),
       block("f2", "TextBlock", { markdown: "Confidential" }, "footer"),
       cover("b1", "TextBlock", { markdown: "Pentesting for Nova Harbor", style: "title" }),
       block("b2", "TextBlock", { markdown: "Dear reader" }),
@@ -282,4 +282,12 @@ test('continuous inclusions contribute only body blocks to the active host secti
  expect(sections.map(s=>s.body.map(b=>b.id))).toEqual([['before','body'],['second','after']]);
  expect(sections.every(s=>s.header.map(b=>b.id).join()==='head'&&s.footer.map(b=>b.id).join()==='foot')).toBe(true);
  expect(sections.every(s=>s.settings.page?.width===559)).toBe(true);
+});
+
+test("nested columns keep an actual signature image in the print and image manifest", () => {
+  const columns = block("approval", "TextColumns", {left:[block("name","TextBlock",{markdown:"Julian Vermeer"}),block("signature","ImageBlock",{asset:MARK,width:180,height:43})],right:[block("client","TextBlock",{markdown:"Customer"})]});
+  expect(pageImages([{...columns,scope:"terms"}])).toEqual([{scope:"terms",image:MARK}]);
+  const html = renderPageBlock(columns,withMark);
+  expect(html).toContain("Julian Vermeer"); expect(html).toContain("Customer"); expect(html).toContain("data:image/svg+xml;base64,");
+  expect(html).toContain("180px");
 });

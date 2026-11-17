@@ -13,6 +13,7 @@ const v1 = id(11), v2 = id(12), v3 = id(13), greeting = id(21), terms = id(22), 
 const carrier = {
   entityName: "Block", fieldKey: "values", definitionField: "definitionKey", schema: "erp", table: "blocks", definitionColumn: "definition_key", valuesColumn: "values",
   definitions: {
+    TextColumns: {entityName:"TextColumns",schemaVersion:1,definitionHash:"c".repeat(64),references:[],fields:[{key:"left",baseType:"object",osfType:"object",cardinality:"collection"},{key:"right",baseType:"object",osfType:"object",cardinality:"collection"}],valueSchema:{type:"object"}},
     TextBlock: {
       entityName: "TextBlock", schemaVersion: 1, definitionHash: "a".repeat(64), references: [],
       fields: [{ key: "markdown", osfType: "markdown", baseType: "string", required: true, variables: "template" }], valueSchema: { type: "object" },
@@ -64,7 +65,7 @@ function fixture(options: { host?: "template" | "document"; credential?: string 
       projectStoredFields: (_session: unknown, request: { fields: Record<string, unknown> }) => request.fields,
     },
     schemas: {
-      entityValues: { get: () => carrier, collection: () => ({ targetEntity: "Block", allowedDefinitions: ["TextBlock", "TemplateBlock"] }) },
+      entityValues: { get: () => carrier, collection: () => ({ targetEntity: "Block", allowedDefinitions: ["TextBlock", "TemplateBlock", "TextColumns"] }) },
       fields: {
         object: (fields: readonly { key: string }[]) => ({ type: "object", properties: Object.fromEntries(fields.map((field) => [field.key, { type: "string" }])) }),
         validateObject: () => ({ valid: true }),
@@ -683,4 +684,19 @@ describe("retained provenance of a stored inclusion", () => {
     expect(retainedInclusionProvenance(carrier, { ...f.row(v1, values), definition_key: "TextBlock" }, { ...f.row(v1, values), definition_key: "TextBlock" })).toBeUndefined();
     expect(retainedInclusionProvenance({ ...carrier, entityName: "Note" }, f.row(v1, values), f.row(v1, values))).toBeUndefined();
   });
+});
+
+describe("column writes use the canonical child contract",()=>{
+ const child:ContentBlock={id:"supplier",definitionKey:"TextBlock",schemaVersion:1,values:{markdown:"Supplier"},references:{}};
+ test("validates nested definitions, identities, references and page boundaries before storing",async()=>{
+  const f=fixture();const row=(children:any[])=>({...f.row(v1,{}),definition_key:"TextColumns",values:{left:children}});
+  expect(await f.write(undefined,row([child]))).toEqual({left:[child]});
+  for(const children of [[child,child],[{...child,definitionKey:"Unknown"}],[{...child,definitionKey:"PageBreak"}],[{...child,references:{invented:{entity:"Deal",id:deal}}}]])await expect(f.write(undefined,row(children))).rejects.toBeDefined();
+ });
+ test("cannot remove or change a locked child through the enclosing columns",async()=>{
+  const f=fixture();const before={...f.row(v1,{}),definition_key:"TextColumns",values:{left:[{...child,locked:true}]}};
+  await expect(f.write(before,{...before,values:{left:[]}})).rejects.toBeDefined();
+  await expect(f.write(before,{...before,values:{left:[{...child,locked:true,values:{markdown:"Changed"}}]}})).rejects.toBeDefined();
+  await expect(assertBlockInclusionRemoval(carrier,before)).rejects.toBeDefined();
+ });
 });

@@ -284,3 +284,16 @@ function inclusion(id: string, captured: { copy: Parameters<typeof inclusionCopy
 function documentWith(...blocks: ContentBlock[]) {
   return { tenantId, documentId: "document-1", channel: "document", locale: "en", variants: [{ id: "variant-1", channel: "document", locale: "en", blocks }] };
 }
+
+describe("ordinary blocks nested in columns", () => {
+  const columnRegistry: CompiledContentBlockRegistry = {...registry,TextColumns:{entityName:"TextColumns",schemaVersion:1,renderers:{document:"columns"},fields:{left:{baseType:"object",cardinality:"collection"},right:{baseType:"object",cardinality:"collection"}}}};
+  test("captures variables inside each child and materializes the typed children under the reader", async () => {
+    const f=fixture();
+    f.versions.columns=version("columns",{},[block("row","TextColumns",{left:[block("prose","Prose",{markdown:"Hello"}),block("typed","DealSummary",{caption:"Scope"},{references:{deal:{entity:"Deal",id:"deal-1"}}})] as never})]);
+    const result=await captureInclusionContent({tenantId,channel:"document",locale:"en",templateVersionId:"columns",parameters:{},host:documentHost},columnRegistry,f.resolvers);
+    expect((result.copy.blocks[0]!.values.left as unknown as ContentBlock[])[1]!.references.deal).toEqual({entity:"Deal",id:"deal-1"});
+    const content=await materializeDocumentContent({tenantId,channel:"document",locale:"en",documentId:"doc",variants:[{id:"v",channel:"document",locale:"en",blocks:result.copy.blocks}]},columnRegistry,f.resolvers);
+    expect(content.blocks[0]!.columns!.left!.map(item=>item.definitionKey)).toEqual(["Prose","DealSummary"]);
+    expect(f.calls.entity).toContain("deal-1");
+  });
+});

@@ -3,10 +3,10 @@ kind: coreEntity
 module: core
 entity: TextColumns
 title: Text columns
-description: A block definition holding up to three text columns in one row, each with its own text style.
+description: A row of up to three columns, each containing an ordered collection of ordinary content blocks.
 language: en
-labels: { en: Text columns, nl: Tekstkolommen }
-pluralLabels: { en: Text columns, nl: Tekstkolommen }
+labels: { en: Columns, nl: Kolommen }
+pluralLabels: { en: Columns, nl: Kolommen }
 domains: [documents]
 # The Block placement supplies identity. This definition supplies its fields.
 baseEntity: false
@@ -16,48 +16,51 @@ authorization:
     read: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite]
 fields:
   - key: left
-    osfType: markdown
+    osfType: object
+    cardinality: collection
     required: false
-    variables: template
-    label: { en: Left text, nl: Tekst links }
-    validation: { maxLength: 20000 }
-  - key: leftStyle
-    osfType: string
-    required: false
-    label: { en: Left text style, nl: Tekststijl links }
-    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+    label: { en: Left column, nl: Links }
+    children:
+      - { key: id, osfType: string, required: true }
+      - { key: definitionKey, osfType: string, required: true }
+      - { key: schemaVersion, osfType: integer, required: true }
+      - { key: values, osfType: object, required: true }
+      - { key: references, osfType: object }
+      - { key: locked, osfType: boolean }
   - key: leftWidth
     osfType: number
     required: false
     label: { en: Left width (px), nl: Breedte links (px) }
     validation: { min: 1, max: 4000 }
   - key: center
-    osfType: markdown
+    osfType: object
+    cardinality: collection
     required: false
-    variables: template
-    label: { en: Center text, nl: Tekst midden }
-    validation: { maxLength: 20000 }
-  - key: centerStyle
-    osfType: string
-    required: false
-    label: { en: Center text style, nl: Tekststijl midden }
-    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+    label: { en: Center column, nl: Midden }
+    children:
+      - { key: id, osfType: string, required: true }
+      - { key: definitionKey, osfType: string, required: true }
+      - { key: schemaVersion, osfType: integer, required: true }
+      - { key: values, osfType: object, required: true }
+      - { key: references, osfType: object }
+      - { key: locked, osfType: boolean }
   - key: centerWidth
     osfType: number
     required: false
     label: { en: Center width (px), nl: Breedte midden (px) }
     validation: { min: 1, max: 4000 }
   - key: right
-    osfType: markdown
+    osfType: object
+    cardinality: collection
     required: false
-    variables: template
-    label: { en: Right text, nl: Tekst rechts }
-    validation: { maxLength: 20000 }
-  - key: rightStyle
-    osfType: string
-    required: false
-    label: { en: Right text style, nl: Tekststijl rechts }
-    validation: { pattern: "^[a-z][A-Za-z0-9-]{0,63}$", maxLength: 64 }
+    label: { en: Right column, nl: Rechts }
+    children:
+      - { key: id, osfType: string, required: true }
+      - { key: definitionKey, osfType: string, required: true }
+      - { key: schemaVersion, osfType: integer, required: true }
+      - { key: values, osfType: object, required: true }
+      - { key: references, osfType: object }
+      - { key: locked, osfType: boolean }
   - key: rightWidth
     osfType: number
     required: false
@@ -111,7 +114,7 @@ operations:
         properties:
           kind: { type: string, const: block }
           value:
-            x-osf-entityInput: { entity: TextColumns, fields: [left, leftStyle, leftWidth, center, centerStyle, centerWidth, right, rightStyle, rightWidth, distribution, verticalAlign] }
+            x-osf-entityInput: { entity: TextColumns, fields: [left, leftWidth, center, centerWidth, right, rightWidth, distribution, verticalAlign] }
     errors: []
     auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }
     tenancy: { mode: required }

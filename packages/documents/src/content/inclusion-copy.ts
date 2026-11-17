@@ -12,6 +12,7 @@
  * `source` and `page` are written by the server only. A caller may send them
  * back as it read them; anything else is refused, never adopted.
  */
+import { columnBlocks, COLUMN_SLOTS, isColumns, mapColumns } from "./columns.js";
 import { contentError } from "./errors.js";
 import { canonicalJson, CONTENT_LIMITS, hashCanonicalJson, type JsonObject, type JsonValue } from "./json.js";
 import type { ContentBlock } from "./types.js";
@@ -57,7 +58,7 @@ export function isInclusionCopy(content: unknown): boolean {
   return object(content) && Array.isArray(content.source) && Array.isArray(content.blocks);
 }
 
-function parseBlock(entry: unknown, locked: boolean | undefined): ContentBlock {
+export function parseContentBlock(entry: unknown, locked: boolean | undefined): ContentBlock {
   if (!object(entry) || typeof entry.id !== "string" || !BLOCK_ID.test(entry.id)) contentError("INVALID_VALUE", "An included block requires a valid identity.");
   if (Object.keys(entry).some((key) => !BLOCK_KEYS.includes(key))) contentError("INVALID_VALUE", "Included content carries unsupported block properties.");
   if (typeof entry.definitionKey !== "string" || !entry.definitionKey) contentError("BLOCK_UNKNOWN", "An included block requires its block definition.");
@@ -99,7 +100,7 @@ export function readInclusionCopy(content: unknown): InclusionCopy {
   });
   uniqueIds(source.map((entry) => entry.id), "Source record");
   const locked = new Set(source.filter((entry) => entry.locked).map((entry) => entry.id));
-  const blocks = rows.map((entry) => parseBlock(entry, object(entry) && typeof entry.id === "string" ? locked.has(entry.id) : false));
+  const blocks = rows.map((entry) => parseContentBlock(entry, object(entry) && typeof entry.id === "string" ? locked.has(entry.id) : false));
   uniqueIds(blocks.map((block) => block.id), "Included block");
   return { ...(stored.page ? { page: stored.page as JsonObject } : {}), source, blocks };
 }
@@ -173,12 +174,14 @@ export function nestedCopy(block: ContentBlock | undefined, compositionOf: Compo
 /** Whether a copy, or any inclusion nested in it, holds content its source protects. */
 export function holdsProtectedContent(copy: InclusionCopy, compositionOf: CompositionOf, depth = 0): boolean {
   if (depth >= CONTENT_LIMITS.templateDepth) contentError("CONTENT_LIMIT_EXCEEDED", "Included content exceeds the maximum depth.");
-  if (copy.source.some((entry) => entry.locked)) return true;
+  if (protectedPaths(copy.source, copy.blocks, compositionOf, "", depth).length) return true;
   return copy.blocks.some((block) => { const nested = nestedCopy(block, compositionOf); return nested ? holdsProtectedContent(nested, compositionOf, depth + 1) : false; });
 }
 
 export type LocalDraftOptions = {
   readonly compositionOf: CompositionOf;
+  readonly validateNestedBlock?: (block: ContentBlock) => Promise<void>;
+  readonly validateBlock?: (block: ContentBlock) => Promise<void>;
   /**
    * Settles one nested inclusion of the draft against the stored one (absent
    * for a new inclusion): the caller captures, validates or merges it and
@@ -216,13 +219,19 @@ export async function normalizeLocalDraft(stored: InclusionCopy, draft: unknown,
     const entry = object(raw) && typeof raw.id === "string" ? entries.get(raw.id) : undefined;
     if (!options.freshBaseline && object(raw) && raw.locked !== undefined && raw.locked !== Boolean(entry?.locked))
       contentError("INVALID_VALUE", "A source lock is kept by the server and cannot be changed.");
-    let block = parseBlock(raw, Boolean(entry?.locked));
+    let block = parseContentBlock(raw, Boolean(entry?.locked));
     const previous = storedBlocks.get(block.id);
-    if (options.compositionOf(block.definitionKey)) {
+    if (isColumns(block.definitionKey)) {
+      block = { ...block, values: await mapColumns(block.values, async (children, slot) => {
+        const old = previous && isColumns(previous.definitionKey) ? columnBlocks(previous.values[slot]) : [];
+        return normalizeLocalDraft({ source: await sourceRecord(old), blocks: old }, { blocks: children }, {...options, ...(options.validateNestedBlock ? {validateBlock:options.validateNestedBlock} : {})});
+      }) };
+    } else if (options.compositionOf(block.definitionKey)) {
       if (options.settleNested) block = { ...await options.settleNested({ stored: previous && options.compositionOf(previous.definitionKey) ? previous : undefined, draft: block }), ...(entry?.locked ? { locked: true as const } : {}) };
       else if (!previous || !sameAuthored(previous, block)) contentError("INVALID_VALUE", "A nested inclusion can only be changed where its source can be captured.");
       else block = previous;
     }
+    await options.validateBlock?.(block);
     if (entry?.locked && await blockHash(block) !== entry.hash) {
       if (!options.freshBaseline || !previous) contentError("INVALID_VALUE", "A locked source block cannot be changed.");
       block = previous;
@@ -254,6 +263,10 @@ export function protectedPaths(source: readonly CopySourceEntry[], blocks: reado
   if (depth >= CONTENT_LIMITS.templateDepth) contentError("CONTENT_LIMIT_EXCEEDED", "Included content exceeds the maximum depth.");
   const paths = source.filter((entry) => entry.locked).map((entry) => prefix + entry.id);
   for (const block of blocks) {
+    if (isColumns(block.definitionKey)) for (const slot of COLUMN_SLOTS) {
+      const children = columnBlocks(block.values[slot]);
+      paths.push(...protectedPaths(children.filter(child => child.locked).map(child => ({id:child.id,hash:"",locked:true as const})), children, compositionOf, `${prefix}${block.id}/${slot}/`, depth + 1));
+    }
     const nested = nestedCopy(block, compositionOf);
     if (nested) paths.push(...protectedPaths(nested.source, nested.blocks, compositionOf, `${prefix}${block.id}/`, depth + 1));
   }
@@ -263,6 +276,7 @@ export function protectedPaths(source: readonly CopySourceEntry[], blocks: reado
 function blockPaths(blocks: readonly ContentBlock[], compositionOf: CompositionOf, prefix = "", found = new Set<string>()): Set<string> {
   for (const block of blocks) {
     found.add(prefix + block.id);
+    if (isColumns(block.definitionKey)) for (const slot of COLUMN_SLOTS) blockPaths(columnBlocks(block.values[slot]), compositionOf, `${prefix}${block.id}/${slot}/`, found);
     const nested = nestedCopy(block, compositionOf);
     if (nested) blockPaths(nested.blocks, compositionOf, `${prefix}${block.id}/`, found);
   }

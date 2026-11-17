@@ -17,7 +17,8 @@
     "./inclusion-copy": "./src/content/inclusion-copy.ts",
     "./page": "./src/page/index.ts",
     "./seed": "./src/seed.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./migrations/column-blocks": "./src/migrations/column-blocks.ts"
   },
   "files": [
     "src",

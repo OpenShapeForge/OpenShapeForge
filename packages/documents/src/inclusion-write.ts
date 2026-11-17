@@ -42,6 +42,10 @@ type Identity = { readonly versionId: string; readonly parameters: JsonObject };
 type Stored = Identity & { readonly copy: InclusionCopy | undefined };
 type Next = Identity & { readonly draft: unknown };
 type Settled = { readonly parameters: JsonObject; readonly copy: InclusionCopy };
+/** What an earlier prepare read captured, as the caller holds it: the copy its current draft was made of. */
+type Baseline = Identity & { readonly content: unknown };
+/** A prepared copy and, apart from the local content merged into it, the capture it was prepared from. */
+type Prepared = Settled & { readonly baseline: InclusionCopy };
 
 type Environment = {
   readonly compositionOf: CompositionOf;
@@ -89,8 +93,9 @@ const isPreparedDraft = (stored: Stored | undefined, draft: unknown): boolean =>
  *
  * `explicit` is the prepare read: it always captures and merges, also for an
  * unchanged version and inputs, and takes only a draft of the stored baseline.
+ * A draft of an earlier preparation goes through `settlePrepared` instead.
  */
-async function settle(environment: Environment, stored: Stored | undefined, next: Next, explicit = false): Promise<Settled> {
+async function settle(environment: Environment, stored: Stored | undefined, next: Next, explicit = false): Promise<Settled & { readonly baseline?: InclusionCopy }> {
   const { compositionOf } = environment;
   const settleNested = (input: { stored: ContentBlock | undefined; draft: ContentBlock }) => settleBlock(environment, input.stored, input.draft);
   const prepared = isPreparedDraft(stored, next.draft);
@@ -100,13 +105,13 @@ async function settle(environment: Environment, stored: Stored | undefined, next
     return { parameters: stored.parameters, copy: { ...stored.copy, blocks: await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested }) } };
   }
   if (prepared && explicit)
-    contentError("INVALID_VALUE", "An update is prepared from the saved inclusion and its local draft; a draft that was already prepared cannot be prepared again.");
+    contentError("INVALID_VALUE", "This draft was already prepared from another source record than the saved one. Send the baseline that preparation returned to prepare it again; the existing inclusion has been kept.");
   const captured = await environment.capture(next);
   if (!stored?.copy) {
     // Nothing was captured before. A draft that arrives with the insertion is local content over the baseline captured now.
     const drafted = isObject(next.draft) && Array.isArray(next.draft.blocks) && next.draft.blocks.length > 0;
-    if (!drafted) return { parameters: captured.parameters, copy: captured.copy };
-    return { parameters: captured.parameters, copy: { ...captured.copy, blocks: await normalizeLocalDraft(captured.copy, next.draft, { compositionOf, settleNested, freshBaseline: true }) } };
+    if (!drafted) return { parameters: captured.parameters, copy: captured.copy, baseline: captured.copy };
+    return { parameters: captured.parameters, baseline: captured.copy, copy: { ...captured.copy, blocks: await normalizeLocalDraft(captured.copy, next.draft, { compositionOf, settleNested, freshBaseline: true }) } };
   }
   if (prepared) {
     const draft = next.draft as Record<string, unknown>;
@@ -122,7 +127,40 @@ async function settle(environment: Environment, stored: Stored | undefined, next
   const current = next.draft === undefined ? stored.copy.blocks : await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested });
   const authoredOld = await environment.authored(stored.versionId);
   const copy = await mergeInclusionCopy({ baseline: stored.copy.source, current, ...(authoredOld ? { authoredOld } : {}), authoredNew: captured.authored, captured: captured.copy, compositionOf });
-  return { parameters: captured.parameters, copy };
+  return { parameters: captured.parameters, copy, baseline: captured.copy };
+}
+
+/**
+ * The prepare read for a draft that was prepared before: the caller sends the
+ * baseline that earlier read returned, and the draft it has made of it since.
+ *
+ * Nothing of that baseline is taken on the caller's word. Its version is
+ * captured again with its inputs as the acting session — which is also what
+ * authorizes reading that source — and the baseline must be exactly that
+ * capture: content, source record, locks and page settings. A baseline the
+ * server would not capture now, because it was altered or because a record it
+ * names changed since, refuses the read. The capture, not the claim, is then
+ * the baseline the draft is checked against and merged from.
+ *
+ * What the saved copy protects, when there is one, still decides: it must be
+ * held by that baseline and by the copy this read answers with.
+ */
+async function settlePrepared(environment: Environment, stored: Stored | undefined, baseline: Baseline, next: Next): Promise<Prepared> {
+  const { compositionOf } = environment;
+  const settleNested = (input: { stored: ContentBlock | undefined; draft: ContentBlock }) => settleBlock(environment, input.stored, input.draft);
+  const kept = "The update no longer holds content that is protected here. The existing inclusion has been kept.";
+  const base = await environment.capture(baseline);
+  if (!isObject(baseline.content) || canonicalJson(baseline.parameters) !== canonicalJson(base.parameters)
+    || canonicalJson(baseline.content as JsonObject) !== canonicalJson(inclusionCopyContent(base.copy)))
+    contentError("INVALID_VALUE", "The earlier preparation no longer matches its source or the records it names, so the draft made of it cannot be carried to another source. Nothing has been changed; the existing inclusion has been kept.");
+  const required = stored?.copy ? protectedPaths(stored.copy.source, stored.copy.blocks, compositionOf) : [];
+  assertProtectedContentKept(required, base.copy.blocks, compositionOf, kept);
+  const current = next.draft === undefined ? base.copy.blocks : await normalizeLocalDraft(base.copy, next.draft, { compositionOf, settleNested });
+  const captured = await environment.capture(next);
+  const authoredOld = await environment.authored(baseline.versionId);
+  const copy = await mergeInclusionCopy({ baseline: base.copy.source, current, ...(authoredOld ? { authoredOld } : {}), authoredNew: captured.authored, captured: captured.copy, compositionOf });
+  assertProtectedContentKept(required, copy.blocks, compositionOf, kept);
+  return { parameters: captured.parameters, copy, baseline: captured.copy };
 }
 
 function identityOf(block: ContentBlock, compositionOf: CompositionOf): Identity {
@@ -326,8 +364,10 @@ export type InclusionPreparation = {
   readonly definitionKey: string;
   readonly versionId: string;
   readonly parameters: JsonObject;
-  /** The local draft of the saved inclusion, relative to its stored source record; absent to use what is stored. */
+  /** The local draft: of the saved inclusion and its stored source record, or of `baseline` when that is given. Absent to use that copy as it is. */
   readonly draft: unknown;
+  /** The baseline an earlier preparation returned, when the draft was made of it. It is captured again, never trusted. */
+  readonly baseline?: { readonly versionId: string; readonly parameters: JsonObject; readonly content: unknown };
 };
 
 /**
@@ -336,8 +376,12 @@ export type InclusionPreparation = {
  * source is captured as the acting session and merged with the stored copy
  * by the same `settle` a write runs. Nothing is written, marked, staged or
  * bound here; a refusal changes nothing, so the caller keeps its draft.
+ *
+ * The answer also carries `baseline`: the capture alone, without the local
+ * content merged into `copy`. A caller that prepares again sends it back with
+ * the draft it has made since, so that draft is merged instead of lost.
  */
-export async function prepareInclusionCopy(context: ModuleOperationContext, trx: unknown, request: InclusionPreparation): Promise<Settled> {
+export async function prepareInclusionCopy(context: ModuleOperationContext, trx: unknown, request: InclusionPreparation): Promise<Prepared> {
   const { tenantId, carrier, host } = request;
   const compositionOf = compositionFor(carrier);
   const definition = Object.hasOwn(carrier.definitions, request.definitionKey) ? carrier.definitions[request.definitionKey] : undefined;
@@ -354,22 +398,26 @@ export async function prepareInclusionCopy(context: ModuleOperationContext, trx:
       if (!root?.versionId) refuse("INVALID_STATE", "The block is not a template inclusion.");
       let found: Stored | undefined = { versionId: root!.versionId!, parameters: record(root!.values[root!.composition.parametersField]), copy: root!.copy };
       let key = String(row![carrier.definitionColumn]);
-      for (const [index, id] of request.path.entries()) {
+      for (const id of request.path) {
         const inner: ContentBlock | undefined = found?.copy?.blocks.find((block) => block.id === id);
-        const last = index === request.path.length - 1;
-        // The last step may name an inclusion the draft adds; every step before it must exist in the stored copy.
-        if (!found?.copy || (inner ? !compositionOf(inner.definitionKey) : !last)) refuse("NOT_FOUND", "The path does not lead to an inclusion of this block.");
-        found = inner ? { ...identityOf(inner, compositionOf), copy: nestedCopy(inner, compositionOf) } : undefined;
+        // A step that is stored must be an inclusion with a complete copy to walk on in.
+        if (!found?.copy || (inner && !compositionOf(inner.definitionKey))) refuse("NOT_FOUND", "The path does not lead to an inclusion of this block.");
         key = inner?.definitionKey ?? request.definitionKey;
+        found = inner ? { ...identityOf(inner, compositionOf), copy: nestedCopy(inner, compositionOf) } : undefined;
+        // A step that is not stored names an inclusion the draft adds. Nothing is stored below it, so nothing stored
+        // is protected there: the rest of the path names unsaved content as well.
+        if (!inner) break;
       }
       if (key !== request.definitionKey) refuse("INVALID_STATE", "The stored block is an inclusion of another kind.");
       stored = found;
     } else if (request.path.length) refuse("VALIDATION", "A path selects an inclusion nested in a saved block; name that block.");
     const parametersField = definition!.fields.find((field) => field.key === composition!.parametersField);
-    const settled = await settle(environment(trx, tenantId, carrier, { [ownerColumn]: host.id }, parametersField?.variables, (work) => work(context)), stored,
-      { versionId: request.versionId, parameters: request.parameters, draft: request.draft }, true);
+    const acting = environment(trx, tenantId, carrier, { [ownerColumn]: host.id }, parametersField?.variables, (work) => work(context));
+    const next = { versionId: request.versionId, parameters: request.parameters, draft: request.draft };
+    const settled = request.baseline ? await settlePrepared(acting, stored, request.baseline, next) : await settle(acting, stored, next, true);
     if (countBlocks(settled.copy, compositionOf) > CONTENT_LIMITS.blocks) refuse("CONTENT_LIMIT_EXCEEDED", "Included content contains too many blocks.");
-    return settled;
+    // An explicit settle always captures, so it always answers with the capture it merged from.
+    return { parameters: settled.parameters, copy: settled.copy, baseline: settled.baseline! };
   } catch (error) { contentRefusal(error); }
 }
 

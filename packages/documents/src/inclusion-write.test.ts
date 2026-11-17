@@ -89,8 +89,8 @@ function fixture(options: { host?: "template" | "document"; credential?: string 
   const write = (before: Record<string, unknown> | undefined, after: Record<string, unknown>, withActor = true) => prepareBlockInclusionWrite(trx, tenant, carrier, before, after, withActor ? { actor } : {});
   const host = options.host === "template" ? { entity: "TemplateVariant", id: hostVariant } : { entity: "DocumentVariant", id: documentVariant };
   /** TemplateBlock.materialize as a caller reaches it: the version, inputs and draft it is about to save. */
-  const prepare = async (version: string, values: Record<string, unknown>, locator: { blockId?: string; path?: string[]; host?: unknown } = {}) =>
-    ((await composeTemplate({ definitionKey: "TemplateBlock", referenceField: "version", parametersField: "parameters", values, references: { version: { entity: "TemplateVersion", id: version } }, host, ...locator }, context)) as { value: { kind: string; referenceField: string; version: unknown; parameters: Record<string, unknown>; content: PreparedContent } }).value;
+  const prepare = async (version: string, values: Record<string, unknown>, locator: { blockId?: string; path?: string[]; host?: unknown; baseline?: unknown } = {}) =>
+    ((await composeTemplate({ definitionKey: "TemplateBlock", referenceField: "version", parametersField: "parameters", values, references: { version: { entity: "TemplateVersion", id: version } }, host, ...locator }, context)) as { value: { kind: string; referenceField: string; version: unknown; parameters: Record<string, unknown>; content: PreparedContent; baseline: { version: unknown; parameters: Record<string, unknown>; content: PreparedContent } } }).value;
   const writes = () => log.statements.filter((statement) => /^(insert|update|delete)\b/i.test(statement) || statement.includes("set_config"));
   return { versions, log, denied, data, saved, session, row, write, prepare, writes };
 }
@@ -327,7 +327,7 @@ describe("preparing an inclusion before it is saved", () => {
     await expect(f.prepare(v2, values, { blockId: id(60) })).rejects.toMatchObject({ operationError: { code: "NOT_FOUND" } });
     await expect(f.prepare(v2, values, { blockId: id(62) })).rejects.toMatchObject({ operationError: { code: "NOT_FOUND" } });
     await expect(f.prepare(v2, values, { blockId: before.id, path: [greeting] })).rejects.toMatchObject({ operationError: { code: "NOT_FOUND" } });
-    await expect(f.prepare(v2, values, { blockId: before.id, path: ["absent", "deeper"] })).rejects.toMatchObject({ operationError: { code: "NOT_FOUND" } });
+    await expect(f.prepare(v2, values, { blockId: before.id, path: [greeting, "deeper"] })).rejects.toMatchObject({ operationError: { code: "NOT_FOUND" } });
     await expect(f.prepare(v2, values, { path: [added] })).rejects.toMatchObject({ operationError: { code: "VALIDATION" } });
     for (const host of [{ entity: "Document", id: documentVariant }, { entity: "DocumentVariant", id: "not-a-uuid" }, { entity: "DocumentVariant", id: documentVariant, tenantId: id(77) }])
       await expect(f.prepare(v2, values, { blockId: before.id, host })).rejects.toMatchObject({ operationError: { code: expect.stringMatching(/VALIDATION/) } });
@@ -349,9 +349,9 @@ describe("preparing an inclusion before it is saved", () => {
     await expect(f.prepare(v2, { parameters: { name: "Ada" }, content: clash }, { blockId: before.id })).rejects.toMatchObject({ operationError: { code: "INVALID_STATE", message: expect.stringContaining("The existing inclusion has been kept.") } });
     expect(JSON.stringify(before)).toBe(snapshot);
     expect(f.writes()).toEqual([]);
-    // A draft is checked against the stored record before anything is merged, and a prepared copy is not prepared again.
+    // A draft is checked against the stored record before anything is merged; a prepared copy needs the baseline it was prepared from.
     await expect(f.prepare(v2, { parameters: { name: "Ada" }, content: edit(values.content, terms, "Other terms") }, { blockId: before.id })).rejects.toMatchObject({ operationError: { code: "INVALID_STATE" } });
-    await expect(f.prepare(v2, { parameters: { name: "Ada" }, content: prepared.content }, { blockId: before.id })).rejects.toMatchObject({ operationError: { code: "INVALID_STATE", message: expect.stringContaining("already prepared") } });
+    await expect(f.prepare(v2, { parameters: { name: "Ada" }, content: prepared.content }, { blockId: before.id })).rejects.toMatchObject({ operationError: { code: "INVALID_STATE", message: expect.stringContaining("Send the baseline") } });
   });
 
   test("prepares an inclusion nested in the saved copy, existing or newly added, by its path", async () => {
@@ -415,6 +415,199 @@ describe("saving a prepared copy", () => {
     // A proposal for a source that changed since it was prepared is not what would be stored any more.
     f.versions[v2] = [{ id: greeting, markdown: "Hello {{local.name}}" }, { id: terms, markdown: "Terms", locked: true }, { id: closing, markdown: "Kind regards" }];
     await expect(save(next.content)).rejects.toMatchObject({ operationError: { code: "INVALID_STATE", message: expect.stringContaining("Prepare it again") } });
+  });
+});
+
+describe("preparing again a draft that was prepared before", () => {
+  const ps = id(25), deeper = id(26), v4 = id(14), v5 = id(15);
+  const stale = { operationError: { code: "INVALID_STATE", message: expect.stringContaining("earlier preparation no longer matches") } };
+  const note = (blockId: string, text: string) => ({ id: blockId, definitionKey: "TextBlock", schemaVersion: 1, values: { markdown: text }, references: {} });
+  /** A saved inclusion of v1, prepared for v2 with a local edit, and v3: v2 with one more block. */
+  async function prepared() {
+    const f = fixture();
+    f.versions[v3] = [...f.versions[v2]!, { id: ps, markdown: "PS for {{local.name}}" }];
+    const values = (await f.write(undefined, f.row(v1, { parameters: { name: "Ada" } })))!;
+    const before = f.row(v1, values);
+    f.saved.set(before.id, before);
+    const second = await f.prepare(v2, { parameters: { name: "Ada" }, content: edit(values.content, greeting, "Dear Ada, welcome") }, { blockId: before.id });
+    f.log.statements.length = 0; f.log.authorized.length = 0; f.log.reads.length = 0;
+    return { f, values, before, second };
+  }
+
+  test("answers every preparation with the capture alone as baseline, apart from the merged content", async () => {
+    const { f, second } = await prepared();
+    expect(second.baseline).toMatchObject({ version: { entity: "TemplateVersion", id: v2 }, parameters: { name: "Ada" } });
+    expect(markdown(second.baseline.content)).toEqual(["Dear Ada", "Terms", "Kind regards"]);
+    expect(markdown(second.content)).toEqual(["Dear Ada, welcome", "Terms", "Kind regards"]);
+    expect(second.baseline.content.source).toEqual(second.content.source);
+    // A new, unsaved inclusion: the baseline is what was captured, the content what would be stored.
+    const fresh = await f.prepare(v1, { parameters: { name: "Ada" } });
+    expect(fresh.baseline).toEqual({ version: { entity: "TemplateVersion", id: v1 }, parameters: fresh.parameters, content: fresh.content });
+  });
+
+  test("keeps what was typed after the earlier preparation when another version is chosen, and saves it", async () => {
+    const { f, before, second } = await prepared();
+    const snapshot = JSON.stringify(before);
+    // Typed after v2 was previewed: an edit and a block of the caller's own.
+    const typed = edit(second.content, closing, "Until soon");
+    const mine = { ...typed, blocks: [...typed.blocks, note(added, "My own note")] };
+    const third = await f.prepare(v3, { parameters: second.parameters, content: mine }, { blockId: before.id, baseline: second.baseline });
+    expect(markdown(third.content)).toEqual(["Dear Ada, welcome", "Terms", "Until soon", "My own note", "PS for Ada"]);
+    expect(markdown(third.baseline.content)).toEqual(["Dear Ada", "Terms", "Kind regards", "PS for Ada"]);
+    // The host first; then the earlier source is read again as this session, before the next one.
+    expect(f.log.authorized[0]).toBe(`DocumentVariant:${documentVariant}`);
+    expect(f.log.authorized.indexOf(`TemplateVersion:${v2}`)).toBe(1);
+    expect(f.log.authorized.indexOf(`TemplateVersion:${v3}`)).toBeGreaterThan(1);
+    expect(f.writes()).toEqual([]);
+    expect(JSON.stringify(before)).toBe(snapshot);
+    // Save is the ordinary write: it captures v3 again and stores the proposal, the edits of both rounds included.
+    const saved = await f.write(before, f.row(v3, { parameters: third.parameters, content: third.content }));
+    expect(saved!.content).toEqual(third.content);
+    expect(markdown(saved!.content)).toEqual(["Dear Ada, welcome", "Terms", "Until soon", "My own note", "PS for Ada"]);
+    // Without the baseline the same request is refused; it never falls back to the saved copy and drops the draft.
+    await expect(f.prepare(v3, { parameters: second.parameters, content: mine }, { blockId: before.id })).rejects.toMatchObject({ operationError: { code: "INVALID_STATE", message: expect.stringContaining("Send the baseline") } });
+  });
+
+  test("carries a draft through repeated changes of the inputs, each from the baseline before it", async () => {
+    const { f, values, before } = await prepared();
+    const first = await f.prepare(v1, { parameters: { name: "Grace" }, content: values.content }, { blockId: before.id });
+    expect(markdown(first.content)).toEqual(["Dear Grace", "Terms", "Regards"]);
+    const second = await f.prepare(v1, { parameters: { name: "Hedy" }, content: edit(first.content, closing, "Bye") }, { blockId: before.id, baseline: first.baseline });
+    expect(markdown(second.content)).toEqual(["Dear Hedy", "Terms", "Bye"]);
+    const mine = { ...second.content, blocks: [note(added, "Before all"), ...second.content.blocks] };
+    const third = await f.prepare(v1, { parameters: { name: "Joan" }, content: mine }, { blockId: before.id, baseline: second.baseline });
+    expect(markdown(third.content)).toEqual(["Before all", "Dear Joan", "Terms", "Bye"]);
+    expect(f.writes()).toEqual([]);
+    const saved = await f.write(before, f.row(v1, { parameters: third.parameters, content: third.content }));
+    expect(markdown(saved!.content)).toEqual(["Before all", "Dear Joan", "Terms", "Bye"]);
+    // A conflict still refuses as a whole: the next source changes the text that was edited after the last preparation.
+    await expect(f.prepare(v2, { parameters: third.parameters, content: edit(third.content, closing, "Cheers") }, { blockId: before.id, baseline: third.baseline }))
+      .rejects.toMatchObject({ operationError: { code: "INVALID_STATE", message: expect.stringContaining("The existing inclusion has been kept.") } });
+  });
+
+  test("a new, unsaved inclusion is prepared again from its earlier baseline, and an inclusion nested in it as well", async () => {
+    const f = fixture();
+    const first = await f.prepare(v1, { parameters: { name: "Ada" } });
+    const second = await f.prepare(v2, { parameters: first.parameters, content: edit(first.content, greeting, "Dear Ada, welcome") }, { baseline: first.baseline });
+    expect(markdown(second.content)).toEqual(["Dear Ada, welcome", "Terms", "Kind regards"]);
+    // Its locks are those of the capture: a draft that rewrites protected text is refused, not repaired.
+    await expect(f.prepare(v2, { parameters: first.parameters, content: edit(first.content, terms, "Other terms") }, { baseline: first.baseline })).rejects.toMatchObject({ operationError: { code: "INVALID_STATE" } });
+    // An inclusion the draft holds inside this unsaved one: prepared on its own, twice, with an edit in between.
+    const inner = await f.prepare(v1, { parameters: { name: "Grace" } });
+    const again = await f.prepare(v2, { parameters: inner.parameters, content: edit(inner.content, greeting, "Dear Grace, hello") }, { baseline: inner.baseline });
+    expect(markdown(again.content)).toEqual(["Dear Grace, hello", "Terms", "Kind regards"]);
+    expect(f.writes()).toEqual([]);
+    // Saving the root inserts both: each copy is captured again and holds what was typed.
+    const nested = { id: added, definitionKey: "TemplateBlock", schemaVersion: 1, values: { parameters: again.parameters, content: again.content }, references: { version: { entity: "TemplateVersion", id: v2 } } };
+    const saved = await f.write(undefined, f.row(v2, { parameters: second.parameters, content: { ...second.content, blocks: [...second.content.blocks, nested] } }));
+    const copy = readInclusionCopy(saved!.content);
+    expect(copy.blocks.slice(0, 3).map((block) => block.values.markdown)).toEqual(["Dear Ada, welcome", "Terms", "Kind regards"]);
+    const child = readInclusionCopy(copy.blocks.at(-1)!.values.content);
+    expect(child.blocks.map((block) => block.values.markdown)).toEqual(["Dear Grace, hello", "Terms", "Kind regards"]);
+    expect(child.source.find((entry) => entry.id === terms)).toMatchObject({ locked: true });
+  });
+
+  test("reaches an inclusion below one that only the prepared draft holds, by its path", async () => {
+    const { f, before } = await prepared();
+    // Neither step is stored: the first preparation is that of a new inclusion.
+    const first = await f.prepare(v1, { parameters: { name: "Grace" } }, { blockId: before.id, path: [added, deeper] });
+    expect(markdown(first.content)).toEqual(["Dear Grace", "Terms", "Regards"]);
+    const next = await f.prepare(v2, { parameters: first.parameters, content: edit(first.content, greeting, "Dear Grace, hello") }, { blockId: before.id, path: [added, deeper], baseline: first.baseline });
+    expect(markdown(next.content)).toEqual(["Dear Grace, hello", "Terms", "Kind regards"]);
+    // A step that is stored but is no inclusion stays a path that leads nowhere.
+    await expect(f.prepare(v2, { parameters: first.parameters }, { blockId: before.id, path: [greeting, deeper], baseline: first.baseline })).rejects.toMatchObject({ operationError: { code: "NOT_FOUND" } });
+    expect(f.writes()).toEqual([]);
+  });
+
+  test("takes nothing of the baseline on the caller's word: content, hash, lock and page are those of a new capture", async () => {
+    const { f, before, second } = await prepared();
+    const snapshot = JSON.stringify(before);
+    const again = (baseline: unknown, content: unknown = second.content) => f.prepare(v3, { parameters: second.parameters, content }, { blockId: before.id, baseline });
+    const base = second.baseline;
+    // Text of the baseline rewritten, so a local change would pass as the source's own.
+    await expect(again({ ...base, content: edit(base.content, closing, "Cheers") })).rejects.toMatchObject(stale);
+    // A lock dropped from the record, in the baseline and in the draft alike, with the protected block rewritten.
+    const unlock = (content: PreparedContent) => {
+      const rewritten = edit(content, terms, "Other terms") as unknown as { blocks: Record<string, unknown>[] };
+      return { ...rewritten, source: content.source.map((entry) => ({ id: entry.id, hash: entry.hash })), blocks: rewritten.blocks.map(({ locked: _locked, ...block }) => block) };
+    };
+    await expect(again({ ...base, content: unlock(base.content) }, unlock(second.content))).rejects.toMatchObject(stale);
+    // A hash rewritten to match rewritten protected text.
+    const forged = await blockHash({ id: terms, definitionKey: "TextBlock", schemaVersion: 1, values: { markdown: "Other terms" }, references: {} });
+    const rehash = (content: PreparedContent) => ({ ...edit(content, terms, "Other terms"), source: content.source.map((entry) => entry.id === terms ? { ...entry, hash: forged } : entry) });
+    await expect(again({ ...base, content: rehash(base.content) }, rehash(second.content))).rejects.toMatchObject(stale);
+    await expect(again({ ...base, content: { ...base.content, page: { format: "a3" } } })).rejects.toMatchObject(stale);
+    // Another version or other inputs than the content was captured with.
+    await expect(again({ ...base, version: { entity: "TemplateVersion", id: v1 } })).rejects.toMatchObject(stale);
+    await expect(again({ ...base, parameters: { name: "Mallory" } })).rejects.toMatchObject(stale);
+    // A true baseline, and a draft that rewrites or drops what it protects.
+    await expect(again(base, edit(second.content, terms, "Other terms"))).rejects.toMatchObject({ operationError: { code: "INVALID_STATE" } });
+    await expect(again(base, { ...second.content, blocks: second.content.blocks.filter((block) => block.id !== terms) })).rejects.toMatchObject({ operationError: { code: "INVALID_STATE" } });
+    for (const baseline of [{ ...base, extra: true }, { ...base, version: { entity: "Template", id: template } }, { ...base, version: { entity: "TemplateVersion", id: "not-a-uuid" } }, { version: base.version, parameters: base.parameters }, "v2"])
+      await expect(again(baseline)).rejects.toMatchObject({ operationError: { code: expect.stringMatching(/VALIDATION|DEPENDENCY_INVALID/) } });
+    expect(f.writes()).toEqual([]);
+    expect(JSON.stringify(before)).toBe(snapshot);
+  });
+
+  test("a true baseline of another source does not release what the saved copy protects", async () => {
+    const { f, before } = await prepared();
+    // Captured for real, as a new inclusion, from versions that do not hold the protected block of the saved copy.
+    f.versions[v4] = [{ id: greeting, markdown: "Dear {{local.name}}" }, { id: closing, markdown: "Regards" }];
+    f.versions[v5] = [{ id: greeting, markdown: "Dear {{local.name}}" }, { id: closing, markdown: "Bye" }];
+    const loose = await f.prepare(v4, { parameters: { name: "Ada" } });
+    expect(markdown(loose.content)).toEqual(["Dear Ada", "Regards"]);
+    const protectedHere = { operationError: { code: "INVALID_STATE", message: expect.stringContaining("protected here") } };
+    await expect(f.prepare(v5, { parameters: { name: "Ada" }, content: loose.content }, { blockId: before.id, baseline: loose.baseline })).rejects.toMatchObject(protectedHere);
+    // Nor does a next source that drops it, from a baseline that still held it.
+    const second = await f.prepare(v2, { parameters: { name: "Ada" } }, { blockId: before.id });
+    await expect(f.prepare(v5, { parameters: { name: "Ada" }, content: second.content }, { blockId: before.id, baseline: second.baseline })).rejects.toMatchObject(protectedHere);
+    expect(f.writes()).toEqual([]);
+  });
+
+  test("refuses another tenant's or host's block, a host the session may not change and a baseline source it may not read", async () => {
+    const { f, before, second } = await prepared();
+    const again = (locator: Record<string, unknown>) => f.prepare(v3, { parameters: second.parameters, content: second.content }, { blockId: before.id, baseline: second.baseline, ...locator });
+    f.saved.set(id(60), { ...before, id: id(60), document_variant_id: id(61) });
+    await expect(again({ blockId: id(60) })).rejects.toMatchObject({ operationError: { code: "NOT_FOUND" } });
+    // Another tenant's block is not found by this tenant's read.
+    await expect(again({ blockId: id(62) })).rejects.toMatchObject({ operationError: { code: "NOT_FOUND" } });
+    await expect(again({ host: { entity: "DocumentVariant", id: id(61) } })).rejects.toMatchObject({ operationError: { code: "NOT_FOUND" } });
+    // Nothing of a source was read for a block that is not the caller's to prepare.
+    expect(f.log.reads).toEqual([]);
+    f.denied.add(documentVariant);
+    await expect(again({})).rejects.toThrow("FORBIDDEN");
+    expect(f.log.reads).toEqual([]);
+    f.denied.clear();
+    // The earlier source is read as this session; holding its baseline does not stand in for the right to read it.
+    f.denied.add(v2);
+    await expect(again({})).rejects.toThrow("FORBIDDEN");
+    expect(f.log.authorized).not.toContain(`TemplateVersion:${v3}`);
+    f.denied.clear();
+    // A version that does not exist for this tenant.
+    await expect(again({ baseline: { ...second.baseline, version: { entity: "TemplateVersion", id: id(99) } } })).rejects.toBeDefined();
+    expect(f.writes()).toEqual([]);
+  });
+
+  test("refuses when a record the earlier preparation named has changed since, and writes nothing", async () => {
+    const f = fixture();
+    f.versions[v3] = [{ id: greeting, markdown: "Dear {{local.name}} of {{chips.brand}}" }, { id: terms, markdown: "Terms", locked: true }, { id: closing, markdown: "Regards" }];
+    f.versions[v4] = [...f.versions[v3]!, { id: ps, markdown: "PS" }];
+    const values = (await f.write(undefined, f.row(v1, { parameters: { name: "Ada" } })))!;
+    const before = f.row(v1, values);
+    f.saved.set(before.id, before);
+    const snapshot = JSON.stringify(before);
+    const second = await f.prepare(v3, { parameters: { name: "Ada" }, content: values.content }, { blockId: before.id });
+    expect(markdown(second.content)).toEqual(["Dear Ada of Acme", "Terms", "Regards"]);
+    const mine = edit(second.content, closing, "Until soon");
+    f.data.brand = "Globex";
+    f.log.statements.length = 0;
+    await expect(f.prepare(v4, { parameters: second.parameters, content: mine }, { blockId: before.id, baseline: second.baseline })).rejects.toMatchObject(stale);
+    expect(f.writes()).toEqual([]);
+    expect(JSON.stringify(before)).toBe(snapshot);
+    // With the record as it was prepared, the same draft goes through unchanged.
+    f.data.brand = "Acme";
+    const third = await f.prepare(v4, { parameters: second.parameters, content: mine }, { blockId: before.id, baseline: second.baseline });
+    expect(markdown(third.content)).toEqual(["Dear Ada of Acme", "Terms", "Until soon", "PS"]);
   });
 });
 

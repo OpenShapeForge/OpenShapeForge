@@ -9,6 +9,12 @@
  * content that save would store. It is a read: nothing is written, no block
  * is marked as changed, no file is staged or bound. Saving is a separate,
  * ordinary write of the Block, which settles the content again by itself.
+ *
+ * The answer also holds `baseline`: the same version and inputs as captured,
+ * without the local draft. A caller that prepares again before it saves sends
+ * that baseline back with the draft it has made since; the server captures it
+ * again as the caller and merges from there, so nothing typed after an
+ * earlier preparation is lost.
  */
 import type { ModuleOperationHandler } from "@openshapeforge/plugin-runtime";
 import { contextServices } from "./commands.js";
@@ -17,7 +23,8 @@ import { inclusionCopyContent, templateComposition } from "./content/inclusion-c
 import { prepareInclusionCopy } from "./inclusion-write.js";
 import { object, refuse, text, uuid } from "./validation.js";
 
-const INPUT = new Set(["definitionKey", "values", "references", "referenceField", "parametersField", "host", "blockId", "path"]);
+const INPUT = new Set(["definitionKey", "values", "references", "referenceField", "parametersField", "host", "blockId", "path", "baseline"]);
+type Json = Parameters<typeof prepareInclusionCopy>[2]["parameters"];
 const HOSTS = ["TemplateVariant", "DocumentVariant"] as const;
 const PATH_STEP = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 
@@ -46,11 +53,20 @@ export const composeTemplate: ModuleOperationHandler = async (input, context) =>
   if (reference.entity !== "TemplateVersion") refuse("DEPENDENCY_INVALID", "Template inclusion refers to another entity type.");
   const values = validatedValues(context, name, input.values);
   const parameters = object(values[parametersField] ?? {}, "parameters");
+  const baseline = input.baseline === undefined ? undefined : object(input.baseline, "baseline");
+  if (baseline && Object.keys(baseline).some((key) => key !== "version" && key !== "parameters" && key !== "content")) refuse("VALIDATION", "baseline holds the version, parameters and content an earlier preparation returned.");
+  const earlier = baseline ? object(baseline.version, "baseline.version") : undefined;
+  if (earlier && earlier.entity !== "TemplateVersion") refuse("DEPENDENCY_INVALID", "Template inclusion refers to another entity type.");
+  const prepared = baseline ? { versionId: uuid(earlier!.id, "baseline.version"), parameters: object(baseline.parameters, "baseline.parameters") as Json, content: object(baseline.content, "baseline.content") } : undefined;
   // The right to change the host decides, exactly as for the write this prepares.
   await platform.records.assertAccess(session, { entityName: host.entity as string, id: hostId, intent: "update" });
   const settled = await platform.db.withSession(session, (trx) => prepareInclusionCopy(context, trx, {
     tenantId: session.tenantId!, carrier, host: { entity: host.entity as typeof HOSTS[number], id: hostId }, ...(blockId ? { blockId } : {}), path: path as string[],
-    definitionKey: name, versionId, parameters: parameters as Parameters<typeof prepareInclusionCopy>[2]["parameters"], draft: values.content,
+    definitionKey: name, versionId, parameters: parameters as Json, draft: values.content, ...(prepared ? { baseline: prepared } : {}),
   }));
-  return { value: { kind: "template", referenceField, version: { entity: "TemplateVersion", id: versionId }, parameters: settled.parameters, content: inclusionCopyContent(settled.copy) } };
+  const version = { entity: "TemplateVersion", id: versionId };
+  return { value: {
+    kind: "template", referenceField, version, parameters: settled.parameters, content: inclusionCopyContent(settled.copy),
+    baseline: { version, parameters: settled.parameters, content: inclusionCopyContent(settled.baseline) },
+  } };
 };

@@ -77,8 +77,9 @@ operations:
   materialize:
     name: Prepare included template
     description: Prepare the complete copy an inclusion would store for the given template version, inputs and local
-      draft, in the named host and optionally for a saved block or an inclusion nested in it. Reads only; saving the
-      block is what stores a copy.
+      draft, in the named host and optionally for a saved block or an inclusion nested in it. The answer also holds the
+      baseline that was captured; send it back with a draft made of an earlier preparation to prepare again. Reads
+      only; saving the block is what stores a copy.
     implementation: { type: plugin, plugin: documents, handler: composeTemplate }
     target: { scope: collection }
     input:
@@ -104,6 +105,22 @@ operations:
             type: array
             maxItems: 8
             items: { type: string, minLength: 1, maxLength: 128 }
+          # What an earlier preparation returned as `baseline`, when `values.content` is a draft made of it. The
+          # server captures it again as the caller and refuses one it would not capture now.
+          baseline:
+            type: object
+            additionalProperties: false
+            required: [version, parameters, content]
+            properties:
+              version:
+                type: object
+                additionalProperties: false
+                required: [entity, id]
+                properties:
+                  entity: { type: string, const: TemplateVersion }
+                  id: { type: string, format: uuid }
+              parameters: { type: object }
+              content: { type: object }
     output: { schema: { type: object } }
     errors: []
     auth: { mode: session, roles: [Templates.Read, Templates.Manage, General.All.Read, General.All.ReadWrite] }

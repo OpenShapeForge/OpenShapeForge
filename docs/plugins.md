@@ -31,6 +31,56 @@ retried and a redirect is a refusal. The body is buffered up to a budget: an SSE
 response is returned once the upstream closes it, and one still open at the
 deadline fails, so this does not carry streaming notifications.
 
+### A record's own secure values and destination
+
+An entity whose create Operation declares static secure input with a `resolve`
+policy (see [secure-input-browser.md](secure-input-browser.md)) lets the plugin
+Operations it names open one record's values:
+
+```ts
+const resolved = await platform.secrets?.resolveEntityValues?.(session, {
+  entity: "SecureEndpoint",
+  id: endpointId,
+});
+if (!resolved) throw new Error("This host cannot resolve secure values.");
+if (!resolved.ok) return refuse(resolved.code);
+const { values, url, egressGrant } = resolved.record;
+const response = await platform.egress!.request(session, egressGrant, {
+  url,
+  json: event,
+  headers: { [headerName]: values.apiKey! },
+});
+```
+
+Core decides, in this order, before it opens anything:
+
+| Refusal | When |
+|---|---|
+| thrown `live verified session` error | the session is not the one of the Operation executing right now |
+| `NOT_FOUND` | the entity declares no `resolve`, the id is not a UUID, or row-level security shows this session no such record (another tenant's record reads the same) |
+| `FORBIDDEN` | the executing Operation is not listed under `resolve.operations`, or it is a record-targeted write Operation of the same entity invoked for a different record |
+| `EGRESS_TARGET_INVALID` | the stored URL is not HTTPS, carries credentials or a fragment, or its host contains `*` |
+| `SECRET_KEYRING_MISSING` | the process holds no key for a stored value |
+| `SECRET_REENTRY_REQUIRED` | a required value is missing, or the values were entered for another origin than the record's current URL |
+
+The executing Operation is the one core is running, read from core's own
+invocation context: a plugin does not state it and cannot lend it to another
+Operation. Stored values are sealed for the tenant, the table and the origin of
+the record's URL, so a record pointed at another origin no longer opens until
+its values are entered again.
+
+The grant is the same single-use, five-minute, session-bound grant a Connection
+yields, with a narrower policy: its allow-list is the stored URL's one
+hostname, and the request URL must have the stored URL's origin, a path equal
+to or below its path, and every query parameter it carries. Every protection of
+`platform.egress.request` above applies unchanged, and the grant opens no
+socket. The egress owner receives `purpose: "provider"`, no `source`, and
+`scope: { tenantId, actorId, provider: "<entity name>", operation:
+"entity.http", kind: "mutation" }`.
+
+Credentials belong in a header, not in the URL: the URL is an ordinary field,
+readable by everyone who may read the record and recorded in its history.
+
 `platform.egress.connect(session, grant, request)` opens a raw socket to a
 `host:port` the Adapter grants. Core resolves the name itself, refuses the
 connection if any answer is a loopback, link-local, private or otherwise

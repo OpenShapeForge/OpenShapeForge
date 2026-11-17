@@ -5,7 +5,7 @@ import { blockHash, readInclusionCopy } from "./content/inclusion-copy.js";
 import type { JsonObject } from "./content/json.js";
 import type { ContentBlock } from "./content/types.js";
 import { composeTemplate } from "./inclusion-prepare.js";
-import { assertBlockInclusionRemoval, prepareBlockInclusionWrite, type InclusionActor } from "./inclusion-write.js";
+import { assertBlockInclusionRemoval, prepareBlockInclusionWrite, retainedInclusionProvenance, type InclusionActor } from "./inclusion-write.js";
 
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const tenant = id(1), template = id(2), variant = id(3), hostVariant = id(4), documentVariant = id(5), deal = id(6);
@@ -455,5 +455,39 @@ describe("the session that captures", () => {
     await expect(f.write(undefined, f.row(v1, { parameters: { name: "Ada" } }))).rejects.toThrow("FORBIDDEN");
     // No session at all is not a session with every right: the capture is unavailable.
     await expect(f.write(undefined, f.row(v1, { parameters: { name: "Ada" } }), false)).rejects.toMatchObject({ operationError: { code: "OPERATION_UNAVAILABLE" } });
+  });
+});
+
+describe("retained provenance of a stored inclusion", () => {
+  const provenance = { referenceField: "version", parametersField: "parameters" };
+
+  test("only an update that repeats the stored version, inputs and source record keeps the source as provenance", async () => {
+    const f = fixture();
+    const values = (await f.write(undefined, f.row(v1, { parameters: { name: "Ada" } })))!;
+    const before = f.row(v1, values);
+    const content = values.content as PreparedContent;
+    expect(retainedInclusionProvenance(carrier, before, f.row(v1, { ...values, content: edit(content, greeting, "Hello Ada") }))).toEqual(provenance);
+    expect(retainedInclusionProvenance(carrier, before, f.row(v1, { parameters: values.parameters }))).toEqual(provenance);
+    // It is the same decision the write takes: such an update is settled without the acting session.
+    await f.write(before, f.row(v1, { ...values, content: edit(content, greeting, "Hello Ada") }), false);
+
+    // An insertion, another version, other inputs, a version left to a variable and a prepared record all read the source.
+    expect(retainedInclusionProvenance(carrier, undefined, before)).toBeUndefined();
+    expect(retainedInclusionProvenance(carrier, before, f.row(v2, values))).toBeUndefined();
+    expect(retainedInclusionProvenance(carrier, before, f.row(v1, { ...values, parameters: { name: "Grace" } }))).toBeUndefined();
+    expect(retainedInclusionProvenance(carrier, before, { ...f.row(v1, values), template_version_parameter: "chosen" })).toBeUndefined();
+    const prepared = { ...content, source: content.source.map((entry) => entry.id === greeting ? { ...entry, hash: "0".repeat(64) } : entry) };
+    expect(retainedInclusionProvenance(carrier, before, f.row(v1, { ...values, content: prepared }))).toBeUndefined();
+    expect(retainedInclusionProvenance(carrier, before, f.row(v1, { ...values, content: { ...content, source: [] } }))).toBeUndefined();
+  });
+
+  test("the stored row decides: a row without a copy, another kind of block or another carrier retains nothing", async () => {
+    const f = fixture();
+    const values = (await f.write(undefined, f.row(v1, { parameters: { name: "Ada" } })))!;
+    // A caller-supplied copy over a row that stores none.
+    expect(retainedInclusionProvenance(carrier, f.row(v1, { parameters: values.parameters }), f.row(v1, values))).toBeUndefined();
+    expect(retainedInclusionProvenance(carrier, { ...f.row(v1, values), definition_key: "TextBlock" }, f.row(v1, values))).toBeUndefined();
+    expect(retainedInclusionProvenance(carrier, { ...f.row(v1, values), definition_key: "TextBlock" }, { ...f.row(v1, values), definition_key: "TextBlock" })).toBeUndefined();
+    expect(retainedInclusionProvenance({ ...carrier, entityName: "Note" }, f.row(v1, values), f.row(v1, values))).toBeUndefined();
   });
 });

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { prepareBlockInclusionWrite, type InclusionActor } from "@openshapeforge/documents/content-commands";
+import { prepareBlockInclusionWrite, retainedInclusionProvenance, type InclusionActor } from "@openshapeforge/documents/content-commands";
 import type { RuntimeEntityValueCarrier, RuntimeEntityValueRegistry } from "@openshapeforge/plugin-runtime";
 import { operationFailure } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
@@ -136,6 +136,9 @@ export function assertEntityValueInput(table: GeneratedCrudTable, input: Record<
   }
 }
 
+const rowValues = (values: ReadonlyMap<GeneratedCrudColumn, unknown>): Record<string, unknown> =>
+  Object.fromEntries([...values].map(([column, value]) => [column.name, value]));
+
 /** Validate and authorize every reference while holding its row against edits/deletes. */
 export async function prepareEntityValueWriteInTransaction(
   trx: Transaction<DB>, session: DbSessionInput, table: GeneratedCrudTable,
@@ -155,7 +158,12 @@ export async function prepareEntityValueWriteInTransaction(
     result.set(valueColumn, split.values);
     for (const [name, value] of Object.entries(split.columns)) result.set(table.columns.find((column) => column.name === name)!, value);
     const definition = carrier.definitions[String(key)]!;
+    // An inclusion whose stored copy is kept names its source only as provenance: the owning module decides that
+    // from the locked stored row, and then neither the source nor its field definitions are read for this write.
+    // Every other reference of the row, and this one whenever the source is captured, is authorized below.
+    const retained = operation === "update" ? retainedInclusionProvenance(carrier, current, { ...current, ...rowValues(result) }) : undefined;
     for (const reference of split.references) {
+      if (reference.fieldKey === retained?.referenceField) continue;
       const descriptor = definition.references.find((item) => item.fieldKey === reference.fieldKey)!;
       references.push({ ...reference, schema: descriptor.schema, table: descriptor.table });
     }
@@ -170,6 +178,7 @@ export async function prepareEntityValueWriteInTransaction(
       const reference = split.references.find(item => item.fieldKey === binding.reference);
       // Parameter-bound references resolve later when the enclosing template is materialized.
       if (!reference) continue;
+      if (retained && binding.reference === retained.referenceField && field.key === retained.parametersField) continue;
       dynamicValues.push({ entityName: reference.entityName, id: reference.id, headEntity: binding.headEntity,
         snapshotColumn: binding.snapshotColumn, values: split.values[field.key] ?? {}, wholeBindings: field.variables === "whole" || field.variables === "both" });
     }
@@ -209,7 +218,7 @@ export async function prepareEntityValueWriteInTransaction(
   // row is written, in this transaction. What it returns replaces the caller's value; a refusal rolls the write back.
   if (session.tenantId) for (const carrier of entityValueCarriers(table, context.registry)) {
     const valueColumn = table.columns.find((column) => column.name === carrier.valuesColumn)!;
-    const next = { ...(current ?? {}), ...Object.fromEntries([...result].map(([column, value]) => [column.name, value])) };
+    const next = { ...(current ?? {}), ...rowValues(result) };
     const settled = await prepareBlockInclusionWrite(trx, session.tenantId, carrier, current, next, { actor: context.inclusionActor ?? inclusionActor(session) });
     if (settled && result.has(valueColumn)) result.set(valueColumn, settled);
   }

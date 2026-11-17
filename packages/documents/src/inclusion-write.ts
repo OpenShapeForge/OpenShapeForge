@@ -61,6 +61,13 @@ function countBlocks(copy: InclusionCopy, compositionOf: CompositionOf, depth = 
   return copy.blocks.reduce((total, block) => { const nested = nestedCopy(block, compositionOf); return total + 1 + (nested ? countBlocks(nested, compositionOf, depth + 1) : 0); }, 0);
 }
 
+const sameIdentity = (stored: Stored | undefined, next: Identity): boolean =>
+  stored !== undefined && stored.versionId === next.versionId && canonicalJson(stored.parameters) === canonicalJson(next.parameters);
+/** A draft whose source record differs from the stored one: what the prepare read returned, to be captured again. */
+const isPreparedDraft = (stored: Stored | undefined, draft: unknown): boolean =>
+  stored?.copy !== undefined && isObject(draft) && draft.source !== undefined
+    && canonicalJson(draft.source) !== canonicalJson(inclusionCopyContent(stored.copy).source);
+
 /**
  * One inclusion, at any depth: unchanged, edited, captured or updated.
  *
@@ -86,10 +93,8 @@ function countBlocks(copy: InclusionCopy, compositionOf: CompositionOf, depth = 
 async function settle(environment: Environment, stored: Stored | undefined, next: Next, explicit = false): Promise<Settled> {
   const { compositionOf } = environment;
   const settleNested = (input: { stored: ContentBlock | undefined; draft: ContentBlock }) => settleBlock(environment, input.stored, input.draft);
-  const sameIdentity = stored !== undefined && stored.versionId === next.versionId && canonicalJson(stored.parameters) === canonicalJson(next.parameters);
-  const prepared = stored?.copy !== undefined && isObject(next.draft) && next.draft.source !== undefined
-    && canonicalJson(next.draft.source) !== canonicalJson(inclusionCopyContent(stored.copy).source);
-  if (stored?.copy && sameIdentity && !prepared && !explicit) {
+  const prepared = isPreparedDraft(stored, next.draft);
+  if (stored?.copy && sameIdentity(stored, next) && !prepared && !explicit) {
     // An ordinary edit: the stored source record and page settings stay, the draft is checked against them.
     if (next.draft === undefined) return { parameters: stored.parameters, copy: stored.copy };
     return { parameters: stored.parameters, copy: { ...stored.copy, blocks: await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested }) } };
@@ -255,6 +260,36 @@ async function prepare(trx: unknown, tenantId: string, carrier: RuntimeEntityVal
   // Also the size budget of what is stored.
   canonicalJson(values);
   return values;
+}
+
+/** The fields of an inclusion that only record where its stored copy came from. */
+export type RetainedInclusionProvenance = { readonly referenceField: string; readonly parametersField: string };
+
+/**
+ * Whether an update keeps the source of a stored inclusion as it is: the row
+ * the server holds (`before`) already carries a complete copy, and the row as
+ * it would be written (`after`) names the same version with the same inputs
+ * and does not offer a prepared source record. That is exactly the ordinary
+ * edit `settle` decides on, for which nothing is captured and the source is
+ * not read: its version reference and inputs are then provenance of the
+ * stored copy, not a live dependency of this write. The answer comes from the
+ * stored row alone; nothing the caller sends can label a write as retained
+ * other than repeating what is stored. Every other write — an insertion,
+ * another version or input, a prepared copy or refresh, a row stored before
+ * copies existed — returns undefined and reads its source as the caller.
+ */
+export function retainedInclusionProvenance(carrier: RuntimeEntityValueCarrier, before: Row | undefined, after: Row): RetainedInclusionProvenance | undefined {
+  if (carrier.entityName !== "Block" || !before || before[carrier.definitionColumn] !== after[carrier.definitionColumn]) return undefined;
+  try {
+    const previous = inclusionOf(carrier, before);
+    if (!previous?.copy || !previous.versionId || previous.bound) return undefined;
+    const { composition, reference } = previous;
+    if (after[reference.column] !== previous.versionId || (reference.parameterColumn && after[reference.parameterColumn] != null)) return undefined;
+    const values = record(after[carrier.valuesColumn]);
+    const stored = { versionId: previous.versionId, parameters: record(previous.values[composition.parametersField]), copy: previous.copy };
+    if (!sameIdentity(stored, { versionId: previous.versionId, parameters: record(values[composition.parametersField]) }) || isPreparedDraft(stored, values.content)) return undefined;
+    return { referenceField: composition.templateVersionField, parametersField: composition.parametersField };
+  } catch (error) { contentRefusal(error); }
 }
 
 function contentRefusal(error: unknown): never {

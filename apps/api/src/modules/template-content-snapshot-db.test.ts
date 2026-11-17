@@ -99,10 +99,11 @@ async function insertBlock(id: string, position: number, markdown: string, varia
     values (${id}::uuid, ${tenantId}::uuid, ${variantId}::uuid, ${position}, 'TextBlock', 1, ${jsonbLiteral({ markdown })})`.execute(privileged.db);
 }
 /** The reference lives in its generated column, exactly as the compiled carrier names it. */
-async function insertTemplateBlock(id: string, variantId: string, position: number, versionId: string) {
+/** A stored inclusion row. `content` is the complete copy a canonical write captures; without it the row is the earlier reference-only form. */
+async function insertTemplateBlock(id: string, variantId: string, position: number, versionId: string, content?: Record<string, unknown>) {
   const column = generatedEntityValues.get("Block", "values")!.definitions.TemplateBlock!.references.find((reference) => reference.fieldKey === "version")!.column;
   await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, definition_version, "values", ${sql.ref(column)})
-    values (${id}::uuid, ${tenantId}::uuid, ${variantId}::uuid, ${position}, 'TemplateBlock', 1, ${jsonbLiteral({ parameters: {} })}, ${versionId}::uuid)`.execute(privileged.db);
+    values (${id}::uuid, ${tenantId}::uuid, ${variantId}::uuid, ${position}, 'TemplateBlock', 1, ${jsonbLiteral({ parameters: {}, ...(content ? { content } : {}) })}, ${versionId}::uuid)`.execute(privileged.db);
 }
 async function insertTemplate(templateId: string, variantId: string, key: string, defaultName: string) {
   await sql`insert into erp.templates (id, tenant_id, key, name, parameters) values (${templateId}::uuid, ${tenantId}::uuid, ${key}, ${key},
@@ -169,12 +170,16 @@ describe("TemplateVersion.materialize reads the frozen snapshot, not the live ta
     expect((await materialize(versionId)).compositionHash).toBe(frozen.compositionHash);
   }, 60_000);
 
-  test("a TemplateBlock inclusion resolves through its generated reference column and pins the nested version too", async () => {
+  test("a TemplateBlock inclusion is read from the copy frozen with it, naming its source version without opening it", async () => {
     await insertTemplate(nested.template, nested.variant, "nested", "Inner");
     await insertBlock(nested.block, 0, "Nested {{local.name}}", nested.variant);
     const nestedVersionId = await publish(nested.template);
     await insertTemplate(nested.outer, nested.outerVariant, "outer", "Outer");
-    await insertTemplateBlock(nested.include, nested.outerVariant, 0, nestedVersionId);
+    // The copy as a canonical write stores it: the captured block, resolved, with the server's source record.
+    await insertTemplateBlock(nested.include, nested.outerVariant, 0, nestedVersionId, {
+      source: [{ id: nested.block, hash: "0".repeat(64) }],
+      blocks: [{ id: nested.block, definitionKey: "TextBlock", schemaVersion: 1, values: { markdown: "Nested Inner" }, references: {} }],
+    });
     await insertBlock(nested.outerText, 1, "After the inclusion", nested.outerVariant);
     const outerVersionId = await publish(nested.outer);
 
@@ -185,10 +190,18 @@ describe("TemplateVersion.materialize reads the frozen snapshot, not the live ta
     const result = await materialize(outerVersionId);
     expect(result.compositions).toHaveLength(1);
     expect(result.compositions[0]).toMatchObject({ path: [nested.include], definitionKey: "TemplateBlock", templateReference: { entity: "TemplateVersion", id: nestedVersionId } });
-    expect(result.templates.map((entry) => [entry.path, entry.version.id, entry.parameters])).toEqual([[[], outerVersionId, { name: "Outer" }], [[nested.include], nestedVersionId, { name: "Inner" }]]);
+    expect(result.templates.map((entry) => [entry.path, entry.version.id, entry.parameters])).toEqual([[[], outerVersionId, { name: "Outer" }]]);
     expect(result.blocks.map((block) => [block.path, block.values.markdown])).toEqual([[[nested.include, nested.block], "Nested Inner"], [[nested.outerText], "After the inclusion"]]);
     expect(JSON.stringify(result)).not.toContain("MUTATED");
     expect(authorizations.filter((entry) => /^(TemplateVariant|Block):/.test(entry))).toEqual([]);
+    // The included version and its template were never read or authorized: the copy is the outer template's content.
+    expect(authorizations.filter((entry) => entry.includes(nestedVersionId) || entry.includes(nested.template))).toEqual([]);
+
+    // A version frozen with the earlier reference-only form is refused by name; it is never expanded from its source.
+    const legacy = { template: randomUUID(), variant: randomUUID(), include: randomUUID() };
+    await insertTemplate(legacy.template, legacy.variant, "legacy", "Legacy");
+    await insertTemplateBlock(legacy.include, legacy.variant, 0, nestedVersionId);
+    await expect(materialize(await publish(legacy.template))).rejects.toMatchObject({ operationError: { code: "DEPENDENCY_INVALID", message: expect.stringContaining("reference-only form") } });
   }, 60_000);
 
   test("a locale that was never published resolves nothing rather than falling back to live rows", async () => {

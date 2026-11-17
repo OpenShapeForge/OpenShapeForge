@@ -97,7 +97,7 @@ export const materializeDocument: ModuleOperationHandler = async (input, context
           return { ...version, variants: await documentContentVariants(trx, { id: documentId, channel, defaultLocales, templatePages }, selection, documentCollection.allowedDefinitions) };
         },
       };
-      const resolved = await materializeTemplateContent({ tenantId, templateVersionId, channel, locale, parameters }, registry, resolvers);
+      const resolved = await materializeTemplateContent({ document: true, tenantId, templateVersionId, channel, locale, parameters }, registry, resolvers);
       // A linked document keeps its template provenance, but its editable content
       // and images belong to the document, exactly as for an unlinked document.
       const { compositionHash: _templateHash, ...content } = resolved;

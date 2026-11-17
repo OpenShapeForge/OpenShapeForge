@@ -51,7 +51,7 @@ export function contentFieldProjection(field: Readonly<Record<string, unknown>>)
   };
 }
 
-function validatedValues(context: ModuleOperationContext, name: string, value: unknown): JsonObject {
+export function validatedValues(context: ModuleOperationContext, name: string, value: unknown): JsonObject {
   const { platform } = contextServices(context);
   const entry = blockDefinition(contentCarrier(context), name);
   const values = object(value, "values");
@@ -66,23 +66,6 @@ export const materializeFields: ModuleOperationHandler = async (input, context) 
   const entry = blockDefinition(contentCarrier(context), name);
   if (entry.references.length) refuse("OPERATION_UNAVAILABLE", "A referenced block requires its authored materialization Operation.");
   return { value: { kind: "block", value: validatedValues(context, name, input.values) } };
-};
-
-/** Returns an inclusion directive. The shared engine owns recursion and cycle limits. */
-export const composeTemplate: ModuleOperationHandler = async (input, context) => {
-  const name = text(input.definitionKey, "definitionKey");
-  const entry = blockDefinition(contentCarrier(context), name);
-  const referenceField = text(input.referenceField, "referenceField");
-  const parametersField = text(input.parametersField, "parametersField");
-  const slot = entry.references.find((reference) => reference.fieldKey === referenceField);
-  if (!slot || slot.targetEntity !== "TemplateVersion") refuse("INVALID_DEFINITION", "Template inclusion requires a typed template-version reference.");
-  const references = object(input.references, "references");
-  const reference = object(references[referenceField], "template reference");
-  uuid(reference.id, "template reference");
-  if (reference.entity !== "TemplateVersion") refuse("DEPENDENCY_INVALID", "Template inclusion refers to another entity type.");
-  const values = validatedValues(context, name, input.values);
-  const parameters = object(values[parametersField] ?? {}, "parameters");
-  return { value: { kind: "template", referenceField, parameters, ...(values.content === undefined ? {} : {content: object(values.content, "included content")}) } };
 };
 
 /** Convert a canonical parameter schema to the engine's structural projection. */

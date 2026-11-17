@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import { captureInclusionContent, captureTemplateBlocks, type CaptureHost } from "./capture.js";
 import { blockHash, inclusionCopyContent, readInclusionCopy } from "./inclusion-copy.js";
-import { materializeDocumentContent } from "./materialize.js";
+import { materializeDocumentContent, materializeTemplateContent } from "./materialize.js";
 import type { CompiledContentBlockRegistry, ContentBlock, ContentResolvers, ContentTemplateVersion, JsonObject, TemplateParameter } from "./index.js";
 import { contentVariableCatalogue } from "./variables.js";
 
@@ -205,8 +205,81 @@ describe("capturing into a template that supplies the input later", () => {
   });
 });
 
-function inclusion(id: string, captured: { copy: Parameters<typeof inclusionCopyContent>[0]; parameters: JsonObject }): ContentBlock {
-  return block(id, "TemplateSlot", { parameters: captured.parameters, content: inclusionCopyContent(captured.copy) }, { references: { version: { entity: "TemplateVersion", id: "letter" } } });
+describe("what is data and what is a variable in a copy", () => {
+  const host = templateHost({ opportunity: dealParameter, client: { baseType: "string" } });
+  /** A Markdown paragraph and a plain line that each print the customer; the paragraph also prints the title. */
+  const mixed = () => version("mixed", { deal: dealParameter, title: { baseType: "string" } }, [
+    block("paragraph", "Prose", { markdown: "For {{local.deal.customer.name}}, by {{local.title}}" }),
+    block("line", "Line", { text: "{{local.deal.customer.name}}" }),
+  ]);
+  const hostTemplate = (...blocks: ContentBlock[]) => version("host", { client: { baseType: "string" } }, blocks);
+  const read = (f: ReturnType<typeof fixture>, parameters: JsonObject) => materializeTemplateContent({ tenantId, templateVersionId: "host", channel: "document", locale: "en", parameters }, registry, f.resolvers);
+
+  test("Markdown keeps a captured value that reads like a variable next to one that is still pending", async () => {
+    const f = fixture({ "deal-1": "{{local.client}} & co" });
+    f.versions.mixed = mixed();
+    const captured = await f.capture({ deal: "deal-1", title: "{{local.client}}" }, host, "mixed");
+    // Not refused: the value is escaped, which Markdown prints as the same text and the variable grammar never matches.
+    expect(captured.copy.blocks[0]!.values.markdown).toBe("For \\{\\{local\\.client\\}\\} \\& co, by {{local.client}}");
+    expect(captured.copy.blocks[1]!.values.text).toBe("{{local.client}} & co");
+    expect(captured.copy.source.map((entry) => entry.deferred ?? false)).toEqual([true, false]);
+    f.versions.host = hostTemplate(inclusion("slot", captured, "mixed"));
+    const content = await read(f, { client: "Hedy" });
+    // Only the pending variable is filled. The customer's name stays the customer's name, in both fields.
+    expect(content.blocks[0]!.values.markdown).toBe("For \\{\\{local\\.client\\}\\} \\& co, by Hedy");
+    expect(content.blocks[1]!.values.text).toBe("{{local.client}} & co");
+  });
+
+  test("a variable the template's author writes into copied Markdown works; captured values around it stay data", async () => {
+    const f = fixture({ "deal-1": "{{local.client}}" });
+    const captured = await f.capture({ deal: "deal-1" }, host);
+    expect(captured.copy.source.some((entry) => entry.deferred)).toBe(false);
+    // The author edits the copied terms and the copied plain line, and adds a paragraph of their own.
+    const edited = captured.copy.blocks.map((entry) => entry.id === "terms" ? { ...entry, locked: undefined, values: { markdown: `${entry.values.markdown} Signed, {{local.client}}.` } }
+      : entry.id === "intro" ? { ...entry, values: { text: `${entry.values.text} — {{local.client}}` } } : entry).map(({ locked: _locked, ...entry }) => entry as ContentBlock);
+    const copy = { ...captured.copy, blocks: [...edited, block("own", "Line", { text: "Added for {{local.client}}" })] };
+    f.versions.host = hostTemplate(inclusion("slot", { copy, parameters: captured.parameters }));
+    const content = await read(f, { client: "Hedy" });
+    const values = Object.fromEntries(content.blocks.map((entry) => [entry.id, entry.values.markdown ?? entry.values.text]));
+    // Markdown: the new variable is bound, the captured name before it is still text.
+    expect(values.terms).toBe("Terms for \\{\\{local\\.client\\}\\} apply. Signed, Hedy.");
+    // The author's own block is the template's content like any other.
+    expect(values.own).toBe("Added for Hedy");
+    // A plain field has no spelling for a brace that is data, so a captured plain field stays data as a whole:
+    // a variable typed into it later is text. That is the one place authoring a variable needs a block of its own.
+    expect(values.intro).toBe("We will assess {{local.client}} — {{local.client}}");
+  });
+
+  test("a document holds no variable: text typed into a copy is text, whoever typed it", async () => {
+    const f = fixture();
+    const captured = await f.capture({ deal: "deal-1" }, documentHost);
+    const blocks = [
+      ...captured.copy.blocks.map((entry) => entry.id === "intro" ? { ...entry, values: { text: "We assess {{Acme}} — see {{local.title}}" } } : entry),
+      block("typed", "Prose", { markdown: "A new paragraph about {{braces}} and {{chips.brand}}" }),
+      block("typed-line", "Line", { text: "{{local.deal.customer.name}}" }),
+    ];
+    const strict = { ...f.resolvers, resolveGlobalVariable: () => { throw new Error("Text of a document was bound."); }, resolveVariablePath: () => { throw new Error("Text of a document was bound."); } };
+    const content = await materializeDocumentContent(documentWith(inclusion("slot", { copy: { ...captured.copy, blocks }, parameters: captured.parameters })), registry, strict);
+    const values = Object.fromEntries(content.blocks.map((entry) => [entry.id, entry.values.markdown ?? entry.values.text]));
+    expect(values).toMatchObject({ intro: "We assess {{Acme}} — see {{local.title}}", typed: "A new paragraph about {{braces}} and {{chips.brand}}", "typed-line": "{{local.deal.customer.name}}", folio: "Page {{page.number}}" });
+    // The same copy under a document linked to a template is read the same way.
+    f.versions.host = hostTemplate(inclusion("slot", { copy: { ...captured.copy, blocks }, parameters: captured.parameters }));
+    const linked = await materializeTemplateContent({ document: true, tenantId, templateVersionId: "host", channel: "document", locale: "en", parameters: { client: "Hedy" } }, registry, strict);
+    expect(linked.blocks.find((entry) => entry.id === "typed")!.values.markdown).toBe("A new paragraph about {{braces}} and {{chips.brand}}");
+  });
+
+  test("a Markdown value bound whole keeps its formatting; only its brace pairs are escaped", async () => {
+    const f = fixture();
+    f.versions.whole = version("whole", { note: { osfType: "markdown", baseType: "string" } }, [block("paragraph", "Prose", { markdown: "{{local.note}}" })]);
+    const both = { ...registry, Prose: { ...registry.Prose!, fields: { markdown: { ...registry.Prose!.fields.markdown!, variables: "both" as const } } } };
+    // The input is given without a variable mode, so it is a literal: Markdown that happens to hold a brace pair.
+    const captured = await captureInclusionContent({ tenantId, channel: "document", locale: "en", templateVersionId: "whole", parameters: { note: "**Note** on {{not.a.variable}}" }, host: documentHost }, both, f.resolvers);
+    expect(captured.copy.blocks[0]!.values.markdown).toBe("**Note** on \\{\\{not.a.variable\\}\\}");
+  });
+});
+
+function inclusion(id: string, captured: { copy: Parameters<typeof inclusionCopyContent>[0]; parameters: JsonObject }, source = "letter"): ContentBlock {
+  return block(id, "TemplateSlot", { parameters: captured.parameters, content: inclusionCopyContent(captured.copy) }, { references: { version: { entity: "TemplateVersion", id: source } } });
 }
 function documentWith(...blocks: ContentBlock[]) {
   return { tenantId, documentId: "document-1", channel: "document", locale: "en", variants: [{ id: "variant-1", channel: "document", locale: "en", blocks }] };

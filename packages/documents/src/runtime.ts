@@ -2,7 +2,8 @@
 import type { RuntimeModule } from "@openshapeforge/plugin-runtime";
 import { registerPublishFollower } from "@openshapeforge/versioning/followers";
 import { createDocument, createDocumentVersion } from "./commands.js";
-import { composeTemplate, materializeFields, materializeTemplate, variablePaths } from "./content-runtime.js";
+import { materializeFields, materializeTemplate, variablePaths } from "./content-runtime.js";
+import { composeTemplate } from "./inclusion-prepare.js";
 import { createDocumentFromTemplate } from "./template-document.js";
 import { renderSnapshot } from "./render-runtime.js";
 import { linkTemplate } from "./document-link.js";

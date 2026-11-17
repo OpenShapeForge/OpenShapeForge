@@ -178,6 +178,13 @@ describe("linking a template version to a document", () => {
     await expect(link(target, versionRow("v2", second), versionRow("v3", clash), clash, { deal: "deal-1", names: {} })).rejects.toThrow("The existing inclusion has been kept.");
     expect(JSON.stringify(target.blocks)).toBe(before);
     expect(target.document.template_version_id).toBe("v2");
+    // Nor can a version take the protected block away: by dropping it from the inclusion, or by dropping the inclusion.
+    const emptied = await slot({ a: "A", c: "C" });
+    await expect(link(target, versionRow("v2", second), versionRow("v4", emptied), emptied, { deal: "deal-1", names: {} })).rejects.toThrow("protected here");
+    const gone: Authored[] = [{ id: "plain", definition_key: "Line", values: { text: "Plain" } }];
+    target.blocks[0]!.diverged = false;
+    await expect(link(target, versionRow("v2", second), versionRow("v5", gone), gone, { deal: "deal-1", names: {} })).rejects.toThrow("protected here");
+    expect(copy().blocks.map((block) => block.values.text)).toEqual(["A mine", "B2", "C"]);
   });
 });
 

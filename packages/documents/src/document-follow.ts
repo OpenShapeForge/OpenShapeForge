@@ -16,7 +16,7 @@ import { operationFailure } from "@openshapeforge/operations";
 import type { RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import { orderedChildren, rowId, type PublishedSnapshot, type SnapshotNode } from "@openshapeforge/versioning/snapshot";
 import { rows } from "./commands.js";
-import { blockHash, inclusionCopyContent, isInclusionCopy, mergeInclusionCopy, readInclusionCopy, templateComposition, type CompositionOf } from "./content/inclusion-copy.js";
+import { blockHash, holdsProtectedContent, inclusionCopyContent, isInclusionCopy, mergeInclusionCopy, readInclusionCopy, templateComposition, type CompositionOf } from "./content/inclusion-copy.js";
 import type { ContentBlock } from "./content/types.js";
 import {
   blockContent, contentKey, deleteDocumentBlocks, insertDocumentBlock, insertDocumentVariant, listDocumentBlocks, listDocumentVariants,
@@ -112,6 +112,8 @@ function capturedContent(node: SnapshotNode, block: ContentBlock, apply: ApplyCo
   return content;
 }
 
+const compositionFor = (carrier: RuntimeEntityValueCarrier): CompositionOf => (key) => { const entry = carrier.definitions[key]; return entry ? templateComposition(entry.fields) : undefined; };
+
 /** The authored blocks of the inclusion a snapshot row stores, when it stores a complete copy. */
 function authoredInclusion(node: SnapshotNode | undefined, carrier: RuntimeEntityValueCarrier): readonly ContentBlock[] | undefined {
   const content = (node?.row[carrier.valuesColumn] as Record<string, unknown> | null | undefined)?.content;
@@ -126,7 +128,7 @@ function authoredInclusion(node: SnapshotNode | undefined, carrier: RuntimeEntit
  */
 async function followInclusion(apply: ApplyContext, row: DocumentBlockRow, previous: SnapshotNode | undefined, next: SnapshotNode, block: ContentBlock): Promise<{ content: BlockContent; local: boolean } | undefined> {
   const { carrier } = apply;
-  const compositionOf: CompositionOf = (key) => { const entry = carrier.definitions[key]; return entry ? templateComposition(entry.fields) : undefined; };
+  const compositionOf = compositionFor(carrier);
   const stored = (row[carrier.valuesColumn] as Record<string, unknown> | null | undefined)?.content;
   if (!compositionOf(block.definitionKey) || row[carrier.definitionColumn] !== block.definitionKey || !isInclusionCopy(stored) || !isInclusionCopy(block.values.content)) return undefined;
   const current = readInclusionCopy(stored), captured = readInclusionCopy(block.values.content);
@@ -182,6 +184,14 @@ async function followVariant(apply: ApplyContext, variant: DocumentVariantRow, p
     if (!followed) continue;
     await write(id, followed.content);
     if (followed.local) stillLocal.push(id);
+  }
+  // An inclusion the new version no longer has cannot take content with it that its copy protects.
+  for (const id of plan.remove) {
+    const row = byId.get(id)!;
+    const stored = (row[apply.carrier.valuesColumn] as Record<string, unknown> | null | undefined)?.content;
+    const compositionOf = compositionFor(apply.carrier);
+    if (compositionOf(String(row[apply.carrier.definitionColumn])) && isInclusionCopy(stored) && holdsProtectedContent(readInclusionCopy(stored), compositionOf))
+      throw operationFailure({ code: "INVALID_STATE", message: "The new template no longer holds content that is protected here; the existing document has been kept.", retryable: false });
   }
   const newlyDiverged = [...new Set([...plan.diverge.filter((id) => !byId.get(id)?.diverged), ...stillLocal])];
   await markBlocksDiverged(trx, newlyDiverged);

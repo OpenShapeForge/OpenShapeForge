@@ -2,7 +2,7 @@
 import { createContentEngine, type VariableScope } from "./engine.js";
 import { contentError } from "./errors.js";
 import { CONTENT_LIMITS, hashCanonicalJson, immutableContent, type JsonObject, type JsonValue } from "./json.js";
-import { readInclusionCopy } from "./inclusion-copy.js";
+import { bindsField, copyBinding, readInclusionCopy, type CopyBinding } from "./inclusion-copy.js";
 import type {
   CompiledContentBlockDefinition,
   CompiledContentBlockRegistry,
@@ -59,7 +59,7 @@ async function materializeContent(
     source: Pick<ContentTemplateVariant, "blocks" | "allowedDefinitions">,
     scope: VariableScope,
     path: readonly string[],
-    literal: (block: ContentBlock) => boolean,
+    bindingOf: (block: ContentBlock) => CopyBinding,
   ) {
     for (const sourceBlock of source.blocks) {
       engine.countBlock();
@@ -120,18 +120,19 @@ async function materializeContent(
           references: await engine.resolveReferences(block, composition.templateVersionField),
           ...(copy.page ? { page: copy.page } : {}),
         });
-        const captured = new Set(copy.source.filter((entry) => !entry.deferred).map((entry) => entry.id));
-        await visitBlocks({ blocks: copy.blocks }, scope, blockPath, (inner) => captured.has(inner.id));
+        await visitBlocks({ blocks: copy.blocks }, scope, blockPath, copyBinding(copy, concrete));
         continue;
       }
+      const binding = bindingOf(block);
       let values: JsonObject;
-      if (literal(block)) values = block.values;
+      if (binding === "literal") values = block.values;
       else {
         // Markdown fields get their filled variables escaped; every other field keeps the raw value.
         const bound: Record<string, JsonValue> = Object.create(null);
         for (const key of Object.keys(block.values).sort()) {
           const field = Object.hasOwn(definition.fields, key) ? definition.fields[key] : undefined;
-          bound[key] = await engine.interpolate(block.values[key]!, field, `block values.${key}`, scope, field?.osfType === "markdown");
+          const markdown = field?.osfType === "markdown";
+          bound[key] = bindsField(binding, markdown) ? await engine.interpolate(block.values[key]!, field, `block values.${key}`, scope, markdown) : block.values[key]!;
         }
         values = bound;
       }
@@ -170,7 +171,10 @@ async function materializeContent(
     }
   }
 
-  const captured = (block: ContentBlock) => block.captured === true;
+  // A block the document's template seeded holds captured text; every other block of the root is the host's own.
+  const captured = (block: ContentBlock): CopyBinding => block.captured === true ? "literal" : "bind";
+  // A document is a concrete host: nothing in a copy it holds is bound, whoever typed it.
+  const concrete = "documentId" in request || request.document === true;
   let ownPage: JsonObject | undefined;
   let identity: {templateVersionId:string;compositionHashVersion:"osf-template-content-v1"} | {documentId:string;documentVariantId:string;compositionHashVersion:"osf-document-content-v1"};
   if ("documentId" in request) {

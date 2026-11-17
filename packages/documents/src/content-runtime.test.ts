@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import type { ModuleOperationContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
-import { composeTemplate, contentFieldProjection, materializeFields, materializeTemplate, parameterShape } from "./content-runtime.js";
+import { contentFieldProjection, materializeFields, materializeTemplate, parameterShape } from "./content-runtime.js";
 
 const ids = {
   tenant: "10000000-0000-4000-8000-000000000001", template: "10000000-0000-4000-8000-000000000002",
@@ -237,12 +237,6 @@ describe("template materialization runtime adapter", () => {
     expect(snapshot.blocks[0]!.references.brand).toMatchObject({ entity: "Chip", id: ids.chip, value: { value: null } });
     expect(JSON.stringify(snapshot)).not.toContain(f.data.chip);
     expect(f.queries.every(query => query.startsWith("select id from "))).toBe(true);
-  });
-  test("requires typed relational inclusion and never treats values.version as a reference", async () => {
-    const f = fixture();
-    await expect(composeTemplate({ definitionKey: "IncludeBlock", referenceField: "version", parametersField: "parameters", values: { parameters: {} }, references: {} }, f.context)).rejects.toMatchObject({ operationError: { code: "VALIDATION" } });
-    const result = await composeTemplate({ definitionKey: "IncludeBlock", referenceField: "version", parametersField: "parameters", values: { parameters: { name: "Ada" } }, references: { version: { entity: "TemplateVersion", id: ids.version } } }, f.context);
-    expect(result).toEqual({ value: { kind: "template", referenceField: "version", parameters: { name: "Ada" } } });
   });
   test("uses the owning collection allowlist rather than the union of loaded definitions", async () => {
     const f = fixture();

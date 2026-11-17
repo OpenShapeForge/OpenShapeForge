@@ -14,10 +14,10 @@
  * references. It is executed when the content is read, under the reader.
  */
 import { variableTokens, wholeVariableExpression, type VariableCatalogue, type VariableReference } from "@openshapeforge/operations";
-import { createContentEngine, type CaptureState, type ContentEngine, type VariableScope } from "./engine.js";
+import { createContentEngine, holdsBraces, type CaptureState, type ContentEngine, type VariableScope } from "./engine.js";
 import { contentError } from "./errors.js";
 import { CONTENT_LIMITS, immutableContent, type JsonObject, type JsonValue } from "./json.js";
-import { inclusionCopyContent, isInclusionCopy, OBSOLETE_INCLUSION, readInclusionCopy, sourceRecord, type InclusionCopy } from "./inclusion-copy.js";
+import { bindsField, copyBinding, inclusionCopyContent, isInclusionCopy, OBSOLETE_INCLUSION, readInclusionCopy, sourceRecord, type CopyBinding, type InclusionCopy } from "./inclusion-copy.js";
 import type { CompiledContentBlockDefinition, CompiledContentBlockRegistry, ContentBlock, ContentResolvers, ContentTemplateVariant, ContentTemplateVersion, ContentValueShape } from "./types.js";
 import { assertContentName, assertContentRecord, selectContentTemplateVariant, validateContentRegistry, validateContentValue, validateContentValues } from "./validation.js";
 import { contentVariableCatalogue, contentVariableOffer, contentVariableReference } from "./variables.js";
@@ -105,7 +105,7 @@ type Capturer = {
  * One block in `scope`, with the rules of `rules` for what stays pending.
  * Returns the block to store and whether it still binds in the host.
  */
-async function captureBlock(capturer: Capturer, source: ContentBlock, variant: Pick<ContentTemplateVariant, "allowedDefinitions">, scopeOf: (capture: CaptureState) => VariableScope, rules: Pick<CaptureState, "defer" | "deferParameter">, depth: number): Promise<{ block: ContentBlock; deferred: boolean }> {
+async function captureBlock(capturer: Capturer, source: ContentBlock, variant: Pick<ContentTemplateVariant, "allowedDefinitions">, scopeOf: (capture: CaptureState) => VariableScope, rules: Pick<CaptureState, "defer" | "deferParameter">, depth: number, binding: CopyBinding = "bind"): Promise<{ block: ContentBlock; deferred: boolean }> {
   const { engine, registry, resolvers } = capturer;
   engine.countBlock();
   const definition: CompiledContentBlockDefinition | undefined = Object.hasOwn(registry, source.definitionKey) ? registry[source.definitionKey] : undefined;
@@ -118,17 +118,17 @@ async function captureBlock(capturer: Capturer, source: ContentBlock, variant: P
   const composition = definition.composition ?? resolvers.compositionContract?.(source.definitionKey);
   if (composition) {
     // An inclusion the source itself holds is already a copy: its captured
-    // text is data, and only what it left pending for the source's own scope
-    // is settled now. Its source template is not read again.
+    // text is data, and only what the source template would bind when it
+    // reads that copy (`copyBinding`) is settled now. Its own source template
+    // is not read again.
     if (!isInclusionCopy(source.values.content)) contentError("DEPENDENCY_INVALID", OBSOLETE_INCLUSION);
     if (depth + 1 >= CONTENT_LIMITS.templateDepth) contentError("CONTENT_LIMIT_EXCEEDED", "Template inclusion exceeds the maximum depth.");
     const stored = readInclusionCopy(source.values.content);
-    const literal = new Set(stored.source.filter((entry) => !entry.deferred).map((entry) => entry.id));
+    const bindingOf = copyBinding(stored, false);
     const blocks: ContentBlock[] = [];
     const deferred = new Set<string>();
     for (const inner of stored.blocks) {
-      if (literal.has(inner.id)) { engine.countBlock(); blocks.push(inner); continue; }
-      const settled = await captureBlock(capturer, inner, {}, scopeOf, rules, depth + 1);
+      const settled = await captureBlock(capturer, inner, {}, scopeOf, rules, depth + 1, bindingOf(inner));
       blocks.push(inner.locked ? { ...settled.block, locked: true } : settled.block);
       if (settled.deferred) deferred.add(inner.id);
     }
@@ -145,10 +145,18 @@ async function captureBlock(capturer: Capturer, source: ContentBlock, variant: P
   const values: Record<string, JsonValue> = Object.create(null);
   for (const key of Object.keys(source.values).sort()) {
     const field = Object.hasOwn(definition.fields, key) ? definition.fields[key] : undefined;
-    values[key] = await engine.interpolate(source.values[key]!, field, `block values.${key}`, scope, field?.osfType === "markdown");
+    const markdown = field?.osfType === "markdown";
+    if (bindsField(binding, markdown)) values[key] = await engine.interpolate(source.values[key]!, field, `block values.${key}`, scope, markdown);
+    else {
+      // Data of an earlier capture. Should this block come out pending, the next host binds all of it, this field too.
+      values[key] = source.values[key]!;
+      if (field?.variables && field.variables !== "none" && holdsBraces(values[key])) capture.literalBraces = true;
+    }
   }
+  // Markdown has a spelling for a brace that is data (the escape every filled value gets), so a Markdown field can
+  // hold resolved values next to a pending variable. A plain field has none: there the two cannot share a block.
   if (capture.deferred && capture.literalBraces)
-    contentError("INVALID_VALUE", "A block cannot combine a variable that is still to be supplied with a value that contains `{{` or `}}`. Supply the value first, or keep the two in separate blocks.");
+    contentError("INVALID_VALUE", "Outside a Markdown field, a block cannot combine a variable that is still to be supplied with a value that contains `{{` or `}}`. Supply the value first, or keep the two in separate blocks.");
   if (!capture.deferred) {
     // What is resolved is checked now; what is pending is checked by the host when it binds it.
     validateContentValues(values, Object.fromEntries(Object.entries(definition.fields).filter(([, field]) => !field.relationship)), "block values");

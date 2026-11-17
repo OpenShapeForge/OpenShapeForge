@@ -99,6 +99,24 @@ describe("a caller's draft against the stored baseline", () => {
     expect((await normalizeLocalDraft(stored, draft(stored, (rows) => [rows[0]!]), { compositionOf })).map((block) => block.id)).toEqual(["inner"]);
   });
 
+  test("refuses turning an inclusion that holds protected content into another kind of block under the same identity", async () => {
+    const guarded = slot("inner", await copyOf([text("deep", "Deep", true)]));
+    const deeper = slot("outer", await copyOf([slot("middle", await copyOf([text("deepest", "Deepest", true)]))]));
+    const stored = await copyOf([guarded, deeper, slot("free", await copyOf([text("loose", "Loose")]))]);
+    const asText = (id: string) => ({ id, definitionKey: "Text", schemaVersion: 1, values: { markdown: "Replacement" }, references: {} });
+    const settleNested = async (input: { draft: ContentBlock }) => input.draft;
+    for (const options of [{ compositionOf }, { compositionOf, settleNested }]) {
+      // The same id as another definition: there is no interior left to hold the protected block, one level down or two.
+      await expect(normalizeLocalDraft(stored, draft(stored, (rows) => [asText("inner"), rows[1]!, rows[2]!]), options)).rejects.toThrow("enclosing block");
+      await expect(normalizeLocalDraft(stored, draft(stored, (rows) => [rows[0]!, asText("outer"), rows[2]!]), options)).rejects.toThrow("enclosing block");
+    }
+    // A settlement that hands back an inclusion without the protected block does not get it past the stored record either.
+    const emptied = async (input: { draft: ContentBlock }) => input.draft.id === "inner" ? slot("inner", await copyOf([text("else", "Else")])) : input.draft;
+    await expect(normalizeLocalDraft(stored, draft(stored), { compositionOf, settleNested: emptied })).rejects.toThrow("enclosing block");
+    // An inclusion that protects nothing may become anything.
+    expect((await normalizeLocalDraft(stored, draft(stored, (rows) => [rows[0]!, rows[1]!, asText("free")]), { compositionOf })).map((block) => block.definitionKey)).toEqual(["Slot", "Slot", "Text"]);
+  });
+
   test("over a baseline captured in the same write, protected blocks come from the baseline and the draft's record is ignored", async () => {
     const fresh = await copyOf([text("a", "Fresh A", true), text("b", "Fresh B")]);
     const stale = { source: [{ id: "a", hash: "0".repeat(64) }], blocks: [{ id: "a", definitionKey: "Text", schemaVersion: 1, values: { markdown: "Stale A" } }, { id: "b", definitionKey: "Text", schemaVersion: 1, values: { markdown: "My B" } }] };
@@ -137,9 +155,40 @@ describe("the three-way update", () => {
   });
 
   test("keeps a locally changed block the source dropped, as local content", async () => {
-    const stored = await copyOf([text("a", "A"), text("b", "B", true)]);
-    const merged = await mergeInclusionCopy({ baseline: stored.source, current: [text("a", "A mine"), text("b", "B", true), text("x", "X")], authoredOld: stored.blocks, authoredNew: [], captured: await copyOf([]), compositionOf });
+    const stored = await copyOf([text("a", "A"), text("b", "B")]);
+    const merged = await mergeInclusionCopy({ baseline: stored.source, current: [text("a", "A mine"), text("b", "B"), text("x", "X")], authoredOld: stored.blocks, authoredNew: [], captured: await copyOf([]), compositionOf });
     expect(merged.blocks).toEqual([text("a", "A mine"), text("x", "X")]);
+  });
+
+  test("never drops content the stored copy protects: a new source that omits it is refused", async () => {
+    // A locked block the new source no longer has.
+    const stored = await copyOf([text("a", "A"), text("b", "B", true)]);
+    const without = [text("a", "A2")];
+    await conflicts(mergeInclusionCopy({ baseline: stored.source, current: stored.blocks, authoredOld: stored.blocks, authoredNew: without, captured: await copyOf(without), compositionOf }), "no longer holds content that is protected here");
+    // An unchanged, unlocked inclusion whose copy holds a locked block, omitted by the new source.
+    const wrapper = slot("wrap", await copyOf([text("clause", "Clause", true)]));
+    const holding = await copyOf([text("a", "A"), wrapper]);
+    await conflicts(mergeInclusionCopy({ baseline: holding.source, current: holding.blocks, authoredOld: holding.blocks, authoredNew: without, captured: await copyOf(without), compositionOf }), "no longer holds content that is protected here");
+    // The inclusion is still offered, but its new copy lost the protected block.
+    const emptied = [text("a", "A"), slot("wrap", await copyOf([text("other", "Other")]))];
+    await conflicts(mergeInclusionCopy({ baseline: holding.source, current: holding.blocks, authoredOld: holding.blocks, authoredNew: emptied, captured: await copyOf(emptied), compositionOf }), "no longer holds content that is protected here");
+    // Replacement by an unrelated source follows the same rule.
+    const other = [text("z", "Z")];
+    await conflicts(mergeInclusionCopy({ baseline: stored.source, current: stored.blocks, authoredNew: other, captured: await copyOf(other), compositionOf }), "no longer holds content that is protected here");
+    // A new source that keeps it — changed, or no longer locked by its author — is adopted.
+    const kept = [text("a", "A2"), text("b", "B2")];
+    expect(bodies((await mergeInclusionCopy({ baseline: stored.source, current: stored.blocks, authoredOld: stored.blocks, authoredNew: kept, captured: await copyOf(kept), compositionOf })).blocks)).toEqual(["a:A2", "b:B2"]);
+  });
+
+  test("an inclusion changed here that the source dropped stays, with the protection its copy holds", async () => {
+    const wrapper = slot("wrap", await copyOf([text("clause", "Clause", true), text("note", "Note")]));
+    const stored = await copyOf([text("a", "A"), wrapper]);
+    const inner = readInclusionCopy(wrapper.values.content);
+    const mine = slot("wrap", { source: inner.source, blocks: [inner.blocks[0]!, text("note", "My note")] });
+    const merged = await mergeInclusionCopy({ baseline: stored.source, current: [stored.blocks[0]!, mine], authoredOld: stored.blocks, authoredNew: [text("a", "A")], captured: await copyOf([text("a", "A")]), compositionOf });
+    const kept = readInclusionCopy(merged.blocks[1]!.values.content);
+    expect(kept.source.filter((entry) => entry.locked).map((entry) => entry.id)).toEqual(["clause"]);
+    expect(holdsProtectedContent(merged, compositionOf)).toBe(true);
   });
 
   test("refuses a block both sides changed, a new lock on local work and an identity collision, leaving its inputs untouched", async () => {

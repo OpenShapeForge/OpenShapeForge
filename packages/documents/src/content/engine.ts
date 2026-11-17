@@ -272,7 +272,13 @@ export function createContentEngine(
       // The typed value of the variable is the value of the field; it is
       // data, not Markdown source, so it is not escaped here.
       const bound = (await bind(whole!, slot, "whole", scope)).value;
-      if (capture && holdsBraces(bound)) capture.literalBraces = true;
+      if (capture && holdsBraces(bound)) {
+        // A capture stores this value where the host may bind again. A whole value bound into Markdown is Markdown
+        // itself, so only its brace pairs are escaped: they print the same and can never be read as a variable. Any
+        // other destination has no such spelling.
+        if (markdown && typeof bound === "string") return bound.replace(/\{\{|\}\}/g, (pair) => `\\${pair[0]}\\${pair[1]}`);
+        capture.literalBraces = true;
+      }
       return bound;
     }
     const matches = variableTokens(value);

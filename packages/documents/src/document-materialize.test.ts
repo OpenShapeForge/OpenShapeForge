@@ -2,7 +2,7 @@
 import { describe, expect, test } from "bun:test";
 import type { ModuleOperationContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import { CONTENT_LIMITS } from "./content/index.js";
-import { composeTemplate, materializeFields } from "./content-runtime.js";
+import { materializeFields } from "./content-runtime.js";
 import { contentBlockFromRow } from "./content-snapshot.js";
 import { hashCanonicalJson } from "./content/json.js";
 import { materializeDocument } from "./document-materialize.js";
@@ -189,9 +189,9 @@ function fixture(options: {
             return { data: null, operations: [] };
           }
           executions.push({ id: request.operation.id, input: request.input });
-          const result = request.operation.id === "IncludeBlock.compose"
-            ? await composeTemplate(request.input, context as unknown as ModuleOperationContext)
-            : await materializeFields(request.input, context as unknown as ModuleOperationContext);
+          // Reading never runs an inclusion's own Operation: that one prepares a copy for a write.
+          if (request.operation.id === "IncludeBlock.compose") throw new Error("A read prepared an inclusion.");
+          const result = await materializeFields(request.input, context as unknown as ModuleOperationContext);
           if (!("value" in result)) throw new Error(`Materialization refused: ${result.code}`);
           return { data: result.value, operations: [] };
         },

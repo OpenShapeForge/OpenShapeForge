@@ -204,6 +204,11 @@ export type ContentResolvers = {
 };
 
 export type MaterializeTemplateContentInput = {
+  /**
+   * The version supplies identity and variables for a document's own
+   * variants. A document is a concrete host: a copy it holds is read as data.
+   */
+  readonly document?: true;
   readonly tenantId: string;
   readonly templateVersionId: string;
   readonly channel: string;

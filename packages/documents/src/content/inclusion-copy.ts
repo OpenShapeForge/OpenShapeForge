@@ -139,6 +139,32 @@ export async function sourceRecord(blocks: readonly ContentBlock[], deferred: Re
   return entries;
 }
 
+/**
+ * How the host reads one block of a copy.
+ *
+ * - `literal`: nothing is bound. Every block of a copy a document holds:
+ *   a document is concrete, so text typed into it is text, braces included.
+ * - `markdown`: a captured block in a template. Its Markdown fields are bound
+ *   in the template's scope, so a variable the author writes into copied
+ *   text works; a captured value there is escaped and is never a variable.
+ *   Its other fields are data.
+ * - `bind`: every field is bound, as for the host's own blocks: a block
+ *   whose capture left a binding pending (`deferred`), and a block the
+ *   template's author added to the copy.
+ */
+export type CopyBinding = "literal" | "markdown" | "bind";
+
+export function copyBinding(copy: InclusionCopy, concreteHost: boolean): (block: ContentBlock) => CopyBinding {
+  if (concreteHost) return () => "literal";
+  const captured = new Map(copy.source.map((entry) => [entry.id, entry]));
+  return (block) => { const entry = captured.get(block.id); return entry && !entry.deferred ? "markdown" : "bind"; };
+}
+
+/** Whether a field of a block read with `binding` is bound in the host's scope. */
+export function bindsField(binding: CopyBinding, markdown: boolean): boolean {
+  return binding === "bind" || (binding === "markdown" && markdown);
+}
+
 /** The copy a nested inclusion block stores, or undefined when the block is no inclusion or holds no complete copy. */
 export function nestedCopy(block: ContentBlock | undefined, compositionOf: CompositionOf): InclusionCopy | undefined {
   return block && compositionOf(block.definitionKey) && isInclusionCopy(block.values.content) ? readInclusionCopy(block.values.content) : undefined;
@@ -208,12 +234,46 @@ export async function normalizeLocalDraft(stored: InclusionCopy, draft: unknown,
   const locked = stored.source.filter((entry) => entry.locked).map((entry) => entry.id);
   if (locked.some((id) => !present.has(id))) contentError("INVALID_VALUE", "A locked source block cannot be removed.");
   if (blocks.filter((block) => block.locked).some((block, index) => block.id !== locked[index])) contentError("INVALID_VALUE", "Locked source blocks must retain their order.");
+  // What the stored copy protects decides, whatever the draft made of the enclosing block: an inclusion that holds
+  // protected content must still be there, as the same kind of block. Its interior was settled above; a block of
+  // another definition under the same identity has no interior to keep that content in.
+  const drafted = new Map(blocks.map((block) => [block.id, block]));
   for (const block of stored.blocks) {
-    if (present.has(block.id)) continue;
     const nested = nestedCopy(block, options.compositionOf);
-    if (nested && holdsProtectedContent(nested, options.compositionOf)) contentError("INVALID_VALUE", "Protected template content cannot be removed or replaced through an enclosing block.");
+    if (!nested || !holdsProtectedContent(nested, options.compositionOf)) continue;
+    const now = drafted.get(block.id);
+    if (!now || now.definitionKey !== block.definitionKey || !options.compositionOf(now.definitionKey))
+      contentError("INVALID_VALUE", "Protected template content cannot be removed or replaced through an enclosing block.");
   }
+  assertProtectedContentKept(protectedPaths(stored.source, stored.blocks, options.compositionOf), blocks, options.compositionOf, "Protected template content cannot be removed or replaced through an enclosing block.");
   return blocks;
+}
+
+/** The path of every block a copy protects, through every inclusion nested in it: `<id>` or `<inclusion id>/…/<id>`. */
+export function protectedPaths(source: readonly CopySourceEntry[], blocks: readonly ContentBlock[], compositionOf: CompositionOf, prefix = "", depth = 0): string[] {
+  if (depth >= CONTENT_LIMITS.templateDepth) contentError("CONTENT_LIMIT_EXCEEDED", "Included content exceeds the maximum depth.");
+  const paths = source.filter((entry) => entry.locked).map((entry) => prefix + entry.id);
+  for (const block of blocks) {
+    const nested = nestedCopy(block, compositionOf);
+    if (nested) paths.push(...protectedPaths(nested.source, nested.blocks, compositionOf, `${prefix}${block.id}/`, depth + 1));
+  }
+  return paths;
+}
+
+function blockPaths(blocks: readonly ContentBlock[], compositionOf: CompositionOf, prefix = "", found = new Set<string>()): Set<string> {
+  for (const block of blocks) {
+    found.add(prefix + block.id);
+    const nested = nestedCopy(block, compositionOf);
+    if (nested) blockPaths(nested.blocks, compositionOf, `${prefix}${block.id}/`, found);
+  }
+  return found;
+}
+
+/** Every protected path must still lead to a block: protection survives an edit, a source update and a replacement. */
+export function assertProtectedContentKept(required: readonly string[], blocks: readonly ContentBlock[], compositionOf: CompositionOf, message: string): void {
+  if (!required.length) return;
+  const present = blockPaths(blocks, compositionOf);
+  if (required.some((path) => !present.has(path))) contentError("INVALID_VALUE", message);
 }
 
 export type InclusionMerge = {
@@ -240,7 +300,9 @@ function conflict(message: string): never {
  * A block without a local change adopts the new capture, record values
  * included. A locally changed block keeps its local content when the source
  * did not change what it authored there — a refreshed record value never
- * overwrites a local edit. Local additions and removals are kept. A block both
+ * overwrites a local edit. Local additions and removals are kept. Content the
+ * stored copy protects, at any depth, must still be offered by the new source;
+ * it is never dropped and never kept as unprotected local text. A block both
  * sides changed, a new lock on locally changed or removed content, and a new
  * block that collides with a local one are conflicts: the update is refused
  * as a whole and nothing is written. A nested inclusion both sides changed is
@@ -304,5 +366,9 @@ export async function mergeInclusionCopy(input: InclusionMerge, depth = 0): Prom
     blocks.push(...(trailers.get(block.id) ?? []));
   }
   if (blocks.length > CONTENT_LIMITS.blocks) contentError("CONTENT_LIMIT_EXCEEDED", "Included content contains too many blocks.");
+  // Content the stored copy protects, here or in an inclusion nested in it, is never dropped by an update: a new
+  // source that no longer offers it cannot replace this one.
+  assertProtectedContentKept(protectedPaths(input.baseline, input.current, compositionOf), blocks, compositionOf,
+    "The new template no longer holds content that is protected here. The existing inclusion has been kept.");
   return { ...(captured.page ? { page: captured.page } : {}), source: captured.source, blocks };
 }

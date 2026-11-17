@@ -6,12 +6,10 @@
  *   - an IP allowlist admits the listed networks and refuses the rest, the
  *     address being the one the API derived through its trusted proxy hop and
  *     never one a client names;
- *   - a server key is refused when a browser presents it;
- *   - a browser key works only from its listed web sites, gets the CORS
- *     handshake there, and can only READ: a write through GraphQL is refused by
- *     core's admission, and the non-Operation write routes refuse it outright;
- *   - the restrictions are edited on the integration and apply to its keys on
- *     their next request.
+ *   - the allowlist is edited on the integration and applies to its keys on
+ *     their next request;
+ *   - a key is refused whenever a browser presents it, and the browser gets
+ *     no CORS header to read anything with.
  *
  * Needs the compose Keycloak (8181) with the generated test realm, and a
  * migrated database. Skips wholesale when either is missing.
@@ -28,11 +26,9 @@ const DATABASE_URL =
 const ROLE_CLIENT = "erp-provider";
 const MANAGE_ROLE = "Platform.ApiKeys.Manage";
 const READ_ROLE = "Relations.All.Read";
-const WRITE_ROLE = "Relations.All.ReadWrite";
 const ADMIN_CLIENT = "openshapeforge-apikey-provisioner";
 const ADMIN_SECRET = process.env.E2E_KEYCLOAK_ADMIN_SECRET ?? "openshapeforge-apikey-provisioner-secret";
 const SHOP = "https://shop.example.com";
-const OTHER_SITE = "https://evil.example.com";
 
 async function discoverIssuer(): Promise<string | null> {
   try {
@@ -119,7 +115,7 @@ async function prepareRealm(): Promise<boolean> {
   const roleClient = ((await (await realmAdmin("GET", `/clients?clientId=${ROLE_CLIENT}`)).json()) as Array<{ id: string }>)[0];
   const user = ((await (await realmAdmin("GET", "/users?username=tenant-a-admin&exact=true")).json()) as Array<{ id: string }>)[0];
   if (!roleClient || !user) return false;
-  const wanted = [MANAGE_ROLE, READ_ROLE, WRITE_ROLE];
+  const wanted = [MANAGE_ROLE, READ_ROLE];
   const roles = (await (await realmAdmin("GET", `/clients/${roleClient.id}/roles?max=2000`)).json()) as Array<{ id: string; name: string }>;
   for (const name of wanted) {
     if (!roles.some((role) => role.name === name)) await realmAdmin("POST", `/clients/${roleClient.id}/roles`, { name });
@@ -216,37 +212,18 @@ function read(secret: string, headers: Record<string, string> = {}) {
 
 const code = (response: { body: string }) => (JSON.parse(response.body) as { error?: { code?: string } }).error?.code;
 
-async function createRelation(secret: string, headers: Record<string, string> = {}) {
-  const response = await app!.inject({
-    method: "POST",
-    url: "/api/graphql",
-    headers: { "content-type": "application/json", authorization: `Bearer ${secret}`, ...headers },
-    payload: JSON.stringify({
-      query: `mutation { createRelation(input: { displayName: "rk-${randomUUID().slice(0, 8)}", relationType: "person" }) { data { id } error { code } } }`,
-    }),
-  });
-  const body = JSON.parse(response.body) as {
-    errors?: Array<{ extensions?: { code?: string } }>;
-    data?: { createRelation?: { data?: { id?: string } | null; error?: { code?: string } | null } | null } | null;
-  };
-  return {
-    status: response.statusCode,
-    code: body.errors?.[0]?.extensions?.code ?? body.data?.createRelation?.error?.code,
-    id: body.data?.createRelation?.data?.id,
-  };
-}
-
 describe.skipIf(!ready)("API key restrictions end to end", () => {
-  test("an invalid address or web site is refused when the integration is created", async () => {
+  test("an invalid address, or a web site, is refused when the integration is created", async () => {
     expect((await catalog("create", { displayName: "bad ip", roles: [READ_ROLE], allowedIps: ["example.com"] })).status).toBe(400);
-    expect((await catalog("create", { displayName: "bad site", roles: [READ_ROLE], allowedOrigins: ["http://shop.example.com"] })).status).toBe(400);
-    expect((await catalog("create", { displayName: "wildcard", roles: [READ_ROLE], allowedOrigins: ["https://*.example.com"] })).status).toBe(400);
+    expect((await catalog("create", { displayName: "bad range", roles: [READ_ROLE], allowedIps: ["10.0.0.0/33"] })).status).toBe(400);
+    // Web sites are not a thing an API key can be configured with.
+    expect((await catalog("create", { displayName: "site", roles: [READ_ROLE], allowedOrigins: [SHOP] })).status).toBe(400);
   }, 30_000);
 
   test("an IP allowlist admits only its networks, through the trusted proxy hop", async () => {
     const created = await integration({ roles: [READ_ROLE], allowedIps: ["203.0.113.0/24"] });
     expect(created.integration.allowedIps).toEqual(["203.0.113.0/24"]);
-    expect(created.integration.allowedOrigins).toEqual([]);
+    expect(created.integration.allowedOrigins).toBeUndefined();
 
     const outside = await read(created.secret);
     expect(outside.statusCode).toBe(403);
@@ -264,79 +241,20 @@ describe.skipIf(!ready)("API key restrictions end to end", () => {
     expect((await read(created.secret)).statusCode).toBe(200);
   }, 60_000);
 
-  test("a server key is refused when a browser presents it, and the browser may read that refusal", async () => {
-    const created = await integration({ roles: [READ_ROLE] });
-    expect((await read(created.secret)).statusCode).toBe(200);
-    const fromBrowser = await read(created.secret, { origin: SHOP });
+  test("a key is refused when a browser presents it, and the browser can read nothing", async () => {
+    const created = await integration({ roles: [READ_ROLE], allowedIps: ["203.0.113.0/24"] });
+    expect((await read(created.secret, { "x-forwarded-for": "203.0.113.9" })).statusCode).toBe(200);
+    const fromBrowser = await read(created.secret, { "x-forwarded-for": "203.0.113.9", origin: SHOP });
     expect(fromBrowser.statusCode).toBe(403);
     expect(code(fromBrowser)).toBe("API_KEY_RESTRICTED");
-    expect(fromBrowser.headers["access-control-allow-origin"]).toBe(SHOP);
-  }, 30_000);
+    expect(fromBrowser.headers["access-control-allow-origin"]).toBeUndefined();
 
-  test("a browser key works only from its web sites, answers CORS there, and can only read", async () => {
-    const created = await integration({ roles: [READ_ROLE, WRITE_ROLE] });
-    // As a server key it may write: the refusal below is the browser rule, not the roles.
-    const serverWrite = await createRelation(created.secret);
-    expect(serverWrite.code).toBeUndefined();
-    expect(serverWrite.id).toBeDefined();
-
-    const updated = await restrict(created.id, { allowedOrigins: [SHOP, "https://shop.example.com/"] });
-    expect(updated.status).toBe(200);
-    expect(updated.body.allowedOrigins).toEqual([SHOP]);
-
-    // The preflight carries no key, so it is answered generically and never with credentials.
+    // No preflight is answered for the REST surface either.
     const preflight = await app!.inject({
       method: "OPTIONS",
       url: `${REST_MOUNT_PATH}/relations`,
       headers: { origin: SHOP, "access-control-request-method": "GET", "access-control-request-headers": "authorization" },
     });
-    expect(preflight.statusCode).toBe(204);
-    expect(preflight.headers["access-control-allow-origin"]).toBe(SHOP);
-    expect(String(preflight.headers["access-control-allow-headers"])).toContain("authorization");
-    expect(preflight.headers["access-control-allow-credentials"]).toBeUndefined();
-    // GraphQL keeps its own (disabled) policy.
-    const graphqlPreflight = await app!.inject({
-      method: "OPTIONS",
-      url: "/api/graphql",
-      headers: { origin: SHOP, "access-control-request-method": "POST" },
-    });
-    expect(graphqlPreflight.headers["access-control-allow-origin"]).toBeUndefined();
-
-    const fromShop = await read(created.secret, { origin: SHOP });
-    expect(fromShop.statusCode).toBe(200);
-    expect(fromShop.headers["access-control-allow-origin"]).toBe(SHOP);
-    expect(fromShop.headers["access-control-allow-credentials"]).toBeUndefined();
-
-    const fromElsewhere = await read(created.secret, { origin: OTHER_SITE });
-    expect(fromElsewhere.statusCode).toBe(403);
-    expect(code(fromElsewhere)).toBe("API_KEY_RESTRICTED");
-    // Without an origin at all: a browser key is for browsers.
-    expect((await read(created.secret)).statusCode).toBe(403);
-
-    // Public by construction, so a write is refused even with the role.
-    const browserWrite = await createRelation(created.secret, { origin: SHOP });
-    expect(browserWrite.code).toBe("EXECUTION_NOT_PERMITTED");
-    expect(browserWrite.id).toBeUndefined();
-
-    // A route outside canonical Operations refuses a browser key outright.
-    const lease = await app!.inject({
-      method: "POST",
-      url: "/api/operation-leases",
-      headers: { "content-type": "application/json", authorization: `Bearer ${created.secret}`, origin: SHOP },
-      payload: JSON.stringify({ operationId: "relations.update", targetId: randomUUID() }),
-    });
-    expect(lease.statusCode).toBe(403);
-    expect(code(lease)).toBe("API_KEY_RESTRICTED");
-
-    // Back to a server key: writes work again, browsers are refused again.
-    expect((await restrict(created.id, { allowedOrigins: [] })).status).toBe(200);
-    expect((await createRelation(created.secret)).code).toBeUndefined();
-    expect((await read(created.secret, { origin: SHOP })).statusCode).toBe(403);
-  }, 90_000);
-
-  test("both restrictions together: the network fence applies to a browser key too", async () => {
-    const created = await integration({ roles: [READ_ROLE], allowedIps: ["203.0.113.0/24"], allowedOrigins: [SHOP] });
-    expect((await read(created.secret, { origin: SHOP })).statusCode).toBe(403);
-    expect((await read(created.secret, { origin: SHOP, "x-forwarded-for": "203.0.113.9" })).statusCode).toBe(200);
+    expect(preflight.headers["access-control-allow-origin"]).toBeUndefined();
   }, 30_000);
 });

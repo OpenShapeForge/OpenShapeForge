@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Where an API key may be used from, without a database: validation of the
- * two allowlists and the per-request rules. The resolver wiring, the CORS
- * handshake and the read-only admission are proven end to end in
- * __tests__/api-key-restrictions.e2e.test.ts.
+ * network allowlist and the per-request rules. The resolver wiring is proven
+ * end to end in __tests__/api-key-restrictions.e2e.test.ts.
  */
 import { describe, expect, test } from "bun:test";
 import {
@@ -11,11 +10,9 @@ import {
   ApiKeyRestrictionError,
   ApiKeyRestrictionInputError,
   assertKeyUsableHere,
-  assertNotBrowserKey,
   CLIENT_ADDRESS_HEADER,
   keyRequestContext,
   normalizeAllowedIps,
-  normalizeAllowedOrigins,
   storedList,
 } from "./restrictions.js";
 
@@ -51,35 +48,6 @@ describe("normalizeAllowedIps", () => {
   });
 });
 
-describe("normalizeAllowedOrigins", () => {
-  test("accepts exact https origins and loopback http, normalized", () => {
-    expect(normalizeAllowedOrigins([
-      "https://Shop.Example.com", "https://shop.example.com/", "https://app.example.com:8443", "http://localhost:5173",
-      "http://shop.hubble.localhost",
-    ])).toEqual([
-      "https://shop.example.com", "https://app.example.com:8443", "http://localhost:5173", "http://shop.hubble.localhost",
-    ]);
-  });
-
-  test.each([
-    ["plain http", "http://shop.example.com"],
-    ["wildcard", "https://*.example.com"],
-    ["a path", "https://shop.example.com/checkout"],
-    ["a query", "https://shop.example.com?x=1"],
-    ["a fragment", "https://shop.example.com#x"],
-    ["credentials", "https://user:pw@shop.example.com"],
-    ["another scheme", "ftp://shop.example.com"],
-    ["not a URL", "shop.example.com"],
-  ])("refuses %s", (_name, origin) => {
-    expect(() => normalizeAllowedOrigins([origin])).toThrow(ApiKeyRestrictionInputError);
-  });
-
-  test("refuses more than 10 entries", () => {
-    const many = Array.from({ length: 11 }, (_, i) => `https://s${i}.example.com`);
-    expect(() => normalizeAllowedOrigins(many)).toThrow(/at most 10/);
-  });
-});
-
 describe("addressAllowed", () => {
   const list = ["203.0.113.7", "198.51.100.0/24", "2001:db8::/32"];
 
@@ -105,55 +73,34 @@ describe("addressAllowed", () => {
 });
 
 describe("assertKeyUsableHere", () => {
-  const server = { allowedIps: [], allowedOrigins: [] };
-  const fenced = { allowedIps: ["203.0.113.0/24"], allowedOrigins: [] };
-  const browser = { allowedIps: [], allowedOrigins: ["https://shop.example.com"] };
   const at = (clientAddress: string | null, origin: string | null = null) => ({ clientAddress, origin });
 
-  test("a server key without restrictions works from anywhere outside a browser", () => {
-    expect(assertKeyUsableHere(server, at("192.0.2.1"), "integration")).toEqual({ browser: false });
-    expect(assertKeyUsableHere(server, at(null), "integration")).toEqual({ browser: false });
+  test("a key without an allowlist works from anywhere outside a browser", () => {
+    expect(() => assertKeyUsableHere([], at("192.0.2.1"), "integration")).not.toThrow();
+    expect(() => assertKeyUsableHere([], at(null), "personal")).not.toThrow();
   });
 
   test("the network allowlist refuses other addresses with a 403", () => {
-    expect(assertKeyUsableHere(fenced, at("203.0.113.9"), "integration")).toEqual({ browser: false });
+    expect(() => assertKeyUsableHere(["203.0.113.0/24"], at("203.0.113.9"), "integration")).not.toThrow();
     try {
-      assertKeyUsableHere(fenced, at("192.0.2.1"), "integration");
+      assertKeyUsableHere(["203.0.113.0/24"], at("192.0.2.1"), "integration");
       throw new Error("expected a refusal");
     } catch (error) {
       expect(error).toBeInstanceOf(ApiKeyRestrictionError);
       expect((error as ApiKeyRestrictionError).status).toBe(403);
+      expect((error as ApiKeyRestrictionError).code).toBe("API_KEY_RESTRICTED");
       expect((error as Error).message).toMatch(/network address/);
     }
-    expect(() => assertKeyUsableHere(fenced, at(null), "personal")).toThrow(ApiKeyRestrictionError);
+    expect(() => assertKeyUsableHere(["203.0.113.0/24"], at(null), "personal")).toThrow(ApiKeyRestrictionError);
   });
 
-  test("a server key and a personal key are refused when a browser presents them", () => {
-    expect(() => assertKeyUsableHere(server, at("192.0.2.1", "https://shop.example.com"), "integration"))
-      .toThrow(/cannot be used from a web browser/);
-    expect(() => assertKeyUsableHere(server, at("192.0.2.1", "https://shop.example.com"), "personal"))
-      .toThrow(/personal API key cannot be used from a web browser/);
-  });
-
-  test("a browser key needs one of its origins, and says it is a browser key", () => {
-    expect(assertKeyUsableHere(browser, at("192.0.2.1", "https://shop.example.com"), "integration"))
-      .toEqual({ browser: true });
-    expect(() => assertKeyUsableHere(browser, at("192.0.2.1", "https://evil.example.com"), "integration"))
-      .toThrow(/web site/);
-    expect(() => assertKeyUsableHere(browser, at("192.0.2.1"), "integration")).toThrow(/web site/);
-  });
-
-  test("a personal key never becomes a browser key, whatever it is handed", () => {
-    expect(() => assertKeyUsableHere(browser, at("192.0.2.1", "https://shop.example.com"), "personal"))
-      .toThrow(ApiKeyRestrictionError);
-  });
-
-  test("both restrictions apply together", () => {
-    const both = { allowedIps: ["203.0.113.0/24"], allowedOrigins: ["https://shop.example.com"] };
-    expect(() => assertKeyUsableHere(both, at("192.0.2.1", "https://shop.example.com"), "integration"))
-      .toThrow(/network address/);
-    expect(assertKeyUsableHere(both, at("203.0.113.1", "https://shop.example.com"), "integration"))
-      .toEqual({ browser: true });
+  test("every key kind is refused when a browser presents it, even from an allowed network", () => {
+    for (const kind of ["integration", "personal"] as const) {
+      expect(() => assertKeyUsableHere([], at("192.0.2.1", "https://shop.example.com"), kind))
+        .toThrow(/cannot be used from a web browser/);
+      expect(() => assertKeyUsableHere(["203.0.113.0/24"], at("203.0.113.1", "https://shop.example.com"), kind))
+        .toThrow(ApiKeyRestrictionError);
+    }
   });
 });
 
@@ -169,11 +116,5 @@ describe("request context and stored lists", () => {
     expect(storedList('["10.0.0.1"]')).toEqual(["10.0.0.1"]);
     expect(storedList(["a", 1, "", "b"])).toEqual(["a", "b"]);
     expect(storedList("not json")).toEqual([]);
-  });
-
-  test("assertNotBrowserKey refuses only a read-only principal", () => {
-    expect(() => assertNotBrowserKey({})).not.toThrow();
-    expect(() => assertNotBrowserKey({ appPrincipal: null })).not.toThrow();
-    expect(() => assertNotBrowserKey({ appPrincipal: { readOnly: true } })).toThrow(ApiKeyRestrictionError);
   });
 });

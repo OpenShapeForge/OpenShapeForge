@@ -450,16 +450,6 @@ export async function operationAdmissionRefusal(
   session: DbSessionInput | undefined,
   operation: GovernedOperation,
 ): Promise<OperationError | undefined> {
-  // A browser API key is public by construction (auth/api-key/restrictions.ts):
-  // core itself admits it only to declared reads, before and independent of
-  // any host policy, so a deployment that registers none is not looser.
-  if (session?.appPrincipal?.readOnly === true && isGovernedOperation(operation.effects)) {
-    return {
-      code: EXECUTION_NOT_PERMITTED,
-      message: "A browser API key can only read. Use a server key for changes.",
-      retryable: false,
-    };
-  }
   const policies = registries.get(db);
   if (!policies || policies.length === 0) return undefined;
   if (!isGovernedOperation(operation.effects)) return undefined;

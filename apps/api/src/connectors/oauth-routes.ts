@@ -23,7 +23,6 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { resolveSessionContext } from "../auth/identity.js";
-import { assertNotBrowserKey } from "../auth/api-key/restrictions.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { headersFromFastify } from "../http/headers.js";
 import { HttpError } from "../rest/http-error.js";
@@ -115,7 +114,6 @@ export function registerConnectorOAuthRoutes(
         const resolved = await resolveSessionContext(headersFromFastify(request.headers), {
           db: options.db,
         });
-        assertNotBrowserKey(resolved);
         requireConnectorAdmin({
           tenantId: resolved.tenantId,
           userId: resolved.userId,

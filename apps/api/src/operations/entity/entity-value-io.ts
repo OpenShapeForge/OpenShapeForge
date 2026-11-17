@@ -1,10 +1,11 @@
-import {assertBlockInclusionWrite} from '@openshapeforge/documents/content-commands';
 // SPDX-License-Identifier: BUSL-1.1
-import type { RuntimeEntityValueCarrier, RuntimeEntityValueRegistry } from "@openshapeforge/plugin-runtime";
+import { prepareBlockInclusionWrite, type InclusionActor } from "@openshapeforge/documents/content-commands";
+import type { ModuleOperationContext, RuntimeEntityValueCarrier, RuntimeEntityValueRegistry } from "@openshapeforge/plugin-runtime";
 import { operationFailure } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
+import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
-import type { DbSessionInput } from "../../db/session.js";
+import { currentDbSessionDatabase, type DbSessionInput } from "../../db/session.js";
 import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import { projectEntityValue, splitEntityValueInput } from "../../modules/entity-value-input.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../../modules/field-schemas.js";
@@ -22,6 +23,8 @@ export type EntityValueIOContext = {
   registry?: RuntimeEntityValueRegistry;
   tables?: readonly GeneratedCrudTable[];
   derivedTools?: readonly DerivedToolsCatalogEntry[];
+  /** Replaces how the writing session reaches its platform services for an inclusion capture; hosts leave it unset. */
+  inclusionActor?: InclusionActor;
 };
 
 /** Same unsupported policies as the compiler, including inherited/nested fields. */
@@ -208,11 +211,32 @@ export async function prepareEntityValueWriteInTransaction(
     const valid = generatedRuntimeFieldSchemas.validateObject(checkedFields, checkedValues);
     if (!valid.valid) throw operationFailure(valid.error);
   }
-  if(session.tenantId)for(const carrier of entityValueCarriers(table,context.registry)){
-    const next={...(current??{}),...Object.fromEntries([...result].map(([column,value])=>[column.name,value]))};
-    await assertBlockInclusionWrite(trx,session.tenantId,carrier,current,next);
+  // The owning module settles what a template inclusion stores (its captured copy and source record) before the
+  // row is written, in this transaction. What it returns replaces the caller's value; a refusal rolls the write back.
+  if (session.tenantId) for (const carrier of entityValueCarriers(table, context.registry)) {
+    const valueColumn = table.columns.find((column) => column.name === carrier.valuesColumn)!;
+    const next = { ...(current ?? {}), ...Object.fromEntries([...result].map(([column, value]) => [column.name, value])) };
+    const settled = await prepareBlockInclusionWrite(trx, session.tenantId, carrier, current, next, { actor: context.inclusionActor ?? inclusionActor(session) });
+    if (settled && result.has(valueColumn)) result.set(valueColumn, settled);
   }
   return result;
+}
+
+/**
+ * The writing session itself, with its own platform services, for a capture
+ * that reads a source template and the records its variables name. The
+ * session is the one this write is already running as: nothing is elevated
+ * and no other principal is constructed. Without a live tenant session the
+ * runtime refuses, and so does the capture.
+ */
+function inclusionActor(session: DbSessionInput): InclusionActor {
+  return async (work) => {
+    const db = currentDbSessionDatabase() as OpenShapeForgeDatabase | undefined;
+    if (!db) throw generatedCrudError("Capturing a template inclusion requires an active transaction.", "INVALID_DEFINITION");
+    // Imported here: the module platform itself dispatches into these entity operations.
+    const { withBlueprintDocumentServices } = await import("../../modules/platform.js");
+    return withBlueprintDocumentServices(db, session, (platform, live) => work({ transport: "operation", platform, session: live } as unknown as ModuleOperationContext));
+  };
 }
 
 /** Projection is deliberately before classification redaction, never after it. */

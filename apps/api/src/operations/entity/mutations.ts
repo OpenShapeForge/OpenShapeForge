@@ -1,4 +1,4 @@
-import {assertBlockInclusionWrite} from '@openshapeforge/documents/content-commands';
+import { assertBlockInclusionRemoval } from "@openshapeforge/documents/content-commands";
 import { guardColorWrite } from "./color-references.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { applyDefaultTemplates } from "./default-template.js";
@@ -764,7 +764,8 @@ export async function deleteGeneratedEntity(
       // Tenant reference fields have no foreign key: `restrict` refuses here
       // and `setNull` unlinks the referencing records in this transaction.
       await enforceExtensionReferencesOnDelete(trx, session, table, input.id);
-    if(session.tenantId)for(const carrier of entityValueCarriers(table,entityValues.registry))await assertBlockInclusionWrite(trx,session.tenantId,carrier,current,undefined);
+      // A source-locked block, and an inclusion whose copy holds protected content at any depth, cannot be deleted.
+      for (const carrier of entityValueCarriers(table, entityValues.registry)) await assertBlockInclusionRemoval(carrier, current);
       await assertPublishableRelatedMutationInTransaction(trx, session, table, {
         kind: "delete",
         id: input.id,

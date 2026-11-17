@@ -20,6 +20,17 @@ export function supportsTasks(meta: unknown): boolean {
   return value?.[protocolKey] === "2026-07-28" &&
     record(record(record(value[capabilitiesKey])?.extensions)?.[TASKS_EXTENSION]) !== undefined;
 }
+/**
+ * Protocol revision 2026-07-28 (and later) requires every tools/call result to name its
+ * kind; a client of that revision refuses a result without it. Earlier
+ * revisions have no such field, so their results stay exactly as they were.
+ */
+export function completeToolResult<T extends object>(result: T, meta: unknown): T | (T & { resultType: "complete" }) {
+  const version = record(meta)?.[protocolKey];
+  // Revisions are ISO dates, so a later revision compares as a greater string.
+  if (typeof version !== "string" || version < "2026-07-28" || "resultType" in result) return result;
+  return { resultType: "complete", ...result };
+}
 export function executionProviders(modules: readonly { executionProviders?: readonly RuntimeExecutionProvider[] }[]) {
   const providers = new Map<string, RuntimeExecutionProvider>();
   for (const module of modules) for (const provider of module.executionProviders ?? []) {
@@ -79,7 +90,7 @@ export function createTasks(input: {
         // cannot track it. Keep the reason inspectable without logging data.
         if (reference || record(result.structuredContent)?.execution) input.onUnavailable?.(
           !reference ? "EXECUTION_REFERENCE_MISSING" : !supportsTasks(meta) ? "TASK_CAPABILITY_ABSENT" : "EXECUTION_PROVIDER_UNAVAILABLE");
-        return result;
+        return completeToolResult(result, meta);
       }
       try {
         // Prove follow access BEFORE retaining a handle. A record-action user
@@ -87,7 +98,7 @@ export function createTasks(input: {
         const snapshot = await snapshotFor(reference.kind, reference.ref);
         // Start acceptance is distinct from the eventual outcome. Keep its
         // exact original envelope, including on an immediately failed run.
-        if (snapshot.status !== "working") return result;
+        if (snapshot.status !== "working") return completeToolResult(result, meta);
         const row = await input.store.retain(reference);
         return { resultType: "task", taskId: row.id, status: snapshot.status,
           createdAt: new Date(row.created_at).toISOString(),
@@ -99,8 +110,8 @@ export function createTasks(input: {
         input.onUnavailable?.(code && /^[A-Z0-9_]{1,80}$/.test(code) ? code : "TRACKING_UNAVAILABLE");
         // The canonical start has already committed. Never report it as a failed
         // start, which could invite a duplicate; the ordinary envelope is durable.
-        return { ...result, content: [...result.content, { type: "text" as const,
-          text: "The execution was accepted, but background tracking is unavailable. Follow the returned execution reference using its existing operations." }] };
+        return completeToolResult({ ...result, content: [...result.content, { type: "text" as const,
+          text: "The execution was accepted, but background tracking is unavailable. Follow the returned execution reference using its existing operations." }] }, meta);
       }
     },
     register(server: Server) {

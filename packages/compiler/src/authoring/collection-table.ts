@@ -89,7 +89,9 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     // Validate references against the complete entity, not that temporary projection.
     const canonical = all.get(record.contract.entity.name) ?? record;
     if (canonical.contract.interfaces?.web?.namedViews?.[panel.view]?.kind !== 'record') throw new Error(`${name}: record panel view ${panel.view} must name a record view of ${record.contract.entity.name}.`);
-    if (panel.includeRecord !== undefined || panel.summaryColumns) throw new Error(`${name}: a record panel view replaces includeRecord and summaryColumns.`);
+    // A typed binding can supply the read summary above the named record body.
+    // Its layout/header fields are validated against that binding below.
+    if (panel.includeRecord === true || panel.summaryColumns || panel.fields || panel.collection || (!panel.binding && (panel.heading || panel.subtitle || panel.layout))) throw new Error(`${name}: a record panel view replaces the inline record body.`);
   }
   if (panel?.primaryMembership) {
     if (!membership || !through || !panel.summaryColumns) throw new Error(`${name}: primaryMembership requires a summary and a membership tree.`);

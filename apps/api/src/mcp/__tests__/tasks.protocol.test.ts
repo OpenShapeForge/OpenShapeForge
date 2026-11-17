@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import { Server } from "@modelcontextprotocol/server";
 import { handleModernMcpRequest } from "../modern-http.js";
-import { createTasks, executionProviders, supportsTasks, taskAwareToolParams, TASKS_EXTENSION } from "../tasks.js";
+import { completeToolResult, createTasks, executionProviders, supportsTasks, taskAwareToolParams, TASKS_EXTENSION } from "../tasks.js";
 import { withExecutionReference } from "../execution-reference.js";
 import type { TaskBinding, TaskStore } from "../task-store.js";
 import type { RuntimeExecutionProvider } from "@openshapeforge/plugin-runtime";
@@ -59,6 +59,12 @@ async function call(method: string, params: Record<string, unknown>, capabilitie
   return await response.json() as { result?: Record<string, any>; error?: { code: number; message: string } };
 }
 
+function expectEmptyAck(response: {error?:unknown;result?:Record<string,unknown>}){
+  expect(response.error).toBeUndefined();
+  const {_meta,...ack}=response.result??{};
+  expect(ack).toEqual({resultType:'complete'});
+}
+
 describe("MCP Tasks extension over actual HTTP", () => {
   test("returns a handle, serves another call, polls through new Server instances and returns the final original envelope", async () => {
     const first = await call("tools/call", { name: "start", arguments: { ref: "run-a" } });
@@ -71,7 +77,7 @@ describe("MCP Tasks extension over actual HTTP", () => {
     done = true;
     const final = await call("tasks/get", { taskId: id });
     expect(final.result).toMatchObject({ resultType: "complete", status: "completed", result: { structuredContent: { data: { answer: 42 } } } });
-    expect((await call("tasks/cancel", { taskId: id })).error).toBeUndefined(); expect(cancels).toBe(0);
+    expectEmptyAck(await call("tasks/cancel", {taskId:id})); expect(cancels).toBe(0);
     const before = reads; denied = true;
     expect((await call("tasks/get", { taskId: id })).error).toBeDefined();
     expect(reads).toBe(before + 1); denied = false; done = false;
@@ -79,17 +85,21 @@ describe("MCP Tasks extension over actual HTTP", () => {
   test("requires Tasks on the tool request itself and never trusts upstream execution-shaped JSON", async () => {
     const plainMeta = { ...meta, "io.modelcontextprotocol/clientCapabilities": {} };
     expect((await call("tools/call", { name: "start" }, plainMeta)).result!.content).toBeDefined();
-    expect((await call("tools/call", { name: "native" })).result!.resultType).not.toBe("task");
+    expect((await call("tools/call", { name: "native" })).result!.resultType).toBe("complete");
+    expect((await call("tools/call", { name: "start" }, plainMeta)).result!.resultType).toBe("complete");
+    expect(completeToolResult({ content: [] }, { ...meta, "io.modelcontextprotocol/protocolVersion": "2025-11-25" })).toEqual({ content: [] });
+    expect(completeToolResult({ content: [] }, { ...meta, "io.modelcontextprotocol/protocolVersion": "2027-01-15" })).toEqual({ resultType: "complete", content: [] });
+    expect(completeToolResult({ resultType: "task", content: [] }, meta)).toEqual({ resultType: "task", content: [] });
     expect(supportsTasks({ ...meta, "io.modelcontextprotocol/protocolVersion": "2025-11-25" })).toBe(false);
   });
   test("cancels through the owner, refuses unknown handles and unissued input", async () => {
     const first = await call("tools/call", { name: "start", arguments: { ref: "run-cancel" } });
     const id = first.result!.taskId;
-    expect((await call("tasks/cancel", { taskId: id })).error).toBeUndefined(); expect(cancels).toBe(1);
+    expectEmptyAck(await call("tasks/cancel", {taskId:id})); expect(cancels).toBe(1);
     expect((await call("tasks/get", { taskId: randomUUID() })).error!.code).toBe(-32602);
     expect((await call("tasks/get", { taskId: "not-a-uuid" })).error).toBeDefined();
     expect((await call("tasks/update", { taskId: id, inputResponses: { forged: { approved: true } } })).error).toBeDefined();
-    expect((await call("tasks/update", { taskId: id })).error).toBeUndefined();
+    expectEmptyAck(await call("tasks/update", {taskId:id}));
   });
   test("rejects ambiguous owner registration", () => {
     expect(() => executionProviders([{ executionProviders: [provider, provider] }])).toThrow("Duplicate");

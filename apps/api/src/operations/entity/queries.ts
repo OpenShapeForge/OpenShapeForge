@@ -182,7 +182,7 @@ export function buildFilterConditions(
       if (Object.keys(value).length !== 1) throw generatedCrudError(`Relationship filter ${key} requires exactly one quantifier.`, "BAD_USER_INPUT");
       const any = (value as Record<string, unknown>)[quantifier];
       if (!any || typeof any !== "object" || Array.isArray(any) || (quantifier === "any" && Object.keys(any).length === 0)) {
-        throw generatedCrudError(`Relationship filter ${key}.any requires exact field constraints.`, "BAD_USER_INPUT");
+        throw generatedCrudError(`Relationship filter ${key}.${quantifier} requires exact field constraints.`, "BAD_USER_INPUT");
       }
       const related = getGeneratedCrudTables().find((candidate) => candidate.source?.graphql?.typeName === relationship.target);
       if (!related) throw generatedCrudError(`Relationship filter ${key} has no generated target.`, "INTERNAL_SERVER_ERROR");

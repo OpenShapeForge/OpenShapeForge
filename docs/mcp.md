@@ -986,6 +986,7 @@ the same callback. Register that exact URL in the provider's client settings.
 ## Durable executions through MCP Tasks
 
 The `io.modelcontextprotocol/tasks` extension uses the 2026-07-28 protocol.
+Its normative contract is the [2026-07-28 Tasks extension specification](https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks).
 It is advertised only when a module contributes an execution provider and
 an authenticated tenant execution context exists. A `tools/call` may return
 `resultType: "task"` only if that exact request declares the extension.
@@ -1030,9 +1031,12 @@ permission checks. Sending `tasks/cancel` is the caller's explicit cancellation
 acknowledgement, translated to `confirmed: true` on that Operation. Terminal
 executions and owners without a cancellation Operation acknowledge without a
 new effect; cancellation never promises rollback of completed effects.
-The seven-day handle TTL is retention, not an execution timeout. Expired handles
+The seven-day handle TTL is retention, not an execution timeout. As specified
+by the extension, `ttlMs` is the duration from `createdAt` (`expires_at` minus
+`created_at`), not the remaining duration at each poll. Reading or reusing a
+handle does not extend its expiry. Expired handles
 are unavailable; the underlying workflow remains governed by its own lifecycle.
-Expired handles of a caller are removed when that caller creates another handle;
+Expired handles of a caller and matching authority are removed when that caller creates another handle;
 there is no deployment-wide expiry sweeper in this increment.
 
 Human-input waits continue to use existing authorized workflow interaction
@@ -1041,3 +1045,10 @@ at the caller. This increment issues no task `inputRequests`; `tasks/update`
 acknowledges an empty update and refuses unissued input. Subscriptions, task
 enumeration and arbitrary background execution of synchronous tools are not
 part of this extension implementation.
+
+The 2026-07-28 Tasks extension defines `tasks/cancel` and `tasks/update` replies
+as empty acknowledgements with `resultType: "complete"` (protocol metadata may
+be present), rather than Task objects. Read the execution status with
+`tasks/get`; cancellation is cooperative and the acknowledgement does not promise
+a terminal cancelled state. See the normative [update and cancellation
+responses](https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks#task-cancellation).

@@ -18,7 +18,7 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
   const logins = DATABASE_ROLES.filter((role) => role.login).map((role) => role.name);
   if (logins.length === 0) throw new Error("The generated manifest declares no runtime login role.");
   const runtimeMembership = sql.join(
-    logins.map((name) => sql`pg_catalog.pg_has_role(r.oid, ${sql.lit(name)}, 'MEMBER')`),
+    logins.map((name) => sql`pg_catalog.pg_has_role(acting.oid, ${sql.lit(name)}, 'USAGE')`),
     sql` or `,
   );
   const declaredRoles = sql.join(DATABASE_ROLES.map((role) => sql.lit(role.name)));
@@ -112,8 +112,10 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
     -- every function, operator and type in it is schema-qualified instead, so
     -- a caller's search_path or temporary objects cannot stand in for them.
     -- Whether a role is a runtime login: one of the declared login roles or
-    -- any role that is a member of one (a per-workload login granted the app
-    -- role is the app role for this purpose). A superuser is not — the API
+    -- any login that can use their privileges, initially or after SET ROLE.
+    -- Membership with ADMIN only (neither INHERIT nor SET) administers a
+    -- role without using its data privileges and must not turn a migrator
+    -- into a runtime login. A superuser is not — the API
     -- refuses to start as one, and row-level security does not bind it
     -- anyway. An unknown role counts as runtime, the closed direction.
     --
@@ -121,12 +123,19 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
     -- search_path that omits pg_temp PostgreSQL searches it FIRST for
     -- relations, so an unqualified pg_roles here could be answered by a
     -- temporary table the runtime role created to call itself a superuser.
+    -- SET reachability is from the login, then USAGE from the chosen role.
+    -- A login may SET an intermediate role that inherits a runtime role even
+    -- when it can neither inherit nor SET the runtime role directly.
     create or replace function app.role_is_runtime_login(role_name name) returns boolean
     language sql stable parallel safe
     set search_path = pg_catalog, pg_temp
     as $$
       select coalesce((
-        select not r.rolsuper and (${runtimeMembership})
+        select not r.rolsuper and exists (
+          select 1 from pg_catalog.pg_roles acting
+           where pg_catalog.pg_has_role(r.oid, acting.oid, 'SET')
+             and (${runtimeMembership})
+        )
           from pg_catalog.pg_roles r
          where r.rolname operator(pg_catalog.=) role_name
       ), true)

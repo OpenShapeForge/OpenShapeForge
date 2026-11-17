@@ -303,6 +303,7 @@ const SESSION_CREDENTIALS: readonly SessionCredential[] = [
   "none",
   "bearer",
   "api-key",
+  "personal-key",
   "trusted-context",
   "control-bearer",
   "grant",

@@ -13,6 +13,7 @@ interface LoginPageProps {
 }
 
 const REASON_MESSAGES: Record<string, string> = {
+  session_unavailable: "Authentication is temporarily unavailable. Your session is retained. Try again when the service recovers.",
   session_expired: "Your session expired. Sign in again to continue.",
 };
 
@@ -93,7 +94,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   // authenticated non-operator to "/" would just bounce them to
   // /not-authorized, and bouncing off the login page is how redirect loops
   // start.
-  if (session && session.error !== "RefreshTokenError" && session.isPlatformOperator) {
+  if (session && !session.error && session.isPlatformOperator) {
     redirect("/");
   }
 
@@ -157,7 +158,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
                 is not possible right now.
               </p>
               <p className="mt-3">
-                <a href="/login" className="underline underline-offset-4">
+                <a href={`/login?callbackUrl=${encodeURIComponent(safeCallbackUrl)}`} className="underline underline-offset-4">
                   Try again
                 </a>
               </p>

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { PageAsset, PageDesign, PageTextStyle } from "./page/types.js";
+import { validatePageDesign } from "./page/html.js";
 import { isObject, refuse } from "./validation.js";
 
 const MAX_ASSET_BASE64 = 2_800_000;
@@ -54,5 +55,7 @@ export function pageDesignFromStored(stored: unknown): PageDesign | null {
       ...(typeof asset.label === "string" && asset.label ? { label: asset.label.slice(0, 120) } : {}),
     };
   }
-  return { page: { width: number(page.width, "page width"), height: number(page.height, "page height") }, colors, textStyles, assets };
+  const parsed = { page: { width: number(page.width, "page width"), height: number(page.height, "page height") }, colors, textStyles, assets };
+  try { validatePageDesign(parsed); } catch { refuse("INVALID_STATE", "The document theme's page design is invalid."); }
+  return parsed;
 }

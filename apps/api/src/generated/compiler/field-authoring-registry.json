@@ -138,7 +138,7 @@
       },
       "baseType": "string",
       "validation": {
-        "pattern": "^[a-z][a-z0-9-]{0,63}$",
+        "pattern": "^[a-z][a-z0-9\\-]{0,63}$",
         "maxLength": 64
       }
     },
@@ -149,7 +149,7 @@
       },
       "baseType": "string",
       "validation": {
-        "pattern": "^(standard|tenant):[a-z][a-z0-9-]{0,63}$",
+        "pattern": "^(standard|tenant):[a-z][a-z0-9\\-]{0,63}$",
         "maxLength": 73
       },
       "render": {
@@ -207,7 +207,7 @@
                 "nl": "Vaste sleutel"
               },
               "validation": {
-                "pattern": "^[a-z][a-z0-9-]{0,63}$",
+                "pattern": "^[a-z][a-z0-9\\-]{0,63}$",
                 "maxLength": 64
               }
             },
@@ -9961,7 +9961,9 @@
                 "TemplateBlock",
                 "TextColumns",
                 "ImageBlock",
-                "SpacerBlock"
+                "SpacerBlock",
+                "SectionBreak",
+                "PageBreak"
               ]
             }
           }
@@ -9995,7 +9997,9 @@
                 "TemplateBlock",
                 "TextColumns",
                 "ImageBlock",
-                "SpacerBlock"
+                "SpacerBlock",
+                "SectionBreak",
+                "PageBreak"
               ]
             }
           }
@@ -10216,8 +10220,8 @@
             "nl": "Pagina-indeling"
           },
           "description": {
-            "en": "Key of the page layout a header or footer block belongs to, as selected by a section break. Empty on a body block; an empty key on a header or footer block means the default layout.",
-            "nl": "Sleutel van de pagina-indeling waar een kop- of voetblok bij hoort, zoals een sectie-einde die kiest. Leeg op een inhoudsblok; een lege sleutel op een kop- of voetblok betekent de standaardindeling."
+            "en": "Key of the page layout a header or footer block belongs to, where an existing renderer selects that layout. Paged rendering refuses an unselected key explicitly. Empty on a body block; an empty key on a header or footer block means the default layout.",
+            "nl": "Sleutel van de pagina-indeling waar een kop- of voetblok bij hoort, waar een bestaande renderer die indeling selecteert. Gepagineerd renderen weigert een niet-geselecteerde sleutel expliciet. Leeg op een inhoudsblok; een lege sleutel op een kop- of voetblok betekent de standaardindeling."
           },
           "osfType": "string",
           "required": false,
@@ -17975,7 +17979,7 @@
             "nl": "Paginaontwerp"
           },
           "description": {
-            "en": "Design tokens for paged documents - the page size in pixels, named colors, named text styles and inlined image assets that blocks and section breaks select by key. Empty means this theme has no page design.",
+            "en": "Design tokens for paged documents - the page size in pixels, named colors, named text styles and inlined image assets that blocks select by key. Empty means this theme has no page design.",
             "nl": "Ontwerptokens voor gepagineerde documenten - het paginaformaat in pixels, benoemde kleuren, benoemde tekststijlen en ingesloten beelden die blokken en sectie-einden op sleutel kiezen. Leeg betekent dat dit thema geen paginaontwerp heeft."
           },
           "persisted": {
@@ -19380,6 +19384,32 @@
           }
         },
         {
+          "key": "pageHeaderEnabled",
+          "label": {
+            "en": "Header on every page",
+            "nl": "Koptekst op elke pagina"
+          },
+          "osfType": "boolean",
+          "defaultValue": true,
+          "persisted": {
+            "column": "page_header_enabled",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "pageFooterEnabled",
+          "label": {
+            "en": "Footer on every page",
+            "nl": "Voettekst op elke pagina"
+          },
+          "osfType": "boolean",
+          "defaultValue": true,
+          "persisted": {
+            "column": "page_footer_enabled",
+            "storageClass": "core"
+          }
+        },
+        {
           "key": "pageFormat",
           "label": {
             "en": "Page format",
@@ -19615,7 +19645,9 @@
             "TemplateBlock",
             "TextColumns",
             "ImageBlock",
-            "SpacerBlock"
+            "SpacerBlock",
+            "SectionBreak",
+            "PageBreak"
           ],
           "relationship": {
             "inverse": "documentVariant",
@@ -28734,6 +28766,28 @@
       "displayTemplate": "{{clientId}} {{permissionName}}",
       "filterField": "permissionName",
       "icon": "file",
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
+    "PageBreak": {
+      "kind": "entity",
+      "entity": "PageBreak",
+      "entityIdentity": false,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Page break",
+        "nl": "Pagina-einde"
+      },
+      "pluralLabel": {
+        "en": "Page breaks",
+        "nl": "Pagina-eindes"
+      },
+      "shape": [],
       "render": {
         "input": "EntityReferenceSelect",
         "display": "EntityReferenceDisplay"
@@ -37898,6 +37952,220 @@
         "display": "EntityReferenceDisplay"
       }
     },
+    "SectionBreak": {
+      "kind": "entity",
+      "entity": "SectionBreak",
+      "entityIdentity": false,
+      "baseType": "string",
+      "validation": {
+        "format": "uuid"
+      },
+      "label": {
+        "en": "Section break",
+        "nl": "Sectie-einde"
+      },
+      "pluralLabel": {
+        "en": "Section breaks",
+        "nl": "Sectie-eindes"
+      },
+      "shape": [
+        {
+          "key": "layout",
+          "osfType": "string",
+          "required": true,
+          "label": {
+            "en": "Section key",
+            "nl": "Sectiesleutel"
+          },
+          "validation": {
+            "pattern": "^[a-z][A-Za-z0-9-]{0,63}$",
+            "maxLength": 64
+          }
+        },
+        {
+          "key": "name",
+          "osfType": "string",
+          "required": true,
+          "defaultValue": "Sectie",
+          "label": {
+            "en": "Section name",
+            "nl": "Sectienaam"
+          },
+          "validation": {
+            "maxLength": 120
+          }
+        },
+        {
+          "key": "headerEnabled",
+          "osfType": "boolean",
+          "defaultValue": true,
+          "label": {
+            "en": "Header on every page",
+            "nl": "Koptekst op elke pagina"
+          }
+        },
+        {
+          "key": "footerEnabled",
+          "osfType": "boolean",
+          "defaultValue": true,
+          "label": {
+            "en": "Footer on every page",
+            "nl": "Voettekst op elke pagina"
+          }
+        },
+        {
+          "key": "format",
+          "osfType": "string",
+          "defaultValue": "a4",
+          "label": {
+            "en": "Page format",
+            "nl": "Paginaformaat"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "a4",
+                "label": {
+                  "en": "A4",
+                  "nl": "A4"
+                }
+              },
+              {
+                "value": "a5",
+                "label": {
+                  "en": "A5",
+                  "nl": "A5"
+                }
+              },
+              {
+                "value": "letter",
+                "label": {
+                  "en": "Letter",
+                  "nl": "Letter"
+                }
+              },
+              {
+                "value": "custom",
+                "label": {
+                  "en": "Custom",
+                  "nl": "Eigen formaat"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "key": "width",
+          "osfType": "number",
+          "label": {
+            "en": "Width (px)",
+            "nl": "Breedte (px)"
+          },
+          "validation": {
+            "min": 200,
+            "max": 4000
+          }
+        },
+        {
+          "key": "height",
+          "osfType": "number",
+          "label": {
+            "en": "Height (px)",
+            "nl": "Hoogte (px)"
+          },
+          "validation": {
+            "min": 200,
+            "max": 4000
+          }
+        },
+        {
+          "key": "margin",
+          "osfType": "number",
+          "defaultValue": 40,
+          "label": {
+            "en": "Margin (px)",
+            "nl": "Marge (px)"
+          },
+          "validation": {
+            "min": 0,
+            "max": 400
+          }
+        },
+        {
+          "key": "gap",
+          "osfType": "number",
+          "defaultValue": 24,
+          "label": {
+            "en": "Header/footer gap (px)",
+            "nl": "Afstand kop en footer (px)"
+          },
+          "validation": {
+            "min": 0,
+            "max": 400
+          }
+        },
+        {
+          "key": "blockGap",
+          "osfType": "number",
+          "defaultValue": 12,
+          "label": {
+            "en": "Block gap (px)",
+            "nl": "Blokafstand (px)"
+          },
+          "validation": {
+            "min": 0,
+            "max": 200
+          }
+        },
+        {
+          "key": "bodyAlignment",
+          "osfType": "string",
+          "defaultValue": "top",
+          "label": {
+            "en": "Body alignment",
+            "nl": "Positie inhoud"
+          },
+          "options": {
+            "type": "static",
+            "items": [
+              {
+                "value": "top",
+                "label": {
+                  "en": "Top",
+                  "nl": "Bovenaan"
+                }
+              },
+              {
+                "value": "aboveCenter",
+                "label": {
+                  "en": "Above center",
+                  "nl": "Boven het midden"
+                }
+              },
+              {
+                "value": "center",
+                "label": {
+                  "en": "Center",
+                  "nl": "Midden"
+                }
+              },
+              {
+                "value": "bottom",
+                "label": {
+                  "en": "Bottom",
+                  "nl": "Onderaan"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "render": {
+        "input": "EntityReferenceSelect",
+        "display": "EntityReferenceDisplay"
+      }
+    },
     "SlaPolicy": {
       "kind": "entity",
       "entity": "SlaPolicy",
@@ -41167,6 +41435,57 @@
             "en": "Values for the local variables of the included template version, used for this inclusion only. A value may hold a `{{…}}` token of the including template; it is resolved there and handed on as data.",
             "nl": "Waarden voor de lokale variabelen van de opgenomen templateversie, alleen voor deze opname. Een waarde mag een `{{…}}`-token van de opnemende template bevatten; dat wordt daar opgelost en als data doorgegeven."
           }
+        },
+        {
+          "key": "content",
+          "osfType": "object",
+          "label": {
+            "en": "Local block content",
+            "nl": "Lokale blokinhoud"
+          },
+          "description": {
+            "en": "Ordered inclusion-local source references and edits, validated against the pinned source version. Locked source blocks remain protected.",
+            "nl": "Volgorde en lokale blokwijzigingen voor deze invoeging, gecontroleerd tegen de gekozen bronversie. Vergrendelde bronblokken blijven beschermd."
+          },
+          "children": [
+            {
+              "key": "blocks",
+              "osfType": "object",
+              "cardinality": "collection",
+              "required": true,
+              "children": [
+                {
+                  "key": "id",
+                  "osfType": "string",
+                  "required": true
+                },
+                {
+                  "key": "definitionKey",
+                  "osfType": "string"
+                },
+                {
+                  "key": "schemaVersion",
+                  "osfType": "integer"
+                },
+                {
+                  "key": "values",
+                  "osfType": "object"
+                },
+                {
+                  "key": "references",
+                  "osfType": "object"
+                },
+                {
+                  "key": "region",
+                  "osfType": "string"
+                },
+                {
+                  "key": "layoutKey",
+                  "osfType": "string"
+                }
+              ]
+            }
+          ]
         }
       ],
       "render": {
@@ -41323,6 +41642,32 @@
           },
           "persisted": {
             "column": "page_layout",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "pageHeaderEnabled",
+          "label": {
+            "en": "Header on every page",
+            "nl": "Koptekst op elke pagina"
+          },
+          "osfType": "boolean",
+          "defaultValue": true,
+          "persisted": {
+            "column": "page_header_enabled",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "pageFooterEnabled",
+          "label": {
+            "en": "Footer on every page",
+            "nl": "Voettekst op elke pagina"
+          },
+          "osfType": "boolean",
+          "defaultValue": true,
+          "persisted": {
+            "column": "page_footer_enabled",
             "storageClass": "core"
           }
         },
@@ -41560,7 +41905,9 @@
             "TemplateBlock",
             "TextColumns",
             "ImageBlock",
-            "SpacerBlock"
+            "SpacerBlock",
+            "SectionBreak",
+            "PageBreak"
           ],
           "relationship": {
             "inverse": "variant",
@@ -44746,6 +45093,24 @@
       "label": {
         "en": "Services",
         "nl": "Services"
+      }
+    },
+    "MyPersonalApiKey": {
+      "kind": "provider",
+      "entity": "MyPersonalApiKey",
+      "baseType": "object",
+      "label": {
+        "en": "My API keys",
+        "nl": "Mijn API-sleutels"
+      }
+    },
+    "PersonalApiKey": {
+      "kind": "provider",
+      "entity": "PersonalApiKey",
+      "baseType": "object",
+      "label": {
+        "en": "Personal API keys",
+        "nl": "Persoonlijke API-sleutels"
       }
     },
     "RecordActionAssignment": {

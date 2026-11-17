@@ -174,6 +174,9 @@ export async function applyGeneratedPluginMigrations(
       // runtime role without guessing its name. The setting is transaction
       // local and is supplied by the host, not by request/session input.
       await sql`select set_config('osf.migration_app_role', ${APP_ROLE}, true)`.execute(db);
+      // Post-schema restoration also crosses tenant boundaries. Like the
+      // pre-schema transition, its trusted authority ends with this transaction.
+      await sql`select set_config('app.bypass_rls', 'true', true)`.execute(db);
       const expression = owned && checkExpression(owned.definition);
       if (owned && expression !== undefined) {
         await ensureCheckConstraint(db, { table: owned.table, name: owned.name, expression });

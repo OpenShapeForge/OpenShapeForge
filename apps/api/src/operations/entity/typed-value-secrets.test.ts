@@ -58,3 +58,11 @@ describe('opt-in encrypted typed values',()=>{
   expect(()=>projectTypedValues(table,{definition:{key:'value',osfType:'string'},value:{ciphertext:'invalid'}})).toThrow();
  });
 });
+
+test('write preparation maps malformed typed definitions to validation before deriving any value', async () => {
+ for (const invalid of [{key:'wrong',osfType:'colorPalette'}, {key:'value',osfType:'bogus-type'}]) {
+   let error: unknown;
+   try { await prepareTypedValueWrite(trx,session,table,new Map<GeneratedCrudColumn,unknown>([[definition,invalid],[value,{colors:[]}]])); } catch (caught) { error=caught; }
+   expect((error as {operationError?: unknown})?.operationError).toMatchObject({code:'VALIDATION'});
+ }
+});

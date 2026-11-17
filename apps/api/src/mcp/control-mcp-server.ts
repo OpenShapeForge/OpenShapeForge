@@ -93,6 +93,7 @@ import {
 } from "./protected-resource-metadata.js";
 import { createRequestFreshContext } from "./stateful-session-authorization.js";
 import { handleModernMcpRequest } from "./modern-http.js";
+import { completeToolResult } from "./tasks.js";
 
 /** The route this server mounts the control MCP on. */
 export const CONTROL_MCP_ROUTE_PATH = "/api/control/mcp";
@@ -376,13 +377,14 @@ function buildPlatformServer(input: {
   });
   // Unknown names and Operations this session may not use get the same
   // refusal: NOT_FOUND, no hint of what exists.
-  server.setRequestHandler('tools/call', async (request) => {
+  server.setRequestHandler('tools/call', async (request, ctx) => {
+    const meta = ctx.mcpReq.envelope;
     const match = tools().find(({ tool }) => tool.name === request.params.name);
     if (!match) {
-      return failedToolResult(
+      return completeToolResult(failedToolResult(
         new HttpError(404, "NOT_FOUND", `Unknown tool "${request.params.name}".`),
         input.log,
-      );
+      ), meta);
     }
     try {
       const result = await invokeOperation(match.entry, request.params.arguments ?? {}, {
@@ -392,9 +394,9 @@ function buildPlatformServer(input: {
         session: input.sessionView ?? input.session(),
         transport: "mcp",
       });
-      return toolResult(result);
+      return completeToolResult(toolResult(result), meta);
     } catch (error) {
-      return failedToolResult(error, input.log);
+      return completeToolResult(failedToolResult(error, input.log), meta);
     }
   });
   return server;

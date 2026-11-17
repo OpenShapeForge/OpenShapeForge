@@ -26,6 +26,7 @@ import { handleModernMcpRequest } from "./modern-http.js";
 import type { McpRegistrationOptions, McpRouteContext } from "./route-context.js";
 import type { BuildServer } from "./generated-mcp-server.js";
 import { resolveServerIcons } from "./server-icons.js";
+import { withConfigurationCredential } from "./configuration-credential.js";
 
 /** Only discovery/initialization consumes instructions; keep other shapes conservative. */
 const sessionCapacity = new SessionCapacity();
@@ -342,7 +343,7 @@ export function createTransportSessions(input: {
   };
 
   const handleMcpRequest = (request: FastifyRequest, reply: FastifyReply): Promise<void> =>
-    observeMcpHttp(request, reply, () => withLiveRequestSignal(request, reply, () => handleAuthenticatedMcpRequest(request, reply)));
+    observeMcpHttp(request, reply, () => withLiveRequestSignal(request, reply, () => withConfigurationCredential(request, () => handleAuthenticatedMcpRequest(request, reply))));
 
   return { handleMcpRequest, notifyDerivedDefinitionChanged };
 }

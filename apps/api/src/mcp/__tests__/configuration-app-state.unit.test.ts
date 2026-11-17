@@ -12,7 +12,7 @@ test("fresh read cards retain private fields only in the owning session until co
   const owner = { tenantId: "tenant", userId: "user" };
   const minted = await mintConfiguration({ tenantId: "tenant", userId: "user", table: "Connection", elicit: {} as any,
     modelValues: {}, definitions: [{ key: "secret", osfType: "string", required: true, secret: true }], displayName: "Provider" });
-  const create = configurationAppResult({}, minted.token, "Provider", [{ key: "secret", osfType: "string" }], undefined, minted.id);
+  const create = configurationAppResult({}, minted.token, "Provider", [{ key: "secret", osfType: "string" }], undefined, minted.id, true);
   await retainConfigurationAppResult(create, owner);
   const read = { content: [{ type: "text" as const, text: "ordinary read" }], structuredContent: { data: [], operations: [] } };
   const retained = await retainConfigurationAppResult(read, owner);
@@ -31,7 +31,7 @@ test("fresh read cards retain private fields only in the owning session until co
 test("a changed owner cannot receive the former handoff", async () => {
   const owner = { tenantId: "tenant", userId: "user" };
   const minted = await mintConfiguration({ ...owner, table: "Connection", elicit: {} as any, modelValues: {}, definitions: [], displayName: "Provider" });
-  await retainConfigurationAppResult(configurationAppResult({},minted.token,"Provider",[]), owner);
+  await retainConfigurationAppResult(configurationAppResult({},minted.token,"Provider",[],undefined,minted.id,true), owner);
   owner.tenantId="other";
   expect((await retainConfigurationAppResult({content:[]},owner))._meta).toBeUndefined();
   await consumeConfiguration(minted.token);

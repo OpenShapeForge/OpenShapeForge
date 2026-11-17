@@ -10,6 +10,7 @@ import { ENTITY_CONFIGURATION_PATH, callbackOrigin, configurationWebUrl, signedI
 import { HttpError } from "../rest/http-error.js";
 import { ok, type ToolResult } from "./tool-results.js";
 import { configurationFormDefinitions } from "./configuration-submission.js";
+import { configurationCredential } from "./configuration-credential.js";
 export function configurationAppResult(
   payload: unknown,
   token: string,
@@ -17,12 +18,13 @@ export function configurationAppResult(
   definitions?: unknown,
   messagePrefix?: string,
   configurationId?: string,
+  submissionAvailable = Boolean(configurationCredential()),
 ): ToolResult {
-  const configurationUrl = `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/${token}`;
   // Capability advertisement does not acknowledge that the host rendered a
   // card. Keep a recovery path outside that card, without exposing its bearer
   // token. The ordinary web session must still match the pending form owner.
   const externalUrl = signedInConfigurationUrl(configurationId);
+  const configurationUrl = externalUrl ?? `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/pending/${configurationId ?? ""}`;
   const result = ok(externalUrl && payload && typeof payload === "object" && !Array.isArray(payload)
     ? { ...payload, externalUrl }
     : payload);
@@ -39,6 +41,8 @@ export function configurationAppResult(
     ],
     _meta: {
       configurationUrl,
+      ...(submissionAvailable ? { submissionUrl: `${callbackOrigin()}${ENTITY_CONFIGURATION_PATH}/app`, submissionToken: token } : {}),
+      ...(externalUrl ? { externalUrl } : {}),
       displayName,
       ...(configurationId ? { configurationId } : {}),
       ...(definitions !== undefined ? { configuration: {

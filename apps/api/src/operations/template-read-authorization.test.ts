@@ -35,5 +35,5 @@ test("the canonical operation guard requires template capability and a verified 
     expect(() => requireOperationAuthorization(contract, undefined)).toThrow("authenticated bearer");
     checked++;
   }
-  expect(checked).toBe(5);
+  expect(checked).toBe(7);
 });

@@ -746,8 +746,9 @@ the core `osf-api-keys` plugin and bound by
 `api-keys.create-integration`, `api-keys.list-integrations`,
 `api-keys.get-integration`, `api-keys.list-credentials`,
 `api-keys.get-credential`, `api-keys.issue-credential`,
-`api-keys.revoke-credential` and `api-keys.disable-integration`, projected to
-REST under `/api/api-key-integrations/*`. They are a third projection of the
+`api-keys.revoke-credential`, `api-keys.update-integration-roles` and
+`api-keys.disable-integration`, projected to REST under
+`/api/api-key-integrations/*`. They are a third projection of the
 same authority, not a second implementation: every handler calls
 `auth/api-key/service.ts` and therefore the one ceiling, and an integration is
 named by its stable `platform.api_key_integrations.id` — never by the derived
@@ -764,10 +765,46 @@ SAME transaction that mints the key, from the activation statement's own
 exists exactly once, in that answer, so any statement between minting it and
 returning it is a step whose failure loses the secret while the mint has
 committed, and whose retry provisions a second realm client and a second
-credential. It is the only Operation here that declares `external: write` and
-the only one that can report `502 PROVISIONING_FAILED`; a realm that refuses
-leaves the intent row at `pending`, which authenticates nothing and is what the
-reconciler sweeps.
+credential. It and `update-integration-roles` are the only Operations here
+that declare `external: write` and the only ones that can report
+`502 PROVISIONING_FAILED`; a realm that refuses creation leaves the intent row
+at `pending`, which authenticates nothing and is what the reconciler sweeps.
+
+**Changing an integration's roles.** `update-integration-roles`
+(`POST /api/api-key-integrations/update-roles`, input `integrationId`, `roles`
+and the acknowledgement `confirmed`) replaces the role set of an `active`
+integration; `roles` is the complete new set, not a delta, and an empty set is
+admitted only where creation admits one. The ceiling is creation's: every role
+in the new set must be held by the caller, while withdrawing a role is not
+checked against the caller. A `pending` or `disabled` integration is refused
+with `404 NOT_FOUND`, like key issuance. The service takes the integration lock that issue and
+disable share, sets the service account's client roles on the entity-role
+client to exactly the new set, and only then records `granted_roles` and
+appends an `ApiKeyIntegration` / `api_key_integration_roles_changed` event to
+`platform.entity_events`. The realm is set from what it maps now, withdrawing
+before granting, so a refused realm call leaves the stored roles unchanged, the
+account with no role neither set authorized, and a repeated request
+converging. Keys are not touched: a key names an integration and its roles are
+the service account's token roles (intersected with its `role_subset`), so the
+change applies from the next request that reads the committed row, on every API
+replica: both cached and in-flight exchanges are bound to the row's roles
+version, read on each request. Local invalidation also stops new requests
+joining the previous exchange. A key narrowed to roles that are
+withdrawn keeps only the ones that remain, possibly none. The web integration
+view offers it as the "Edit roles" record action on active integrations,
+prefilled from `grantedRoles`.
+
+Role updates commit their row and audit event in an independent transaction;
+a later outer Operation failure cannot erase the record of a realm change.
+If a row write, event write, read-back or commit fails after the realm changes,
+compensation reacquires the integration lock and restores the currently recorded
+roles, preserving any concurrent committed edit. Compensation is best effort:
+if Keycloak or PostgreSQL remains unavailable, an operator error records that
+reconciliation is required; the original failure is returned. An empty role set
+first ensures that the existing client has the configured API audience mapper.
+A key subset can also gain a previously named role when that role is later added
+to the integration; the subset still never grants anything the service account
+itself lacks.
 
 **A fenced activation compensates recoverably.** The intent row commits before
 the realm is touched, so the integration is visible and mutable while the
@@ -1104,6 +1141,96 @@ That is the enforced answer to "do not grant a workflow role to an API key's
 service account": an entity that declares a record action for integrations
 excludes `application` from its generic routes by default, so a broad role on a
 key no longer reaches the collection behind the per-record grant.
+
+### Personal API keys
+
+An integration key (above) is the ORGANIZATION's credential for an external
+party: it names an integration, runs as that integration's own service account,
+and outlives whoever created it. A personal key is the other kind: a person
+mints it for THEMSELVES, and a request made with it acts as that person.
+
+**Format and routing.** `osf_user_<lookupId>_<secret><crc>` — the integration
+format with its own prefix, so a secret scanner can tell the kinds apart and the
+session resolver routes on the prefix alone; neither kind is ever resolved by
+the other's path. The stored half is a SHA-256 hash in
+`platform.personal_api_keys`, a table of its own beside `platform.api_keys`.
+
+**What a request with one may do.** Resolution
+(`auth/api-key/personal-resolve.ts`) reads the CURRENT state on every request:
+the key row (secret, expiry, revocation, and dormancy — a key unused for 90
+days stops working), the owner's realm account (it must exist and be enabled;
+read through the provisioner's admin client, cached 30 seconds per process),
+and the owner's membership row in the tenant (it must be `linked`, read
+uncached). The roles are then computed exactly as for that person's own login —
+`personOrganizationAuthority` in `auth/bearer-session.ts`, shared by both paths:
+membership roles expanded through the realm composites, RelationGroup roles and
+custom-role permissions — and intersected with the key's `role_subset`, which
+narrows and never widens. Issuer-wide realm roles are NOT carried: a key is
+bound to one organization. So withdrawing a role from the person withdraws it
+from all their keys on the next request, and disabling the account or blocking
+the membership (`MEMBER_ACCESS_BLOCKED`) stops every key they hold, with
+nothing to revoke. An unreachable realm is a `503`, not a refusal.
+
+The session's `credential` is `personal-key` and its `principalKind` is
+`person`: audit records the person (`actorKind: person`), row ownership and
+named-person record actions see them, and `personalKeyId` records which key
+they acted through. Everything that needs a person to be PRESENT refuses the
+credential: no API key, personal or not, reaches any key management
+(`auth/api-key/ceiling.ts`), and OAuth-scoped Operations refuse it as they
+refuse an integration key.
+
+**Who sees and manages them.** Three rights, all `Platform.*` client roles so
+no entity grant confers them, deliberately separate:
+
+| Role | Grants |
+|---|---|
+| `Platform.ApiKeys.Personal` | Mint, list, read and revoke your OWN personal keys. |
+| `Platform.ApiKeys.PersonalRead` | See every person's personal keys in the organization — metadata only. |
+| `Platform.ApiKeys.PersonalRevoke` | Revoke any person's personal key in the organization. |
+
+Nobody mints a key for somebody else; there is no Operation for it. Holding
+`Platform.ApiKeys.Manage` (integrations) confers none of the three. The shipped
+`org_admin` composite carries all three and `org_employee` carries the first.
+The service states the owner or oversight predicate on every statement, and RLS
+on `platform.personal_api_keys` (`db/migrations/api-keys.ts`) carries the same
+one: a session reads its own rows, or every row of its tenant with an oversight
+role; it updates its own, or any with the revoke role; it inserts only rows it
+owns; nothing deletes outside an audited bypass. The single tenant-without-user
+session — credential resolution — is the one that reads before an owner is
+known, through `app.personal_api_key_tenant(lookup_id)` as for integration keys.
+
+**Operations** (`operations/personal-api-keys.yaml`, the core `osf-api-keys`
+plugin), REST under `/api/personal-api-keys/*` and MCP:
+
+| Operation | REST | Role |
+|---|---|---|
+| `api-keys.list-my-personal-keys` | `POST mine/list` | `Personal` |
+| `api-keys.get-my-personal-key` | `POST mine/get` | `Personal` |
+| `api-keys.create-my-personal-key` | `POST mine/create` | `Personal` |
+| `api-keys.revoke-my-personal-key` | `POST mine/revoke` | `Personal` |
+| `api-keys.list-personal-keys` | `POST list` | `PersonalRead` |
+| `api-keys.get-personal-key` | `POST get` | `PersonalRead` |
+| `api-keys.revoke-personal-key` | `POST revoke` | `PersonalRevoke` |
+
+`create-my-personal-key` takes `displayName`, an optional `roleSubset` (every
+role named must be held by the caller now) and `expiresInDays` (default 30,
+at most 90 — a personal key always expires), and returns the secret once with
+`no-store` headers. Writes take the acknowledgement `confirmed: true`. Another
+person's key is `404` on the owner Operations, and an organization is never
+crossed. Revocation is idempotent and keeps the first instant and actor;
+`revokedByAdministrator` tells the owner when somebody else withdrew a key, and
+`platform.entity_events` records a `PersonalApiKey` event —
+`personal_api_key_created`, `personal_api_key_revoked` or
+`personal_api_key_revoked_by_administrator`, with the owner and the actor. The
+web projection has two entities: `MyPersonalApiKey` (`/my-api-keys`) and the
+oversight list `PersonalApiKey` (`/personal-api-keys`). Personal keys need only
+a database to be managed — no keyring and no realm write — and the resolver
+needs the bearer issuer and the `OPENSHAPEFORGE_KEYCLOAK_*` admin settings,
+without which it answers `503` rather than accepting a key it cannot check.
+
+The end-to-end proof is
+`apps/api/src/auth/api-key/__tests__/personal-api-key.e2e.test.ts`, against the
+real realm and database.
 
 ### What makes a session a `person`
 

@@ -74,6 +74,10 @@ short or too uniform, or no complete authentication method is configured.
 In every environment, API startup also checks the actual connected Postgres
 role before initializing modules or serving requests. It refuses `SUPERUSER`
 and `BYPASSRLS` connections, and fails closed if the role cannot be verified.
+This includes an unreachable database during boot: the API serves no liveness
+or readiness endpoint until startup verification succeeds. Configure startup
+probe budgets and restart backoff for that dependency. Once started, an outage
+is reported through readiness while liveness remains available.
 The remaining unchecked requirements below are the operator's responsibility.
 
 - connect the API as a **non-superuser, non-BYPASSRLS** Postgres role so
@@ -104,3 +108,23 @@ publication (`nvm install && nvm use`). The `engines.node` range excludes releas
 affected by [CVE-2026-111497](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases).
 This metadata does not upgrade an existing process or the Node.js runtime bundled
 with GitHub Actions runners; update those runners separately.
+
+### Private configuration forms
+
+MCP Apps receive a single-form submission capability only in private tool-result
+`_meta`, never in model-visible `content` or `structuredContent`. This relies on
+conforming hosts preserving the MCP Apps model/UI separation; a host that exposes
+private UI metadata to its model or logs is unsuitable for this form. See the
+[MCP Apps specification](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/draft/apps.mdx).
+Browser recovery links contain only a public form ID and require ordinary sign-in.
+App submissions send the capability in the redacted Authorization header, not a URL.
+The route accepts no cookie authority and revalidates the encrypted, server-held
+issuing credential for its original resource, person and tenant before repeating
+canonical create admission. Handoffs expire no later than the issuing JWT. A
+successful save atomically consumes the handoff; validation failures roll back.
+
+The RLS bypass credential remains a bearer secret. SQL executing inside a trusted
+bypass transaction can read its transaction-local setting; do not hand that
+transaction to untrusted code. Keep PostgreSQL parameter logging disabled for
+statements using the credential. To rotate it, set a new dedicated bypass secret,
+run the migration with the same value, then restart all API and worker processes.

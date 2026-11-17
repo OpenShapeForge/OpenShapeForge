@@ -7,6 +7,7 @@
  * read from the manifest or the database — never from an entity's name.
  */
 import { expect } from "bun:test";
+import { createOffersField, operationIdFor } from "./operations.js";
 import { sql } from "kysely";
 import { isOperationWrittenColumn } from "../../../operations/entity/write-policy.js";
 import { eligibleTablesByName, fieldName, foreignKeyTargets, referencingRows } from "./entity-factory.js";
@@ -86,16 +87,21 @@ export function expectWriterRefusal(refusal: { code?: string | undefined; messag
 /**
  * The refusal of a create naming an operation-written field: the same as an
  * update's, on every interface and whether the create is entity- or
- * plugin-backed — the write policy speaks before a plugin's own contract
- * (operations/entity/plugin-executor.ts), so the answer is BAD_USER_INPUT
- * naming the field and every writer, never "unknown property".
+ * plugin-backed. A create explicitly named as a writer instead validates the
+ * supplied reference through its own contract: this sweep supplies a missing
+ * UUID and expects NOT_FOUND, while its update remains forbidden.
  */
 export function expectCreateWriteRefusal(
-  _table: GeneratedTable,
+  table: GeneratedTable,
   refusal: { code?: string | undefined; message?: string | undefined; text?: string | undefined },
   field: string,
   writers: readonly string[],
 ): void {
+  if (writers.includes(operationIdFor(table, "create")) && createOffersField(table, field)) {
+    const text = refusal.text ?? `${refusal.code ?? ""} ${refusal.message ?? ""}`;
+    expect(text).toContain("NOT_FOUND");
+    return;
+  }
   expectWriterRefusal(refusal, field, writers);
 }
 

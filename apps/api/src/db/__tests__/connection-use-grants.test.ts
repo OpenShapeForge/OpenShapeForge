@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { SQL } from 'bun';
+import {sql,type Transaction} from 'kysely';
+import type {DB} from '../../generated/db/types.js';
+import {prepareConnectionUseGrant} from '../../modules/connection-use-grants.js';
 import { createDatabaseRuntime } from '../connection.js';
 import { runMigrationChain } from '../migration-chain.js';
 import { IDENTITY_LINK_ADMIN_ROLE } from '../../auth/organization-roles.js';
@@ -14,6 +17,7 @@ const tenant = crypto.randomUUID(), foreignTenant = crypto.randomUUID(), owner =
 const identity = crypto.randomUUID(), adapter = crypto.randomUUID();
 const connection = crypto.randomUUID(), grant = crypto.randomUUID(), subject = crypto.randomUUID();
 let admin: SQL, db: SQL;
+let grantsRuntime: ReturnType<typeof createDatabaseRuntime>;
 describe('owner-issued connection use grants', () => {
   beforeAll(async () => {
     admin = new SQL(url!); await admin.unsafe(`create database "${database}"`);
@@ -43,8 +47,9 @@ describe('owner-issued connection use grants', () => {
     await db`insert into platform.identity_relations(identity_id,tenant_id,relation_id,status,linked_at,linked_by) values(${identity}::uuid,${tenant}::uuid,${owner}::uuid,'linked',now(),'jit')`;
     await db`insert into integration.adapters(id,tenant_id,key,name,description,transport) values(${adapter}::uuid,${tenant}::uuid,'test','Test','Test','rest')`;
     await db`insert into integration.connections(id,tenant_id,owner_user_id,adapter_id,key,name,configuration_values) values(${connection}::uuid,${tenant}::uuid,${owner}::uuid,${adapter}::uuid,'test','Test','{"accessToken":"ciphertext-fixture"}'::jsonb)`;
+    grantsRuntime=createDatabaseRuntime({databaseUrl:target.href,maxConnections:4});
   },120_000);
-  afterAll(async () => { await db?.close(); if (admin) { await admin.unsafe(`drop database "${database}" with(force)`); await admin.close(); } });
+  afterAll(async () => { await grantsRuntime?.close(); await db?.close(); if (admin) { await admin.unsafe(`drop database "${database}" with(force)`); await admin.close(); } });
   async function as<T>(person: string, user: string, organization: string, operation: string, run: (tx: SQL) => Promise<T>) {
     return db.begin(async tx => {
       await tx.unsafe(`set local role "${role}"`);
@@ -109,6 +114,16 @@ describe('owner-issued connection use grants', () => {
     });
     await expect(as(owner,actor,tenant,'calendar.consent',async tx => { await tx`update platform.connection_use_grants set revoked_at=null where id=${grant}::uuid`; })).rejects.toThrow('scope is immutable');
   });
+  test('an owner withdraws consent without hard-deleting its record',async()=>{
+    const retained=crypto.randomUUID();
+    await as(owner,actor,tenant,'calendar.consent',tx=>issue(tx,retained));
+    await as(owner,actor,tenant,'calendar.consent',async tx=>{
+      expect(await tx`delete from platform.connection_use_grants where id=${retained}::uuid returning id`).toHaveLength(0);
+      expect(await tx`select id from platform.connection_use_grants where id=${retained}::uuid`).toHaveLength(1);
+      await tx`update platform.connection_use_grants set revoked_at=now() where id=${retained}::uuid`;
+    });
+    expect((await db`select revoked_at from platform.connection_use_grants where id=${retained}::uuid`)[0].revoked_at).not.toBeNull();
+  });
   test('offboarding permanently withdraws consent through both tenant and cross-tenant maintenance sessions',async()=>{
     for(const maintenance of [false,true]) for(const remove of [false,true]){
       const offboardingGrant=crypto.randomUUID();
@@ -130,4 +145,89 @@ describe('owner-issued connection use grants', () => {
       await as(service,service,tenant,'calendar.availability',async tx=>expect((await tx`select app.delegated_connection_row(${offboardingGrant}::uuid,'calendar.availability',false,${credential}) as value`)[0].value).toBeNull());
     }
   });
+  async function transaction<T>(person: string, organization: string, run: (trx: Transaction<DB>) => Promise<T>): Promise<T> {
+    return grantsRuntime.db.transaction().execute(async trx => {
+      await sql.raw('set local role "openshapeforge_app"').execute(trx);
+      await sql`select set_config('app.tenant_id',${organization},true),set_config('app.relation_id',${person},true),
+        set_config('app.user_id',${actor},true),set_config('app.audit_operation','calendar.consent',true)`.execute(trx);
+      return run(trx);
+    });
+  }
+  const fingerprintA='a'.repeat(64),fingerprintB='b'.repeat(64);
+  function scope(subjectId: string, fingerprint: string) {
+    return {tenantId:tenant,subject:{entity:'Calendar',id:subjectId},connectionId:connection,
+      consumerOperation:'calendar.availability',definitionId:adapter,fingerprint,consent:{inputSchema:{},expiresAt:null,identityId:identity,actorId:actor,ownerRelationId:owner}};
+  }
+  async function insert(trx: Transaction<DB>, id: string, subjectId: string, fingerprint: string, expiresAt: string | null = null) {
+    await sql`insert into platform.connection_use_grants
+      (id,tenant_id,connection_table,values_column,connection_id,owner_relation_id,consumer_operation,subject_entity,subject_id,service_definition,definition_fingerprint,input_schema,issued_by,issued_identity_id,expires_at)
+      values(${id}::uuid,${tenant}::uuid,'integration.connections','configuration_values',${connection}::uuid,${owner}::uuid,
+        'calendar.availability','Calendar',${subjectId}::uuid,${JSON.stringify({id:adapter})}::text::jsonb,${fingerprint},'{}'::jsonb,${actor}::uuid,${identity}::uuid,${expiresAt}::timestamptz)`.execute(trx);
+  }
+  test('explicit new consent atomically replaces a stale Service snapshot and survives concurrent retries', async()=>{
+    const subjectId=crypto.randomUUID(),oldId=crypto.randomUUID();
+    await transaction(owner,tenant,trx=>insert(trx,oldId,subjectId,fingerprintA));
+    const attempts=await Promise.all([1,2].map(()=>transaction(owner,tenant,async trx=>{
+      const matching=await prepareConnectionUseGrant(trx,scope(subjectId,fingerprintB));
+      if(matching)return matching;
+      const id=crypto.randomUUID();await insert(trx,id,subjectId,fingerprintB);return id;
+    })));
+    expect(attempts[0]).toBe(attempts[1]);
+    const rows: {id:string;revoked_at:Date|null;definition_fingerprint:string}[]=await db`select id,revoked_at,definition_fingerprint from platform.connection_use_grants where subject_id=${subjectId}::uuid`;
+    expect(rows).toHaveLength(2);
+    expect(rows.find(row=>row.id===oldId)!.revoked_at).not.toBeNull();
+    expect(rows.filter(row=>row.revoked_at===null)).toHaveLength(1);
+    expect(rows.find(row=>row.revoked_at===null)!.definition_fingerprint).toBe(fingerprintB);
+  });
+  test('repeat consent retains only the identical owner, issuer, lifetime and input limits',async()=>{
+    const subjectId=crypto.randomUUID(),id=crypto.randomUUID();
+    await transaction(owner,tenant,trx=>insert(trx,id,subjectId,fingerprintA));
+    expect(await transaction(owner,tenant,trx=>prepareConnectionUseGrant(trx,scope(subjectId,fingerprintA)))).toBe(id);
+    const changed=scope(subjectId,fingerprintA);changed.consent.inputSchema={type:'object',additionalProperties:false};
+    await transaction(owner,tenant,async trx=>{
+      expect(await prepareConnectionUseGrant(trx,changed)).toBeUndefined();
+      throw Error('rollback explicit changed limits');
+    }).catch(error=>expect(error.message).toBe('rollback explicit changed limits'));
+    expect((await db`select revoked_at from platform.connection_use_grants where id=${id}::uuid`)[0].revoked_at).toBeNull();
+  });
+  test('a failed replacement and foreign or non-owner calls cannot withdraw existing consent', async()=>{
+    const subjectId=crypto.randomUUID(),oldId=crypto.randomUUID(),replacementId=crypto.randomUUID();
+    await transaction(owner,tenant,trx=>insert(trx,oldId,subjectId,fingerprintA));
+    await expect(transaction(owner,tenant,async trx=>{
+      await prepareConnectionUseGrant(trx,scope(subjectId,fingerprintB));
+      await insert(trx,replacementId,subjectId,fingerprintB);
+      throw Error('owning consent transaction rolled back');
+    })).rejects.toThrow('owning consent transaction rolled back');
+    for(const [person,organization] of [[service,tenant],[owner,foreignTenant]]) {
+      await expect(transaction(person!,organization!,async trx=>{
+        await prepareConnectionUseGrant(trx,scope(subjectId,fingerprintB));
+        await insert(trx,crypto.randomUUID(),subjectId,fingerprintB);
+      })).rejects.toThrow('row-level security');
+    }
+    const rows=await db`select id,revoked_at from platform.connection_use_grants where subject_id=${subjectId}::uuid`;
+    expect(rows).toHaveLength(1);expect(rows[0].id).toBe(oldId);expect(rows[0].revoked_at).toBeNull();
+  });
+  test('expired consent can be renewed even when its Service fingerprint is unchanged', async()=>{
+    const subjectId=crypto.randomUUID(),oldId=crypto.randomUUID();
+    await transaction(owner,tenant,trx=>insert(trx,oldId,subjectId,fingerprintA,new Date(Date.now()-1000).toISOString()));
+    await transaction(owner,tenant,async trx=>{
+      await prepareConnectionUseGrant(trx,scope(subjectId,fingerprintA));
+      await insert(trx,crypto.randomUUID(),subjectId,fingerprintA);
+    });
+    expect((await db`select revoked_at from platform.connection_use_grants where id=${oldId}::uuid`)[0].revoked_at).not.toBeNull();
+  });
+  test('membership withdrawal uses the live-identity index among unrelated grants', async()=>{
+    const otherIdentity=crypto.randomUUID(),otherActor=crypto.randomUUID();
+    await db`insert into platform.identities(id,issuer,subject) values(${otherIdentity}::uuid,'https://identity.example.test',${otherActor})`;
+    await db`insert into platform.connection_use_grants
+      (id,tenant_id,connection_table,values_column,connection_id,owner_relation_id,consumer_operation,subject_entity,subject_id,service_definition,definition_fingerprint,input_schema,issued_by,issued_identity_id)
+      select gen_random_uuid(),${tenant}::uuid,'integration.connections','configuration_values',${connection}::uuid,${owner}::uuid,
+        'calendar.availability','Calendar',gen_random_uuid(),${JSON.stringify({id:adapter})}::text::jsonb,${fingerprintA},'{}'::jsonb,${otherActor}::uuid,${otherIdentity}::uuid
+      from generate_series(1,2000)`;
+    await db`analyze platform.connection_use_grants`;
+    const plan=await db`explain(format json) select id from platform.connection_use_grants
+      where tenant_id=${tenant}::uuid and issued_identity_id=${identity}::uuid and revoked_at is null`;
+    expect(JSON.stringify(plan)).toContain('connection_use_grants_issued_identity_idx');
+  });
+
 });

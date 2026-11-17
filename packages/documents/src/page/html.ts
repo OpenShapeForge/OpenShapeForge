@@ -276,7 +276,7 @@ export function pageSettings(values: Readonly<Record<string, unknown>> | undefin
   };
 }
 
-function validateDesign(design: PageDesign, fonts: readonly PageFont[]): void {
+export function validatePageDesign(design: PageDesign, fonts: readonly PageFont[] = []): void {
   px(design.page.width, "page.width", 100, 5000);
   px(design.page.height, "page.height", 100, 5000);
   for (const [key, color] of Object.entries(design.colors)) if (!KEY.test(key) || typeof color !== "string" || !COLOR.test(color)) fail(`The color "${key}" is not valid.`);
@@ -286,6 +286,7 @@ function validateDesign(design: PageDesign, fonts: readonly PageFont[]): void {
   }
   for (const [key, asset] of Object.entries(design.assets)) if (!KEY.test(key) || !ASSET_TYPES.has(asset.mediaType) || !BASE64.test(asset.data)) fail(`The asset "${key}" is not valid.`);
   for (const font of fonts) if (!FONT_FAMILY.test(font.family) || !FONT_WEIGHT.test(font.weight) || !BASE64.test(font.data) || !["woff2", "truetype"].includes(font.format)) fail(`The font "${font.family}" is not valid.`);
+  textStyleRules(design, ""); // The same numeric/style rules apply at write and render.
 }
 
 /**
@@ -313,7 +314,7 @@ function blockRules(scope: string): string {
  */
 export function pageBlockCss(design: PageDesign, scope: string): string {
   if (!/^[A-Za-z0-9 ._#>-]*$/.test(scope)) fail("The style scope is not a plain selector.");
-  validateDesign(design, []);
+  validatePageDesign(design, []);
   return blockRules(scope) + textStyleRules(design, scope);
 }
 
@@ -436,6 +437,10 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
     section.body.push(block);
   }
   if (!sections.length) open(stateFor(""), true);
+  const selectedLayouts = new Set(sections.map(section => scopedKey(section.scope, section.settings.layout)));
+  for (const region of [regions.header, regions.footer]) for (const key of region.keys()) {
+    if (!selectedLayouts.has(key)) fail("A header or footer names a page layout that this document does not select.");
+  }
   return sections.filter(section => section.body.length || section.force).map(({ scope, settings, body, sectionId, sectionName }) => ({
     ...(scope?{scope}:{}), settings, body, ...(() => { const frame = pageFrame(regions, scope, settings.layout); return {header: settings.headerEnabled === false ? [] : frame.header, footer: settings.footerEnabled === false ? [] : frame.footer}; })(), ...(sectionId ? { sectionId } : {}), ...(sectionName ? { sectionName } : {}),
   }));
@@ -444,7 +449,7 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
 /** Renders one self-contained HTML document per section of `layoutPagedSections`, for a print engine. */
 export function buildPagedDocument(input: PagedDocumentInput): PagedDocument {
   if (!/^[a-z]{2}(-[A-Z]{2})?$/.test(input.locale)) fail("The locale is not valid.");
-  validateDesign(input.design, input.fonts);
+  validatePageDesign(input.design, input.fonts);
   const css = designCss(input.design, input.fonts);
   const rendered: PagedSection[] = layoutPagedSections(input.blocks, input.design, input.layouts).map((section) => ({
     layout: section.settings.layout, page: { ...(section.settings.page ?? input.design.page) },

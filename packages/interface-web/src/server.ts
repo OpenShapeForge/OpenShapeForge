@@ -20,6 +20,9 @@ export function stripHopByHopHeaders(headers: Headers): Headers {
 
 /** Stream with backpressure on a dedicated socket, including early API refusals.
  * Hosts retain ownership of routing and trusted forwarding/header policy.
+ * Call only after admitting request.url against the host origin allowlist,
+ * with a server-configured upstream. The original admitted host is preserved;
+ * this transport does not establish trust in inbound forwarding headers.
  */
 export async function forwardRuntimeRequest(request: Request, upstream: URL, options: {
   maxBodyBytes?: number;

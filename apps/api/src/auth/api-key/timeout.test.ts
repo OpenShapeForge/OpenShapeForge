@@ -40,7 +40,7 @@ test("the token exchange aborts a Keycloak that never answers", async () => {
   const keyring = keyringFromEnv(`fixture:${Buffer.alloc(32, 7).toString("base64")}`)!;
   const secret = encryptSecret(keyring, "integration-1", "clientSecret", "client-secret");
   const exchange = exchangeForToken({ issuer: "https://keycloak.example.test/realms/tenants", keyring, fetch: hangingFetch },
-    "integration-1", "api-key-client", secret);
+    "integration-1", "api-key-client", secret, "v1");
   await expect(within(exchange)).rejects.toMatchObject({ name: "TimeoutError" });
   expect(requested).toEqual([REQUEST_TIMEOUT_MS]);
 });

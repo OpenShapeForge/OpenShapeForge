@@ -737,7 +737,7 @@ operations:
       self-contained HTML document per section, for a print engine to turn into a PDF. Blocks flow in order on the
       pages the document's variant (else its template's) describes; an included template with pages of its own starts
       its own section with its own header and footer. Images are the document's own files and those of included
-      templates; text styles come from the document's theme. Fonts are
+      templates; colors and text styles come from the document's theme. Fonts are
       not included; the host that prints supplies them.
     implementation: { type: plugin, plugin: documents, handler: renderDocumentPages }
     target: { scope: record, inputField: id }

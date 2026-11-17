@@ -21,6 +21,9 @@ test("a tenantless control write reaches its own audited system transaction", as
           if (query.sql.includes("insert into platform.system_bypass_audit")) {
             expect(query.parameters).toContain("https://identity.test/realms/control#operator-subject (operator)");
           }
+          if (query.sql === "select app.bypass_rls() as accepted") {
+            return { rows: [{ accepted: true }] as unknown as R[] };
+          }
           return { rows: [] as R[] };
         },
         streamQuery: async function* <R>() { yield { rows: [] as R[] }; },

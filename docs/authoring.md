@@ -1186,6 +1186,18 @@ Catalog files under `catalogs/` merge across authoring layers automatically
   lookarounds are rejected; patterns are limited to 4096 characters and 16384
   compiled instructions. Both authored field validation and canonical Operation
   validation use this bounded engine; there is no native-regex fallback.
+  Upgrade migration `0025_check-stored-field-patterns` checks columns the
+  compiled manifest identifies as stored `fieldDefinition` values, including
+  immutable settings and compiler-bound published snapshot positions. It
+  visits canonical `shape`, `children` and `item` positions, not arbitrary JSON,
+  default values or metadata. An incompatible editable definition stops the
+  upgrade with its table and column; correct it explicitly, then rerun.
+  An incompatible immutable definition also stops deployment. Keep the previous
+  release available and follow the owner data-disposition procedure in
+  [migrations.md](migrations.md#stored-field-pattern-dialect-upgrades).
+  Nothing is automatically rewritten, dropped, grandfathered or reinterpreted.
+  This prevents a successful upgrade from silently disabling existing document
+  materialization or tenant-setting access. Fresh databases baseline the dialect.
   An entry may also declare `children`, which is how a typed object value
   (`measurement`, `numericRange`, `dateRange`, `coordinates`, `recurrence`)
   carries its own shape instead of every field restating it. Add an entry when

@@ -192,7 +192,7 @@ export type WebFieldProjection = {
   /** Logical dynamic form metadata; physical storage stays server-side. */
   entityValue?: { definitionField: string; parameterBindings?: boolean };
   valueFieldsFrom?: { reference: string; field: string };
-  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean };
+  typedBy?: { definitionField: string; documentField?: string; encrypted?: boolean; organizationData?: boolean };
   allowedDefinitions?: string[];
   relationship?: {
     targetEntityId: string;
@@ -258,6 +258,8 @@ export type WebCollectionTableValue = {
   text?: LocalizedText;
   format?: "money" | "percentage" | "frequency" | "chip";
   currency?: WebValuePath;
+  /** Every path in this value, including currency and when, must resolve to zero or one result.
+   * Consumers refuse partial, unavailable or multiple results rather than selecting the first. */
   select?: "one";
   when?: { path: WebValuePath; equals: string | number | boolean };
   defaultValue?: string | number;
@@ -443,7 +445,7 @@ export type WebRecordView = {
     actions?: WebCustomOperationRef[];
   };
   titleTemplate: string;
-  /** Authored form layout retained even when standalone create is unavailable. */
+  /** Authored forms; named editable records project update groups from their own layout, excluding server-owned/read-only fields. */
   formGroups?: { create?: WebFieldGroup[]; update?: WebFieldGroup[] };
   subtitleTemplate?: string;
   badges?: string[];

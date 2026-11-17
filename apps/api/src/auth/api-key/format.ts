@@ -103,11 +103,30 @@ export function hashSecret(secret: string): string {
   return createHash("sha256").update(secret, "utf8").digest("hex");
 }
 
+/**
+ * The prefix of a PERSONAL key: one a person minted for themselves, which acts
+ * as that person (personal-resolve.ts). Its own prefix rather than a flag in
+ * the body, for the same two reasons the integration prefix exists: a secret
+ * scanner can tell the two kinds apart, and the session resolver routes on
+ * the prefix alone, so one kind can never be resolved by the other's path.
+ * Same body, checksum and hashing as an integration key.
+ */
+export const PERSONAL_API_KEY_PREFIX = "osf_user_";
+
 /** Generate a fresh credential. The caller persists `lookupId` + `secretHash`. */
 export function mintApiKey(): MintedApiKey {
+  return mintWithPrefix(API_KEY_PREFIX);
+}
+
+/** Generate a fresh personal credential. Same shape, its own prefix. */
+export function mintPersonalApiKey(): MintedApiKey {
+  return mintWithPrefix(PERSONAL_API_KEY_PREFIX);
+}
+
+function mintWithPrefix(prefix: string): MintedApiKey {
   const lookupId = toBase62(randomBytes(LOOKUP_ID_BYTES));
   const secret = toBase62(randomBytes(SECRET_BYTES));
-  const body = `${API_KEY_PREFIX}${lookupId}_${secret}`;
+  const body = `${prefix}${lookupId}_${secret}`;
   return {
     token: `${body}${checksumFor(body)}`,
     lookupId,
@@ -134,14 +153,28 @@ export function looksLikeApiKey(candidate: string): boolean {
  * checksum" from "unknown key" learns whether a lookup id exists.
  */
 export function parseApiKey(candidate: string): ParsedApiKey | undefined {
-  if (!looksLikeApiKey(candidate)) return undefined;
-  if (candidate.length <= API_KEY_PREFIX.length + CHECKSUM_CHARS + 2) return undefined;
+  return parseWithPrefix(candidate, API_KEY_PREFIX);
+}
+
+/** True when a bearer credential is shaped like a personal key. Cheap, no parsing. */
+export function looksLikePersonalApiKey(candidate: string): boolean {
+  return candidate.startsWith(PERSONAL_API_KEY_PREFIX);
+}
+
+/** {@link parseApiKey} for a personal key. Same refusals, same silence. */
+export function parsePersonalApiKey(candidate: string): ParsedApiKey | undefined {
+  return parseWithPrefix(candidate, PERSONAL_API_KEY_PREFIX);
+}
+
+function parseWithPrefix(candidate: string, prefix: string): ParsedApiKey | undefined {
+  if (!candidate.startsWith(prefix)) return undefined;
+  if (candidate.length <= prefix.length + CHECKSUM_CHARS + 2) return undefined;
 
   const body = candidate.slice(0, -CHECKSUM_CHARS);
   const presented = candidate.slice(-CHECKSUM_CHARS);
   if (!constantTimeEquals(presented, checksumFor(body))) return undefined;
 
-  const rest = body.slice(API_KEY_PREFIX.length);
+  const rest = body.slice(prefix.length);
   const separator = rest.indexOf("_");
   if (separator <= 0) return undefined;
 

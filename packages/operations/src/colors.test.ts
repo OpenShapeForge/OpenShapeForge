@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from 'bun:test';
 import { parseTenantColors, resolvePalette, resolveColor } from './colors.js';
 const blue = { key:'brand-primary', name:'Merkblauw', value:'#2457d6', active:true };

@@ -728,6 +728,20 @@ describe("worker-role RLS axis", () => {
                 expect(row.cmd).toBe("SELECT");
                 expect(row.qual).toMatch(/^\(tenant_id = app\.current_tenant\(\)\)$/);
                 expect(row.check_expr).toBeNull();
+              } else if (row.roles.length === 1 && row.roles[0] === databaseRole("identityResolver").name && ['public_color_palette_lookup','public_color_palette_scope'].includes(row.policyname)) {
+                expect(row.tablename).toBe('tenant_settings');
+                expect(row.cmd).toBe('SELECT');
+                expect(row.permissive).toBe(row.policyname==='public_color_palette_scope'?'RESTRICTIVE':'PERMISSIVE');
+                expect(row.qual).toContain('tenant_id = app.current_tenant()');
+                expect(row.qual).toContain("namespace = 'appearance'::text");
+                expect(row.qual).toContain("key = 'colors'::text");
+                expect(row.check_expr).toBeNull();
+              } else if (row.policyname === 'authorization_profile_scope' && row.tablename === 'tenant_settings') {
+                expect(row.permissive).toBe('RESTRICTIVE');
+                expect(row.qual).toContain(`CURRENT_USER = '${databaseRole('identityResolver').name}'`);
+                expect(row.qual).toContain("namespace = 'appearance'::text");
+                expect(row.qual).toContain("key = 'colors'::text");
+                expect(row.check_expr).toBe(row.qual);
               } else if (row.policyname === "authorization_profile_scope" && row.tablename === "relation_groups") {
                 expect(row.permissive).toBe("RESTRICTIVE");
                 expect(row.qual).toContain(`CURRENT_USER = '${databaseRole("identityResolver").name}'`);

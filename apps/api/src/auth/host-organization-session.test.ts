@@ -591,7 +591,9 @@ describe("explicit service credentials in host mode", () => {
     await db.destroy();
   });
 
-  test("API keys retain scoped service access and validate exchanged tid, client and registry", async () => {
+  test.each(["host", "off"] as const)("API keys bind exchanged tokens to their credential under a static interactive allowlist (%s)", async (mode) => {
+    process.env.OPENSHAPEFORGE_ORGANIZATION_CONTEXT = mode;
+    process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUTHORIZED_PARTIES = "web";
     const apiKey = mintApiKey();
     const integrationId = "44444444-4444-4444-8444-444444444444";
     const keyMaterial = `fixture:${Buffer.alloc(32, 7).toString("base64")}`;
@@ -599,7 +601,8 @@ describe("explicit service credentials in host mode", () => {
     const secret = encryptSecret(keyringFromEnv(keyMaterial)!, integrationId, "clientSecret", "synthetic-secret");
     const issuer = new URL("/realms/host", server.url).href;
     process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = issuer;
-    const identityId = "66666666-6666-4666-8666-666666666666";
+    const identityId = mode === "host" ? "66666666-6666-4666-8666-666666666666" : "66666666-6666-4666-8666-666666666667";
+    const subject = mode === "host" ? USER : "77777777-7777-4777-8777-777777777777";
     let linkRecorded = false;
     // The database credential, not the deployment service allowlist, grants this client access.
     delete process.env.OPENSHAPEFORGE_ORGANIZATION_SERVICE_IDENTITIES;
@@ -621,7 +624,7 @@ describe("explicit service credentials in host mode", () => {
       // both writes and the read-back of the pending row.
       if (query.sql.includes("insert into platform.identities")) return [{ id: identityId }];
       const pendingRow = {
-        identity_id: identityId, issuer, subject: "service-user", status: "pending_confirmation", relation_id: null,
+        identity_id: identityId, issuer, subject, status: "pending_confirmation", relation_id: null,
         candidate_relation_id: null, linked_by: null, display_name: null, relation_type: null, needs_role_assignment: false, roles: [],
       };
       if (query.sql.includes("insert into platform.identity_relations")) { linkRecorded = true; return [pendingRow]; }
@@ -629,20 +632,33 @@ describe("explicit service credentials in host mode", () => {
       return undefined;
     };
     const request = new Headers({ authorization: `Bearer ${apiKey.token}` });
-    for (const scenario of [
+    const scenarios: { realm: string; claims: Record<string, unknown>; allowed: boolean; invalidSignature?: boolean }[] = [
       { realm: "host", claims: {}, allowed: true },
-      { realm: "other", claims: {}, allowed: false },
       { realm: "host", claims: { tid: TENANT_B }, allowed: false },
       { realm: "host", claims: { azp: "sibling" }, allowed: false },
-    ]) {
+      { realm: "host", claims: { azp: undefined }, allowed: false },
+      { realm: "host", claims: { iss: `${issuer}-other` }, allowed: false },
+      { realm: "host", claims: { aud: "sibling-api" }, allowed: false },
+      { realm: "host", claims: {}, allowed: false, invalidSignature: true },
+      ...(mode === "host" ? [{ realm: "other", claims: {}, allowed: false }] : []),
+    ];
+    for (const scenario of scenarios) {
       __resetExchangeCacheForTests();
-      const tokenHeaders = await headers({ ...serviceClaims, iss: issuer,
+      const tokenHeaders = await headers({ ...serviceClaims, iss: issuer, sub: subject,
         resource_access: { api: { roles: ["Records.Read", "Records.Write"] } }, ...scenario.claims });
       exchangeToken = tokenHeaders.get("authorization")!.slice("Bearer ".length);
+      if (scenario.invalidSignature) {
+        const parts = exchangeToken.split(".");
+        parts[2] = `${parts[2]![0] === "A" ? "B" : "A"}${parts[2]!.slice(1)}`;
+        exchangeToken = parts.join(".");
+      }
       const { db, queries } = serviceRegistry(scenario.realm, "org-a", credentialRows);
       const session = await resolveSessionContext(request, { db });
       expect(session.credential).toBe(scenario.allowed ? "api-key" : "none");
+      if (!scenario.allowed) expect(session.tenantId).toBeNull();
       if (scenario.allowed) {
+        // Resolving a stored API credential never broadens interactive azp policy.
+        expect((await resolveSessionContext(tokenHeaders, { db })).credential).toBe("none");
         expect(session.tenantId).toBe(TENANT_A);
         expect(session.roles).toEqual(["Records.Read"]);
         // The session names its identity and recorded it: a pending link, nothing linked yet.
@@ -658,6 +674,6 @@ describe("explicit service credentials in host mode", () => {
       }
       await db.destroy();
     }
-    expect(exchangeCalls).toBe(4);
+    expect(exchangeCalls).toBe(scenarios.length);
   });
 });

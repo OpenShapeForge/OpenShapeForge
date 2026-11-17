@@ -109,3 +109,16 @@ describe("application entry projection", () => {
     expect(() => projectWebAppEntries(shell(item("x", { entity: "product" })), ambiguous)).toThrow("2 top-level views claim (Product.collection, Other.collection)");
   });
 });
+
+test('host routes use the manifest locale and detect collisions in that locale', () => {
+ const nl=manifest(); nl.locale='nl';
+ const localized=shell(item('settings',{route:{en:'/settings',nl:'/instellingen'}}));
+ expect(projectWebAppEntries(localized,nl).entries.entries.settings!.route).toBe('/instellingen');
+ nl.entities.Product!.views.collection.route='/instellingen';
+ expect(()=>projectWebAppEntries(localized,nl)).toThrow('already projects');
+});
+test('navigation refuses deeper nesting and explains targetless top-level omissions', () => {
+ const empty={navigation:{sidebarItems:[item('empty',{})]}};
+ expect(projectWebAppEntries(empty,manifest()).omitted).toEqual([{id:'empty',reason:'no-target'}]);
+ expect(()=>projectWebAppEntries(shell(item('nested',{children:[item('leaf',{route:'/leaf'})]})),manifest())).toThrow('one level');
+});

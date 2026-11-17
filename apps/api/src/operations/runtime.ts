@@ -841,7 +841,7 @@ export function requireOperationAuthorization(
     throw new HttpError(403, "FORBIDDEN", "Session lacks a required operation role group.");
   }
   const requiredScopes = operation.auth.scopes ?? [];
-  if (session.credential === "api-key" && requiredScopes.length > 0) {
+  if ((session.credential === "api-key" || session.credential === "personal-key") && requiredScopes.length > 0) {
     throw new HttpError(403, "INSUFFICIENT_SCOPE", "OAuth-scoped operations cannot be invoked with an API key.");
   }
   const heldScopes = new Set(session.oauthScopes ?? []);
@@ -1971,11 +1971,11 @@ function operationRestInputFromParts(
   for (const name of pathParameters) {
     const schema = properties[name];
     const value = params[name];
-    if (schema && typeof schema === "object" && !Array.isArray(schema) && (schema as Record<string, unknown>).type === "integer" &&
-        typeof value === "string" && /^-?(?:0|[1-9]\d*)$/.test(value)) {
-      const number = Number(value);
-      if (Number.isSafeInteger(number)) typedParams[name] = number;
-    }
+    if (!schema || typeof schema !== "object" || Array.isArray(schema) || (schema as Record<string,unknown>).type!=="integer" || typeof value!=="string")continue;
+    const canonical=/^(?:0|-?[1-9]\d*)$/.test(value) && Number.isSafeInteger(Number(value));
+    if(canonical)typedParams[name]=Number(value);
+    // Query coercion must not turn a rejected path spelling into a valid int.
+    else if(readsInputFromQuery)throw new HttpError(400,"BAD_USER_INPUT","Operation integer path input must use a canonical safe integer.");
   }
   const input = bind(readsInputFromQuery ? { ...query, ...typedParams } : { ...body, ...typedParams });
   if (operation.idempotency.mode === "idempotency-key") {

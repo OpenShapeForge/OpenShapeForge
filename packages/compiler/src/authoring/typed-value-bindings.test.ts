@@ -126,9 +126,18 @@ describe("a value typed by the definition stored beside it", () => {
     });
     // Both halves are JSON, which is what makes the stored definition the
     // only contract the value has.
-    expect(columnOf(manifest, "Variable", "definition")?.type).toBe("jsonb");
+    expect(columnOf(manifest, "Variable", "definition")).toMatchObject({type:"jsonb",storedFieldDefinition:"single"});
+    expect(columnOf(manifest, "Variable", "value")?.storedFieldDefinition).toBeUndefined();
+    const emitted = JSON.parse(generateArtifacts(manifest).find(a => a.path.endsWith("db/manifest.json"))!.contents);
+    expect(emitted.tables.find((t:any) => t.table === "variables").columns.find((c:any) => c.name === "definition").storedFieldDefinition).toBe("single");
     // Nothing else claims to be typed at runtime.
     expect(tableOf(manifest, "Memo").columns.some((column) => column.typedBy)).toBe(false);
+  });
+
+  it("marks definition collections without mistaking ordinary JSON values for definitions", () => {
+    const manifest=compileFixture(entities=>named(entities,"Memo").fields.push({key:"parameters",osfType:"fieldDefinition",cardinality:"collection",persisted:{column:"parameters",storageClass:"core"}}));
+    expect(columnOf(manifest,"Memo","parameters")?.storedFieldDefinition).toBe("collection");
+    expect(tableOf(manifest,"Memo").columns.filter(c=>c.storedFieldDefinition).map(c=>c.name)).toEqual(["parameters"]);
   });
 
   it("refuses a pair that would leave the value without a contract", () => {

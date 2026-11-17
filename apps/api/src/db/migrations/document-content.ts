@@ -14,8 +14,9 @@
  * blocks_owner_read with the role names the owner entities declare, so
  * nothing here restates a role name.
  *
- * The documents module marks its own command with the transaction-local
- * setting `app.document_command` (`link`); the generated CRUD never sets it. Messages open with the public code so the API classifies them
+ * The documents module marks its own commands with the transaction-local
+ * setting `app.document_command` (link | follow); the generated CRUD never
+ * sets it. Messages open with the public code so the API classifies them
  * (db/database-refusals.ts) instead of redacting them.
  */
 import { sql } from "kysely";

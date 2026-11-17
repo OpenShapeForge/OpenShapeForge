@@ -17,6 +17,7 @@ import { parseSnapshot } from "@openshapeforge/versioning/snapshot";
 import { contextServices, rows } from "./commands.js";
 import { blockCollection, canonicalReader, compiledContentRegistry, contentResolvers, validatedValues, parameterShapes, pathResolver } from "./content-runtime.js";
 import { captureInclusionContent, type CaptureHost, type CapturedInclusion } from "./content/capture.js";
+import { createContentEngine } from "./content/engine.js";
 import { contentError, TemplateContentError } from "./content/errors.js";
 import { canonicalJson, CONTENT_LIMITS, type JsonObject } from "./content/json.js";
 import {
@@ -25,7 +26,7 @@ import {
 } from "./content/inclusion-copy.js";
 import type { ContentBlock, ContentResolvers } from "./content/types.js";
 import { columnBlocks, COLUMN_SLOTS, isColumns, mapColumns } from "./content/columns.js";
-import { selectContentTemplateVariant, validateContentBlockReferences } from "./content/validation.js";
+import { selectContentTemplateVariant } from "./content/validation.js";
 import { contentVariableCatalogue } from "./content/variables.js";
 import { templateParameterFields, withDocumentCommand } from "./document-blocks.js";
 import { isObject, refuse } from "./validation.js";
@@ -173,11 +174,21 @@ function identityOf(block: ContentBlock, compositionOf: CompositionOf): Identity
   return { versionId: (reference as { id: string }).id, parameters: record(composition.parametersField ? block.values[composition.parametersField] : undefined) };
 }
 
-async function settleBlock(environment: Environment, previous: ContentBlock | undefined, draft: ContentBlock): Promise<ContentBlock> {
+async function settleBlock(environment: Environment, previous: ContentBlock | undefined, draft: ContentBlock, authoredColumns = false): Promise<ContentBlock> {
   const { compositionOf } = environment;
-  if (isColumns(draft.definitionKey)) await environment.validate(draft);
+  if (isColumns(draft.definitionKey) || authoredColumns) await environment.validate(draft);
   if (isColumns(draft.definitionKey)) return { ...draft, values: await mapColumns(draft.values, async (children, slot) => {
     const old = previous && isColumns(previous.definitionKey) ? columnBlocks(previous.values[slot]) : [];
+    if (authoredColumns) {
+      const settled = await Promise.all(children.map(child => settleBlock(environment, old.find(block => block.id === child.id), child, true)));
+      // Own source locks are editable by the template maker. Locks inside an included copy still belong to its source.
+      const withoutOwnLocks = (blocks: readonly ContentBlock[]): ContentBlock[] => blocks.map(block => {
+        const {locked: _locked, ...own} = block;
+        return isColumns(own.definitionKey) ? {...own, values:{...own.values,...Object.fromEntries(COLUMN_SLOTS.filter(slot => own.values[slot] !== undefined).map(slot => [slot,withoutOwnLocks(columnBlocks(own.values[slot]))]))} as JsonObject} : own;
+      });
+      assertProtectedContentKept(protectedPaths([], withoutOwnLocks(old), compositionOf), settled, compositionOf, "Protected template content cannot be removed through its columns.");
+      return settled;
+    }
     return normalizeLocalDraft({ source: await sourceRecord(old), blocks: old }, { blocks: children }, {
       compositionOf, validateBlock: environment.validate, settleNested: ({ stored, draft }) => settleBlock(environment, stored, draft),
     });
@@ -240,16 +251,9 @@ function environment(trx: unknown, tenantId: string, carrier: RuntimeEntityValue
       if (!definition || (allowed && !allowed.includes(block.definitionKey))) refuse("INVALID_DEFINITION", "This block is not allowed in its owning collection.");
       if (block.schemaVersion !== definition!.schemaVersion) refuse("INVALID_DEFINITION", "The block definition version is unsupported.");
       validatedValues(context, block.definitionKey, block.values);
-      validateContentBlockReferences(block, definition!);
-      const composition = compositionFor(carrier)(block.definitionKey);
-      for (const [key, value] of Object.entries(block.references)) {
-        if (key === composition?.templateVersionField) continue;
-        for (const reference of Array.isArray(value) ? value : [value]) {
-          if (!reference || !("id" in reference)) continue;
-          const resolved = await resolvers.resolveEntity(reference, { tenantId });
-          if (!resolved || resolved.tenantId !== tenantId || resolved.id !== reference.id || resolved.entity !== reference.entity) refuse("FORBIDDEN", "The nested block reference is unavailable.");
-        }
-      }
+      const engine = createContentEngine({tenantId,locale:host.locale},resolvers);
+      const bound = engine.bindReferences(block, definition!, {catalogue:host.host.catalogue,parameters:host.host.parameters??{},...(!host.host.parameters ? {capture:{deferred:false,literalBraces:false,defer:()=>undefined,deferParameter:(name:string)=>name}} : {})});
+      await engine.resolveReferences(bound, compositionFor(carrier)(block.definitionKey)?.templateVersionField);
     }),
     capture: (identity) => acting(async (context, host, resolvers) => captureInclusionContent({
       tenantId, channel: host.channel, locale: host.locale, templateVersionId: identity.versionId, parameters: identity.parameters, host: host.host,
@@ -321,8 +325,9 @@ async function prepare(trx: unknown, tenantId: string, carrier: RuntimeEntityVal
     const make = (row: Row): ContentBlock => ({ id: String(row.id), definitionKey: String(row[carrier.definitionColumn]), schemaVersion: Number(row.definition_version ?? 1), values: record(row[carrier.valuesColumn]), references: {} });
     canonicalJson(after[carrier.valuesColumn]);
     if (countBlocks({source:[],blocks:[make(after)]}, compositionOf) > CONTENT_LIMITS.blocks) refuse("CONTENT_LIMIT_EXCEEDED", "Nested content contains too many blocks.");
-    const block = await settleBlock(env, before ? make(before) : undefined, make(after));
+    const block = await settleBlock(env, before ? make(before) : undefined, make(after), !after.document_variant_id);
     canonicalJson(block.values);
+    for (const slot of COLUMN_SLOTS) columnBlocks(block.values[slot]);
     return block.values;
   }
   if (!next) return undefined;

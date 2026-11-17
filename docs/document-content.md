@@ -15,7 +15,7 @@ Template (head = draft) ──publish──▶ TemplateVersion (snapshot: varian
         └─ Block (variant_id; locked authored here)
 
 Document (head = draft)
-   ├─ templateVersionId → TemplateVersion   (pinned; moves through linkTemplate and the follow rule)
+   ├─ templateVersionId → TemplateVersion   (pinned; moves through linkTemplate only)
    ├─ parameters (values for the template's local variables), followError
    └─ DocumentVariant (channel × locale, seeded from the template's variants)
         └─ Block (document_variant_id; origin: template | local, templateBlockId, diverged, locked)
@@ -99,8 +99,8 @@ collection, `Block.variant` does not. The compiler also drops the lock field and
 the child from the owner-scoped `insertBlock`/`updateBlock` values contracts
 (`packages/compiler/src/authoring/collection-operations.ts`), so the schema
 promises no more than the storage guards admit. The database keeps `locked` server-managed on a document block (an
-editor cannot unlock one), and the follow rule always overwrites a locked
-block from the new snapshot, whatever happened to it locally.
+editor cannot unlock one), and a link always overwrites a locked block with
+the new capture.
 
 ### Plugin patches apply to both block collections
 
@@ -158,10 +158,11 @@ renaming a role renames the policy and no migration restates a role name.
   (`apps/api/src/operations/entity/collection-mutations.ts`, `safeOperation`
   with `via`). `TemplateVariant.blocks` does not set it. There is no generic
   `Block.delete`.
-- A documents command (`app.document_command` = `link` | `follow`) passes the
-  read policy regardless of roles, so a template publisher holding only
-  `Organization.All.ReadWrite` still re-seeds the documents tracking the
-  template; the setting is transaction-local and never set by generated CRUD.
+- A documents command (`app.document_command` = `link`; the entity still
+  admits the retired `follow` value, which nothing sets) passes the read
+  policy regardless of roles, so `Document.linkTemplate` can rewrite the blocks
+  of the document it links; the setting is transaction-local and never set by
+  generated CRUD.
   It is the `ownerAxis.command` the entity authors; the provenance triggers in
   `apps/api/src/db/migrations/document-content.ts` honour the same marker.
   The same setting admits the server-managed writes: `Document.templateVersionId`,
@@ -206,9 +207,9 @@ runtime reads from the manifest (`apps/api/src/operations/entity/versioned-head.
   draft or not, so a publisher's `expectedVersion` never covers content it
   has not seen; a row whose owner columns resolve to more than one head or
   path is refused;
-- a follow that actually re-seeds, diverges, inserts, removes or moves a block;
-  a follow that only moves the pin (a head-only template change) leaves a
-  published document published.
+- a link that actually re-seeds, diverges, inserts, removes or moves a block;
+  a link that only moves the pin (a head-only template change) leaves a
+  published document published. Publishing a template drafts no document.
 
 Publishing is allowed in any state and requires the head's `updatedAt` as
 `expectedVersion`. Publishing a head whose content hashes like its latest
@@ -221,15 +222,15 @@ field.
 
 | Operation | What it does |
 |---|---|
-| `Document.linkTemplate` `{ id, expectedVersion, templateVersionId, parameters?, replace? }` | Needs the document's update roles only. Seeds one `DocumentVariant` per variant of the published template version, blocks copied from the snapshot (`origin = template`, `templateBlockId`, `locked`), validates `parameters` against the template's local variables and stores them. Linking another version of the **same** template behaves like the follow rule (local edits survive). Linking a **different** template requires `replace: true`, retains local and diverged blocks, and refuses protection conflicts instead of discarding content. REST `POST /api/document-content/:id/link-template`. |
+| `Document.linkTemplate` `{ id, expectedVersion, templateVersionId, parameters?, replace? }` | Needs the document's update roles only. Seeds one `DocumentVariant` per variant of the published template version, blocks captured from the snapshot (`origin = template`, `templateBlockId`, `locked`) with every variable resolved once from the document's values, validates `parameters` against the template's local variables and stores them. It is the only way a document moves to another version. Linking a version of the **same** template — also the one already linked — follows the follow rule (local edits survive, untouched content is captured again with the current record values). A value the linking session may not read, a missing input or a merge conflict refuses the link and leaves the document as it was. Linking a **different** template requires `replace: true`, retains local and diverged blocks, and refuses protection conflicts instead of discarding content. REST `POST /api/document-content/:id/link-template`. |
 | `DocumentVariant.insertBlock` `{ id, expectedVersion, values, beforeId? }` | Core collection machinery; inserted blocks are `origin = local`; `beforeId` places the block before another one. |
 | `DocumentVariant.updateBlock` `{ id, expectedVersion, childId, values }` | Owner-scoped edit of one unlocked block's caller-writable fields. |
 | `DocumentVariant.moveBlock` `{ id, expectedVersion, childId, beforeId }` | Reorder an unlocked block. |
 | `DocumentVariant.removeBlock` `{ id, expectedVersion, childId }` | Owner-scoped removal of an unlocked block; positions are compacted. |
-| `Document.materialize` `{ id, channel, locale }` | Read-only; needs the document's read roles only (the pinned version is read under that authority; an included template still needs its own read roles). Resolves the editable head for one channel and locale (served by language, see above) through the same content engine as `TemplateVersion.materialize`: the root is the pinned version's identity and parameter definitions with the document's **live** variants and blocks, the document's stored `parameters` are the values, and any template version a `TemplateBlock` includes resolves from its frozen snapshot. Returns the same `MaterializedTemplateContent` shape; `compositionHash` covers the live content, so an unchanged head hashes the same and an edit changes it. Theme tokens are **not** part of that snapshot; resolve them with `DocumentTheme.resolve`. `INVALID_STATE` without a linked template version. REST `POST /api/document-content/:id/materialize`. |
+| `Document.materialize` `{ id, channel, locale }` | Read-only; needs the document's read roles only (the pinned version is read under that authority; an inclusion is read from the copy its block stores, so its source template is not read at all). Resolves the editable head for one channel and locale (served by language, see above) through the same content engine as `TemplateVersion.materialize`: the root is the pinned version's identity and parameter definitions with the document's **live** variants and blocks. Content the server captured — a block the template seeded, a block of an inclusion's copy — is data and is not bound again; a block the document authored itself binds its variables against the document's stored `parameters`; a typed block is executed under the reader, through its concrete references. Returns the same `MaterializedTemplateContent` shape; `compositionHash` covers the live content, so an unchanged head hashes the same and an edit changes it. Theme tokens are **not** part of that snapshot; resolve them with `DocumentTheme.resolve`. `INVALID_STATE` without a linked template version. REST `POST /api/document-content/:id/materialize`. |
 | `DocumentTheme.resolve` `{ documentId }` / `{ templateId }` / `{ templateVersionId }` | Read-only live theme tokens for one source. REST `POST /api/document-themes/resolve`. |
 | `Document.publish` `{ id, expectedVersion }` | Generic snapshot publish (`packages/versioning`): freezes the document row with its variants and blocks into a new `DocumentVersion`, moves `latestVersion(Id)`/`publishedVersion(Id)`, sets `lifecycleStatus = published`. |
-| `Template.publish` (existing) | Unchanged input; also runs the follow rule. |
+| `Template.publish` (existing) | Unchanged input. Freezes the images the new version uses (see below); changes no document. |
 | `TemplateVersion.createDocument` (existing) | Still materializes a frozen template straight into a `DocumentVersion` artifact; plugins that render a frozen template to a file build on it. |
 
 The web manifest projects `insert`, `move`, `update` and `remove` on the
@@ -240,22 +241,27 @@ command appends the same `updated` entity events the generated CRUD appends
 
 ## Follow-template rule
 
-When `Template.publish` creates a new `TemplateVersion`, every document
-tracking that template is re-seeded in the same transaction
-(`packages/documents/src/document-follow.ts`, registered as a publish follower
-with `@openshapeforge/versioning` in the module's `init`). Per template
-variant of the new snapshot, matched to the document variant of the same
-channel and locale (created when missing):
+A document moves to a template version only through `Document.linkTemplate`
+(`packages/documents/src/document-follow.ts`). Publishing a template changes
+no document: nothing is re-seeded for the publisher, under the publisher's
+account. What a link gives the document is captured content — the template's
+blocks with every variable resolved once, as the linking session, from the
+document's values (`captureTemplateBlocks`). Per template variant of the
+linked snapshot, matched to the document variant of the same channel and
+locale (created when missing):
 
-1. For each block with `origin = template`, compare its content (only the
-   columns the tracked snapshot row has, so a column added later is not an
-   edit) with the block of the same `templateBlockId` in the tracked snapshot.
-2. Untouched and still present: overwrite from the new snapshot (skipped when
+1. A block with `origin = template` counts as edited when the server marked
+   it: any canonical write that changes a seeded block's content sets
+   `diverged = true` in the same transaction. Its stored text is resolved
+   text, so it is never compared with what the template authored.
+2. Untouched and still present: overwrite with the new capture (skipped when
    the content is already identical, so `updatedAt` is not bumped). Untouched
    and gone: delete. Edited: keep, `diverged = true`, whether or not the
    template still has it. Newly locked content that conflicts with a local edit or deletion: refuse the
-   update and retain the existing document and pin. A second row claiming the same `templateBlockId` counts
-   as a local block.
+   link and retain the existing document and pin. A second row claiming the same `templateBlockId` counts
+   as a local block. An inclusion the document already holds is updated from
+   its own source record instead (the three-way update below), so changes
+   inside it survive and a real conflict refuses the link.
 3. New template blocks are inserted at their snapshot position; blocks whose
    definition is not allowed on a document are skipped and named in
    `followError`. Local and kept diverged blocks trail the template block that
@@ -265,11 +271,115 @@ channel and locale (created when missing):
    `lifecycleStatus` becomes `draft` only when a block changed (the draft
    rule above), positions are renumbered in one statement.
 
-Each document runs under its own savepoint: a document that fails (or whose
-tracked version is unavailable) keeps its blocks and old `templateVersionId`,
-records the reason in `followError`, and the publication still succeeds.
-Published `DocumentVersion`s are never touched. `Document.linkTemplate` runs
-the same routine under the `link` command.
+The link is one transaction under the `link` command: a refusal or a fault
+leaves the blocks, the pin and the stored parameters as they were. Published
+`DocumentVersion`s are never touched.
+
+## Inclusions are host-owned copies
+
+A `TemplateBlock` stores the complete content of the template version it
+includes, in its `content` value. The copy is what is read, edited, laid out
+and printed; the source template is read only when the copy is captured and
+when it is explicitly updated.
+
+```
+content
+ ├─ blocks[]   complete blocks: id, definitionKey, schemaVersion, values, references?, region?, layoutKey?, locked?
+ ├─ source[]   the server's record, one entry per captured block in source order: id, hash, locked?, deferred?
+ └─ page?      the source variant's page settings
+```
+
+`source` and `page` are written by the server only. `hash` is the hash of the
+block as it was captured (`blockHash`: its content, without its lock and
+without the source record of an inclusion nested in it), so a block that still
+hashes to it has no local change. An inclusion nested in a copy is itself a
+`TemplateBlock` entry of `blocks`, with its own `content` and source record.
+
+**Capture** (`packages/documents/src/content/capture.ts`) resolves ordinary
+text exactly once, as the session that writes. The rule is the same for every
+typed variable and every host:
+
+- an input with a concrete value resolves everything that depends on it —
+  `{{local.deal.customer.name}}` becomes the name, read through the canonical
+  Operations of the records on that path;
+- an input bound to a variable the host has not supplied
+  (`deal: "{{local.opportunity}}"` in a host template) leaves what depends on
+  it pending: the text is rewritten into the host's scope
+  (`{{local.opportunity.customer.name}}`), a typed reference becomes a
+  binding to the host's parameter, and the block's source entry is marked
+  `deferred`. Nothing of the unnamed record is read;
+- a document is a concrete host. Whatever a document cannot supply refuses
+  the capture: an inclusion in a document holds no pending binding.
+
+Captured text is data. A value that reads like `{{local.title}}` stays that
+text: a captured block that is not `deferred` is never bound again, in a
+template or in a document, and a Markdown destination escapes it. A `deferred`
+block is bound by the host when it is read, so it cannot also hold a resolved
+value containing `{{` or `}}`; that one combination is refused at capture.
+`{{page.…}}` stays as written everywhere and is filled by the page renderer.
+A typed block keeps its definition and its concrete `{entity, id}` references
+and is executed on every read, under the reader's authorization.
+
+A block the host added to a copy itself is the host's own content and is read
+in the host's scope like any other block of the host. Tokens typed into a
+captured block later are text.
+
+**Writing** goes through the generic Block Operations; there is no separate
+action. Every insert and update of a Block row passes
+`prepareBlockInclusionWrite` in the transaction that stores it, and every
+removal or move `assertBlockInclusionRemoval`
+(`packages/documents/src/inclusion-write.ts`):
+
+| Write | What the server does |
+|---|---|
+| Insert `{ definitionKey: "TemplateBlock", values: { version, parameters } }` | Captures the source and stores `parameters` (resolved where concrete) and the complete `content`. Leave `content` out. If one is sent, its blocks are local content over the baseline captured in this write; its `source` and `page` are ignored and protected blocks come from the capture. |
+| Update with the same `version` and `parameters` | An ordinary edit. `content.blocks` is the new local content; `source` and `page` may be sent back as read or left out. Leaving `content` out keeps the stored copy. No template is read. |
+| Update with another `version` or changed `parameters` | The explicit update: captures the new source with the given inputs and merges three ways (below). `content`, when sent, is the current local draft and is checked against the stored baseline first; left out, the stored blocks are the draft. |
+| Remove or move the row | Refused while the copy, at any depth, holds content its source protects. |
+
+Refused on every write: a `source` or `page` that differs from the stored
+one, a lock that is lowered or invented, a locked block that is changed,
+removed or reordered against other locked blocks, and removing or replacing a
+nested inclusion that still holds protected content. A nested inclusion that
+is new, or whose `version` or `parameters` changed, is captured or merged by
+the same rules inside the same write. The host cannot leave an inclusion's
+version to a variable: a copy is captured from one version.
+
+**The three-way update** (`mergeInclusionCopy`) compares the stored source
+record with the current blocks to find local changes, the source's own blocks
+as authored then and now to find source changes, and adopts the new capture:
+
+- no local change: the block adopts the new capture, record values included;
+- a local change, and the source did not change what it authored there: the
+  local content stays — a refreshed record value never overwrites an edit;
+- local additions stay behind the block they followed, local removals stay
+  removed, new source blocks arrive at their source position, and a block the
+  source dropped goes unless it was changed here;
+- a nested inclusion both sides changed is merged by the same rule from its
+  own source record;
+- a block both sides changed, a new lock on content that was changed or
+  removed here, and a new block with the identity of a local one are
+  conflicts. The write is refused with `INVALID_STATE` ("… The existing
+  inclusion has been kept.") and nothing is stored.
+
+When the earlier source version can no longer be read by the writing session
+there is no authored comparison, and a local change is kept rather than
+weighed against the source.
+
+A template version published before copies existed may hold an inclusion in
+the earlier reference-only form (no `source`). It is not expanded: reading or
+capturing it is refused with `DEPENDENCY_INVALID` and the instruction to insert
+the template again or republish the template that contains it. A version
+without inclusions is captured like any other.
+
+**Images.** `Template.publish` freezes every image its version uses into that
+version (`TemplateVersionImage`). An image that came with an inclusion is
+copied from the frozen images of the inclusion's exact source version, under
+the hash the content names; it is never read as a file of the host template
+and the source's file is never bound to it. A document reads images from the
+version it is linked to and from the exact source version of each inclusion
+it holds — the server's own record of provenance, not a lookup across the
+tenant — which needs no access to any template.
 
 ## Published snapshot
 

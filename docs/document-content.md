@@ -407,18 +407,53 @@ local draft), and
 - `blockId` — the saved root block. It must be a block of `host`; anything
   else is `NOT_FOUND`. Left out for an inclusion that is not stored yet.
 - `path` — at most eight block ids from that root down to an inclusion nested
-  in its copy. The last step may name an inclusion the draft adds.
+  in its copy. A step that is stored must be an inclusion; a step that is not
+  stored names an inclusion the draft adds, and so does everything below it.
+- `baseline` — only when `values.content` is a draft of an earlier
+  preparation; see "Preparing again" below.
 
-`values.content` must be the draft of the *saved* copy (its `source` as read,
-or none): a copy that was already prepared is not prepared again. Result:
-`{ kind: "template", referenceField, version: { entity, id }, parameters, content }`
-with `parameters` as resolved and `content` the complete prepared copy. The
-caller replaces its draft with it and, on Save, writes the Block with exactly
-these `version`, `parameters` and `content` (edited further if the user did).
+Without `baseline`, `values.content` must be the draft of the *saved* copy
+(its `source` as read, or none). Result:
+`{ kind: "template", referenceField, version: { entity, id }, parameters, content, baseline }`
+with `parameters` as resolved, `content` the complete prepared copy and
+`baseline` `{ version, parameters, content }`: the same version and inputs as
+captured, without the local content merged into `content`. The caller
+replaces its draft with `content`, keeps `baseline` beside it and, on Save,
+writes the Block with exactly these `version`, `parameters` and `content`
+(edited further if the user did). `baseline` is never saved.
 
 A prepare with unchanged version and inputs captures again and merges: that
 is how a copy is refreshed with the current record values. Ordinary reads and
 edits never do.
+
+**Preparing again.** Between a preparation and Save the user may keep
+editing and then choose yet another version or other inputs. The draft is by
+then a draft of the earlier preparation, not of the saved copy, so the caller
+sends that preparation's `baseline` back unchanged, with `values.content` the
+current draft and `references`/`values.parameters` the next choice. This holds
+for a saved inclusion, for a new one that is not stored yet (no `blockId`) and
+for an inclusion nested in either.
+
+Nothing of `baseline` is trusted. Its version is captured again with its
+inputs as the caller — which takes the same read access to that source as the
+first preparation did — and `baseline` must equal that capture exactly:
+blocks, source record, locks and page settings. The capture, not what was
+sent, is then the baseline: the draft is checked against it (a block it locks
+is present, unchanged and in order) and merged three ways into the next
+source, with the source's blocks as authored at the baseline version and the
+next one. What the saved copy protects must be held by that baseline and by
+the result, so a true baseline of an unrelated source releases nothing. The
+result again carries the `baseline` of the next source.
+
+A `baseline` the server would not capture now is refused with `INVALID_STATE`
+("The earlier preparation no longer matches its source or the records it
+names…"), whether it was altered or a record it names changed after it was
+prepared; nothing is written and the saved inclusion is as it was. A draft
+whose `source` differs from the stored one and arrives without `baseline` is
+refused as well: it is never silently read as a draft of the saved copy. No
+preparation is stored on the server: there is no token, table or lock, and
+Save is the same generic write, which captures once more and decides from the
+stored record alone.
 
 Roles. The prepare read needs update access to `host` and read access to the
 source. Its Operation roles (`Templates.Read`, `Templates.Manage`,

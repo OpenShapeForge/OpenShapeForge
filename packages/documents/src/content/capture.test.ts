@@ -287,6 +287,11 @@ function documentWith(...blocks: ContentBlock[]) {
 
 describe("ordinary blocks nested in columns", () => {
   const columnRegistry: CompiledContentBlockRegistry = {...registry,TextColumns:{entityName:"TextColumns",schemaVersion:1,renderers:{document:"columns"},fields:{left:{baseType:"object",cardinality:"collection"},right:{baseType:"object",cardinality:"collection"}}}};
+  test("never reinterprets captured plain values when another column child stays pending", async () => {
+    const f=fixture();
+    f.versions.columns=version("columns",{plain:{baseType:"string"},pending:{baseType:"string"}},[block("row","TextColumns",{left:[block("plain","Line",{text:"{{local.plain}}"}),block("pending","Line",{text:"{{local.pending}}"})] as never})]);
+    await expect(captureInclusionContent({tenantId,channel:"document",locale:"en",templateVersionId:"columns",parameters:{plain:"{{unknown.value}}",pending:"{{local.later}}"},parameterVariables:"both",host:templateHost({later:{baseType:"string"}})},columnRegistry,f.resolvers)).rejects.toBeDefined();
+  });
   test("captures variables inside each child and materializes the typed children under the reader", async () => {
     const f=fixture();
     f.versions.columns=version("columns",{},[block("row","TextColumns",{left:[block("prose","Prose",{markdown:"Hello"}),block("typed","DealSummary",{caption:"Scope"},{references:{deal:{entity:"Deal",id:"deal-1"}}})] as never})]);

@@ -106,7 +106,7 @@ type Capturer = {
  * One block in `scope`, with the rules of `rules` for what stays pending.
  * Returns the block to store and whether it still binds in the host.
  */
-async function captureBlock(capturer: Capturer, source: ContentBlock, variant: Pick<ContentTemplateVariant, "allowedDefinitions">, scopeOf: (capture: CaptureState) => VariableScope, rules: Pick<CaptureState, "defer" | "deferParameter">, depth: number, binding: CopyBinding = "bind"): Promise<{ block: ContentBlock; deferred: boolean }> {
+async function captureBlock(capturer: Capturer, source: ContentBlock, variant: Pick<ContentTemplateVariant, "allowedDefinitions">, scopeOf: (capture: CaptureState) => VariableScope, rules: Pick<CaptureState, "defer" | "deferParameter">, depth: number, binding: CopyBinding = "bind"): Promise<{ block: ContentBlock; deferred: boolean; literalBraces?: boolean }> {
   const { engine, registry, resolvers } = capturer;
   engine.countBlock();
   const definition: CompiledContentBlockDefinition | undefined = Object.hasOwn(registry, source.definitionKey) ? registry[source.definitionKey] : undefined;
@@ -115,18 +115,19 @@ async function captureBlock(capturer: Capturer, source: ContentBlock, variant: P
   if (source.schemaVersion !== definition.schemaVersion) contentError("BLOCK_SCHEMA_UNSUPPORTED", "Block requires a different compiled definition version.");
   if (depth > CONTENT_LIMITS.templateDepth) contentError('CONTENT_LIMIT_EXCEEDED', 'Nested content exceeds the maximum depth.');
   if (isColumns(source.definitionKey)) {
-    let deferred = false;
+    let deferred = false, literalBraces = false;
     const values = await mapColumns(source.values, async children => {
       const kept: ContentBlock[] = [];
       for (const child of children) {
         const result = await captureBlock(capturer, child, variant, scopeOf, rules, depth + 1, binding);
-        kept.push(result.block); deferred ||= result.deferred;
+        kept.push(result.block); deferred ||= result.deferred; literalBraces ||= Boolean(result.literalBraces);
       }
       return kept;
     });
     validateContentValues(values, Object.fromEntries(Object.entries(definition.fields).filter(([, field]) => !field.relationship)), "column values");
     await resolvers.validateBlockValues?.(source.definitionKey, immutableContent(values));
-    return {block:{...source,values},deferred};
+    if (deferred && literalBraces) contentError("INVALID_VALUE", "A column cannot mix pending bindings with captured non-Markdown values that contain variable syntax.");
+    return {block:{...source,values},deferred,literalBraces};
   }
   const capture = state(rules);
   const scope = scopeOf(capture);
@@ -182,7 +183,7 @@ async function captureBlock(capturer: Capturer, source: ContentBlock, variant: P
   const block: ContentBlock = { ...bound, values };
   // Every record a typed block names is read now, so a capture never stores a reference its actor could not open.
   await engine.resolveReferences(block);
-  return { block, deferred: capture.deferred };
+  return { block, deferred: capture.deferred, literalBraces: capture.literalBraces };
 }
 
 function request(input: { tenantId: string; channel: string; locale: string }) {

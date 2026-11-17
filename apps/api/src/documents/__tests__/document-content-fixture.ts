@@ -26,6 +26,7 @@ import { generatedVersioning } from "../../modules/versioning-registry.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../../modules/field-schemas.js";
 import { RecordAccessRuntime } from "../../modules/record-access.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
+import type { RuntimeModule } from "../../modules/contract.js";
 import { listOperationContracts, runtimeStaticOperationRegistrations } from "../../operations/runtime.js";
 import { createCollectionMutationExecutor } from "../../operations/entity/collection-mutations.js";
 import { getGeneratedCrudTables } from "../../operations/entity/catalog.js";
@@ -73,7 +74,8 @@ export async function openScratch(): Promise<void> {
     Object.entries(documents.operationHandlers ?? {}).filter(([handler]) => declared.has(handler)),
   ) };
   live.registerStaticOperations(runtimeStaticOperationRegistrations(
-    [canonicalDocuments, versioning], { db: scratch.restricted.db, platform: live.services }, contracts,
+    [canonicalDocuments as unknown as RuntimeModule, versioning as unknown as RuntimeModule],
+    { db: scratch.restricted.db, platform: live.services }, contracts,
   ));
   // The API initialises modules after loading; that is where the documents module registers its publish follower.
   await documents.init?.();

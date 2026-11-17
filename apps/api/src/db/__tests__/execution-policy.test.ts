@@ -23,6 +23,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { fingerprintSnapshot } from "@openshapeforge/versioning/snapshot";
 import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
@@ -961,6 +962,21 @@ describe("host execution policies against PostgreSQL", () => {
     const actor = session(tenantA, { roles: [...WRITE_ROLES, "Templates.Manage", "Templates.Read"] });
     const template = randomUUID();
     const templateVersion = randomUUID();
+    const frozen = fingerprintSnapshot({
+      schemaVersion: 1,
+      entity: "Template",
+      head: {
+        table: "templates",
+        row: { id: template, tenant_id: tenantA, parameters: [] },
+        children: {
+          template_variants: [{
+            table: "template_variants",
+            row: { id: randomUUID(), tenant_id: tenantA, template_id: template, channel: "document", locale: "nl-NL", is_default: true },
+            children: { blocks: [] },
+          }],
+        },
+      },
+    });
     await sql`
       insert into erp.templates (id, tenant_id, key, name, lifecycle_status)
       values (${template}::uuid, ${tenantA}::uuid, 'minutes', 'Minutes', 'draft')
@@ -969,8 +985,8 @@ describe("host execution policies against PostgreSQL", () => {
       insert into erp.template_versions
         (id, tenant_id, template_id, version_number, status, snapshot, content_hash, published_by, published_at)
       values
-        (${templateVersion}::uuid, ${tenantA}::uuid, ${template}::uuid, 1, 'published', '{"schemaVersion":1,"entity":"Template","head":{"row":{"parameters":[]}}}'::jsonb,
-         ${"a".repeat(64)}, ${randomUUID()}::uuid, now())
+        (${templateVersion}::uuid, ${tenantA}::uuid, ${template}::uuid, 1, 'published', ${sql.lit(frozen.canonical)}::jsonb,
+         ${frozen.contentHash}, ${randomUUID()}::uuid, now())
     `.execute(privileged!.db);
     await sql`
       insert into erp.document_types

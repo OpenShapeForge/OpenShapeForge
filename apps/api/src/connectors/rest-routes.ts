@@ -12,6 +12,7 @@
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { resolveSessionContext } from "../auth/identity.js";
+import { assertNotBrowserKey } from "../auth/api-key/restrictions.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { RuntimeModule } from "../modules/contract.js";
 import { headersFromFastify } from "../http/headers.js";
@@ -156,6 +157,7 @@ export function registerConnectorRestRoutes(
       );
     }
     const resolved = await resolveSessionContext(headersFromFastify(request.headers), { db: options.db });
+    assertNotBrowserKey(resolved);
     return {
       db: options.db,
       session: {
@@ -174,6 +176,7 @@ export function registerConnectorRestRoutes(
   /** Session shape the authorization helpers take, before the DB is touched. */
   async function sessionFor(request: FastifyRequest) {
     const resolved = await resolveSessionContext(headersFromFastify(request.headers), { db: options.db });
+    assertNotBrowserKey(resolved);
     return {
       tenantId: resolved.tenantId,
       userId: resolved.userId,

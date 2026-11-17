@@ -54,6 +54,7 @@ import {
 import { mintPersonalApiKey } from "./format.js";
 import { ApiKeyNotFoundError, ApiKeyValidationError, MAX_PAGE_SIZE } from "./service.js";
 import { parseRoleSubset } from "./store.js";
+import { ApiKeyRestrictionInputError, normalizeAllowedIps, storedList } from "./restrictions.js";
 
 /**
  * A personal key's lifetime, in days. Shorter than an integration's on
@@ -82,6 +83,8 @@ export type CreatePersonalKeyInput = {
   roleSubset?: string[] | null;
   /** Omitted: {@link PERSONAL_KEY_DEFAULT_TTL_DAYS}. */
   expiresInDays?: number;
+  /** Optional network allowlist (IP addresses and CIDR ranges); restrictions.ts. */
+  allowedIps?: string[] | null;
 };
 
 export type CreatedPersonalKey = {
@@ -99,6 +102,8 @@ export type ListedPersonalKey = {
   /** The owner's name as the organization knows it; null when unknown. */
   ownerName: string | null;
   roleSubset: string[] | null;
+  /** Network allowlist; empty means any address. */
+  allowedIps: string[];
   createdAt: Date;
   expiresAt: Date;
   revokedAt: Date | null;
@@ -152,6 +157,12 @@ export async function createPersonalKey(
   assertMayHoldPersonalKeys(session, roleSubset ?? []);
   const displayName = input.displayName.trim();
   if (displayName === "") throw new ApiKeyValidationError("A personal API key needs a name.");
+  let allowedIps: string[];
+  try { allowedIps = normalizeAllowedIps(input.allowedIps); }
+  catch (error) {
+    if (error instanceof ApiKeyRestrictionInputError) throw new ApiKeyValidationError(error.message);
+    throw error;
+  }
   const issuer = ownerIssuer(session);
   const expiresAt = expiryFrom(input.expiresInDays, now);
   const minted = mintPersonalApiKey();
@@ -161,16 +172,17 @@ export async function createPersonalKey(
     await sql`
       insert into platform.personal_api_keys
         (id, tenant_id, owner_issuer, owner_user_id, lookup_id, secret_hash,
-         display_name, role_subset, expires_at, created_at)
+         display_name, role_subset, allowed_ips, expires_at, created_at)
       values
         (${id}, ${session.tenantId}, ${issuer}, ${session.userId}, ${minted.lookupId},
-         ${minted.secretHash}, ${displayName}, ${jsonbLiteral(roleSubset)}, ${expiresAt}, ${now})
+         ${minted.secretHash}, ${displayName}, ${jsonbLiteral(roleSubset)},
+         ${allowedIps.length === 0 ? null : jsonbLiteral(allowedIps)}, ${expiresAt}, ${now})
     `.execute(trx);
     await appendScopedEntityEventInTransaction(trx, {
       aggregateType: PERSONAL_API_KEY_AGGREGATE,
       aggregateId: id,
       eventType: "personal_api_key_created",
-      payload: { ownerUserId: session.userId, roleSubset, expiresAt: expiresAt.toISOString(), actorUserId: session.userId },
+      payload: { ownerUserId: session.userId, roleSubset, allowedIps, expiresAt: expiresAt.toISOString(), actorUserId: session.userId },
     });
   });
 
@@ -182,6 +194,7 @@ export async function createPersonalKey(
       ownerUserId: session.userId,
       ownerName: null,
       roleSubset,
+      allowedIps,
       createdAt: now,
       expiresAt,
       revokedAt: null,
@@ -200,6 +213,7 @@ type KeyRow = {
   owner_user_id: string;
   owner_name: string | null;
   role_subset: unknown;
+  allowed_ips: unknown;
   created_at: Date;
   expires_at: Date;
   revoked_at: Date | null;
@@ -211,7 +225,7 @@ type KeyRow = {
 const METADATA_COLUMNS = sql`
   k.id, k.display_name, k.owner_user_id,
   coalesce(i.display_name, i.email) as owner_name,
-  k.role_subset, k.created_at, k.expires_at, k.revoked_at, k.revoked_by, k.last_used_at
+  k.role_subset, k.allowed_ips, k.created_at, k.expires_at, k.revoked_at, k.revoked_by, k.last_used_at
 `;
 
 /** The owner's identity row, for a name an administrator recognises. */
@@ -227,6 +241,7 @@ function listed(row: KeyRow): ListedPersonalKey {
     ownerUserId: row.owner_user_id,
     ownerName: row.owner_name,
     roleSubset: parseRoleSubset(row.role_subset),
+    allowedIps: storedList(row.allowed_ips),
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     revokedAt: row.revoked_at,

@@ -156,6 +156,7 @@ describe("shipped integration and API-key catalog", () => {
       "api-keys.list-credentials",
       "api-keys.list-integrations",
       "api-keys.revoke-credential",
+      "api-keys.update-integration-restrictions",
       "api-keys.update-integration-roles",
     ]);
     for (const operation of operations) {
@@ -321,6 +322,7 @@ describe("shipped integration and API-key catalog", () => {
       "listCredentials",
       "listIntegrations",
       "revokeCredential",
+      "updateIntegrationRestrictions",
       "updateIntegrationRoles",
     ]);
     expect(web.entities!.ApiKeyIntegration!.operations.create).toEqual({ operation: "createIntegration" });
@@ -328,7 +330,8 @@ describe("shipped integration and API-key catalog", () => {
     const entities = manifest(apiKeyCatalog()).entities;
     const actions = entities.ApiKeyIntegration!.views.record!.operations.actions!;
     expect(actions.map((action) => action.id)).toEqual([
-      "api-keys.issue-credential", "api-keys.update-integration-roles", "api-keys.disable-integration",
+      "api-keys.issue-credential", "api-keys.update-integration-roles",
+      "api-keys.update-integration-restrictions", "api-keys.disable-integration",
     ]);
     // The record action is bound to the record it was opened on, by the
     // entity's own id field — the integration's stable database id.

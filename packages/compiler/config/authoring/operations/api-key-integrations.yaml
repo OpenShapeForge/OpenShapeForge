@@ -114,7 +114,7 @@ operations:
             items: &integration
               type: object
               additionalProperties: false
-              required: [integrationId, displayName, status, grantedRoles, credentialCount, activeCredentialCount, createdAt, updatedAt]
+              required: [integrationId, displayName, status, grantedRoles, allowedIps, allowedOrigins, credentialCount, activeCredentialCount, createdAt, updatedAt]
               properties:
                 integrationId:
                   type: string
@@ -135,6 +135,16 @@ operations:
                   items: { type: string }
                   description: Roles the integration's service account holds, as the provisioning caller authorized them.
                   x-osf-i18n: { title: { en: Roles, nl: Rollen } }
+                allowedIps:
+                  type: array
+                  items: { type: string }
+                  description: Network allowlist of IP addresses and CIDR ranges. Empty means any address.
+                  x-osf-i18n: { title: { en: Allowed IP addresses, nl: Toegestane IP-adressen } }
+                allowedOrigins:
+                  type: array
+                  items: { type: string }
+                  description: Web sites (exact origins) whose pages may use this integration's keys. Non-empty makes them read-only browser keys; empty means server keys.
+                  x-osf-i18n: { title: { en: Allowed web sites, nl: Toegestane websites } }
                 credentialCount:
                   type: integer
                   minimum: 0
@@ -386,6 +396,32 @@ operations:
             items: { type: string, minLength: 1 }
             description: Narrows the FIRST credential to a subset of the integration's roles. Omit for the integration's full set; an empty list is refused rather than read as "no narrowing".
             x-osf-i18n: { title: { en: Role narrowing, nl: Rolbeperking } }
+          allowedIps:
+            type: array
+            maxItems: 20
+            uniqueItems: true
+            items: { type: string, minLength: 2, maxLength: 64 }
+            description: 'Optional network allowlist: IP addresses or CIDR ranges (IPv4 or IPv6), at most 20. A key
+              used from any other address is refused with 403. Omit or leave empty for any address.'
+            x-osf-i18n:
+              title: { en: Allowed IP addresses, nl: Toegestane IP-adressen }
+              description:
+                en: Optional. Only these IP addresses or ranges (such as 203.0.113.7 or 203.0.113.0/24) may use the key.
+                nl: Optioneel. Alleen deze IP-adressen of reeksen (zoals 203.0.113.7 of 203.0.113.0/24) mogen de sleutel gebruiken.
+          allowedOrigins:
+            type: array
+            maxItems: 10
+            uniqueItems: true
+            items: { type: string, minLength: 8, maxLength: 255 }
+            description: 'Optional web sites, as exact origins such as https://shop.example.com (https required except
+              for localhost; no paths or wildcards), at most 10. Non-empty makes every key of this integration a
+              BROWSER key: it is usable only from pages on these sites and only for read Operations, because a key in
+              a web page is public. Leave empty for a server key, which browsers are refused.'
+            x-osf-i18n:
+              title: { en: Allowed web sites, nl: Toegestane websites }
+              description:
+                en: Optional. Only for use in a web page. A key with web sites can only read, because anyone visiting the site can see it.
+                nl: Optioneel. Alleen voor gebruik in een webpagina. Een sleutel met websites kan alleen lezen, omdat iedere bezoeker van de site hem kan zien.
     output:
       schema:
         type: object
@@ -395,7 +431,7 @@ operations:
           integration:
             type: object
             additionalProperties: false
-            required: [integrationId, displayName, status, grantedRoles, createdAt]
+            required: [integrationId, displayName, status, grantedRoles, allowedIps, allowedOrigins, createdAt]
             description: Ordinary metadata, identical to what the integration list and read report.
             properties:
               integrationId:
@@ -416,6 +452,16 @@ operations:
                 type: array
                 items: { type: string }
                 x-osf-i18n: { title: { en: Roles, nl: Rollen } }
+              allowedIps:
+                type: array
+                items: { type: string }
+                description: Network allowlist of IP addresses and CIDR ranges. Empty means any address.
+                x-osf-i18n: { title: { en: Allowed IP addresses, nl: Toegestane IP-adressen } }
+              allowedOrigins:
+                type: array
+                items: { type: string }
+                description: Web sites (exact origins) whose pages may use this integration's keys. Non-empty makes them read-only browser keys; empty means server keys.
+                x-osf-i18n: { title: { en: Allowed web sites, nl: Toegestane websites } }
               createdAt:
                 type: string
                 format: date-time
@@ -632,6 +678,60 @@ operations:
       - { status: 404, code: NOT_FOUND, description: The integration does not exist or is not active in this organization. }
       - { status: 502, code: PROVISIONING_FAILED, description: 'The identity provider refused or could not complete the role change; the stored roles are unchanged and repeating the request converges the realm.' }
       - { status: 503, code: NOT_CONFIGURED, description: 'This deployment has no API key provisioning configuration, so no integration can be managed here.' }
+  updateIntegrationRestrictions:
+    id: api-keys.update-integration-restrictions
+    name: { en: Edit where keys work, nl: Gebruiksplekken wijzigen }
+    description:
+      en: Replaces the IP addresses and web sites from which this integration's API keys may be used. Takes effect on
+        the next request of every key. Adding web sites makes the keys read-only browser keys; removing them all makes
+        them server keys again.
+      nl: Vervangt de IP-adressen en websites van waaruit de API-sleutels van deze integratie gebruikt mogen worden.
+        Geldt vanaf het volgende verzoek van elke sleutel. Met websites worden de sleutels browsersleutels die alleen
+        kunnen lezen; zonder websites zijn het weer serversleutels.
+    implementation: { type: plugin, plugin: osf-api-keys, handler: updateIntegrationRestrictions }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId]
+        properties:
+          integrationId: *integrationIdInput
+          allowedIps:
+            type: array
+            maxItems: 20
+            uniqueItems: true
+            items: { type: string, minLength: 2, maxLength: 64 }
+            description: The complete new network allowlist, not a delta. Omit or leave empty for any address.
+            x-osf-sourceField: allowedIps
+            x-osf-i18n:
+              title: { en: Allowed IP addresses, nl: Toegestane IP-adressen }
+              description:
+                en: Only these IP addresses or ranges (such as 203.0.113.7 or 203.0.113.0/24) may use the keys. Leave empty for any address.
+                nl: Alleen deze IP-adressen of reeksen (zoals 203.0.113.7 of 203.0.113.0/24) mogen de sleutels gebruiken. Laat leeg voor elk adres.
+          allowedOrigins:
+            type: array
+            maxItems: 10
+            uniqueItems: true
+            items: { type: string, minLength: 8, maxLength: 255 }
+            description: The complete new list of web sites (exact origins), not a delta. Omit or leave empty for server keys.
+            x-osf-sourceField: allowedOrigins
+            x-osf-i18n:
+              title: { en: Allowed web sites, nl: Toegestane websites }
+              description:
+                en: Only for use in a web page. Keys with web sites can only read, because anyone visiting the site can see them.
+                nl: Alleen voor gebruik in een webpagina. Sleutels met websites kunnen alleen lezen, omdat iedere bezoeker van de site ze kan zien.
+    output: { schema: *integration }
+    auth: *manageAuth
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 400, code: VALIDATION, description: 'An address, range or web site is not valid, or a list is too long.' }
+      - { status: 401, code: UNAUTHENTICATED, description: An authenticated tenant session is required. }
+      - { status: 403, code: FORBIDDEN, description: 'The session may not manage API keys: it lacks the management role or is not a verified person.' }
+      - { status: 404, code: NOT_FOUND, description: The integration does not exist in this organization. }
+      - { status: 503, code: NOT_CONFIGURED, description: 'This deployment has no API key provisioning configuration, so no integration can be managed here.' }
 interfaces:
   mcp: {}
   rest:
@@ -645,6 +745,7 @@ interfaces:
       revokeCredential: { method: POST, path: /api/api-key-integrations/revoke-credential, response: { status: 200, kind: json } }
       disableIntegration: { method: POST, path: /api/api-key-integrations/disable, response: { status: 200, kind: json } }
       updateIntegrationRoles: { method: POST, path: /api/api-key-integrations/update-roles, response: { status: 200, kind: json } }
+      updateIntegrationRestrictions: { method: POST, path: /api/api-key-integrations/update-restrictions, response: { status: 200, kind: json } }
   web:
     entities:
       ApiKeyIntegration:
@@ -653,7 +754,7 @@ interfaces:
         recordRoute: /api-key-integrations/:integrationId
         idField: integrationId
         displayField: displayName
-        fields: [integrationId, displayName, status, grantedRoles, activeCredentialCount, credentialCount, createdAt, updatedAt]
+        fields: [integrationId, displayName, status, grantedRoles, allowedIps, allowedOrigins, activeCredentialCount, credentialCount, createdAt, updatedAt]
         columns: [displayName, status, activeCredentialCount, createdAt]
         operations:
           list: { operation: listIntegrations, resultField: integrations }
@@ -663,6 +764,8 @@ interfaces:
             - issueCredential
             # Only a live integration can be edited; the service refuses the rest as well.
             - operation: updateIntegrationRoles
+              visibleWhen: { conditions: [{ field: status, operator: eq, value: active }] }
+            - operation: updateIntegrationRestrictions
               visibleWhen: { conditions: [{ field: status, operator: eq, value: active }] }
             - disableIntegration
         related:

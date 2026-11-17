@@ -21,6 +21,7 @@
  * holder cannot tell an unknown key from a revoked one from a disabled
  * integration.
  */
+import { assertKeyUsableHere, type KeyRequestContext } from "./restrictions.js";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { sameTenantId } from "../organization-binding.js";
 import type { SecretKeyring } from "../../platform/secrets.js";
@@ -70,6 +71,7 @@ export function integrationRoles(granted: readonly string[], subset: readonly st
 export async function resolveApiKeySession(
   deps: ApiKeyResolverDeps,
   candidate: string,
+  request: KeyRequestContext = { clientAddress: null, origin: null },
 ): Promise<TrustedSessionContext | undefined> {
   const parsed = parseApiKey(candidate);
   if (!parsed) return undefined;
@@ -77,6 +79,12 @@ export async function resolveApiKeySession(
   const resolved = await resolveApiKey(deps.db, parsed.lookupId, parsed.secret);
   if (!resolved.ok) return undefined;
   const key = resolved.key;
+
+  // Where the key may be used from, decided on the verified key and BEFORE the
+  // token exchange, so a refused address or site never costs the realm a
+  // client-credentials grant. A refusal is a 403 naming the rule: the caller
+  // has already proved they hold a valid key (restrictions.ts).
+  const { browser } = assertKeyUsableHere(key.restrictions, request, "integration");
 
   let token: string | undefined;
   try {
@@ -169,6 +177,10 @@ export async function resolveApiKeySession(
     // the one value that can still be checked for revocation and expiry while
     // an Operation is in flight (db/migrations/record-actions.ts,
     // `app.record_action_principal_live`). Neither is the secret.
-    appPrincipal: { integrationId: key.integrationId, credentialId: key.keyId },
+    appPrincipal: {
+      integrationId: key.integrationId,
+      credentialId: key.keyId,
+      ...(browser ? { readOnly: true as const } : {}),
+    },
   };
 }

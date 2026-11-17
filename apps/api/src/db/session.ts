@@ -89,7 +89,7 @@ export type DbSessionInput = {
    * integration id alone cannot answer that, because it is chosen to survive
    * rotation.
    */
-  appPrincipal?: { integrationId: string; credentialId: string } | null;
+  appPrincipal?: { integrationId: string; credentialId: string; readOnly?: true } | null;
   /**
    * What the bearer verifier made of the token's claims, or what a
    * trusted-context producer signed into its bundle, when the carrier states

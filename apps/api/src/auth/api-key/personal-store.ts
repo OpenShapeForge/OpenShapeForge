@@ -13,6 +13,7 @@
  * real, live and whose; personal-resolve.ts then asks the realm and the
  * membership row what that person may do right now.
  */
+import { storedList } from "./restrictions.js";
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import { withCredentialResolutionSession } from "../../db/session.js";
@@ -34,6 +35,8 @@ export type ResolvedPersonalKey = {
   displayName: string;
   /** null means "whatever the owner holds when the key is used". */
   roleSubset: string[] | null;
+  /** The key's network allowlist; empty means any address. */
+  allowedIps: string[];
 };
 
 export type PersonalKeyRejection =
@@ -55,6 +58,7 @@ type KeyRow = {
   display_name: string;
   secret_hash: string;
   role_subset: unknown;
+  allowed_ips: unknown;
   expires_at: Date | string;
   revoked_at: Date | string | null;
   created_at: Date | string;
@@ -85,7 +89,7 @@ export async function resolvePersonalApiKey(
   const row = await withCredentialResolutionSession(db, tenantId, async (trx) => {
     const result = await sql<KeyRow>`
       select id, tenant_id, owner_issuer, owner_user_id, display_name, secret_hash,
-             role_subset, expires_at, revoked_at, created_at, last_used_at
+             role_subset, allowed_ips, expires_at, revoked_at, created_at, last_used_at
         from platform.personal_api_keys
        where lookup_id = ${lookupId}
        limit 1
@@ -112,6 +116,7 @@ export async function resolvePersonalApiKey(
       ownerUserId: row.owner_user_id,
       displayName: row.display_name,
       roleSubset: parseRoleSubset(row.role_subset),
+      allowedIps: storedList(row.allowed_ips),
     },
   };
 }

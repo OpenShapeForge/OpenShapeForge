@@ -52,7 +52,7 @@ async function seedPagedTemplate(themeId: string | null, background: string | nu
     (${ids.variant}::uuid, ${tenant}::uuid, ${ids.template}::uuid, 'document', 'nl', 'pages', 32, ${background})`.execute(privileged());
   const blocks: [string, Record<string, unknown>, string][] = [
     ["TextBlock", { markdown: "Head of the page" }, "header"],
-    ["TextColumns", { left: "www.example.com", center: "Street 1", right: "KVK: 1", centerWidth: 140 }, "footer"],
+    ["TextColumns", { left: [{ id: randomUUID(), definitionKey: "TextBlock", schemaVersion: 1, values: { markdown: "www.example.com" }, references: {} }], center: [{ id: randomUUID(), definitionKey: "TextBlock", schemaVersion: 1, values: { markdown: "Street 1" }, references: {} }], right: [{ id: randomUUID(), definitionKey: "TextBlock", schemaVersion: 1, values: { markdown: "KVK: 1" }, references: {} }], centerWidth: 140 }, "footer"],
     ["TextBlock", { markdown: "Pentesting for Nova Harbor", style: "title" }, "body"],
   ];
   let position = 0;
@@ -139,7 +139,7 @@ describe("document pages against PostgreSQL", () => {
 
     const { version: cover } = await template("cover", ["title", "date"], "standard:blue", (id) => [
       { definitionKey: "ImageBlock", values: { asset: id, width: 120, height: 24 }, region: "header" },
-      { definitionKey: "TextColumns", values: { left: "www.example.com" }, region: "footer" },
+      { definitionKey: "TextColumns", values: { left: [{ id: randomUUID(), definitionKey: "TextBlock", schemaVersion: 1, values: { markdown: "www.example.com" }, references: {} }] }, region: "footer" },
       { definitionKey: "TextBlock", values: { markdown: "{{local.title}} on {{local.date}}", style: "title" } },
     ]);
     const { version: proposal, variant: proposalVariant } = await template("proposal", ["title", "client", "date"], null, [

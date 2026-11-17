@@ -16,7 +16,8 @@ import { operationFailure } from "@openshapeforge/operations";
 import type { RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import { orderedChildren, rowId, type PublishedSnapshot, type SnapshotNode } from "@openshapeforge/versioning/snapshot";
 import { rows } from "./commands.js";
-import { blockHash, holdsProtectedContent, inclusionCopyContent, isInclusionCopy, mergeInclusionCopy, readInclusionCopy, templateComposition, type CompositionOf } from "./content/inclusion-copy.js";
+import { blockHash, holdsProtectedContent, inclusionCopyContent, isInclusionCopy, mergeInclusionCopy, protectedPaths, readInclusionCopy, sourceRecord, templateComposition, type CompositionOf } from "./content/inclusion-copy.js";
+import { columnBlocks, COLUMN_SLOTS, isColumns } from "./content/columns.js";
 import type { ContentBlock } from "./content/types.js";
 import {
   blockContent, contentKey, deleteDocumentBlocks, insertDocumentBlock, insertDocumentVariant, listDocumentBlocks, listDocumentVariants,
@@ -188,8 +189,14 @@ async function followVariant(apply: ApplyContext, variant: DocumentVariantRow, p
   // An inclusion the new version no longer has cannot take content with it that its copy protects.
   for (const id of plan.remove) {
     const row = byId.get(id)!;
-    const stored = (row[apply.carrier.valuesColumn] as Record<string, unknown> | null | undefined)?.content;
+    const values = row[apply.carrier.valuesColumn] as Record<string, unknown> | null | undefined;
+    const stored = values?.content;
     const compositionOf = compositionFor(apply.carrier);
+    if (isColumns(String(row[apply.carrier.definitionColumn]))) {
+      const blocks = COLUMN_SLOTS.flatMap((slot) => columnBlocks(values?.[slot]));
+      if (protectedPaths(await sourceRecord(blocks), blocks, compositionOf).length)
+        throw operationFailure({ code: "INVALID_STATE", message: "The new template no longer holds protected column content; the existing document has been kept.", retryable: false });
+    }
     if (compositionOf(String(row[apply.carrier.definitionColumn])) && isInclusionCopy(stored) && holdsProtectedContent(readInclusionCopy(stored), compositionOf))
       throw operationFailure({ code: "INVALID_STATE", message: "The new template no longer holds content that is protected here; the existing document has been kept.", retryable: false });
   }

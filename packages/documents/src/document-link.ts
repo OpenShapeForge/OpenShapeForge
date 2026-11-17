@@ -92,11 +92,14 @@ export const linkTemplate: ModuleOperationHandler = async (input, context) => {
     if (!next) refuse("NOT_FOUND", "The template version does not exist.");
     if (next!.status !== "published") refuse("INVALID_STATE", "Only a published template version can be linked.");
     const fields = templateParameterFields(next!.snapshot);
-    const mergedParameters={...object(document!.parameters??{},"parameters"),...parameters};
-    if (fields.length) {
-      const valid = platform.schemas.fields.validateObject(fields, mergedParameters);
-      if (!valid.valid) throw operationFailure(valid.error);
-    }
+    const declared = new Set(fields.map((field) => field.key));
+    // Carry only values the selected version still declares. Explicit caller
+    // input stays intact so canonical validation continues to refuse unknown keys.
+    const retained = Object.fromEntries(Object.entries(object(document!.parameters ?? {}, "parameters"))
+      .filter(([key]) => declared.has(key)));
+    const mergedParameters = { ...retained, ...parameters };
+    const valid = platform.schemas.fields.validateObject(fields, mergedParameters);
+    if (!valid.valid) throw operationFailure(valid.error);
     const tracked = document!.template_version_id ? await readTemplateVersion(trx, document!.template_version_id) : undefined;
     const sameTemplate = !document!.template_version_id || tracked?.template_id === next!.template_id;
     const carrier = contentCarrier(context);

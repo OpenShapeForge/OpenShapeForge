@@ -25,6 +25,8 @@ import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import { generatedVersioning } from "../../modules/versioning-registry.js";
 import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../../modules/field-schemas.js";
 import { RecordAccessRuntime } from "../../modules/record-access.js";
+import { ModulePlatformRuntime } from "../../modules/platform.js";
+import { listOperationContracts, runtimeStaticOperationRegistrations } from "../../operations/runtime.js";
 import { createCollectionMutationExecutor } from "../../operations/entity/collection-mutations.js";
 import { getGeneratedCrudTables } from "../../operations/entity/catalog.js";
 import type { EntityOperationContract } from "../../operations/entity/types.js";
@@ -61,6 +63,18 @@ export async function openScratch(): Promise<void> {
   scratch.privileged = createDatabaseRuntime({ databaseUrl: databaseUrl(), maxConnections: 1 });
   await scratch.privileged.db.connection().execute((connection) => runMigrationChain(connection));
   scratch.restricted = createDatabaseRuntime({ databaseUrl: databaseUrl(true), maxConnections: 1 });
+  // Canonical collection writes capture inclusions as the writing live session.
+  const live = new ModulePlatformRuntime(scratch.restricted.db);
+  const contracts = listOperationContracts().filter(operation => !operation.plugin || [documents.name, versioning.name].includes(operation.plugin));
+  // The legacy direct-command helpers below remain available to their tests;
+  // only publicly declared handlers participate in the live capture runtime.
+  const declared = new Set(contracts.filter(operation => operation.plugin === documents.name).map(operation => operation.handler));
+  const canonicalDocuments = { ...documents, operationHandlers: Object.fromEntries(
+    Object.entries(documents.operationHandlers ?? {}).filter(([handler]) => declared.has(handler)),
+  ) };
+  live.registerStaticOperations(runtimeStaticOperationRegistrations(
+    [canonicalDocuments, versioning], { db: scratch.restricted.db, platform: live.services }, contracts,
+  ));
   // The API initialises modules after loading; that is where the documents module registers its publish follower.
   await documents.init?.();
   // Document types are tenant-scoped reference data; the chain seeds none for a fresh tenant.

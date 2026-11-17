@@ -93,6 +93,8 @@ describe("document content authorization against PostgreSQL", () => {
     expect(foreignDocument.rows[0]!.count).toBe(0);
     const emptyTemplate = await seedTemplate();
     await sql`update erp.templates set parameters = null where id = ${emptyTemplate.template}::uuid`.execute(privileged());
+    // This version declares no local variables, so its authored text needs none.
+    await sql`update erp.blocks set "values" = ${jsonbLiteral({ markdown: "A template without parameters" })} where id = ${emptyTemplate.first}::uuid`.execute(privileged());
     const emptyVersion = await publishTemplate(setup.context, emptyTemplate.template);
     const emptyInput = { ...input, document: { ...input.document, title: `template-empty-${crypto.randomUUID()}` }, content: { ...input.content,
       blocks: [{ definitionKey: "TemplateBlock", values: { version: emptyVersion, parameters: {} } }] } };
@@ -185,7 +187,7 @@ describe("document content authorization against PostgreSQL", () => {
     const ids = await seedTemplate();
     const templateVersion = await publishTemplate(context, ids.template);
     const documentId = await createDocument();
-    await linked(handlers, context, { id: documentId, templateVersionId: templateVersion });
+    await linked(handlers, context, { id: documentId, templateVersionId: templateVersion, parameters: { name: "Reader" } });
     const session = dbInput(editor);
     // The generated update refuses the writtenBy fields at the contract; a raw write hits the trigger.
     await failsWith(updateGeneratedEntity(restricted(), session, { table: documents(), id: documentId, values: { templateVersionId: null } }), ["VALIDATION", "BAD_USER_INPUT", "FORBIDDEN"]);

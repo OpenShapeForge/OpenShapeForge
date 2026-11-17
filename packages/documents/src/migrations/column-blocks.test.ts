@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BUSL-1.1
 import {test,expect} from 'bun:test';
 import {migrateColumnBlocks} from './column-blocks.js';
 import {sourceRecord,blockHash} from '../content/inclusion-copy.js';

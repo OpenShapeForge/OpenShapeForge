@@ -1,6 +1,6 @@
 {
   "name": "@openshapeforge/documents",
-  "version": "0.2.30",
+  "version": "0.2.31",
   "description": "Canonical Document and DocumentVersion runtime commands for OpenShapeForge.",
   "repository": {
     "type": "git",
@@ -14,9 +14,11 @@
     "./runtime": "./src/runtime.ts",
     "./content-commands": "./src/content-commands.ts",
     "./content": "./src/content/index.ts",
+    "./inclusion-copy": "./src/content/inclusion-copy.ts",
     "./page": "./src/page/index.ts",
     "./seed": "./src/seed.ts",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./migrations/column-blocks": "./src/migrations/column-blocks.ts"
   },
   "files": [
     "src",

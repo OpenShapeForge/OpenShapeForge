@@ -28,7 +28,7 @@ describe("buildPagedDocument", () => {
       ({ ...block(id, definitionKey, values, region), scope: "cover" });
     const paged = build([
       cover("h1", "ImageBlock", { asset: MARK, width: 120, height: 24 }, "header"),
-      cover("f1", "TextColumns", { left: "left", center: "middle", right: "right", centerWidth: 140 }, "footer"),
+      cover("f1", "TextColumns", { left: [block("l", "TextBlock", {markdown:"left"})], center: [block("c", "TextBlock", {markdown:"middle"})], right: [block("r", "TextBlock", {markdown:"right"})], centerWidth: 140 }, "footer"),
       block("f2", "TextBlock", { markdown: "Confidential" }, "footer"),
       cover("b1", "TextBlock", { markdown: "Pentesting for Nova Harbor", style: "title" }),
       block("b2", "TextBlock", { markdown: "Dear reader" }),
@@ -103,7 +103,7 @@ describe("buildPagedDocument", () => {
     expect(html).toContain("justify-content:flex-end;min-height:calc((var(--h) - var(--top) - var(--m)) / 2 - var(--bg))");
   });
 
-  test("an included chapter without a page frame keeps the document's; one with a header or footer of its own keeps only that", () => {
+  test("a paginated inclusion replaces only the regions it supplies and inherits the ones it leaves out", () => {
     const sections = layoutPagedSections([
       block("h", "TextBlock", { markdown: "Head" }, "header"), block("f", "TextBlock", { markdown: "Foot" }, "footer"),
       block("a", "TextBlock", { markdown: "Letter" }),
@@ -111,7 +111,7 @@ describe("buildPagedDocument", () => {
       { ...block("ch-h", "TextBlock", { markdown: "Cover head" }, "header"), scope: "cover" }, { ...block("cv", "TextBlock", { markdown: "Cover" }), scope: "cover" },
     ], design, { "": {}, ch: {}, cover: {} });
     expect(sections.map((section) => [section.body[0]!.id, section.header.map((entry) => entry.id), section.footer.map((entry) => entry.id)]))
-      .toEqual([["a", ["h"], ["f"]], ["c", ["h"], ["f"]], ["cv", ["ch-h"], []]]);
+      .toEqual([["a", ["h"], ["f"]], ["c", ["h"], ["f"]], ["cv", ["ch-h"], ["f"]]]);
   });
 
   test("an included template without page settings flows inside the including page", () => {
@@ -242,4 +242,52 @@ test('invalid section identities and boundaries in headers fail instead of leaki
  expect(()=>layoutPagedSections([block('s','SectionBreak',{layout:'bad layout'})],design)).toThrow();
  expect(()=>layoutPagedSections([block('s','SectionBreak',{layout:'same'}),block('s2','SectionBreak',{layout:'same'})],design)).toThrow();
  expect(()=>layoutPagedSections([block('p','PageBreak',{},'header')],design)).toThrow();
+});
+
+
+test("a section can repeat only its footer without deleting its header", () => {
+  const blocks: PageBlock[] = [
+    {id:"section",definitionKey:"SectionBreak",region:"body",values:{layout:"letter",name:"Brief",headerEnabled:false,footerEnabled:true}},
+    {id:"header",definitionKey:"TextBlock",region:"header",layoutKey:"letter",values:{markdown:"Hidden letterhead"}},
+    {id:"body",definitionKey:"TextBlock",region:"body",values:{markdown:"Letter"}},
+    {id:"break",definitionKey:"PageBreak",region:"body",values:{}},
+    {id:"next",definitionKey:"TextBlock",region:"body",values:{markdown:"Next page"}},
+    {id:"footer",definitionKey:"TextBlock",region:"footer",layoutKey:"letter",values:{markdown:"Repeated footer"}},
+  ];
+  const result = build(blocks);
+  expect(result.sections).toHaveLength(2);
+  for (const section of result.sections) {
+    expect(section.html).not.toContain("Hidden letterhead");
+    expect(section.html).toContain("Repeated footer");
+  }
+  blocks[0]={...blocks[0]!,values:{...blocks[0]!.values,headerEnabled:true}};
+  expect(build(blocks).sections[0]!.html).toContain("Hidden letterhead");
+});
+
+test('continuous inclusions contribute only body blocks to the active host section',()=>{
+ const scoped=(id:string,key:string,values:Record<string,unknown>,region:PageBlock['region']='body')=>({...block(id,key,values,region),scope:'letter'});
+ const sections=layoutPagedSections([
+  block('section','SectionBreak',{layout:'report',format:'a5'}),
+  {...block('head','TextBlock',{markdown:'Host head'},'header'),layoutKey:'report'},
+  {...block('foot','TextBlock',{markdown:'Host foot'},'footer'),layoutKey:'report'},
+  block('before','TextBlock',{markdown:'Before'}),
+  scoped('h','TextBlock',{markdown:'Source header'},'header'),
+  scoped('s','SectionBreak',{layout:'source',format:'a4'}),
+  scoped('body','TextBlock',{markdown:'Letter'}),
+  scoped('f','TextBlock',{markdown:'Source footer'},'footer'),
+  scoped('page','PageBreak',{}),scoped('second','TextBlock',{markdown:'Second'}),
+  block('after','TextBlock',{markdown:'After'}),
+ ],design,{'':{}});
+ expect(sections).toHaveLength(2);
+ expect(sections.map(s=>s.body.map(b=>b.id))).toEqual([['before','body'],['second','after']]);
+ expect(sections.every(s=>s.header.map(b=>b.id).join()==='head'&&s.footer.map(b=>b.id).join()==='foot')).toBe(true);
+ expect(sections.every(s=>s.settings.page?.width===559)).toBe(true);
+});
+
+test("nested columns keep an actual signature image in the print and image manifest", () => {
+  const columns = block("approval", "TextColumns", {left:[block("name","TextBlock",{markdown:"Julian Vermeer"}),block("signature","ImageBlock",{asset:MARK,width:180,height:43})],right:[block("client","TextBlock",{markdown:"Customer"})]});
+  expect(pageImages([{...columns,scope:"terms"}])).toEqual([{scope:"terms",image:MARK}]);
+  const html = renderPageBlock(columns,withMark);
+  expect(html).toContain("Julian Vermeer"); expect(html).toContain("Customer"); expect(html).toContain("data:image/svg+xml;base64,");
+  expect(html).toContain("180px");
 });

@@ -14,6 +14,8 @@ import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { registerDocumentFollowers } from "@openshapeforge/documents/runtime";
+import { prepareBlockInclusionWrite } from "@openshapeforge/documents/content-commands";
+import { generatedEntityValues } from "../../modules/entity-value-registry.js";
 import { closeScratch, createDocument, documentReader, editor, fails, linked, openScratch, platformFor, privileged, publishTemplate, tenant, variant } from "./document-content-fixture.js";
 
 const pageDesign = {
@@ -117,27 +119,43 @@ describe("document pages against PostgreSQL", () => {
         (${ids.variant}::uuid, ${tenant}::uuid, ${ids.template}::uuid, 'document', 'nl', 'pages', ${background})`.execute(privileged());
       let position = 0;
       for (const block of blocks) {
-        // An inclusion's version is a reference slot with its own column, not a key of the JSON values.
+        const id = randomUUID();
+        // An inclusion's version is a reference slot with its own column, not a key of the JSON values. Its row holds
+        // the complete copy the write boundary of every Block insert captures, as the editor's session; a row
+        // without that copy is not an inclusion that can be read.
+        const values = block.version
+          ? await services.db.withSession(context.session, (trx) => prepareBlockInclusionWrite(trx, tenant, carrier, undefined,
+            { id, tenant_id: tenant, variant_id: ids.variant, document_variant_id: null, definition_key: block.definitionKey, [carrier.valuesColumn]: block.values, [versionColumn]: block.version }, { actor: (work) => work(context) }))
+          : block.values;
         const reference = block.version ? sql`${block.version}::uuid` : sql`null`;
         await sql`insert into erp.blocks (id, tenant_id, variant_id, variant_id_position, definition_key, "values", region, layout_key, ${sql.ref(versionColumn)}) values
-          (${randomUUID()}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, ${position++}, ${block.definitionKey}, ${jsonbLiteral(block.values)}, ${block.region ?? "body"}, ${block.layoutKey ?? null}, ${reference})`.execute(privileged());
+          (${id}::uuid, ${tenant}::uuid, ${ids.variant}::uuid, ${position++}, ${block.definitionKey}, ${jsonbLiteral(values!)}, ${block.region ?? "body"}, ${block.layoutKey ?? null}, ${reference})`.execute(privileged());
       }
-      return publishTemplate(context, ids.template);
+      return { version: await publishTemplate(context, ids.template), variant: ids.variant };
     };
-    const versionColumn = (await sql<{ column_name: string }>`select column_name from information_schema.columns
-      where table_schema = 'erp' and table_name = 'blocks' and column_name like 'ev_values_template_block_version_id%'`.execute(privileged())).rows[0]!.column_name;
+    const services = (context as unknown as { platform: { db: { withSession<T>(session: unknown, work: (trx: unknown) => Promise<T>): Promise<T> } } }).platform;
+    const carrier = generatedEntityValues.get("Block", "values")!;
+    const versionColumn = carrier.definitions.TemplateBlock!.references.find((reference) => reference.fieldKey === "version")!.column;
 
-    const cover = await template("cover", ["title", "date"], "standard:blue", (id) => [
+    const { version: cover } = await template("cover", ["title", "date"], "standard:blue", (id) => [
       { definitionKey: "ImageBlock", values: { asset: id, width: 120, height: 24 }, region: "header" },
       { definitionKey: "TextColumns", values: { left: "www.example.com" }, region: "footer" },
       { definitionKey: "TextBlock", values: { markdown: "{{local.title}} on {{local.date}}", style: "title" } },
     ]);
-    const proposal = await template("proposal", ["title", "client", "date"], null, [
+    const { version: proposal, variant: proposalVariant } = await template("proposal", ["title", "client", "date"], null, [
       { definitionKey: "TextBlock", values: { markdown: "Proposal header" }, region: "header" },
       // The date is handed on as the whole value, so it reaches the cover as a date and is written out there.
       { definitionKey: "TemplateBlock", values: { parameters: { title: "{{local.title}}", date: "{{local.date}}" } }, version: cover },
       { definitionKey: "TextBlock", values: { markdown: "Dear {{local.client}}," } },
     ]);
+    // The inclusion holds the cover as a complete copy: its three blocks with their zones and its page settings, and
+    // the inputs it leaves to the proposal are still open in the stored text.
+    const included = (await sql<{ content: { page?: Record<string, unknown>; source: { id: string }[]; blocks: { definitionKey: string; region?: string; values: Record<string, unknown> }[] } }>`
+      select "values"->'content' as content from erp.blocks where variant_id = ${proposalVariant}::uuid and definition_key = 'TemplateBlock'`.execute(privileged())).rows[0]!.content;
+    expect(included.blocks.map((block) => [block.definitionKey, block.region ?? "body"])).toEqual([["ImageBlock", "header"], ["TextColumns", "footer"], ["TextBlock", "body"]]);
+    expect(included.source.map((entry) => entry.id)).toEqual(included.blocks.map((block) => (block as unknown as { id: string }).id));
+    expect(included.page).toBeDefined();
+    expect(JSON.stringify(included.blocks.at(-1)!.values)).toContain("{{");
     const documentId = await createDocument();
     await linked(handlers, context, { id: documentId, templateVersionId: proposal, parameters: { title: "Pentesting for Nova Harbor", client: "Elise", date: "2026-05-11" } });
 

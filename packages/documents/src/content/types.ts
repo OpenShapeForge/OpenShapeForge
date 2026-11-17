@@ -65,6 +65,8 @@ export type ContentReferenceValue =
   | null;
 
 export type ContentBlock = {
+  /** Source-authored protection; local inclusion changes cannot override it. */
+  readonly locked?: true;
   readonly id: string;
   readonly definitionKey: string;
   readonly schemaVersion: number;
@@ -74,6 +76,11 @@ export type ContentBlock = {
   readonly region?: "header" | "footer";
   /** Page layout a header or footer block belongs to; absent means the default layout. */
   readonly layoutKey?: string;
+  /**
+   * Set by the adapter that read the block, never stored: the server captured
+   * this content from a source, so its text is data and is not bound again.
+   */
+  readonly captured?: true;
 };
 
 export type TemplateParameter = ContentValueShape & { readonly defaultValue?: JsonValue; readonly relationship?: { readonly target: string } };
@@ -146,7 +153,7 @@ export type ContentBlockMaterialization = {
   readonly operationId: string;
   readonly result:
     | { readonly kind: "block"; readonly value: JsonObject }
-    | { readonly kind: "template"; readonly referenceField: string; readonly parameters: JsonObject };
+    | { readonly kind: "template"; readonly referenceField: string; readonly parameters: JsonObject; readonly content?: JsonObject };
 };
 
 /** The adapter must authorize reads with its verified session, then return tenant-scoped data. */
@@ -197,6 +204,11 @@ export type ContentResolvers = {
 };
 
 export type MaterializeTemplateContentInput = {
+  /**
+   * The version supplies identity and variables for a document's own
+   * variants. A document is a concrete host: a copy it holds is read as data.
+   */
+  readonly document?: true;
   readonly tenantId: string;
   readonly templateVersionId: string;
   readonly channel: string;
@@ -205,11 +217,14 @@ export type MaterializeTemplateContentInput = {
 };
 
 export type MaterializedContentBlock = {
+  readonly columns?: Readonly<Record<string, readonly MaterializedContentBlock[]>>;
   readonly path: readonly string[];
   readonly id: string;
   readonly definitionKey: string;
   readonly schemaVersion: number;
   readonly renderer: string;
+  /** The block's stored values, before any variable of its scope is bound. */
+  readonly authoredValues: JsonObject;
   readonly values: JsonObject;
   readonly references: Readonly<
     Record<string, ContentResolvedEntity | readonly ContentResolvedEntity[] | null>
@@ -235,8 +250,10 @@ export type MaterializedTemplateContent = {
     readonly values: JsonObject;
     readonly templateReference: ContentEntityReference;
     readonly references: MaterializedContentBlock["references"];
-    readonly materialization?: ContentBlockMaterialization;
+    /** The page settings the inclusion captured from its source; absent for continuous content. */
+    readonly page?: JsonObject;
   }[];
+  /** The template version the content is rooted in, when it is. An inclusion is read from its own copy and names no version here. */
   readonly templates: readonly {
     readonly path: readonly string[];
     readonly version: ContentTemplateVersion;

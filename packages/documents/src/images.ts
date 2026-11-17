@@ -12,9 +12,10 @@
  * own uploads are read as files of the document.
  */
 import { operationFailure } from "@openshapeforge/operations";
-import type { ModuleOperationContext, ModuleOperationHandler, PluginPlatformServices, PluginSessionContext } from "@openshapeforge/plugin-runtime";
+import type { ModuleOperationContext, ModuleOperationHandler, PluginPlatformServices, PluginSessionContext, RuntimeEntityValueCarrier } from "@openshapeforge/plugin-runtime";
 import type { PublishFollowerContext } from "@openshapeforge/versioning/followers";
 import { contextServices, rows } from "./commands.js";
+import { templateComposition } from "./content/inclusion-copy.js";
 import type { MaterializedDocumentContent, MaterializedTemplateContent } from "./content/types.js";
 import { isImageValue, type ImageValue } from "./page/html.js";
 import { isObject, object, refuse, uuid } from "./validation.js";
@@ -56,23 +57,36 @@ async function readFile(platform: PluginPlatformServices, session: PluginSession
   return { artifactId: image.artifactId, mediaType: imageMediaType(contents.descriptor.mediaType, image), fileName: image.fileName, data: base64(contents.bytes) };
 }
 
-/** The frozen images of these template versions, by file. */
-async function frozenImages(trx: unknown, versionIds: readonly string[], artifactIds: readonly string[]): Promise<Map<string, ImageData>> {
-  if (!versionIds.length || !artifactIds.length) return new Map();
+/** The frozen images of these template versions, by file. Only bytes frozen under the hash the content names are returned. */
+async function frozenImages(trx: unknown, versionIds: readonly string[], images: Iterable<ImageValue>): Promise<Map<string, ImageData>> {
+  const wanted = [...images].map((image) => [image.artifactId, image.sha256]);
+  if (!versionIds.length || !wanted.length) return new Map();
   const found = await rows<{ artifact_id: string; media_type: string; file_name: string; data: string }>(trx,
     `select distinct on (artifact_id) artifact_id, media_type, file_name, data from erp.template_version_images
       where tenant_id = app.current_tenant()
         and template_version_id in (select jsonb_array_elements_text($1::text::jsonb)::uuid)
-        and artifact_id in (select jsonb_array_elements_text($2::text::jsonb))`,
-    [JSON.stringify(versionIds), JSON.stringify(artifactIds)]);
+        and (artifact_id, sha256) in (select pair->>0, pair->>1 from jsonb_array_elements($2::text::jsonb) pair)`,
+    [JSON.stringify(versionIds), JSON.stringify(wanted)]);
   return new Map(found.map((row) => [row.artifact_id, { artifactId: row.artifact_id, mediaType: row.media_type, fileName: row.file_name, data: row.data }]));
 }
 
 /**
- * The bytes of every image in materialized content. A template's image comes
- * from the frozen images of the version it was materialized from; anything
- * else is a file of the record whose content this is (the document, or the
- * template whose head is shown).
+ * The template versions whose frozen images this content may show: the
+ * version it is rooted in and the exact source version of every inclusion it
+ * holds. Those ids are the server's own record — the pinned version and the
+ * typed reference each captured copy was settled with — so this is the
+ * content's provenance, never a lookup across the tenant's images.
+ */
+function imageSourceVersions(content: MaterializedDocumentContent | MaterializedTemplateContent): string[] {
+  return [...new Set([...content.templates.map((template) => template.version.id), ...content.compositions.map((inclusion) => inclusion.templateReference.id)])];
+}
+
+/**
+ * The bytes of every image in materialized content. An image that came with
+ * a template — the document's own, or the source of an inclusion — is read
+ * from the frozen images of that exact version, which needs no access to the
+ * template; anything else is a file of the record whose content this is (the
+ * document, or the template whose head is shown).
  */
 export async function contentImages(
   context: ModuleOperationContext,
@@ -84,8 +98,7 @@ export async function contentImages(
   const wanted = imageValuesIn(content.blocks.map((block) => block.materialization?.result.kind === "block" ? block.materialization.result.value : block.values));
   for (const image of extra) wanted.set(image.artifactId, image);
   if (!wanted.size) return [];
-  const versions = content.templates.map((template) => template.version.id);
-  const frozen = await platform.db.withSession(session, (trx) => frozenImages(trx, versions, [...wanted.keys()]));
+  const frozen = await platform.db.withSession(session, (trx) => frozenImages(trx, imageSourceVersions(content), wanted.values()));
   const images: ImageData[] = [];
   for (const image of wanted.values()) {
     const kept = frozen.get(image.artifactId);
@@ -125,16 +138,61 @@ function addImage(entity: "Template" | "Document", table: string): ModuleOperati
 export const addTemplateImage = addImage("Template", "templates");
 export const addDocumentImage = addImage("Document", "documents");
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The source version of every inclusion a frozen template holds, at any
+ * depth: the typed reference column of an inclusion's own row, and the
+ * `{entity, id}` reference of an inclusion nested in a copy. Both were
+ * settled by the server when the copy was captured.
+ */
+export function inclusionSourceVersions(snapshot: unknown, carrier: RuntimeEntityValueCarrier | undefined): string[] {
+  const found = new Set<string>();
+  const columns = new Map<string, string>();
+  for (const [key, definition] of Object.entries(carrier?.definitions ?? {})) {
+    const composition = templateComposition(definition.fields);
+    const column = composition && definition.references.find((reference) => reference.fieldKey === composition.templateVersionField)?.column;
+    if (column) columns.set(key, column);
+  }
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) { for (const item of value) walk(item); return; }
+    if (!isObject(value)) return;
+    if (value.entity === "TemplateVersion" && typeof value.id === "string" && UUID.test(value.id)) found.add(value.id);
+    const column = carrier && typeof value[carrier.definitionColumn] === "string" ? columns.get(value[carrier.definitionColumn] as string) : undefined;
+    if (column && typeof value[column] === "string" && UUID.test(value[column] as string)) found.add(value[column] as string);
+    for (const item of Object.values(value)) walk(item);
+  };
+  walk(snapshot);
+  return [...found];
+}
+
 /**
  * Template.publish follower: freeze the bytes of every image the new version
- * uses. The publisher can read the template's files; a document later reads
- * the frozen copy through its pinned version, whatever its reader may do.
+ * uses, so the version holds all of them itself. An image that came with an
+ * inclusion is copied from the frozen images of that inclusion's exact source
+ * version, under the hash the content names; it is never read as a file of
+ * this template, and the source's file is never bound to it. Every other
+ * image is a file of this template, which its publisher can read. A document
+ * later reads the frozen copy through its pinned version, whatever its
+ * reader may do.
  */
 export async function freezeTemplateImages(context: PublishFollowerContext): Promise<void> {
   const { transaction, platform, session, sourceId, version } = context;
   const images = imageValuesIn(version.snapshot);
   if (!images.size) return;
+  const sources = JSON.stringify(inclusionSourceVersions(version.snapshot, platform.schemas.entityValues?.get("Block", "values")).filter((id) => id !== version.id));
   for (const image of images.values()) {
+    const inherited = await rows<{ id: string }>(transaction, `select id from erp.template_version_images
+      where tenant_id = app.current_tenant() and artifact_id = $1 and sha256 = $2
+        and template_version_id in (select jsonb_array_elements_text($3::text::jsonb)::uuid) limit 1`, [image.artifactId, image.sha256, sources]);
+    if (inherited.length) {
+      await rows(transaction, `insert into erp.template_version_images
+          (id, tenant_id, template_version_id, artifact_id, sha256, media_type, file_name, data)
+        select gen_random_uuid(), app.current_tenant(), $1::uuid, artifact_id, sha256, media_type, file_name, data
+          from erp.template_version_images where tenant_id = app.current_tenant() and id = $2::uuid
+        on conflict do nothing`, [version.id, inherited[0]!.id]);
+      continue;
+    }
     let contents: Awaited<ReturnType<PluginPlatformServices["artifacts"]["read"]>>;
     try {
       contents = await platform.artifacts.read(session, { artifactId: image.artifactId, owner: { entity: "Template", id: sourceId } });
@@ -157,7 +215,7 @@ export const documentImages: ModuleOperationHandler = async (input, context) => 
   const materialized = await materializeDocument(input, context);
   const content = (materialized as { value: MaterializedDocumentContent | MaterializedTemplateContent }).value;
   const page = "page" in content && content.page ? [content.page] : [];
-  const extra = imageValuesIn([...page, ...content.templates.map((template) => template.version.variants[0]?.page ?? null)]).values();
+  const extra = imageValuesIn([...page, ...content.templates.map((template) => template.version.variants[0]?.page ?? null), ...content.compositions.map((inclusion) => inclusion.page ?? null)]).values();
   return { value: { images: await contentImages(context, content, extra, { entity: "Document", id: uuid(input.id, "id") }) } };
 };
 

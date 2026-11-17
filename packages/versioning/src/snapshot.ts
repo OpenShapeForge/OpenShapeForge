@@ -4,6 +4,7 @@
  * `{ schemaVersion: 1, entity, head: { table, row, children: { <table>: [...] } } }`.
  * No database, no session; callers pass the parsed JSON.
  */
+import { createHash } from "node:crypto";
 
 export type SnapshotRow = Readonly<Record<string, unknown>>;
 export type SnapshotNode = {
@@ -71,4 +72,28 @@ export function rowId(node: SnapshotNode): string {
   const id = node.row.id;
   if (typeof id !== "string" || !id) throw new Error(`Snapshot row in ${node.table} has no id.`);
   return id;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+/**
+ * The fingerprint `publish()` stores on a version row: `canonical` is the
+ * text written to its `snapshot` column and `contentHash` the SHA-256 of that
+ * text in lowercase hex, its `content_hash`. Object keys are ordered with
+ * `localeCompare` and arrays keep their order, so the same content
+ * fingerprints alike however its objects were built, and reordered children
+ * do not.
+ *
+ * The value is fingerprinted as given, including head keys beyond the typed
+ * shape (`extensions`, `extensionDefinitions`). Deciding what is content —
+ * dropping row bookkeeping and publication pointers — belongs to the capture
+ * that builds the snapshot, not to this function.
+ */
+export function fingerprintSnapshot(snapshot: PublishedSnapshot): { canonical: string; contentHash: string } {
+  const canonical = canonicalJson(snapshot);
+  return { canonical, contentHash: createHash("sha256").update(canonical).digest("hex") };
 }

@@ -119,15 +119,20 @@ function textColumns(block: PageBlock, design: PageDesign): string {
   const items = { top: "flex-start", center: "center", bottom: "flex-end" }[vertical];
   const slots: string[] = [];
   for (const slot of ["left", "center", "right"] as const) {
-    const markdown = text(v[slot], `TextColumns.${slot}`);
-    if (!markdown.trim()) continue;
+    const children = v[slot];
+    if (children === undefined) continue;
+    if (!Array.isArray(children)) return fail(`TextColumns.${slot} must contain blocks.`);
     const width = v[`${slot}Width`] === undefined || v[`${slot}Width`] === null ? undefined : px(v[`${slot}Width`], `TextColumns.${slot}Width`, 1, 4000);
     const grows = width === undefined && (distribution === "fill" || slot === "left");
     const flex = width !== undefined ? `flex:0 0 ${width}px;` : grows ? "flex:1 1 0;min-width:0;" : "flex:0 0 auto;white-space:nowrap;";
     // Filled columns share the row as equal, wrapping columns 24px apart (the Figma letter's address and
     // reference); fitted columns keep the right one on one line against the right edge.
     const end = slot === "right" && distribution === "fit";
-    const cell = `<div class="text ${styleClass(design, v[`${slot}Style`], `TextColumns.${slot}Style`)}"${end ? ' style="white-space:nowrap"' : ""}>${paragraphs(markdown)}</div>`;
+    const cell = children.map((child) => {
+      if (!child || typeof child !== 'object' || typeof child.definitionKey !== 'string' || !child.values) return fail('A column contains an invalid block.');
+      if (child.definitionKey === 'PageBreak' || child.definitionKey === 'SectionBreak') return fail('Page boundaries cannot stand inside a column.');
+      return renderBlock({...child, region:'body'} as PageBlock, design);
+    }).join('');
     slots.push(`<div class="col${end ? " end" : ""}" style="${flex}">${cell}</div>`);
   }
   return `<div class="b cols" style="align-items:${items};gap:${distribution === "fit" ? 16 : 24}px">${slots.join("")}</div>`;
@@ -158,7 +163,17 @@ export function imageAssetKey(image: Pick<ImageValue, "artifactId">): string {
 export function pageImages(blocks: readonly PageBlock[], layouts: PageLayouts = {}): { scope: string; image: ImageValue }[] {
   const found = new Map<string, { scope: string; image: ImageValue }>();
   const add = (scope: string, value: unknown) => { if (isImageValue(value)) found.set(`${scope}|${value.artifactId}`, { scope, image: value }); };
-  for (const block of blocks) if (block.definitionKey === "ImageBlock") add(block.scope ?? "", block.values.asset);
+  const visit = (items: readonly PageBlock[], scope = "") => {
+    for (const block of items) {
+      const ownScope = block.scope ?? scope;
+      if (block.definitionKey === "ImageBlock") add(ownScope, block.values.asset);
+      if (block.definitionKey === "TextColumns") for (const slot of ["left", "center", "right"]) {
+        const children = block.values[slot];
+        if (Array.isArray(children)) visit(children as unknown as PageBlock[], ownScope);
+      }
+    }
+  };
+  visit(blocks);
   for (const [scope, layout] of Object.entries(layouts)) add(scope, layout.backgroundImage);
   return [...found.values()];
 }
@@ -226,7 +241,7 @@ export function variantPageValues(source: Readonly<Record<string, unknown>> | nu
   const number = (value: unknown) => typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)) ? Number(value) : value;
   const values: Record<string, unknown> = {};
   for (const [key, camel, snake] of [["margin", "pageMargin", "page_margin"], ["gap", "pageGap", "page_gap"], ["blockGap", "pageBlockGap", "page_block_gap"],
-    ["format", "pageFormat", "page_format"], ["width", "pageWidth", "page_width"], ["height", "pageHeight", "page_height"], ["background", "pageBackground", "page_background"], ["backgroundImage", "pageBackgroundImage", "page_background_image"], ["bodyAlignment", "pageBodyAlignment", "page_body_alignment"]] as const) {
+    ["format", "pageFormat", "page_format"], ["width", "pageWidth", "page_width"], ["height", "pageHeight", "page_height"], ["background", "pageBackground", "page_background"], ["backgroundImage", "pageBackgroundImage", "page_background_image"], ["bodyAlignment", "pageBodyAlignment", "page_body_alignment"], ["headerEnabled", "pageHeaderEnabled", "page_header_enabled"], ["footerEnabled", "pageFooterEnabled", "page_footer_enabled"]] as const) {
     const value = read(camel, snake);
     if (value != null && value !== "") values[key] = number(value);
   }
@@ -264,6 +279,8 @@ export function pageSettings(values: Readonly<Record<string, unknown>> | undefin
     : Object.hasOwn(PAGE_FORMATS, format) ? PAGE_FORMATS[format as keyof typeof PAGE_FORMATS] : undefined;
   return {
     layout: optionalKey(v.layout, "Page.layout") ?? DEFAULT_PAGE_LAYOUT,
+    ...(typeof v.headerEnabled === "boolean" ? {headerEnabled: v.headerEnabled} : {}),
+    ...(typeof v.footerEnabled === "boolean" ? {footerEnabled: v.footerEnabled} : {}),
     margin: px(v.margin, "Page.margin", 0, 400, 40),
     gap: px(v.gap, "Page.gap", 0, 400, 24),
     blockGap: px(v.blockGap, "Page.blockGap", 0, 400, 16),
@@ -364,28 +381,21 @@ function sectionHtml(input: PagedDocumentInput, section: PageSettings, header: r
 }
 
 const scopedKey = (scope: string, layout: string) => `${scope}\n${layout}`;
+type PageFrame = Readonly<{ header: readonly PageBlock[]; footer: readonly PageBlock[] }>;
+const EMPTY_FRAME: PageFrame = { header: [], footer: [] };
 /**
- * A header or footer of a section: its own template's, else that of the
- * nearest including template with one for the same layout. An included
- * chapter with pages of its own but no header of its own keeps the
- * document's header; one with a header of its own (a cover) keeps that.
+ * The frame of a section, one region at a time: a region switched off is blank, a region the section's own layout
+ * supplies replaces the host's, and a region it leaves out is the one `inherited` carries. The document itself
+ * inherits nothing, and continuous content has already joined its host's section.
  */
-/**
- * The header and footer of a section: its own template's, or else the nearest enclosing template's. A template
- * that brings a header or a footer brings its whole page frame, so a letter with only a footer of its own does
- * not take the document's header.
- */
-function pageFrame(regions: { header: ReadonlyMap<string, PageBlock[]>; footer: ReadonlyMap<string, PageBlock[]> }, scope: string, layout: string): { header: PageBlock[]; footer: PageBlock[] } {
-  for (let at = scope; ; at = at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "") {
-    const key = scopedKey(at, layout);
-    const header = regions.header.get(key), footer = regions.footer.get(key);
-    if (header || footer) return { header: header ?? [], footer: footer ?? [] };
-    if (!at) return { header: [], footer: [] };
-  }
+function pageFrame(regions: Readonly<Record<"header" | "footer", ReadonlyMap<string, PageBlock[]>>>, scope: string, settings: PageSettings, inherited: PageFrame): PageFrame {
+  const key = scopedKey(scope, settings.layout);
+  const region = (name: "header" | "footer", enabled: boolean | undefined) => enabled === false ? [] : regions[name].get(key) ?? inherited[name];
+  return { header: region("header", settings.headerEnabled), footer: region("footer", settings.footerEnabled) };
 }
 
 /** One section of a paged document: its page settings and the blocks of its three zones. */
-export type PagedSectionLayout = Readonly<{ settings: PageSettings; header: readonly PageBlock[]; body: readonly PageBlock[]; footer: readonly PageBlock[]; sectionId?: string; sectionName?: string }>;
+export type PagedSectionLayout = Readonly<{ scope?: string; settings: PageSettings; header: readonly PageBlock[]; body: readonly PageBlock[]; footer: readonly PageBlock[]; sectionId?: string; sectionName?: string }>;
 
 /**
  * Splits the ordered blocks into sections.
@@ -394,12 +404,15 @@ export type PagedSectionLayout = Readonly<{ settings: PageSettings; header: read
  * settings of each template whose content is laid out as pages, keyed by the
  * scope its blocks arrive with ("" is the document itself). A block follows
  * the nearest enclosing scope that has settings, so an included template with
- * pages of its own (a cover) gets its own pages with its own header and
- * footer, an included continuous template flows on the pages around it, and
- * when the including document's blocks resume they continue on a new page
- * with the document's settings. A document without settings gets the default
- * page. A section without body blocks is left out unless it is the last one,
- * which still yields a page.
+ * pages of its own (a cover) gets its own pages, an included continuous
+ * template flows on the pages around it, and when the including document's
+ * blocks resume they continue on a new page in the section they left, with
+ * its settings and frame. On its own pages an included template's header or
+ * footer replaces the including section's; a region it leaves out is the one
+ * of the section active where it is included, through every level of
+ * inclusion, and a region it switches off stays blank. A document without
+ * settings gets the default page. A section without body blocks is left out
+ * unless it is the last one, which still yields a page.
  */
 export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDesign, layouts: PageLayouts = {}): PagedSectionLayout[] {
   if (blocks.length > MAX_BLOCKS) fail(`A paged document holds at most ${MAX_BLOCKS} blocks.`);
@@ -416,13 +429,21 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
     if (!state) { state = { scope, settings: pageSettings(layouts[scope], design) }; states.set(scope, state); }
     return state;
   };
-  const sections: (State & { body: PageBlock[]; force: boolean })[] = [];
-  const open = (state: State, force = false) => { const section = { ...state, body: [] as PageBlock[], force }; sections.push(section); return section; };
+  // The frame stack of an inclusion: its own section over the section active in each including template, read when
+  // its pages open, so a host that entered a named section lends that section's frame and not its default one.
+  const frameOf = (state: State): PageFrame => {
+    const host = state.scope ? owner(state.scope.includes("/") ? state.scope.slice(0, state.scope.lastIndexOf("/")) : "") : undefined;
+    return pageFrame(regions, state.scope, state.settings, host === undefined ? EMPTY_FRAME : frameOf(stateFor(host)));
+  };
+  const sections: (State & PageFrame & { body: PageBlock[]; force: boolean })[] = [];
+  const open = (state: State, force = false) => { const section = { ...state, ...frameOf(state), body: [] as PageBlock[], force }; sections.push(section); return section; };
   // Headers and footers are records, keyed by their declared section layout. They may occur anywhere in stored order.
   for (const block of blocks) {
     const scope = block.scope ?? "";
     if (scope.length > 4000 || /[\n]/.test(scope)) fail("A block scope is not valid.");
     if (block.region === "body") continue;
+    // A continuous inclusion contributes body content, never a repeating page frame.
+    if (scope && !Object.hasOwn(layouts,scope)) continue;
     if (block.definitionKey === "SectionBreak" || block.definitionKey === "PageBreak") fail("A page or section break belongs in the body.");
     const key = scopedKey(owner(scope), optionalKey(block.layoutKey, "Block.layoutKey") ?? DEFAULT_PAGE_LAYOUT);
     const list = regions[block.region].get(key) ?? [];
@@ -433,6 +454,7 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
     const owned = owner(block.scope ?? "");
     let state = stateFor(owned);
     if (block.definitionKey === "SectionBreak") {
+      if (block.scope && !Object.hasOwn(layouts,block.scope)) continue;
       const layout = optionalKey(block.values.layout, "SectionBreak.layout");
       if (!layout || layout === DEFAULT_PAGE_LAYOUT) fail("A section must name its own layout.");
       if (sections.some(section => section.scope === owned && section.settings.layout === layout)) fail("Section layouts must be unique within a template.");
@@ -446,12 +468,17 @@ export function layoutPagedSections(blocks: readonly PageBlock[], design: PageDe
     section.body.push(block);
   }
   if (!sections.length) open(stateFor(""), true);
-  const selectedLayouts = new Set(sections.map(section => scopedKey(section.scope, section.settings.layout)));
+  // A header or footer must belong to a layout this document has: the default layout of the document or of an
+  // inclusion with pages of its own, or a section one of them opens. The default layout exists whether or not a page
+  // of it is printed — a host whose body lies entirely inside a paginated inclusion still lends its frame to those
+  // pages — so only a layout nobody declares is refused.
+  const declaredLayouts = new Set(sections.map(section => scopedKey(section.scope, section.settings.layout)));
+  for (const scope of ["", ...Object.keys(layouts)]) declaredLayouts.add(scopedKey(scope, pageSettings(layouts[scope], design).layout));
   for (const region of [regions.header, regions.footer]) for (const key of region.keys()) {
-    if (!selectedLayouts.has(key)) fail("A header or footer names a page layout that this document does not select.");
+    if (!declaredLayouts.has(key)) fail("A header or footer names a page layout that this document does not select.");
   }
-  return sections.filter(section => section.body.length || section.force).map(({ scope, settings, body, sectionId, sectionName }) => ({
-    settings, body, ...pageFrame(regions, scope, settings.layout), ...(sectionId ? { sectionId } : {}), ...(sectionName ? { sectionName } : {}),
+  return sections.filter(section => section.body.length || section.force).map(({ scope, settings, header, body, footer, sectionId, sectionName }) => ({
+    ...(scope ? { scope } : {}), settings, header, body, footer, ...(sectionId ? { sectionId } : {}), ...(sectionName ? { sectionName } : {}),
   }));
 }
 

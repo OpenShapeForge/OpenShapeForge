@@ -233,6 +233,7 @@ function customOperation(
     // drop those keys before the wire.
     input: { kind: "json-schema", schema: withOperationControls(definition.input.schema, definition) },
     output: { kind: "json-schema", schema: definition.output.schema },
+    ...(source.interfaces.web?.successMessage ? { successMessage: localized(source.interfaces.web.successMessage, "Action completed.") } : {}),
     ...(source.interfaces.web?.resultRenderer ? { resultRenderer: source.interfaces.web.resultRenderer } : {}),
     ...(source.interfaces.web?.form ? { form: operationForm(source.interfaces.web.form, definition.input.schema, source.id, definition.reliability.idempotency.mode === "keyed" ? [definition.reliability.idempotency.inputField] : []) } : {}),
     effects: definition.effects,
@@ -648,7 +649,11 @@ function projectField(
     ...(field.suggestions ? { suggestions: field.suggestions } : {}),
     ...(field.visibility ? { visibility: field.visibility } : {}),
     ...(field.entityValue ? { entityValue: { ...field.entityValue } } : {}),
-    ...(field.valueFieldsFrom ? { valueFieldsFrom: { reference: field.valueFieldsFrom.reference, field: field.valueFieldsFrom.field } } : {}),
+    // The logical binding and the head entity it resolves to; the snapshot column stays server-side storage.
+    ...(field.valueFieldsFrom ? { valueFieldsFrom: {
+      reference: field.valueFieldsFrom.reference, field: field.valueFieldsFrom.field,
+      ...(field.valueFieldsFrom.headEntity ? { headEntity: field.valueFieldsFrom.headEntity } : {}),
+    } } : {}),
     ...(field.typedBy ? { typedBy: { ...field.typedBy } } : {}),
     ...(field.allowedDefinitions ? { allowedDefinitions: [...field.allowedDefinitions].sort() } : {}),
     ...(field.defaultValue !== undefined ? { defaultValue: field.defaultValue } : {}),

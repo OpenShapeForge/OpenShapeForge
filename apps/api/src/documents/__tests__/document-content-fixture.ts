@@ -101,7 +101,8 @@ export function platformFor(who: Session) {
     operation("Document.insertVariant", "Document", "invoke", "write", { type: "object" }),
     operation("Document.linkTemplate", "Document", "invoke", "write", { type: "object" }),
     operation("DocumentVariant.insertBlock", "DocumentVariant", "invoke", "write", { type: "object" }),
-    operation("TemplateBlock.materialize", "TemplateBlock", "invoke", "read", { type: "object", required: ["definitionKey", "values", "references", "referenceField", "parametersField"], properties: {
+    operation("TemplateBlock.materialize", "TemplateBlock", "invoke", "read", { type: "object", required: ["definitionKey", "values", "references", "referenceField", "parametersField", "host"], properties: {
+      host: { type: "object" }, blockId: { type: "string" }, path: { type: "array" },
       definitionKey: { const: "TemplateBlock" }, values: { type: "object" }, references: { type: "object" }, referenceField: { const: "version" }, parametersField: { const: "parameters" } } }),
     ...FIELD_BLOCKS.map((entity) => operation(`${entity}.materialize`, entity, "invoke", "read", { type: "object", required: ["definitionKey", "values"], properties: { definitionKey: { const: entity }, values: { type: "object" } } })),
     operation("DocumentVersion.create", "DocumentVersion", "create", "write", { type: "object" }),

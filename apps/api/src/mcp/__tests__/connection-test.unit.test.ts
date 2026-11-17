@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "bun:test";
 import { testElicitedRow } from "../connection-test.js";
-import type { ElicitOnCreateEntry } from "../elicitation.js";
+import type { SourcedElicitEntry } from "../elicitation.js";
 import { connectionTokenSecretScope, encryptSecret, keyringFromEnv } from "../../connectors/secrets.js";
 import { __setOutboundAddressResolverForTests } from "../../modules/egress.js";
 
@@ -17,7 +17,7 @@ __setOutboundAddressResolverForTests(async () => ["93.184.216.34"]);
 
 const KEYRING = keyringFromEnv(`test:${Buffer.alloc(32, 7).toString("base64")}`)!;
 const TABLE = "core.connections";
-const ELICIT: ElicitOnCreateEntry = {
+const ELICIT: SourcedElicitEntry = {
   sourceField: "providerId",
   sourceEntity: "Provider",
   sourceTable: "core.providers",

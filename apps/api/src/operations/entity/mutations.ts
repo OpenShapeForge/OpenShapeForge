@@ -155,6 +155,7 @@ export async function mergeGeneratedEntityObjectForTable(
   field: string,
   patch: Record<string, unknown>,
   entityValues: EntityValueIOContext = {},
+  guard?: Parameters<typeof applyGeneratedRowUpdate>[5],
 ): Promise<GeneratedEntityRow | null> {
   if (entityValueCarriers(table).some((carrier) => carrier.fieldKey === field)) throw generatedCrudError("Entity values require a canonical whole-value update.", "BAD_USER_INPUT");
   const column = writableColumnMap(table, "update").get(field);
@@ -169,7 +170,7 @@ export async function mergeGeneratedEntityObjectForTable(
   // and would make required credentials appear absent to those guards.
   const supplied = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
   return applyGeneratedRowUpdate(db, session, table, id, new Map([[column, supplied]]),
-    undefined, entityValues, false, [], column);
+    guard, entityValues, false, [], column);
 }
 
 /**

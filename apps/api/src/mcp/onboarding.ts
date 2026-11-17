@@ -55,7 +55,7 @@ import {
   type DerivedTool,
   type DerivedToolsCatalogEntry,
 } from "./derived-tools.js";
-import type { ElicitOnCreateEntry } from "./elicitation.js";
+import type { SourcedElicitEntry } from "./elicitation.js";
 
 /**
  * Bump when a step is added or changes meaning so that everyone who completed
@@ -620,7 +620,7 @@ export type OnboardingEnvironment = {
    */
   connectionContract: (
     connectionTable: string,
-  ) => { elicit: ElicitOnCreateEntry; createTool: string } | null;
+  ) => { elicit: SourcedElicitEntry; createTool: string } | null;
   /**
    * The tenant-owned Connection row for one provider, as stored (values with
    * their secret markers, so required-value presence can be judged); null

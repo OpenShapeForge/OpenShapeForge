@@ -155,12 +155,16 @@ export function storeSubmission(
   pending: PendingConfiguration,
   content: JsonRecord,
   keyring?: SecretKeyring,
+  /** The AAD scope of a static entry's values; a sourced entry seals under its source table. */
+  secretScope?: string,
 ): JsonRecord {
   const { elicitable } = elicitationSchemaFromDefinitions(pending.definitions);
+  const scope = pending.elicit.fields ? secretScope : pending.elicit.sourceTable;
+  if (!scope) throw new HttpError(500, "INTERNAL", "Secure input requires its storage scope.");
   return {
     ...pending.modelValues,
     [pending.elicit.into]: storeElicitedValues(
-      pending.elicit.sourceTable,
+      scope,
       elicitable,
       content,
       keyring,

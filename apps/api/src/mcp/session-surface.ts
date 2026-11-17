@@ -164,7 +164,7 @@ export function createSessionSurface(scope: ServerScope) {
       const createTool = catalog.tools.find(
         (tool) => tool.table === connectionTable && tool.operation === "create",
       )?.name;
-      return elicit && createTool ? { elicit, createTool } : null;
+      return elicit && !elicit.fields && createTool ? { elicit, createTool } : null;
     },
     tenantConnection: (connectionTable, providerRef, providerId) =>
       runtimeRowsByFilter(db, session, tables, connectionTable, {

@@ -43,6 +43,10 @@ export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelin
     }
   }
   function config(table: GeneratedCrudTable): Config {
+    // Static secure-input values are hidden by declaration, whatever the
+    // column is called: the name pattern below is a net, not the contract.
+    const secureField = table.source?.secureInputOnCreate?.fields ? table.source.secureInputOnCreate.into : undefined;
+    const secureColumn = secureField ? table.columns.find(column => column.sourceField === secureField)?.name : undefined;
     const physicalColumns = new Set((manifest.entityValues.carriers as unknown as RuntimeEntityValueCarrier[])
       .filter(carrier => carrier.schema === table.schema && carrier.table === table.table)
       .flatMap(carrier => Object.values(carrier.definitions).flatMap(definition => definition.references
@@ -51,7 +55,7 @@ export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelin
       entityIds: Object.entries(entityNames).filter(([, name]) => name === table.source!.authoringEntityName).map(([id]) => id).sort(), aggregate: table.source!.graphql?.singleQueryName ?? table.source!.authoringEntityName!,
       schema: table.schema, table: table.table, pk: table.primaryKey!, visibility: (table.realtime?.visibilityColumns ?? []).filter(name => {
         const column = table.columns.find(column => column.name === name);
-        return column && !physicalColumns.has(name) && (!table.retention || name === "id" || name.endsWith("_id")) && !column.classification && !column.fieldPolicy && !/password|secret|token|credential|private.?key|cipher|encrypted/i.test(name);
+        return column && name !== secureColumn && !physicalColumns.has(name) && (!table.retention || name === "id" || name.endsWith("_id")) && !column.classification && !column.fieldPolicy && !/password|secret|token|credential|private.?key|cipher|encrypted/i.test(name);
       }),
       tracked: Object.fromEntries((table.source?.computedFields ?? []).flatMap(field => {
         if (field.resolver !== "temporalThreshold") return [];
@@ -69,7 +73,7 @@ export function auditTableConfigs(tables: readonly GeneratedCrudTable[], timelin
         name: column.sourceField!, exact: ["numeric", "bigint"].includes(column.type),
         // The tenant field source never enters before/after raw: its audit is
         // per key, with classified keys redacted (operations/entity/extensions/write.ts).
-        hidden: !!table.retention || !!column.classification || !!column.fieldPolicy || column.name === "extension_values" || /password|secret|token|credential|private.?key|cipher|encrypted/i.test(column.name),
+        hidden: !!table.retention || !!column.classification || !!column.fieldPolicy || column.name === "extension_values" || column.name === secureColumn || /password|secret|token|credential|private.?key|cipher|encrypted/i.test(column.name),
       }])), parents: (parentEdges.get(table.name) ?? []).map(edge => ({ column: edge.column, entity: edge.parent.source!.authoringEntityName! })) };
   }
   return business.map(table => config(table));

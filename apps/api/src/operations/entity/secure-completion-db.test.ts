@@ -145,7 +145,7 @@ test("private app save validates, creates once and rolls back a refused attempt"
   }});
   try {
     const pending=await withConfigurationCredential(request,()=>mintConfiguration({db:runtime.db,session,
-      tenantId:session.tenantId,userId:session.userId,table:table.name,elicit:{...operation.interaction.secureInput!,sourceTable:table.name},
+      tenantId:session.tenantId,userId:session.userId,table:table.name,elicit:{sourceField:"parentTaskId",sourceEntity:"Task",definitionsField:"metadata",into:"metadata",sourceTable:table.name},
       modelValues:values,definitions:[{key:"label",osfType:"string",required:true}],displayName:"Synthetic"}));
     const post=(payload:string)=>app.inject({method:"POST",url:"/api/entity-configuration/app",headers:{"content-type":"application/x-www-form-urlencoded",authorization:`Form ${pending.token}`},payload});
     expect((await post("")).statusCode).toBe(400);

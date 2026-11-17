@@ -59,6 +59,7 @@ export type StoredFieldDefinition = {
   label?: unknown;
   description?: unknown;
   options?: { items?: { value?: unknown; label?: unknown }[] };
+  classification?: { sensitivity?: unknown };
 };
 
 export type PendingConfiguration = {
@@ -73,6 +74,10 @@ export type PendingConfiguration = {
   relationId?: string | null;
   /** Physical table the created row is written to. */
   table: string;
+  /** Rotation: the existing record whose secure values this form replaces. */
+  existingId?: string;
+  /** Rotation: the record version the person started from. */
+  expectedVersion?: string;
   elicit: ElicitOnCreateEntry;
   /** The model-supplied identity arguments, target field already removed. */
   modelValues: JsonRecord;

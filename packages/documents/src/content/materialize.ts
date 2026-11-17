@@ -584,6 +584,7 @@ async function materializeContent(
           definitionKey: block.definitionKey,
           schemaVersion: block.schemaVersion,
           renderer: renderer!,
+          authoredValues: block.values,
           values,
           references,
           ...(materialization ? { materialization } : {}),

@@ -206,6 +206,7 @@ describe("canonical content snapshots", () => {
     const second = await f.run();
     expect(canonicalJson(first)).toBe(canonicalJson(second));
     expect(first.blocks[0]!.values.body).toBe("Hello Reader from Example.");
+    expect(first.blocks[0]!.authoredValues.body).toBe("Hello {{local.name}} from {{chips.brand.name}}.");
     expect(Object.isFrozen(first.blocks[0]!.values)).toBe(true);
     expect(Object.isFrozen(first.templates[0]!.version.variants)).toBe(true);
     f.versions.root = version("root", [text("replacement", "Changed")]);

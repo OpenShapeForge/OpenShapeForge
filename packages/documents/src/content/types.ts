@@ -214,6 +214,8 @@ export type MaterializedContentBlock = {
   readonly definitionKey: string;
   readonly schemaVersion: number;
   readonly renderer: string;
+  /** Effective authored content, including inclusion-local edits, before variable substitution. */
+  readonly authoredValues: JsonObject;
   readonly values: JsonObject;
   readonly references: Readonly<
     Record<string, ContentResolvedEntity | readonly ContentResolvedEntity[] | null>

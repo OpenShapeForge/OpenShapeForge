@@ -16,6 +16,7 @@ test('included blocks edit, insert and delete locally while preserving source an
  const content={blocks:[{id:'title',values:{markdown:'Changed locally'}},{id:'new-block',definitionKey:'TextBlock',values:{markdown:'Inserted between'}},{id:'protected'}]};
  const {result,original}=await render(content,'tenant',true);
  expect(result.blocks.map(block=>block.values.markdown)).toEqual(['Changed locally','Inserted between','Required clause','Title','Required clause','Optional']);
+ expect(result.blocks[0]!.authoredValues.markdown).toBe('Changed locally');
  expect(original.variants[0]!.blocks.map(block=>block.values.markdown)).toEqual(['Title','Required clause','Optional']);
  expect(result.templates.find(template=>template.path[0]==='one')!.version.variants[0]!.blocks[0]!.values.markdown).toBe('Title');
 });

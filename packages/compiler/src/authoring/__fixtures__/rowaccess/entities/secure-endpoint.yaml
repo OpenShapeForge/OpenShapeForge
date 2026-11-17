@@ -1,0 +1,80 @@
+schemaVersion: 3
+kind: coreEntity
+module: core
+entity: SecureEndpoint
+title: Secure Endpoint
+description: Test fixture for static secure input, rotation and record-bound resolution.
+language: en
+displayTemplate: "{{name}}"
+filterField: name
+labels:
+  en: Secure Endpoint
+domains:
+  - relations
+authorization:
+  roles:
+    read: [ Relations.All.Read ]
+    create: [ Relations.All.ReadWrite ]
+    update: [ Relations.All.ReadWrite ]
+    delete: [ Relations.All.ReadWrite ]
+fields:
+  - key: name
+    osfType: string
+    required: true
+    persisted:
+      column: name
+      storageClass: core
+  - key: url
+    osfType: string
+    required: true
+    persisted:
+      column: url
+      storageClass: core
+  - key: secrets
+    osfType: object
+    required: false
+    persisted:
+      column: secret_values
+      storageClass: core
+operations:
+  create:
+    name: Create secure endpoint
+    description: Creates an endpoint after server-issued secure input.
+    implementation: { type: entity, action: create }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    confirmation: { mode: none }
+    interaction:
+      type: secureInput
+      into: secrets
+      fields:
+        - key: apiKey
+          osfType: string
+          required: true
+          label: { en: API key }
+          classification: { sensitivity: confidential }
+        - key: signingSecret
+          osfType: string
+          label: { en: Signing secret }
+          classification: { sensitivity: confidential }
+      resolve:
+        operations: [ fixture.send ]
+        egress: { urlField: url }
+  update:
+    name: Update secure endpoint
+    description: Updates an endpoint; its secrets are replaced through secure input.
+    implementation: { type: entity, action: update }
+    effects: { data: write, external: none }
+    reliability:
+      idempotency: { mode: none }
+    concurrency:
+      version: { mode: required, field: updatedAt }
+    confirmation: { mode: none }
+    interaction:
+      type: secureInput
+      into: secrets
+interfaces:
+  rest: {}
+  graphql: {}
+  mcp: {}

@@ -317,11 +317,40 @@ export type EntityOperationAction = CrudOperationKey;
  */
 export type EntityOperationSecureInput = {
   type: "secureInput";
-  sourceField: string;
-  sourceEntity: string;
-  definitionsField: string;
   into: string;
   message?: string;
+  /** Source form: the definitions live on another entity's row. */
+  sourceField?: string;
+  sourceEntity?: string;
+  definitionsField?: string;
+  /** Static form: the definitions are declared with the Operation. */
+  fields?: EntityOperationSecureInputField[];
+  /** Static form only: who may open the stored values, and for which destination. */
+  resolve?: EntityOperationSecureInputResolve;
+  /**
+   * Compiled, never authored: the entity's update Operation declares secure
+   * input too, so the stored values can be replaced through the same form.
+   */
+  rotation?: true;
+};
+
+/** One statically declared secure-input field; a primitive canonical FieldDefinition. */
+export type EntityOperationSecureInputField = {
+  key: string;
+  osfType: "string" | "integer" | "number" | "boolean";
+  required?: boolean;
+  label?: LocalizedText;
+  description?: LocalizedText;
+  classification?: { sensitivity: "public" | "internal" | "confidential" };
+};
+
+/**
+ * Only the named plugin Operations may resolve the stored values, and the
+ * egress grant minted with them admits nothing but the record's own URL.
+ */
+export type EntityOperationSecureInputResolve = {
+  operations: string[];
+  egress: { urlField: string };
 };
 
 /**

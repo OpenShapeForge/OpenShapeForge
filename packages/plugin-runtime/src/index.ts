@@ -435,14 +435,7 @@ export type RuntimeOperationDefinition = OperationReference & {
   /** Canonical interaction meaning; adapters decide only how to render it. */
   interaction?: {
     confirmation?: OperationConfirmation;
-    secureInput?: {
-      type: "secureInput";
-      sourceField: string;
-      sourceEntity: string;
-      definitionsField: string;
-      into: string;
-      message?: string;
-    };
+    secureInput?: RuntimeOperationSecureInput;
   };
 };
 
@@ -740,6 +733,34 @@ export type PluginDatabase = {
   ): Promise<T>;
 };
 
+/** One statically declared secure-input field; a primitive canonical FieldDefinition. */
+export type RuntimeSecureInputField = {
+  key: string;
+  osfType: "string" | "integer" | "number" | "boolean";
+  required?: boolean;
+  label?: Readonly<Record<string, string>>;
+  description?: Readonly<Record<string, string>>;
+  classification?: { sensitivity: "public" | "internal" | "confidential" };
+};
+/**
+ * Server-issued secure input on an entity Operation. Either the definitions
+ * live on a source entity's row (`source*`), or they are declared statically
+ * (`fields`), in which case `resolve` names the plugin Operations that may open
+ * the stored values and the record field whose URL their egress grant admits.
+ */
+export type RuntimeOperationSecureInput = {
+  type: "secureInput";
+  into: string;
+  message?: string;
+  sourceField?: string;
+  sourceEntity?: string;
+  definitionsField?: string;
+  fields?: readonly RuntimeSecureInputField[];
+  resolve?: { operations: readonly string[]; egress: { urlField: string } };
+  /** The entity's update Operation lets the stored values be replaced through the same form. */
+  rotation?: true;
+};
+
 /** Core-minted opaque permission; never construct or widen this grant. */
 export type RuntimeConnectionGrant = { readonly __brand: unique symbol };
 /** Resolve by a known Connection or an Adapter's available Connection. */
@@ -787,6 +808,27 @@ export type RuntimeConnectionResolution =
       "SECRET_KEYRING_MISSING" | "REAUTHORIZATION_REQUIRED" | "TOKEN_REFRESH_FAILED";
       message: string };
 
+/** One record of an entity whose create Operation declares static secure input with `resolve`. */
+export type RuntimeEntitySecretSelector = { entity: string; id: string };
+/** Plaintext for trusted server code only. Never log or return these values. */
+export type RuntimeEntitySecretValues = {
+  entity: string;
+  id: string;
+  /** Every stored secure-input value, decrypted where it was stored encrypted. */
+  values: Readonly<Record<string, string>>;
+  /** The declared confidential keys; the complement is NOT safe to log. */
+  secretKeys: readonly string[];
+  /** The record's stored URL. The grant admits this origin and path, and nothing else. */
+  url: string;
+  /** Single use, short lived, bound to the resolving session; hand it to `egress.request`. */
+  egressGrant: RuntimeConnectionGrant;
+};
+export type RuntimeEntitySecretResolution =
+  | { ok: true; record: RuntimeEntitySecretValues }
+  | { ok: false; code: "NOT_FOUND" | "FORBIDDEN" | "SECRET_KEYRING_MISSING" |
+      "EGRESS_TARGET_INVALID" | "SECRET_REENTRY_REQUIRED";
+      message: string };
+
 export type PluginPlatformServices = {
   /** Diagnostic journal access requires a live verified tenant session and McpInsights.Manage. */
   readonly mcpDiagnostics?: import("./diagnostics.js").RuntimeMcpDiagnosticServices<PluginSessionContext>;
@@ -804,6 +846,12 @@ export type PluginPlatformServices = {
    * Absent on runtimes without this capability; consumers must fail closed. */
   readonly secrets?: {
     resolveConnectionValues(session: PluginSessionContext, selector: RuntimeConnectionSelector): Promise<RuntimeConnectionResolution>;
+    /**
+     * Open one record's secure-input values for the plugin Operation its entity
+     * names under `resolve.operations`, with a grant for that record's own URL.
+     * Absent on runtimes without this capability; consumers must fail closed.
+     */
+    resolveEntityValues?(session: PluginSessionContext, selector: RuntimeEntitySecretSelector): Promise<RuntimeEntitySecretResolution>;
   };
   /** One POST on a single-use grant from `secrets`, in the session that resolved it. Never retried; a redirect
    * is a refusal. Absent on runtimes without this capability; consumers must fail closed. */

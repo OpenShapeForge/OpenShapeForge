@@ -87,8 +87,10 @@ export function buildMcp(
   }
 
   const secureInput = operationByAction(coreEntity).create?.[1].interaction;
+  const rotation = secureInput?.fields !== undefined &&
+    operationByAction(coreEntity).update?.[1].interaction !== undefined;
   const elicitOnCreate = secureInput
-    ? (({ type: _type, ...value }) => value)(secureInput)
+    ? (({ type: _type, ...value }) => ({ ...value, ...(rotation ? { rotation: true as const } : {}) }))(secureInput)
     : undefined;
 
   return {

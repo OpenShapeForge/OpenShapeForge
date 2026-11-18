@@ -437,6 +437,8 @@ export interface EntityWebRecordLayout {
   preset?: "main" | "main-context" | "inbox-main-context";
   /** Omit the surrounding workspace tab chrome; record task tabs remain available. */
   workspaceTabs?: boolean;
+  /** Direct reference used as the parent in record navigation. */
+  breadcrumbParent?: string;
   tabs: import("./views.js").ViewGroup[];
   /** Deliberately selected summary, independent of the full record tabs. */
   context?: { fields: string[]; relationships?: string[]; contacts?: import("./views.js").ContactContextPresentation; records?: import("./views.js").RelatedRecordContextPresentation[] };

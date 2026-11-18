@@ -407,6 +407,7 @@ export function compile(artifacts: LoadedArtifacts): CompiledEntityContract {
             web: {
               ...(coreEntity.interfaces.web.views?.record?.layout.preset ? { recordPreset: coreEntity.interfaces.web.views.record.layout.preset } : {}),
               ...(coreEntity.interfaces.web.views?.record?.layout.workspaceTabs !== undefined ? { recordWorkspaceTabs: coreEntity.interfaces.web.views.record.layout.workspaceTabs } : {}),
+              ...(coreEntity.interfaces.web.views?.record?.layout.breadcrumbParent !== undefined ? { recordBreadcrumbParent: coreEntity.interfaces.web.views.record.layout.breadcrumbParent } : {}),
               ...(Object.keys(namedViews).length ? { namedViews } : {}),
               ...(coreEntity.interfaces.web.fields
                 ? { fields: coreEntity.interfaces.web.fields }

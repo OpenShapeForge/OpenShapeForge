@@ -462,6 +462,8 @@ export type WebRecordView = {
   layout: {
     tabs: WebRecordTab[];
     workspaceTabs?: boolean;
+    /** Relationship key for an explicitly selected record navigation parent. */
+    breadcrumbParent?: string;
     context: { groups: WebFieldGroup[]; relationships: string[]; contacts?: WebContactContext; records?: WebRelatedRecordContext[] };
   };
   variableSources?: WebVariableSource[];

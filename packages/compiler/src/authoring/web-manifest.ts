@@ -1247,6 +1247,14 @@ function projectEntity(
       }
     }
   }
+  const breadcrumbParent = contract.interfaces?.web?.recordBreadcrumbParent;
+  if (breadcrumbParent !== undefined) {
+    const parent = relationships[breadcrumbParent];
+    if (parent?.kind !== "belongsTo" || !parent.recordField || parent.via || parent.through ||
+      parent.targetEntityId === entityName || !fields[parent.recordField]?.supports.read) {
+      throw new Error(`${entityName}: breadcrumbParent must name a readable direct reference to another entity.`);
+    }
+  }
   const detail = view?.detail;
   const modes: WebViewMode[] = [
     ...(operations.get && detail ? ["read" as const] : []),
@@ -1306,6 +1314,7 @@ function projectEntity(
     ...(detail?.header.badges?.items.length ? { badges: detail.header.badges.items } : {}),
     layout: {
       tabs: recordTabs,
+      ...(breadcrumbParent !== undefined ? { breadcrumbParent } : {}),
       ...(contract.interfaces?.web?.recordWorkspaceTabs !== undefined ? { workspaceTabs: contract.interfaces.web.recordWorkspaceTabs } : {}),
       context: {
         ...(contextRecords?.length ? { records: contextRecords } : {}),

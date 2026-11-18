@@ -818,6 +818,7 @@ export interface CompiledEntityContract {
       namedViews?: Record<string, CompiledEntityWebNamedViewDefinition>;
       recordPreset?: "main" | "main-context" | "inbox-main-context";
       recordWorkspaceTabs?: boolean;
+      recordBreadcrumbParent?: string;
       fields?: Record<string, { render: import("./common.js").FieldRender }>;
       operations: Partial<Record<EntityOperationIntent, boolean>>;
       collectionActions?: string[];

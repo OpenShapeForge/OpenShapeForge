@@ -167,7 +167,10 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
     name: { en: "Unpublish", nl: "Depubliceren" },
     description: { en: "Stop new uses of this publication while preserving existing references and version history.", nl: "Stop nieuw gebruik van deze publicatie. Bestaande koppelingen en versiehistorie blijven bewaard." },
     implementation: { ...publish.implementation, handler: `unpublish${entity.entity}From${versioning.versionEntity}` },
-    output: { schema: { type: "object", required: ["id", "changed"], properties: { id: { type: "string", format: "uuid" }, changed: { type: "boolean" } } } },
+    output: { schema: { type: "object", required: ["id", "changed"], properties: {
+      id: { type: "string", format: "uuid", "x-osf-i18n": { title: { en: "Record", nl: "Record" } } },
+      changed: { type: "boolean", "x-osf-i18n": { title: { en: "Publication withdrawn", nl: "Publicatie ingetrokken" } } },
+    } } },
     errors: [
       { status: 404, code: "NOT_FOUND", description: "The editable source no longer exists." },
       { status: 409, code: "VERSION_CONFLICT", description: "The editable source changed before withdrawal." },

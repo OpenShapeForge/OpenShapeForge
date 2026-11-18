@@ -2799,7 +2799,8 @@
                 "breadcrumbParent": {
                   "type": "string",
                   "pattern": "^[a-z][A-Za-z0-9]*$",
-                  "description": "Direct record relationship to follow as the breadcrumb parent."
+                  "description": "Direct record relationship to follow as the breadcrumb parent.",
+                  "x-osf-i18n": { "title": { "en": "Breadcrumb parent", "nl": "Bovenliggend record voor broodkruimelpad" } }
                 },
                 "workspaceTabs": {
                   "type": "boolean",

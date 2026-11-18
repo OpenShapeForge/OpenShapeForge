@@ -258,7 +258,17 @@ function environment(trx: unknown, tenantId: string, carrier: RuntimeEntityValue
       if (block.schemaVersion !== definition!.schemaVersion) refuse("INVALID_DEFINITION", "The block definition version is unsupported.");
       validatedValues(context, block.definitionKey, block.values);
       const engine = createContentEngine({tenantId,locale:host.locale},resolvers);
-      const bound = engine.bindReferences(block, definition!, {catalogue:host.host.catalogue,parameters:host.host.parameters??{},...(!host.host.parameters ? {capture:{deferred:false,literalBraces:false,defer:()=>undefined,deferParameter:(name:string)=>name}} : {})});
+      const parameters = host.host.parameters ?? {};
+      const bound = engine.bindReferences(block, definition!, {
+        catalogue: host.host.catalogue,
+        parameters,
+        // A draft may still be waiting for a parameter. The engine checks its
+        // declared type now and reads every concrete reference under the actor.
+        capture: {
+          deferred: false, literalBraces: false, defer: () => undefined,
+          deferParameter: name => Object.hasOwn(parameters, name) ? undefined : name,
+        },
+      });
       await engine.resolveReferences(bound, compositionFor(carrier)(block.definitionKey)?.templateVersionField);
     }),
     capture: (identity) => acting(async (context, host, resolvers) => captureInclusionContent({

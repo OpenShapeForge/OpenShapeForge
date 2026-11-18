@@ -392,6 +392,28 @@ export async function mergeInclusionCopy(input: InclusionMerge, depth = 0): Prom
     const { locked: _locked, ...local } = block;
     const before = old?.get(block.id), after = authored.get(block.id);
     const sourceChanged = Boolean(old) && (!before || !after || !sameAuthored(before, after));
+    // Columns do not store a per-child capture baseline. We can use the new
+    // capture as that baseline only when it is exactly the same source, and
+    // preserve permitted edits while applying the existing child lock rules.
+    if (entry.locked && upcoming.locked && block.editableChildren && replacement.editableChildren
+        && isColumns(block.definitionKey) && block.definitionKey === replacement.definitionKey
+        && entry.hash === upcoming.hash && entry.deferred === upcoming.deferred
+        && sameAuthored(
+          { ...block, values: containerShell(block.values, true) },
+          { ...replacement, values: containerShell(replacement.values, true) },
+        )) {
+      const values = await mapColumns(replacement.values, async (children, slot) => {
+        const source = await sourceRecord(children);
+        const merged = await mergeInclusionCopy({
+          baseline: source, current: columnBlocks(block.values[slot]),
+          authoredOld: children, authoredNew: children,
+          captured: { source, blocks: children }, compositionOf,
+        }, depth + 1);
+        return merged.blocks;
+      });
+      chosen.set(block.id, { ...replacement, values });
+      continue;
+    }
     const mine = nestedCopy(block, compositionOf), theirs = nestedCopy(replacement, compositionOf);
     if (upcoming.locked && (!replacement.editableChildren || !mine || !theirs)) conflict("The new template locks a block that was changed here.");
     if (mine && theirs && (sourceChanged || replacement.editableChildren)) {

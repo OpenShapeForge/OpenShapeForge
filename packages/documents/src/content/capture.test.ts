@@ -326,3 +326,26 @@ test("a proposal lock protects the container and inherited blocks, with editable
   ]);
   expect(copy.blocks.every(child => child.lockOverride === undefined)).toBe(true);
 });
+
+test("a section lock governs its body and named frames until the next section", async () => {
+  const f = fixture();
+  const line = (id: string, extra?: Partial<ContentBlock>) => block(id, "Line", { text: id }, extra);
+  const section = (layout: string, extra?: Partial<ContentBlock>) => block(layout, "SectionBreak", { layout }, extra);
+  const proposal = version("sections", {}, [
+    line("intro"),
+    section("confidential", { lockOverride: true }),
+    line("content"),
+    line("exception", { lockOverride: false }),
+    section("appendix"),
+    line("appendix-body"),
+    line("footer", { region: "footer", layoutKey: "confidential" }),
+  ]);
+  const definitions: CompiledContentBlockRegistry = {
+    ...registry,
+    SectionBreak: { entityName: "SectionBreak", schemaVersion: 1, fields: { layout: { baseType: "string" } }, renderers: { document: "section" } },
+  };
+  const captured = await captureTemplateBlocks({
+    tenantId, channel: "document", locale: "en", version: proposal, variantId: "sections-document", parameters: {},
+  }, definitions, f.resolvers);
+  expect(captured.filter(block => block.locked).map(block => block.id)).toEqual(["confidential", "content", "footer"]);
+});

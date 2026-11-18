@@ -73,6 +73,8 @@ fields:
           - { key: region, osfType: string }
           - { key: layoutKey, osfType: string }
           - { key: locked, osfType: boolean }
+          - { key: lockOverride, osfType: boolean }
+          - { key: editableChildren, osfType: boolean }
 operations:
   materialize:
     name: Prepare included template

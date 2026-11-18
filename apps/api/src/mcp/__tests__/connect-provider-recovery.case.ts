@@ -37,7 +37,7 @@ mock.module("../connection-token-refresh.js", () => ({
 }));
 mock.module("../catalog.js", () => ({ entityForTable: () => ({ elicitOnCreate: { sourceTable: "provider", definitionsField: "fields" } }) }));
 mock.module("../declarative-execution.js", () => ({ resolveTemplate: (value: string) => value }));
-mock.module("../onboarding.js", () => ({ isOrganizationAdministrator: () => false }));
+mock.module("../onboarding.js", () => ({ isOrganizationAdministrator: () => false, mayStartOrganizationSignIn: () => false }));
 mock.module("../connection-guidance.js", () => ({ missingRequiredConnectionValues: () => [] }));
 mock.module("../catalog-rows.js", () => ({ connectionScopeOf: (auth: any) => auth.connectionScope }));
 mock.module("../tool-results.js", () => ({ ok: (data: unknown) => ({ structuredContent: data }) }));

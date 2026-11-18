@@ -395,6 +395,58 @@ describe.skipIf(!ready)("personal API keys end to end", () => {
     expect(invalid.status).toBe(400);
   });
 
+  test("a personal key works on its organization's MCP resource, and on no other organization's", async () => {
+    const key = await mint({});
+    const slugs = (await sql<{ id: string; slug: string }>`
+      select id::text as id, slug from platform.tenants
+    `.execute(seed!.db)).rows;
+    const own = slugs.find((row) => row.id.toLowerCase() === tenantId.toLowerCase())?.slug;
+    const other = slugs.find((row) => row.id.toLowerCase() !== tenantId.toLowerCase())?.slug;
+    expect(own).toBeDefined();
+    const rpc = async (path: string, method: string, params: Record<string, unknown> = {}, credential = key.secret) => {
+      const response = await app!.inject({
+        method: "POST",
+        url: path,
+        headers: {
+          accept: "application/json, text/event-stream",
+          "content-type": "application/json",
+          authorization: `Bearer ${credential}`,
+        },
+        payload: { jsonrpc: "2.0", id: 1, method, params },
+      });
+      // A JSON-RPC answer arrives as JSON or as one SSE `data:` event.
+      const text = response.body;
+      const json = text.trimStart().startsWith("{")
+        ? text
+        : text.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5)).join("");
+      return { status: response.statusCode, body: json ? JSON.parse(json) : undefined };
+    };
+
+    // The organization's own resource: the key is admitted and acts as its owner.
+    const listed = await rpc(`/${own}`, "tools/list");
+    expect(listed.status).toBe(200);
+    const tools = (listed.body.result?.tools ?? []) as Array<{ name: string }>;
+    expect(tools.length).toBeGreaterThan(0);
+    expect(tools.map((tool) => tool.name)).toContain("whoami");
+    const whoami = await rpc(`/${own}`, "tools/call", { name: "whoami", arguments: {} });
+    expect(whoami.status).toBe(200);
+    expect(whoami.body.result?.isError ?? false).toBe(false);
+
+    // The shared mount admits it too.
+    expect((await rpc("/api/mcp", "tools/list")).status).toBe(200);
+
+    // Another organization's resource refuses it like a token of another organization.
+    if (other) {
+      const refused = await rpc(`/${other}`, "tools/list");
+      expect(refused.status).toBe(403);
+      expect(refused.body.error.code).toBe("ORGANIZATION_RESOURCE_FORBIDDEN");
+    }
+
+    // A revoked key is nothing on MCP either.
+    await op("mine/revoke", { id: key.id }, ownerToken);
+    expect((await rpc(`/${own}`, "tools/list")).status).toBe(401);
+  });
+
   test("a lifetime past 90 days is refused", async () => {
     const tooLong = await op("mine/create", { displayName: "forever", expiresInDays: 365 }, ownerToken);
     expect(tooLong.status).toBe(400);

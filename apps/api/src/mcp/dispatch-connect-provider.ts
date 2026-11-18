@@ -21,7 +21,7 @@ import { connectionTokenSecretScope } from "../connectors/secrets.js";
 import { HttpError } from "../rest/http-error.js";
 import { connectRefreshOutcome } from "./connect-refresh-outcome.js";
 import { missingRequiredConnectionValues } from "./connection-guidance.js";
-import { isOrganizationAdministrator } from "./onboarding.js";
+import { mayStartOrganizationSignIn } from "./onboarding.js";
 import { connectionScopeOf } from "./catalog-rows.js";
 import { entityForTable } from "./catalog.js";
 import { elicitedKeyring, oauthCallbackUrl } from "./handoff-config.js";
@@ -93,7 +93,7 @@ export async function connectProviderStep(
       : declaredScope;
   if (
     scope_ === "tenant" &&
-    !isOrganizationAdministrator(session.roles)
+    !mayStartOrganizationSignIn(session.roles)
   ) {
     throw new HttpError(
       403,

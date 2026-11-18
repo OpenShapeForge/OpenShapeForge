@@ -531,6 +531,21 @@ export function isOrganizationAdministrator(roles: readonly string[] | null | un
   return granted.has(ROLE_ADMIN) || granted.has(IDENTITY_LINK_ADMIN_ROLE);
 }
 
+/**
+ * The one organization right an automatic identity may hold without being an
+ * administrator: starting the provider sign-in of a shared (tenant) connection.
+ * It mints an authorization URL and nothing else. The person who completes it
+ * decides which provider account the organization connects; the holder never
+ * sees a token, cannot read or change configuration, and gains no other
+ * administrator surface. A setup workflow holds it so it can offer the sign-in
+ * the moment a connection's client credentials are saved.
+ */
+export const ORGANIZATION_SIGN_IN_ROLE = "integration_organization_sign_in";
+
+export function mayStartOrganizationSignIn(roles: readonly string[] | null | undefined): boolean {
+  return isOrganizationAdministrator(roles) || (roles ?? []).includes(ORGANIZATION_SIGN_IN_ROLE);
+}
+
 // ---------------------------------------------------------------------------
 // Tools
 

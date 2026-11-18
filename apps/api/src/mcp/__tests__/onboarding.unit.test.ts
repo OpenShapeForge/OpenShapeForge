@@ -8,6 +8,8 @@ import { IDENTITY_LINK_ADMIN_ROLE } from "../../auth/organization-roles.js";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { DerivedToolsCatalogEntry } from "../derived-tools.js";
 import {
+  ORGANIZATION_SIGN_IN_ROLE,
+  mayStartOrganizationSignIn,
   callOnboardingTool,
   computeOnboarding,
   COMPLETE_ONBOARDING_TOOL,
@@ -227,6 +229,13 @@ describe("onboarding roles and instructions", () => {
     expect(isOrganizationAdministrator(["org_admin"])).toBe(true);
     expect(isOrganizationAdministrator(["people_manager"])).toBe(false);
     expect(isOrganizationAdministrator([])).toBe(false);
+  });
+  it("lets the sign-in role start an organization sign-in without making it an administrator", () => {
+    expect(mayStartOrganizationSignIn([ORGANIZATION_SIGN_IN_ROLE])).toBe(true);
+    expect(isOrganizationAdministrator([ORGANIZATION_SIGN_IN_ROLE])).toBe(false);
+    expect(mayStartOrganizationSignIn(["org_admin"])).toBe(true);
+    expect(mayStartOrganizationSignIn(["integration_admin", "integration_user"])).toBe(false);
+    expect(mayStartOrganizationSignIn(null)).toBe(false);
   });
   it("names both ways to the detail in the server instructions", () => {
     expect(ONBOARDING_INSTRUCTION).toContain("Call `whoami` first");

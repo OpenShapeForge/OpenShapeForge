@@ -1228,6 +1228,13 @@ a database to be managed — no keyring and no realm write — and the resolver
 needs the bearer issuer and the `OPENSHAPEFORGE_KEYCLOAK_*` admin settings,
 without which it answers `503` rather than accepting a key it cannot check.
 
+A personal key also works on MCP: the shared `/api/mcp` mount (in host mode as
+well) and the organization's own resource `/<alias>`, as `Authorization: Bearer
+osf_user_…`. On `/<alias>` the key's tenant must be that organization, or the
+request is refused with `403 ORGANIZATION_RESOURCE_FORBIDDEN`. The key acts as
+its owner there as everywhere: the same roles, minus any narrowing, and no OAuth
+scopes. Integration keys remain refused on the MCP resources.
+
 The end-to-end proof is
 `apps/api/src/auth/api-key/__tests__/personal-api-key.e2e.test.ts`, against the
 real realm and database.

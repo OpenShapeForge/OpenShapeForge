@@ -5,6 +5,7 @@
  * through to another. `identity.ts` composes this with the acting Relation
  * and the organization address check into `resolveSessionContext`.
  */
+import { sessionTenantIsAlias } from "./organization-address.js";
 import { keyRequestContext } from "./api-key/restrictions.js";
 import { mcpResourceHeader } from "./mcp-resource-header.js";
 import { BearerVerifierUnavailableError } from "@openshapeforge/auth";
@@ -196,11 +197,16 @@ export async function resolveCredentialSession(
     // A personal key: same routing rule as an integration key — once the
     // prefix says it is ours, it is accepted or refused here and never
     // retried as a JWT — but it resolves to the PERSON who minted it.
+    //
+    // Unlike an integration key it is accepted by the MCP resources too. Their
+    // bearer-only rule exists for tokens: an `aud` stops a JWT minted for one
+    // resource being replayed at another. A personal key is not a token of any
+    // resource. It is this deployment's own credential, bound to one person's
+    // linked membership of one tenant, which the resolver re-reads on every
+    // request. On the per-organization resource (`/<alias>`) that tenant must
+    // BE the organization at the path, checked by registry slug like the short
+    // addresses, and refused exactly like a token of another organization.
     if (looksLikePersonalApiKey(presented)) {
-      if (options.organization || options.requiredAudience !== undefined) {
-        console.warn("[auth] A personal API key was presented to a bearer-only resource. Rejecting.");
-        return EMPTY_SESSION;
-      }
       const issuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER?.trim();
       const ownerAccount = personalKeyOwnerLookup();
       if (!options.db || !issuer || !ownerAccount) {
@@ -218,7 +224,14 @@ export async function resolveCredentialSession(
         presented,
         keyRequestContext(headers),
       );
-      return session ?? EMPTY_SESSION;
+      if (!session) return EMPTY_SESSION;
+      if (options.organization && !(await sessionTenantIsAlias(options.db, session, options.organization.alias))) {
+        throw new OrganizationBindingError(
+          options.organization,
+          `personal API key of tenant ${session.tenantId} presented at /${options.organization.alias}`,
+        );
+      }
+      return session;
     }
 
     if (looksLikeApiKey(presented)) {

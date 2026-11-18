@@ -302,3 +302,27 @@ describe("ordinary blocks nested in columns", () => {
     expect(f.calls.entity).toContain("deal-1");
   });
 });
+
+test("a proposal lock protects the container and inherited blocks, with editable exceptions and immutable source locks", async () => {
+  const f = fixture();
+  const source = await f.capture({ deal: "deal-1" }, documentHost);
+  const enclosing = inclusion("slot", {
+    ...source,
+    copy: {
+      ...source.copy,
+      blocks: source.copy.blocks.map(child =>
+        child.id === "intro" || child.id === "terms" ? { ...child, lockOverride: false } : child),
+    },
+  });
+  const proposal = version("proposal", {}, [{ ...enclosing, lockOverride: true }]);
+  const [captured] = await captureTemplateBlocks({
+    tenantId, channel: "document", locale: "en", version: proposal,
+    variantId: "proposal-document", parameters: {},
+  }, registry, f.resolvers);
+  expect(captured).toMatchObject({ locked: true, editableChildren: true });
+  const copy = readInclusionCopy(captured!.values.content);
+  expect(copy.blocks.map(child => [child.id, child.locked])).toEqual([
+    ["intro", undefined], ["title", true], ["summary", true], ["terms", true], ["folio", true],
+  ]);
+  expect(copy.blocks.every(child => child.lockOverride === undefined)).toBe(true);
+});

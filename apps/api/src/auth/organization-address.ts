@@ -74,6 +74,22 @@ async function tenantSlug(db: OpenShapeForgeDatabase, session: TenantSession): P
 }
 
 /**
+ * Whether the session's tenant is the organization at `/<alias>`, by registry
+ * slug. Used where a credential carries no organization claim of its own — a
+ * personal API key on the per-organization MCP resource — to pin it the same
+ * way the short addresses are pinned.
+ */
+export async function sessionTenantIsAlias(
+  db: OpenShapeForgeDatabase,
+  session: TrustedSessionContext,
+  alias: string,
+): Promise<boolean> {
+  if (!session.tenantId || !session.userId) return false;
+  const slug = await tenantSlug(db, session as TenantSession);
+  return typeof slug === "string" && slug.toLowerCase() === alias.trim().toLowerCase();
+}
+
+/**
  * The session, or the empty one when the organization cannot be verified;
  * throws {@link OrganizationAddressError} when it is another organization's.
  */

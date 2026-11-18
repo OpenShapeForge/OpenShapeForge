@@ -87,7 +87,10 @@ also agree. A missing database or registry mapping refuses the service session.
 API keys remain available on endpoints without `requiredAudience`. Their stored
 credential supplies the tenant/client binding, and the exchanged verified token
 undergoes the same service registry checks in host mode. Key roles intersect
-the token's grants. API keys cannot authenticate on bearer-only resources.
+the token's grants. Integration API keys cannot authenticate on bearer-only
+resources. Personal API keys can, on the MCP resources: they bind a person's
+re-read membership to one tenant, which on `/<alias>` must be the organization
+at the path (registry slug, as for the short addresses).
 
 Trusted-context headers carry no verified selected organization or resource
 audience. Host mode rejects them, even with a valid HMAC; it never falls back to

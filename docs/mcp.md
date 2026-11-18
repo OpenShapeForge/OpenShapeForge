@@ -263,8 +263,15 @@ what the identity provider actually asserts, the audience is what stops a token
 minted for another resource (another Organization, another origin) from being
 replayed here. The origin half of that holds only with
 `OPENSHAPEFORGE_PUBLIC_ORIGIN` set (see above); without it the origin compared
-against comes from the request. Only a bearer JWT is accepted on these paths; API keys and
-trusted-context headers name a tenant, not a membership, and are refused.
+against comes from the request. Bearer JWTs and personal API keys are accepted on
+these paths. An integration API key and trusted-context headers name a tenant,
+not a membership, and are refused. A personal API key (`osf_user_…`) is
+admitted because it is a person's credential, not a token of some other resource:
+the resolver re-reads the owner's linked membership on every request, and on
+`/<alias>` the key's tenant must be the organization at the path (registry slug).
+A key of another organization gets the same `403 ORGANIZATION_RESOURCE_FORBIDDEN`
+as a token of another organization. A personal key carries no OAuth scopes, so
+tools that require one are not listed for it.
 
 Each resource has its own metadata document,
 `/.well-known/oauth-protected-resource/<alias>`, whose

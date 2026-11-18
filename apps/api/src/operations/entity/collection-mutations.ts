@@ -247,7 +247,8 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       if ((binding.action === "move" || editing) && !ordered.includes(request.childId!)) invalid("childId is not a member of this collection.");
       const child = rows.find((row) => row.id === request.childId);
       // Block write validation checks the container shell and every protected descendant.
-      const updatingLockedInterior = binding.action === "update" && target.name === "Block" && child?.editable_children === true;
+      const updatingLockedInterior = binding.action === "update"
+        && target.source?.authoringEntityName === "Block" && child?.document_variant_id != null && child.editable_children === true;
       if (lockColumn && (binding.action === "move" || editing) && child?.[lockColumn.name] === true && !updatingLockedInterior) {
         throw generatedCrudError("This item is locked by its source and cannot be changed, moved or removed.", "INVALID_STATE");
       }

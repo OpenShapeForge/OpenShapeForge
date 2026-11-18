@@ -10179,7 +10179,10 @@
             "en": "Template lock override",
             "nl": "Vergrendeling overschrijven"
           },
-          "description": "Override the containing template block or section. Empty inherits the parent’s lock.",
+          "description": {
+            "en": "Override the containing template block or section. Empty inherits the parent’s lock.",
+            "nl": "Overschrijft de vergrendeling van het bovenliggende templateblok of de sectie. Leeg neemt die vergrendeling over."
+          },
           "osfType": "boolean",
           "required": false,
           "persisted": {
@@ -10193,7 +10196,10 @@
             "en": "Editable children",
             "nl": "Bewerkbare onderliggende blokken"
           },
-          "description": "A locked block with an interior that can still receive permitted edits.",
+          "description": {
+            "en": "A locked block with an interior that can still receive permitted edits.",
+            "nl": "Een vergrendeld blok waarvan de inhoud nog toegestane bewerkingen kan ontvangen."
+          },
           "osfType": "boolean",
           "required": false,
           "readOnly": true,

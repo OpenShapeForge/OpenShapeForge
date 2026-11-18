@@ -10174,6 +10174,39 @@
           }
         },
         {
+          "key": "lockOverride",
+          "label": {
+            "en": "Template lock override",
+            "nl": "Vergrendeling overschrijven"
+          },
+          "description": "Override the containing template block or section. Empty inherits the parent’s lock.",
+          "osfType": "boolean",
+          "required": false,
+          "persisted": {
+            "column": "lock_override",
+            "storageClass": "core"
+          }
+        },
+        {
+          "key": "editableChildren",
+          "label": {
+            "en": "Editable children",
+            "nl": "Bewerkbare onderliggende blokken"
+          },
+          "description": "A locked block with an interior that can still receive permitted edits.",
+          "osfType": "boolean",
+          "required": false,
+          "readOnly": true,
+          "writtenBy": [
+            "Document.linkTemplate",
+            "Template.publish"
+          ],
+          "persisted": {
+            "column": "editable_children",
+            "storageClass": "core"
+          }
+        },
+        {
           "key": "region",
           "label": {
             "en": "Page region",
@@ -41523,6 +41556,14 @@
                 {
                   "key": "locked",
                   "osfType": "boolean"
+                },
+                {
+                  "key": "lockOverride",
+                  "osfType": "boolean"
+                },
+                {
+                  "key": "editableChildren",
+                  "osfType": "boolean"
                 }
               ]
             }
@@ -42927,6 +42968,14 @@
             {
               "key": "locked",
               "osfType": "boolean"
+            },
+            {
+              "key": "lockOverride",
+              "osfType": "boolean"
+            },
+            {
+              "key": "editableChildren",
+              "osfType": "boolean"
             }
           ]
         },
@@ -42980,6 +43029,14 @@
             {
               "key": "locked",
               "osfType": "boolean"
+            },
+            {
+              "key": "lockOverride",
+              "osfType": "boolean"
+            },
+            {
+              "key": "editableChildren",
+              "osfType": "boolean"
             }
           ]
         },
@@ -43032,6 +43089,14 @@
             },
             {
               "key": "locked",
+              "osfType": "boolean"
+            },
+            {
+              "key": "lockOverride",
+              "osfType": "boolean"
+            },
+            {
+              "key": "editableChildren",
               "osfType": "boolean"
             }
           ]

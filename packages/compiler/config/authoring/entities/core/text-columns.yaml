@@ -27,6 +27,8 @@ fields:
       - { key: values, osfType: object, required: true }
       - { key: references, osfType: object }
       - { key: locked, osfType: boolean }
+      - { key: lockOverride, osfType: boolean }
+      - { key: editableChildren, osfType: boolean }
   - key: leftWidth
     osfType: number
     required: false
@@ -44,6 +46,8 @@ fields:
       - { key: values, osfType: object, required: true }
       - { key: references, osfType: object }
       - { key: locked, osfType: boolean }
+      - { key: lockOverride, osfType: boolean }
+      - { key: editableChildren, osfType: boolean }
   - key: centerWidth
     osfType: number
     required: false
@@ -61,6 +65,8 @@ fields:
       - { key: values, osfType: object, required: true }
       - { key: references, osfType: object }
       - { key: locked, osfType: boolean }
+      - { key: lockOverride, osfType: boolean }
+      - { key: editableChildren, osfType: boolean }
   - key: rightWidth
     osfType: number
     required: false

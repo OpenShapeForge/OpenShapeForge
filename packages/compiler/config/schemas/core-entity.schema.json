@@ -170,6 +170,7 @@
       "required": ["strategy", "versionEntity", "versionsField"],
       "properties": {
         "strategy": { "type": "string", "const": "publishedSnapshot" },
+        "unpublish": { "type": "boolean", "const": true },
         "versionEntity": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
         "versionsField": { "$ref": "#/$defs/fieldKey" },
         "snapshot": {
@@ -2795,6 +2796,11 @@
               "required": ["tabs"],
               "properties": {
                 "preset": { "enum": ["main", "main-context", "inbox-main-context"], "x-osf-i18n": { "title": { "en": "Page layout", "nl": "Pagina-indeling" }, "enum": { "main": { "en": "Main", "nl": "Hoofdinhoud" }, "main-context": { "en": "Main and context", "nl": "Hoofdinhoud en context" }, "inbox-main-context": { "en": "List, main and context", "nl": "Lijst, hoofdinhoud en context" } } } },
+                "breadcrumbParent": {
+                  "type": "string",
+                  "pattern": "^[a-z][A-Za-z0-9]*$",
+                  "description": "Direct record relationship to follow as the breadcrumb parent."
+                },
                 "workspaceTabs": {
                   "type": "boolean",
                   "description": "Whether to show surrounding workspace tabs; omission inherits the normal shell. Internal record task tabs are unaffected.",

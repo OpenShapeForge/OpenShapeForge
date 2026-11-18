@@ -107,7 +107,9 @@ export function contentBlockFromRow(row: Record<string, unknown>, owner: { reado
   const values = Object.fromEntries(Object.entries(stored as Record<string, unknown>).filter(([key]) => !Object.hasOwn(bound, key)));
   // A document block its template seeded holds text the server resolved when it was linked: data, not a template.
   const captured = owner.column === DOCUMENT_BLOCK_OWNER_COLUMN && row.origin === "template";
-  return { id, ...(row.locked === true ? {locked: true as const} : {}), definitionKey: definitionKey as string, schemaVersion: version, values: immutableContent(values) as JsonObject, references: bound, ...placement(row, origin), ...(captured ? { captured: true as const } : {}) };
+  return { id, ...(row.locked === true ? {locked: true as const} : {}),
+    ...(owner.column === BLOCK_OWNER_COLUMN && typeof row.lock_override === "boolean" ? { lockOverride: row.lock_override } : {}),
+    ...(row.locked === true && row.editable_children === true ? { editableChildren: true as const } : {}), definitionKey: definitionKey as string, schemaVersion: version, values: immutableContent(values) as JsonObject, references: bound, ...placement(row, origin), ...(captured ? { captured: true as const } : {}) };
 }
 
 const LAYOUT_KEY = /^[a-z][A-Za-z0-9-]{0,63}$/;

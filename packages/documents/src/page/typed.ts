@@ -59,9 +59,12 @@ function tableColumns(list: Schema, item: Schema): Column[] {
   });
 }
 
-function table(rows: readonly unknown[], list: Schema, item: Schema, locale: string, scope: MoneyScope): string {
+type Rows = { open: string; close: string; header?: string; rows: string[] };
+type Part = string | Rows;
+
+function table(rows: readonly unknown[], list: Schema, item: Schema, locale: string, scope: MoneyScope): Rows | undefined {
   const columns = tableColumns(list, item);
-  if (!columns.length) return "";
+  if (!columns.length) return undefined;
   // A column is a label column first and an amount column after it, unless the list says how it aligns.
   const open = (role: string, column: Column, index: number, head: boolean) => {
     const align = column.align ?? (index ? "end" : "start");
@@ -73,41 +76,75 @@ function table(rows: readonly unknown[], list: Schema, item: Schema, locale: str
   const body = rows.map((row) => {
     if (!isObject(row)) return fail("A table row is not an object.");
     return `<div role="row" class="r">${columns.map((column, index) => `${open("cell", column, index, false)}${scalar(row[column.key], column.schema, within(scope, row)) ?? ""}</div>`).join("")}</div>`;
-  }).join("");
-  return `<div role="table" class="t"><div role="row" class="r h">${head}</div>${body}</div>`;
+  });
+  return { open: '<div role="table" class="t">', close: "</div>", header: `<div role="row" class="r h">${head}</div>`, rows: body };
 }
 
-function part(value: unknown, schema: Schema, key: string, locale: string, depth: number, scope: MoneyScope): { rows: string[]; parts: string[] } {
+function part(value: unknown, schema: Schema, key: string, locale: string, depth: number, scope: MoneyScope): { rows: string[]; parts: Part[] } {
   if (depth > 8) fail("The output schema nests too deeply.");
   const type = typeOf(schema);
   const label = escape(schemaLabel(schema, key, locale));
   if (value === null || value === undefined) return { rows: [], parts: [] };
   if (type === "object") {
     if (!isObject(value) || !isObject(schema.properties)) return fail("A value does not match its output schema.");
-    const rows: string[] = [], parts: string[] = [];
+    const rows: string[] = [], parts: Part[] = [];
     for (const [name, child] of Object.entries(schema.properties)) {
       if (!isObject(child) || !Object.hasOwn(value, name)) continue;
       const inner = part(value[name], child, name, locale, depth + 1, within(scope, value));
       rows.push(...inner.rows); parts.push(...inner.parts);
     }
-    const kv = rows.length ? `<div role="table" class="t kv">${rows.join("")}</div>` : "";
-    return depth === 0 ? { rows: [], parts: [kv, ...parts].filter(Boolean) } : { rows: [], parts: rows.length || parts.length ? [`<div class="th">${label}</div>${kv}${parts.join("")}`] : [] };
+    const tables: Part[] = rows.length ? [{ open: '<div role="table" class="t kv">', close: "</div>", rows }, ...parts] : parts;
+    return { rows: [], parts: depth > 0 && tables.length ? [`<div class="th">${label}</div>`, ...tables] : tables };
   }
   if (type === "array") {
     if (!Array.isArray(value)) return fail("A value does not match its output schema.");
     if (!value.length) return { rows: [], parts: [] };
     const item = isObject(schema.items) ? schema.items : fail("A list has no item schema.");
-    const inner = typeOf(item) === "object" ? table(value, schema, item, locale, scope) : `<ul>${value.map((entry) => `<li>${scalar(entry, item, scope) ?? ""}</li>`).join("")}</ul>`;
-    return { rows: [], parts: inner ? [`<div class="th">${label}</div>${inner}`] : [] };
+    const inner = typeOf(item) === "object" ? table(value, schema, item, locale, scope) : {
+      open: "<ul>", close: "</ul>", rows: value.map((entry) => `<li>${scalar(entry, item, scope) ?? ""}</li>`),
+    };
+    return { rows: [], parts: inner ? [`<div class="th">${label}</div>`, inner] : [] };
   }
   const text = scalar(value, schema, scope);
   return { rows: text === undefined ? [] : [`<div role="row" class="r"><div role="rowheader" class="c">${label}</div><div role="cell" class="c n">${text}</div></div>`], parts: [] };
 }
 
-/** The block's HTML: `schema` is the materialization's value schema, `value` the materialized value. */
+function typedParts(value: unknown, schema: unknown, locale: string): Part[] {
+  if (!isObject(schema)) return fail("The block has no output schema.");
+  return part(value, schema, "", locale, 0, moneyScope(schema, locale)).parts;
+}
+
+function typedHtml(styleClass: string, content: string, continued = false): string {
+  return `<div class="b typed ${styleClass}${continued ? " typed-continued" : ""}">${content}</div>`;
+}
+
+/** The block's HTML for a renderer that handles page breaks itself. */
 export function typedPageBlock(value: unknown, schema: unknown, locale: string, styleClass: string): string {
-  if (!isObject(schema)) fail("The block has no output schema.");
-  return `<div class="b typed ${styleClass}">${part(value, schema as Schema, "", locale, 0, moneyScope(schema, locale)).parts.join("")}</div>`;
+  const html = typedParts(value, schema, locale).map((item) =>
+    typeof item === "string" ? item : item.open + (item.header ?? "") + item.rows.join("") + item.close,
+  ).join("");
+  return typedHtml(styleClass, html);
+}
+
+/** Measurable pieces for an explicitly positioned page. Keep headings with the first row. */
+export function typedPageFragments(value: unknown, schema: unknown, locale: string, styleClass: string) {
+  const fragments: { html: string; gap: number }[] = [];
+  let headings = "";
+  for (const item of typedParts(value, schema, locale)) {
+    if (typeof item === "string") {
+      headings += item;
+      continue;
+    }
+    item.rows.forEach((row, index) => {
+      const content = index === 0 ? headings + item.open + (item.header ?? "") : item.open;
+      fragments.push({
+        html: typedHtml(styleClass, content + row + item.close, index < item.rows.length - 1),
+        gap: index === 0 ? 12 : 0,
+      });
+    });
+    headings = "";
+  }
+  return fragments;
 }
 
 /**
@@ -116,7 +153,7 @@ export function typedPageBlock(value: unknown, schema: unknown, locale: string, 
  * keeps that room between ordinary blocks. A row never breaks.
  */
 export const TYPED_BLOCK_RULES = [
-  ".typed>*+*{margin-top:12px}", ".typed .r{display:flex;break-inside:avoid}", ".typed .t .r.h,.typed .t .r:last-child{border-bottom:1px solid #dee3ea}",
+  ".typed>*+*{margin-top:12px}", ".typed .r{display:flex;break-inside:avoid}", ".typed .t .r.h,.typed:not(.typed-continued) .t .r:last-child{border-bottom:1px solid #dee3ea}",
   ".typed .c{flex:1 1 0;min-width:0;box-sizing:border-box;padding:8px 8px 12px 0;text-align:left;overflow-wrap:break-word}",
   ".typed .p,.typed .m,.typed .n{padding-left:12px}", ".typed .m{text-align:center}", ".typed .n{text-align:right}", ".typed .c:last-child{padding-right:0}",
   ".typed .c:first-child{flex-grow:2}", ".typed .r.h{font-weight:600}", ".typed .th{font-weight:600;margin-bottom:4px}", ".typed ul{margin:0;padding-left:1.2em}",

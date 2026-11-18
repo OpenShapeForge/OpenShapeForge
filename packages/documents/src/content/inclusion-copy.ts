@@ -41,7 +41,7 @@ export const OBSOLETE_INCLUSION = "This inclusion is stored in the earlier refer
 const BLOCK_ID = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/;
 const LAYOUT_KEY = /^[a-z][A-Za-z0-9-]{0,63}$/;
 const HASH = /^[a-f0-9]{64}$/;
-const BLOCK_KEYS = ["id", "definitionKey", "schemaVersion", "values", "references", "region", "layoutKey", "locked"];
+const BLOCK_KEYS = ["id", "definitionKey", "schemaVersion", "values", "references", "region", "layoutKey", "locked", "lockOverride", "editableChildren"];
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
 
 /** The existing typed argument contract identifies a template inclusion without another block type system. */
@@ -71,8 +71,13 @@ export function parseContentBlock(entry: unknown, locked: boolean | undefined): 
   if (region === "body" && entry.layoutKey != null) contentError("INVALID_VALUE", "Only a header or footer block names a page layout.");
   if (layoutKey !== undefined && (typeof layoutKey !== "string" || !LAYOUT_KEY.test(layoutKey))) contentError("INVALID_VALUE", "An included block requires a valid page layout.");
   if (entry.locked !== undefined && typeof entry.locked !== "boolean") contentError("INVALID_VALUE", "A source lock is true or false.");
+  if (entry.lockOverride !== undefined && typeof entry.lockOverride !== "boolean") contentError("INVALID_VALUE", "A template lock override is true or false.");
+  if (entry.editableChildren !== undefined && entry.editableChildren !== true) contentError("INVALID_VALUE", "Editable child metadata must be true.");
+  const protectedBlock = locked ?? entry.locked === true;
   return {
-    id: entry.id as string, ...((locked ?? entry.locked === true) ? { locked: true as const } : {}),
+    id: entry.id as string, ...(protectedBlock ? { locked: true as const } : {}),
+    ...(typeof entry.lockOverride === "boolean" ? { lockOverride: entry.lockOverride } : {}),
+    ...(protectedBlock && entry.editableChildren === true ? { editableChildren: true as const } : {}),
     definitionKey: entry.definitionKey as string, schemaVersion: entry.schemaVersion as number,
     values: entry.values as JsonObject, references: references as ContentBlock["references"],
     ...(region !== "body" ? { region } : {}), ...(layoutKey ? { layoutKey: layoutKey as string } : {}),
@@ -125,7 +130,7 @@ function comparable(block: ContentBlock): unknown {
   const values = object(content) && Array.isArray(content.blocks)
     ? { ...block.values, content: { ...(content.page ? { page: content.page } : {}), blocks: (content.blocks as unknown[]).map((entry) => object(entry) && object(entry.values) ? comparable(entry as unknown as ContentBlock) : entry) } }
     : block.values;
-  return { id: block.id, definitionKey: block.definitionKey, schemaVersion: block.schemaVersion, values, references: block.references ?? {}, ...(block.region ? { region: block.region } : {}), ...(block.layoutKey ? { layoutKey: block.layoutKey } : {}) };
+  return { id: block.id, definitionKey: block.definitionKey, schemaVersion: block.schemaVersion, ...(block.lockOverride === undefined ? {} : { lockOverride: block.lockOverride }), values, references: block.references ?? {}, ...(block.region ? { region: block.region } : {}), ...(block.layoutKey ? { layoutKey: block.layoutKey } : {}) };
 }
 const sameAuthored = (left: ContentBlock, right: ContentBlock) => canonicalJson(comparable(left)) === canonicalJson(comparable(right));
 
@@ -195,7 +200,17 @@ export type LocalDraftOptions = {
    * from the baseline instead of compared.
    */
   readonly freshBaseline?: boolean;
+  /** Template authors can add or remove local lock overrides on editable blocks. */
+  readonly authorLocks?: boolean;
 };
+
+/** A partially locked container allows updates to its children only. */
+export function containerShell(values: JsonObject, columns: boolean): JsonObject {
+  if (columns) return Object.fromEntries(Object.entries(values).map(([key, value]) =>
+    [key, COLUMN_SLOTS.some(slot => slot === key) ? [] : value])) as JsonObject;
+  if (!isInclusionCopy(values.content)) return values;
+  return { ...values, content: { ...values.content as JsonObject, blocks: [] } };
+}
 
 /**
  * The blocks of a caller's draft, checked against the stored baseline. The
@@ -221,6 +236,20 @@ export async function normalizeLocalDraft(stored: InclusionCopy, draft: unknown,
       contentError("INVALID_VALUE", "A source lock is kept by the server and cannot be changed.");
     let block = parseContentBlock(raw, Boolean(entry?.locked));
     const previous = storedBlocks.get(block.id);
+    if (block.lockOverride !== previous?.lockOverride && (!options.authorLocks || entry?.locked))
+      contentError("INVALID_VALUE", "Only template authors can change an editable block’s lock override.");
+    if (block.editableChildren !== previous?.editableChildren && !(options.freshBaseline && block.editableChildren === undefined))
+      contentError("INVALID_VALUE", "Editable child metadata is kept by the server.");
+    if (options.freshBaseline && previous?.editableChildren && !block.editableChildren)
+      block = { ...block, editableChildren: true };
+    const partial = entry?.locked && previous?.editableChildren && previous.definitionKey === block.definitionKey;
+    if (partial) {
+      const shell = (item: ContentBlock) => ({
+        ...item, values: containerShell(item.values, isColumns(item.definitionKey)),
+      });
+      if (canonicalJson(shell(previous)) !== canonicalJson(shell(block)))
+        contentError("INVALID_VALUE", "A locked container’s settings cannot be changed.");
+    }
     if (isColumns(block.definitionKey)) {
       block = { ...block, values: await mapColumns(block.values, async (children, slot) => {
         const old = previous && isColumns(previous.definitionKey) ? columnBlocks(previous.values[slot]) : [];
@@ -232,7 +261,7 @@ export async function normalizeLocalDraft(stored: InclusionCopy, draft: unknown,
       else block = previous;
     }
     await options.validateBlock?.(block);
-    if (entry?.locked && await blockHash(block) !== entry.hash) {
+    if (entry?.locked && !partial && await blockHash(block) !== entry.hash) {
       if (!options.freshBaseline || !previous) contentError("INVALID_VALUE", "A locked source block cannot be changed.");
       block = previous;
     }
@@ -346,7 +375,8 @@ export async function mergeInclusionCopy(input: InclusionMerge, depth = 0): Prom
       continue;
     }
     const hash = await blockHash(block);
-    const edited = hash !== entry.hash;
+    const { lockOverride, ...content } = block;
+    const edited = (lockOverride === undefined ? hash : await blockHash(content)) !== entry.hash;
     if (!replacement) {
       // Gone from the new source. Local content stays: a block changed here, or one that reached this copy through an enclosing template and never was this source's.
       if (edited || (old && !old.has(block.id))) trail(anchor, block);
@@ -354,21 +384,47 @@ export async function mergeInclusionCopy(input: InclusionMerge, depth = 0): Prom
     }
     anchor = block.id;
     const upcoming = nextEntries.get(block.id)!;
-    if (!edited || hash === upcoming.hash) { chosen.set(block.id, replacement); continue; }
+    const authoredLock = replacement.locked ? undefined : block.lockOverride;
+    if (!edited || hash === upcoming.hash) {
+      chosen.set(block.id, authoredLock === undefined ? replacement : { ...replacement, lockOverride: authoredLock });
+      continue;
+    }
     const { locked: _locked, ...local } = block;
     const before = old?.get(block.id), after = authored.get(block.id);
     const sourceChanged = Boolean(old) && (!before || !after || !sameAuthored(before, after));
+    // Columns do not store a per-child capture baseline. We can use the new
+    // capture as that baseline only when it is exactly the same source, and
+    // preserve permitted edits while applying the existing child lock rules.
+    if (entry.locked && upcoming.locked && block.editableChildren && replacement.editableChildren
+        && isColumns(block.definitionKey) && block.definitionKey === replacement.definitionKey
+        && entry.hash === upcoming.hash && entry.deferred === upcoming.deferred
+        && sameAuthored(
+          { ...block, values: containerShell(block.values, true) },
+          { ...replacement, values: containerShell(replacement.values, true) },
+        )) {
+      const values = await mapColumns(replacement.values, async (children, slot) => {
+        const source = await sourceRecord(children);
+        const merged = await mergeInclusionCopy({
+          baseline: source, current: columnBlocks(block.values[slot]),
+          authoredOld: children, authoredNew: children,
+          captured: { source, blocks: children }, compositionOf,
+        }, depth + 1);
+        return merged.blocks;
+      });
+      chosen.set(block.id, { ...replacement, values });
+      continue;
+    }
     const mine = nestedCopy(block, compositionOf), theirs = nestedCopy(replacement, compositionOf);
-    if (upcoming.locked) conflict("The new template locks a block that was changed here.");
-    else if (!sourceChanged) chosen.set(block.id, local);
-    else if (mine && theirs) {
+    if (upcoming.locked && (!replacement.editableChildren || !mine || !theirs)) conflict("The new template locks a block that was changed here.");
+    if (mine && theirs && (sourceChanged || replacement.editableChildren)) {
       const merged = await mergeInclusionCopy({
         baseline: mine.source, current: mine.blocks, captured: theirs, compositionOf,
         ...(nestedCopy(before, compositionOf) ? { authoredOld: nestedCopy(before, compositionOf)!.blocks } : {}),
         authoredNew: nestedCopy(after, compositionOf)?.blocks ?? [],
       }, depth + 1);
-      chosen.set(block.id, { ...replacement, values: { ...replacement.values, content: inclusionCopyContent(merged) } });
-    } else conflict("The template changed a block that was also changed here.");
+      chosen.set(block.id, { ...replacement, ...(authoredLock === undefined ? {} : { lockOverride: authoredLock }), values: { ...replacement.values, content: inclusionCopyContent(merged) } });
+    } else if (!sourceChanged) chosen.set(block.id, local);
+    else conflict("The template changed a block that was also changed here.");
   }
   for (const entry of input.baseline) {
     if (!current.has(entry.id) && nextEntries.get(entry.id)?.locked) conflict("The new template protects a block that was removed here.");

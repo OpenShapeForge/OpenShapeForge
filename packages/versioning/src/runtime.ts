@@ -172,11 +172,35 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
   };
 }
 
+function unpublish(sourceEntity: string, versionEntity: string): ModuleOperationHandler {
+  return async ({ id }, context) => {
+    if (!context.session?.tenantId || !context.session.userId || !context.platform) {
+      fail("UNAUTHENTICATED", "Unpublishing requires a verified tenant session.");
+    }
+    if (typeof id !== "string" || !UUID.test(id)) fail("VALIDATION", "A valid source id is required.");
+    const { head } = binding(context, sourceEntity, versionEntity);
+    const headTable = qualified(head.schema, head.table);
+    return context.platform.db.withSession(context.session, async transaction => {
+      const source = (await rows<{ published_version_id: string | null }>(transaction,
+        `select published_version_id from ${headTable} where tenant_id = app.current_tenant() and id = $1::uuid for update`, [id]))[0];
+      if (!source) fail("NOT_FOUND", "The editable source no longer exists.");
+      if (!source.published_version_id) return { value: { id, changed: false } };
+      const updated = await rows(transaction, `update ${headTable} set
+        published_version = null, published_version_id = null, lifecycle_status = 'draft', updated_at = now()
+        where tenant_id = app.current_tenant() and id = $1::uuid returning id`, [id]);
+      if (!updated.length) fail("NOT_FOUND", "The editable source no longer exists.");
+      return { value: { id, changed: true } };
+    });
+  };
+}
+
 const handlers = new Proxy<Record<string, ModuleOperationHandler>>({}, {
   get(_target, property) {
     if (typeof property !== "string") return undefined;
     const match = /^publish([A-Z][A-Za-z0-9]*)To([A-Z][A-Za-z0-9]*)$/.exec(property);
-    return match ? publish(match[1]!, match[2]!) : undefined;
+    if (match) return publish(match[1]!, match[2]!);
+    const withdrawal = /^unpublish([A-Z][A-Za-z0-9]*)From([A-Z][A-Za-z0-9]*)$/.exec(property);
+    return withdrawal ? unpublish(withdrawal[1]!, withdrawal[2]!) : undefined;
   },
   ownKeys() { return []; },
   getOwnPropertyDescriptor() { return undefined; },

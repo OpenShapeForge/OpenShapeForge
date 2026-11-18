@@ -105,6 +105,9 @@ type VariantFollow = Readonly<{ problems: readonly string[]; changed: boolean }>
 function capturedContent(node: SnapshotNode, block: ContentBlock, apply: ApplyContext): BlockContent {
   const { carrier, columns } = apply;
   const content: Record<string, unknown> = { ...blockContent(node.row, columns), [carrier.valuesColumn]: block.values };
+  if (columns.has("locked")) content.locked = block.locked === true;
+  if (columns.has("editable_children")) content.editable_children = block.editableChildren === true ? true : null;
+  if (columns.has("lock_override")) content.lock_override = null;
   for (const reference of carrier.definitions[block.definitionKey]?.references ?? []) {
     const value = block.references[reference.fieldKey];
     if (columns.has(reference.column)) content[reference.column] = value && !Array.isArray(value) && "id" in value ? value.id : null;
@@ -160,7 +163,7 @@ async function followVariant(apply: ApplyContext, variant: DocumentVariantRow, p
   const plan = planFollow(
     current.map((row) => ({ id: row.id, origin: row.origin, templateBlockId: row.template_block_id, diverged: row.diverged, key: (row.template_block_id ? baseline.get(row.template_block_id) : undefined) ?? "" })),
     baseline,
-    nextNodes.map((node) => ({ templateBlockId: rowId(node), key: contentKey(blockContent(node.row, columns)), locked: node.row.locked === true })),
+    nextNodes.map((node) => ({ templateBlockId: rowId(node), key: contentKey(blockContent(node.row, columns)), locked: captured.get(rowId(node))?.locked === true && !captured.get(rowId(node))?.editableChildren })),
   );
   const unchanged = new Map(current.map((row) => [row.id, contentKey(blockContent(row, columns))]));
   const byId = new Map(current.map((row) => [row.id, row]));

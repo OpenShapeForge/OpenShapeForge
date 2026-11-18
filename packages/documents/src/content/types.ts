@@ -67,6 +67,10 @@ export type ContentReferenceValue =
 export type ContentBlock = {
   /** Source-authored protection; local inclusion changes cannot override it. */
   readonly locked?: true;
+  /** Optional authored choice. Absent means inherit the containing block or section. */
+  readonly lockOverride?: boolean;
+  /** A captured lock on the container itself, with an interior open to permitted edits. */
+  readonly editableChildren?: true;
   readonly id: string;
   readonly definitionKey: string;
   readonly schemaVersion: number;

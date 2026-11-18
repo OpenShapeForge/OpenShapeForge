@@ -1466,6 +1466,24 @@ no entity-implemented Operations (`operations: {}` or only plugin-handled
 ones). Secret-bearing and runtime-scheduler entities in the base catalog are
 authored that way; no compiled slug denylist is involved.
 
+## Withdrawing a published snapshot
+
+A versioned entity can enable the canonical withdrawal Operation with
+`versioning.unpublish: true` alongside `strategy: publishedSnapshot`. The
+compiler adds `<Entity>.unpublish` using the publication roles, tenant scope and
+record version guard. The caller must acknowledge the withdrawal.
+
+Withdrawal clears the active publication and returns the editable record to
+draft. It preserves the latest version pointer and all immutable versions.
+Already-linked consumers keep their pinned history. An unchanged head can be
+published again without adding a duplicate version.
+
+Enable this only when the domain's entry points for new use check active
+publication and serialize new references with concurrent withdrawal. A
+historical-version reader used for existing references must remain usable.
+Withdrawal is independent of access revocation and archival of a running
+process.
+
 ## Published blueprint copies
 
 A tenant-scoped v2 entity with built-in create and update Operations can opt in:

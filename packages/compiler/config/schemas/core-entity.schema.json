@@ -170,6 +170,7 @@
       "required": ["strategy", "versionEntity", "versionsField"],
       "properties": {
         "strategy": { "type": "string", "const": "publishedSnapshot" },
+        "unpublish": { "type": "boolean", "const": true },
         "versionEntity": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" },
         "versionsField": { "$ref": "#/$defs/fieldKey" },
         "snapshot": {

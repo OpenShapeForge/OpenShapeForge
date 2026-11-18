@@ -115,20 +115,24 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
   const versioning = entity.versioning;
   if (!versioning) return entity;
   const publishOperation = `${entity.entity}.publish`;
+  const unpublishOperation = `${entity.entity}.unpublish`;
+  const publicationWriters = versioning.unpublish ? [publishOperation, unpublishOperation] : [publishOperation];
   const managedFields: import("../types.js").Field[] = [
     { key: "latestVersion", osfType: "integer", readOnly: true, writtenBy: [publishOperation], label: { en: "Latest version", nl: "Laatste versie" }, persisted: { column: "latest_version", storageClass: "core" } },
     { key: "latestVersionId", osfType: "string", readOnly: true, writtenBy: [publishOperation], validation: { format: "uuid" }, label: { en: "Latest version id", nl: "Id van laatste versie" }, persisted: { column: "latest_version_id", storageClass: "core" } },
-    { key: "publishedVersion", osfType: "integer", readOnly: true, writtenBy: [publishOperation], label: { en: "Published version", nl: "Gepubliceerde versie" }, persisted: { column: "published_version", storageClass: "core" } },
-    { key: "publishedVersionId", osfType: "string", readOnly: true, writtenBy: [publishOperation], validation: { format: "uuid" }, label: { en: "Published version id", nl: "Id van gepubliceerde versie" }, persisted: { column: "published_version_id", storageClass: "core" } },
-    { key: "lifecycleStatus", osfType: "string", required: true, readOnly: true, writtenBy: [publishOperation], defaultValue: "draft", label: { en: "Status", nl: "Status" }, options: { type: "static", items: [{ value: "draft", label: { en: "Draft", nl: "Concept" } }, { value: "published", label: { en: "Published", nl: "Gepubliceerd" } }] }, persisted: { column: "lifecycle_status", storageClass: "core" } },
+    { key: "publishedVersion", osfType: "integer", readOnly: true, writtenBy: publicationWriters, label: { en: "Published version", nl: "Gepubliceerde versie" }, persisted: { column: "published_version", storageClass: "core" } },
+    { key: "publishedVersionId", osfType: "string", readOnly: true, writtenBy: publicationWriters, validation: { format: "uuid" }, label: { en: "Published version id", nl: "Id van gepubliceerde versie" }, persisted: { column: "published_version_id", storageClass: "core" } },
+    { key: "lifecycleStatus", osfType: "string", required: true, readOnly: true, writtenBy: publicationWriters, defaultValue: "draft", label: { en: "Status", nl: "Status" }, options: { type: "static", items: [{ value: "draft", label: { en: "Draft", nl: "Concept" } }, { value: "published", label: { en: "Published", nl: "Gepubliceerd" } }] }, persisted: { column: "lifecycle_status", storageClass: "core" } },
   ];
-  const authoredPublish = Object.entries(entity.operations ?? {}).find(([key, operation]) =>
-    key === "publish" || operation.id === publishOperation);
-  if (authoredPublish) {
-    throw new Error(
-      `[${entity.entity}] versioning owns the canonical ${publishOperation} Operation; ` +
-        `authored operation "${authoredPublish[0]}" collides with it.`,
-    );
+  const reservedOperations = versioning.unpublish ? [publishOperation, unpublishOperation] : [publishOperation];
+  for (const [key, operation] of Object.entries(entity.operations ?? {})) {
+    const collision = reservedOperations.find(id => operation.id === id || key === id.split(".").at(-1));
+    if (collision) {
+      throw new Error(
+        `[${entity.entity}] versioning owns the canonical ${collision} Operation; ` +
+          `authored operation "${key}" collides with it.`,
+      );
+    }
   }
   const managedKeys = new Set(managedFields.map((field) => field.key));
   const authoredManagedField = entity.fields.find((field) => managedKeys.has(field.key));
@@ -157,20 +161,46 @@ function withPublishedSnapshotVersioning(entity: import("../types.js").CoreEntit
     concurrency: { version: { mode: "required" as const, field: "updatedAt" } },
     confirmation: { mode: "none" as const },
   };
+  const unpublish = {
+    ...publish,
+    id: unpublishOperation,
+    name: { en: "Unpublish", nl: "Depubliceren" },
+    description: { en: "Stop new uses of this publication while preserving existing references and version history.", nl: "Stop nieuw gebruik van deze publicatie. Bestaande koppelingen en versiehistorie blijven bewaard." },
+    implementation: { ...publish.implementation, handler: `unpublish${entity.entity}From${versioning.versionEntity}` },
+    output: { schema: { type: "object", required: ["id", "changed"], properties: { id: { type: "string", format: "uuid" }, changed: { type: "boolean" } } } },
+    errors: [
+      { status: 404, code: "NOT_FOUND", description: "The editable source no longer exists." },
+      { status: 409, code: "VERSION_CONFLICT", description: "The editable source changed before withdrawal." },
+    ],
+    reliability: { idempotency: { mode: "natural" as const } },
+    confirmation: { mode: "acknowledgement" as const },
+  };
   const views = entity.interfaces?.web?.views;
   return {
     ...entity,
     fields: [...entity.fields, ...managedFields],
-    operations: { ...(entity.operations ?? {}), publish },
+    operations: { ...(entity.operations ?? {}), publish, ...(versioning.unpublish ? { unpublish } : {}) },
     ...(entity.interfaces?.web ? {
       interfaces: {
         ...entity.interfaces,
         web: {
           ...entity.interfaces!.web,
-          operations: { ...entity.interfaces!.web!.operations, publish: entity.interfaces!.web!.operations?.publish === false ? false : { successMessage: { en: "Version {{version_number}} published", nl: "Versie {{version_number}} gepubliceerd" }, ...(entity.interfaces!.web!.operations?.publish ?? {}) } },
+          operations: {
+            ...entity.interfaces!.web!.operations,
+            publish: entity.interfaces.web.operations?.publish === false ? false : {
+              successMessage: { en: "Version {{version_number}} published", nl: "Versie {{version_number}} gepubliceerd" },
+              ...(entity.interfaces.web.operations?.publish ?? {}),
+            },
+            ...(versioning.unpublish ? {
+              unpublish: entity.interfaces.web.operations?.unpublish === false ? false : {
+                successMessage: { en: "Publication withdrawn", nl: "Publicatie ingetrokken" },
+                ...(entity.interfaces.web.operations?.unpublish ?? {}),
+              },
+            } : {}),
+          },
           ...(views ? { views: {
             ...views,
-            record: views.record ? { ...views.record, actions: [...new Set([...(views.record.actions ?? []), "publish"])] } : views.record,
+            record: views.record ? { ...views.record, actions: [...new Set([...(views.record.actions ?? []), "publish", ...(versioning.unpublish ? ["unpublish"] : [])])] } : views.record,
           } } : {}),
         },
       },

@@ -24,7 +24,7 @@ const compile = (mutate: (contract: CompiledEntityContract) => void = () => {}, 
     onCandidate: ({ contract }) => mutate(contract),
   });
 
-function compileWithVersionedNoteYaml(transform: (yaml: string) => string) {
+function compileWithVersionedNoteYaml(transform: (yaml: string) => string, inspect?: (contract: CompiledEntityContract) => void) {
   const directory = mkdtempSync(join(tmpdir(), "osf-versioning-guards-"));
   try {
     cpSync(fixtureDir, directory, { recursive: true });
@@ -34,6 +34,7 @@ function compileWithVersionedNoteYaml(transform: (yaml: string) => string) {
       mode: "promote",
       entityAllowlist: slugs,
       generatedCrudAllowlist: slugs,
+      onCandidate: ({ contract }) => { if (contract.entity.name === "VersionedNote") inspect?.(contract); },
     });
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -66,6 +67,29 @@ describe("published-snapshot storage binding", () => {
     // The bound column is the owned reference the manifest lowers, in the same schema.
     const column = version.columns.find((column) => column.name === "note_id")!;
     expect(column.references).toMatchObject({ schema: "notes", table: "versioned_notes", column: "id", onDelete: "CASCADE" });
+  });
+
+  it("generates an authorized, confirmed and version-checked unpublish Operation only when enabled", () => {
+    compileWithVersionedNoteYaml(yaml => yaml, contract => {
+      expect(contract.pluginOperations?.find(operation => operation.key === "unpublish")).toBeUndefined();
+    });
+    compileWithVersionedNoteYaml(yaml => yaml.replace("  strategy: publishedSnapshot", "  strategy: publishedSnapshot\n  unpublish: true"), contract => {
+      const publish = contract.pluginOperations!.find(operation => operation.key === "publish")!;
+      const unpublish = contract.pluginOperations?.find(operation => operation.key === "unpublish")!;
+      expect(unpublish.definition).toMatchObject({
+        id: "VersionedNote.unpublish",
+        auth: publish.definition.auth,
+        tenancy: { mode: "required" },
+        target: { scope: "record", inputField: "id" },
+        concurrency: { version: { mode: "required", field: "updatedAt" } },
+        confirmation: { mode: "acknowledgement" },
+        implementation: { plugin: "core-versioning", handler: "unpublishVersionedNoteFromVersionedNoteVersion" },
+      });
+      expect(contract.model.fields.find(field => field.key === "publishedVersionId")?.writtenBy).toEqual([
+        "VersionedNote.publish", "VersionedNote.unpublish",
+      ]);
+      expect(contract.model.fields.find(field => field.key === "latestVersionId")?.writtenBy).toEqual(["VersionedNote.publish"]);
+    });
   });
 
   it("refuses a versionsField that is not the version entity's collection on the head", () => {

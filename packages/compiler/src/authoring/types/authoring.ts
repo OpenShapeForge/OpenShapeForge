@@ -733,6 +733,8 @@ export interface CoreEntity {
    */
   versioning?: {
     strategy: "publishedSnapshot";
+    /** Enable withdrawal of the active publication once all new uses check it. */
+    unpublish?: true;
     versionEntity: string;
     versionsField: string;
     snapshot?: { ownedRelationships?: "recursive" };

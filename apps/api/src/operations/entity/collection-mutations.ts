@@ -245,7 +245,10 @@ export function createCollectionMutationExecutor(catalog: { tables: readonly Gen
       const ordered = [...rows].sort((a, b) => (relation.sortable ? Number(a[position!.name]) - Number(b[position!.name]) : 0) || String(a.id).localeCompare(String(b.id))).map((row) => String(row.id));
       if (request.beforeId != null && !ordered.includes(request.beforeId)) invalid("beforeId is not a member of this collection.");
       if ((binding.action === "move" || editing) && !ordered.includes(request.childId!)) invalid("childId is not a member of this collection.");
-      if (lockColumn && (binding.action === "move" || editing) && rows.find((row) => row.id === request.childId)?.[lockColumn.name] === true) {
+      const child = rows.find((row) => row.id === request.childId);
+      // Block write validation checks the container shell and every protected descendant.
+      const updatingLockedInterior = binding.action === "update" && target.name === "Block" && child?.editable_children === true;
+      if (lockColumn && (binding.action === "move" || editing) && child?.[lockColumn.name] === true && !updatingLockedInterior) {
         throw generatedCrudError("This item is locked by its source and cannot be changed, moved or removed.", "INVALID_STATE");
       }
       // All siblings whose positions can change need their own authored edit rights.

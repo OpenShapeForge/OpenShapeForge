@@ -13,7 +13,7 @@
  * A typed block keeps its definition and its concrete `{entity, id}`
  * references. It is executed when the content is read, under the reader.
  */
-import { isColumns, mapColumns } from './columns.js';
+import { COLUMN_SLOTS, columnBlocks, isColumns, mapColumns } from './columns.js';
 import { variableTokens, wholeVariableExpression, type VariableCatalogue, type VariableReference } from "@openshapeforge/operations";
 import { createContentEngine, holdsBraces, type CaptureState, type ContentEngine, type VariableScope } from "./engine.js";
 import { contentError } from "./errors.js";
@@ -102,12 +102,41 @@ type Capturer = {
   readonly channel: string;
 };
 
+/** Sections are siblings in storage. A named page frame belongs to the section that opens it. */
+function sectionLocks(blocks: readonly ContentBlock[], inherited: boolean, copied = false): ReadonlyMap<string, boolean> {
+  const sectionDefault = (block: ContentBlock) => block.lockOverride ?? (!copied && block.locked === true ? true : inherited);
+  const frames = new Map<string, boolean>();
+  for (const block of blocks) {
+    if (block.definitionKey === "SectionBreak" && typeof block.values.layout === "string") {
+      frames.set(block.values.layout, sectionDefault(block));
+    }
+  }
+  const locks = new Map<string, boolean>();
+  let section = inherited;
+  for (const block of blocks) {
+    if (block.definitionKey === "SectionBreak") section = sectionDefault(block);
+    locks.set(block.id, block.region ? (block.layoutKey ? frames.get(block.layoutKey) ?? section : inherited) : section);
+  }
+  return locks;
+}
+
+const opensInterior = (block: ContentBlock) => !block.locked || block.editableChildren === true;
+
+function captureLock(block: ContentBlock, locked: boolean, children: readonly ContentBlock[] = []): ContentBlock {
+  const { lockOverride: _override, locked: _locked, editableChildren: _interior, ...content } = block;
+  return locked ? { ...content, locked: true, ...(children.some(opensInterior) ? { editableChildren: true as const } : {}) } : content;
+}
+
 /**
  * One block in `scope`, with the rules of `rules` for what stays pending.
  * Returns the block to store and whether it still binds in the host.
  */
-async function captureBlock(capturer: Capturer, source: ContentBlock, variant: Pick<ContentTemplateVariant, "allowedDefinitions">, scopeOf: (capture: CaptureState) => VariableScope, rules: Pick<CaptureState, "defer" | "deferParameter">, depth: number, binding: CopyBinding = "bind"): Promise<{ block: ContentBlock; deferred: boolean; literalBraces?: boolean }> {
+async function captureBlock(capturer: Capturer, source: ContentBlock, variant: Pick<ContentTemplateVariant, "allowedDefinitions">, scopeOf: (capture: CaptureState) => VariableScope, rules: Pick<CaptureState, "defer" | "deferParameter">, depth: number, binding: CopyBinding = "bind", inherited = false, fromCopy = false, forced = false): Promise<{ block: ContentBlock; deferred: boolean; literalBraces?: boolean }> {
   const { engine, registry, resolvers } = capturer;
+  const authoredLock = source.lockOverride ?? inherited;
+  const hardLock = forced || (fromCopy && source.locked === true && !source.editableChildren);
+  const locked = hardLock || source.locked === true || authoredLock;
+  const childDefault = authoredLock || (source.locked === true && !source.editableChildren);
   engine.countBlock();
   const definition: CompiledContentBlockDefinition | undefined = Object.hasOwn(registry, source.definitionKey) ? registry[source.definitionKey] : undefined;
   if (!definition) contentError("BLOCK_UNKNOWN", "Block definition is absent from the compiled entity metadata.");
@@ -119,7 +148,7 @@ async function captureBlock(capturer: Capturer, source: ContentBlock, variant: P
     const values = await mapColumns(source.values, async children => {
       const kept: ContentBlock[] = [];
       for (const child of children) {
-        const result = await captureBlock(capturer, child, variant, scopeOf, rules, depth + 1, binding);
+        const result = await captureBlock(capturer, child, variant, scopeOf, rules, depth + 1, binding, childDefault, fromCopy, hardLock);
         kept.push(result.block); deferred ||= result.deferred; literalBraces ||= Boolean(result.literalBraces);
       }
       return kept;
@@ -127,7 +156,7 @@ async function captureBlock(capturer: Capturer, source: ContentBlock, variant: P
     validateContentValues(values, Object.fromEntries(Object.entries(definition.fields).filter(([, field]) => !field.relationship)), "column values");
     await resolvers.validateBlockValues?.(source.definitionKey, immutableContent(values));
     if (deferred && literalBraces) contentError("INVALID_VALUE", "A column cannot mix pending bindings with captured non-Markdown values that contain variable syntax.");
-    return {block:{...source,values},deferred,literalBraces};
+    return {block:captureLock({...source,values},locked,COLUMN_SLOTS.flatMap(slot => columnBlocks(values[slot]))),deferred,literalBraces};
   }
   const capture = state(rules);
   const scope = scopeOf(capture);
@@ -144,9 +173,10 @@ async function captureBlock(capturer: Capturer, source: ContentBlock, variant: P
     const bindingOf = copyBinding(stored, false);
     const blocks: ContentBlock[] = [];
     const deferred = new Set<string>();
+    const inheritedLocks = sectionLocks(stored.blocks, childDefault, true);
     for (const inner of stored.blocks) {
-      const settled = await captureBlock(capturer, inner, {}, scopeOf, rules, depth + 1, bindingOf(inner));
-      blocks.push(inner.locked ? { ...settled.block, locked: true } : settled.block);
+      const settled = await captureBlock(capturer, inner, {}, scopeOf, rules, depth + 1, bindingOf(inner), inheritedLocks.get(inner.id), true, hardLock);
+      blocks.push(settled.block);
       if (settled.deferred) deferred.add(inner.id);
     }
     const parametersField = composition.parametersField;
@@ -155,7 +185,7 @@ async function captureBlock(capturer: Capturer, source: ContentBlock, variant: P
     const copy: InclusionCopy = { ...(stored.page ? { page: stored.page } : {}), source: await sourceRecord(blocks, deferred), blocks };
     const values = { ...source.values, ...(parametersField && inputs !== undefined ? { [parametersField]: await engine.rescope(inputs as JsonObject, scope) } : {}), content: inclusionCopyContent(copy) } as JsonObject;
     engine.accountExpandedContent(values);
-    return { block: { ...bound, values }, deferred: capture.deferred || deferred.size > 0 };
+    return { block: captureLock({ ...bound, values }, locked, blocks), deferred: capture.deferred || deferred.size > 0 };
   }
   const renderer = Object.hasOwn(definition.renderers, capturer.channel) ? definition.renderers[capturer.channel] : undefined;
   if (!renderer) contentError("UNSUPPORTED_CHANNEL", "Block has no renderer for the requested channel.");
@@ -180,7 +210,7 @@ async function captureBlock(capturer: Capturer, source: ContentBlock, variant: P
     await resolvers.validateBlockValues?.(source.definitionKey, immutableContent(values));
   }
   engine.accountExpandedContent(values);
-  const block: ContentBlock = { ...bound, values };
+  const block = captureLock({ ...bound, values }, locked);
   // Every record a typed block names is read now, so a capture never stores a reference its actor could not open.
   await engine.resolveReferences(block);
   return { block, deferred: capture.deferred, literalBraces: capture.literalBraces };
@@ -233,8 +263,9 @@ export async function captureInclusionContent(input: CaptureInclusionInput, regi
   const rules = pendingRules(pending);
   const blocks: ContentBlock[] = [];
   const deferred = new Set<string>();
+  const locks = sectionLocks(variant.blocks, false);
   for (const source of variant.blocks) {
-    const captured = await captureBlock(capturer, source, variant, (capture) => ({ catalogue, parameters, capture }), rules, 0);
+    const captured = await captureBlock(capturer, source, variant, (capture) => ({ catalogue, parameters, capture }), rules, 0, "bind", locks.get(source.id));
     blocks.push(captured.block);
     if (captured.deferred) deferred.add(source.id);
   }
@@ -267,8 +298,9 @@ export async function captureTemplateBlocks(input: CaptureTemplateBlocksInput, r
   const catalogue = contentVariableCatalogue(input.version.parameters);
   const parameters = immutableContent(input.parameters) as JsonObject;
   const blocks: ContentBlock[] = [];
+  const locks = sectionLocks(variant.blocks, false);
   for (const source of variant.blocks) {
-    const captured = await captureBlock({ engine, registry, resolvers, channel: input.channel }, source, variant, (capture) => ({ catalogue, parameters, capture }), NO_CAPTURE, 0);
+    const captured = await captureBlock({ engine, registry, resolvers, channel: input.channel }, source, variant, (capture) => ({ catalogue, parameters, capture }), NO_CAPTURE, 0, "bind", locks.get(source.id));
     blocks.push(captured.block);
   }
   return immutableContent(blocks);

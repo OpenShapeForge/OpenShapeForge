@@ -708,3 +708,19 @@ test("a template maker may edit and set the locks of their own nested source blo
  const changed={...row,values:{left:[{...child,values:{markdown:"Edited source"}}]}};
  expect(await f.write(row,changed)).toEqual(changed.values);
 });
+
+test("a locked columns row lets the document edit its open child and protects its structure", async () => {
+  const f = fixture();
+  const body: ContentBlock = { id: "body", definitionKey: "TextBlock", schemaVersion: 1, values: { markdown: "Body" }, references: {} };
+  const terms: ContentBlock = { ...body, id: "terms", values: { markdown: "Terms" }, locked: true };
+  const row = {
+    ...f.row(v1, {}), locked: true, editable_children: true,
+    definition_key: "TextColumns", values: { left: [body, terms], leftWidth: 200 },
+  };
+  const edited = { ...row, values: { ...row.values, left: [{ ...body, values: { markdown: "Edited" } }, terms] } };
+  expect(await f.write(row, edited)).toEqual(edited.values);
+  await expect(f.write(row, { ...edited, values: { ...edited.values, leftWidth: 220 } })).rejects.toBeDefined();
+  await expect(f.write(row, { ...edited, values: { ...edited.values, left: [body, { ...terms, values: body.values }] } })).rejects.toBeDefined();
+  await expect(f.write(row, { ...row, values: { ...row.values, left: [{ ...body, lockOverride: false }, terms] } })).rejects.toBeDefined();
+  await expect(assertBlockInclusionRemoval(carrier, row)).rejects.toBeDefined();
+});

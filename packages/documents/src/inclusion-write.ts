@@ -21,7 +21,9 @@ import { createContentEngine } from "./content/engine.js";
 import { contentError, TemplateContentError } from "./content/errors.js";
 import { canonicalJson, CONTENT_LIMITS, type JsonObject } from "./content/json.js";
 import {
-  assertProtectedContentKept, holdsProtectedContent, inclusionCopyContent, isInclusionCopy, mergeInclusionCopy, nestedCopy, normalizeLocalDraft, protectedPaths, readInclusionCopy, templateComposition,
+  assertProtectedContentKept,
+  containerShell,
+  holdsProtectedContent, inclusionCopyContent, isInclusionCopy, mergeInclusionCopy, nestedCopy, normalizeLocalDraft, protectedPaths, readInclusionCopy, templateComposition,
   sourceRecord, type CompositionOf, type InclusionCopy,
 } from "./content/inclusion-copy.js";
 import type { ContentBlock, ContentResolvers } from "./content/types.js";
@@ -51,6 +53,7 @@ type Prepared = Settled & { readonly baseline: InclusionCopy };
 
 type Environment = {
   readonly compositionOf: CompositionOf;
+  readonly authorLocks: boolean;
   validate(block: ContentBlock): Promise<void>;
   capture(identity: Identity): Promise<CapturedInclusion>;
   /** The source variant's own blocks at `versionId`, or undefined when the acting session can no longer read it. */
@@ -105,7 +108,7 @@ async function settle(environment: Environment, stored: Stored | undefined, next
   if (stored?.copy && sameIdentity(stored, next) && !prepared && !explicit) {
     // An ordinary edit: the stored source record and page settings stay, the draft is checked against them.
     if (next.draft === undefined) return { parameters: stored.parameters, copy: stored.copy };
-    return { parameters: stored.parameters, copy: { ...stored.copy, blocks: await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate }) } };
+    return { parameters: stored.parameters, copy: { ...stored.copy, blocks: await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate, authorLocks: environment.authorLocks }) } };
   }
   if (prepared && explicit)
     contentError("INVALID_VALUE", "This draft was already prepared from another source record than the saved one. Send the baseline that preparation returned to prepare it again; the existing inclusion has been kept.");
@@ -114,20 +117,20 @@ async function settle(environment: Environment, stored: Stored | undefined, next
     // Nothing was captured before. A draft that arrives with the insertion is local content over the baseline captured now.
     const drafted = isObject(next.draft) && Array.isArray(next.draft.blocks) && next.draft.blocks.length > 0;
     if (!drafted) return { parameters: captured.parameters, copy: captured.copy, baseline: captured.copy };
-    return { parameters: captured.parameters, baseline: captured.copy, copy: { ...captured.copy, blocks: await normalizeLocalDraft(captured.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate, freshBaseline: true }) } };
+    return { parameters: captured.parameters, baseline: captured.copy, copy: { ...captured.copy, blocks: await normalizeLocalDraft(captured.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate, authorLocks: environment.authorLocks, freshBaseline: true }) } };
   }
   if (prepared) {
     const draft = next.draft as Record<string, unknown>;
     const fresh = inclusionCopyContent(captured.copy);
     if (canonicalJson(draft.source) !== canonicalJson(fresh.source) || canonicalJson(draft.page ?? null) !== canonicalJson(fresh.page ?? null))
       contentError("INVALID_VALUE", "The prepared update no longer matches its source or the records it names. Prepare it again; the existing inclusion has been kept.");
-    const blocks = await normalizeLocalDraft(captured.copy, draft, { compositionOf, settleNested, validateNestedBlock: environment.validate });
+    const blocks = await normalizeLocalDraft(captured.copy, draft, { compositionOf, settleNested, validateNestedBlock: environment.validate, authorLocks: environment.authorLocks });
     assertProtectedContentKept(protectedPaths(stored.copy.source, stored.copy.blocks, compositionOf), blocks, compositionOf,
       "The update no longer holds content that is protected here. The existing inclusion has been kept.");
     return { parameters: captured.parameters, copy: { ...captured.copy, blocks } };
   }
   // The version or an input changed: the current local content, the stored baseline and the new capture are merged, or the write is refused whole.
-  const current = next.draft === undefined ? stored.copy.blocks : await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate });
+  const current = next.draft === undefined ? stored.copy.blocks : await normalizeLocalDraft(stored.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate, authorLocks: environment.authorLocks });
   const authoredOld = await environment.authored(stored.versionId);
   const copy = await mergeInclusionCopy({ baseline: stored.copy.source, current, ...(authoredOld ? { authoredOld } : {}), authoredNew: captured.authored, captured: captured.copy, compositionOf });
   return { parameters: captured.parameters, copy, baseline: captured.copy };
@@ -158,7 +161,7 @@ async function settlePrepared(environment: Environment, stored: Stored | undefin
     contentError("INVALID_VALUE", "The earlier preparation no longer matches its source or the records it names, so the draft made of it cannot be carried to another source. Nothing has been changed; the existing inclusion has been kept.");
   const required = stored?.copy ? protectedPaths(stored.copy.source, stored.copy.blocks, compositionOf) : [];
   assertProtectedContentKept(required, base.copy.blocks, compositionOf, kept);
-  const current = next.draft === undefined ? base.copy.blocks : await normalizeLocalDraft(base.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate });
+  const current = next.draft === undefined ? base.copy.blocks : await normalizeLocalDraft(base.copy, next.draft, { compositionOf, settleNested, validateNestedBlock: environment.validate, authorLocks: environment.authorLocks });
   const captured = await environment.capture(next);
   const authoredOld = await environment.authored(baseline.versionId);
   const copy = await mergeInclusionCopy({ baseline: base.copy.source, current, ...(authoredOld ? { authoredOld } : {}), authoredNew: captured.authored, captured: captured.copy, compositionOf });
@@ -176,6 +179,8 @@ function identityOf(block: ContentBlock, compositionOf: CompositionOf): Identity
 
 async function settleBlock(environment: Environment, previous: ContentBlock | undefined, draft: ContentBlock, authoredColumns = false): Promise<ContentBlock> {
   const { compositionOf } = environment;
+  if (authoredColumns && draft.editableChildren !== previous?.editableChildren)
+    refuse("INVALID_STATE", "Editable child metadata is kept by the server.");
   if (isColumns(draft.definitionKey) || authoredColumns) await environment.validate(draft);
   if (isColumns(draft.definitionKey)) return { ...draft, values: await mapColumns(draft.values, async (children, slot) => {
     const old = previous && isColumns(previous.definitionKey) ? columnBlocks(previous.values[slot]) : [];
@@ -244,6 +249,7 @@ function environment(trx: unknown, tenantId: string, carrier: RuntimeEntityValue
   };
   return {
     compositionOf: compositionFor(carrier),
+    authorLocks: !row.document_variant_id,
     validate: (block) => acting(async (context, host, resolvers) => {
       const registry = await compiledContentRegistry(context, carrier);
       const definition = registry[block.definitionKey];
@@ -303,11 +309,17 @@ function lockedRow(carrier: RuntimeEntityValueCarrier, before: Row | undefined, 
   if (!before?.document_variant_id || before.locked !== true) return;
   const definition = carrier.definitions[String(before[carrier.definitionColumn])];
   const columns = [carrier.definitionColumn, carrier.valuesColumn, "locked", "definition_version", "document_variant_id", "document_variant_id_position", "region", "layout_key", ...(definition?.references.flatMap((reference) => [reference.column, ...(reference.parameterColumn ? [reference.parameterColumn] : [])]) ?? [])];
-  if (!after || columns.some((key) => canonicalJson(before[key] ?? null) !== canonicalJson(after[key] ?? null))) refuse("INVALID_STATE", "This document block is locked by its source and cannot be changed, moved or removed.");
+  const editableInterior = after && before.editable_children === true
+    && (isColumns(String(before[carrier.definitionColumn])) || Boolean(compositionFor(carrier)(String(before[carrier.definitionColumn]))))
+    && canonicalJson(containerShell(record(before[carrier.valuesColumn]), isColumns(String(before[carrier.definitionColumn]))))
+      === canonicalJson(containerShell(record(after[carrier.valuesColumn]), isColumns(String(before[carrier.definitionColumn]))));
+  if (!after || columns.some((key) => !(editableInterior && key === carrier.valuesColumn) && canonicalJson(before[key] ?? null) !== canonicalJson(after[key] ?? null))) refuse("INVALID_STATE", "This document block is locked by its source and cannot be changed, moved or removed.");
 }
 
 async function prepare(trx: unknown, tenantId: string, carrier: RuntimeEntityValueCarrier, before: Row | undefined, after: Row, options: InclusionWriteOptions): Promise<JsonObject | undefined> {
   if (carrier.entityName !== "Block") return undefined;
+  if (after.document_variant_id && after.lock_override != null)
+    refuse("INVALID_STATE", "Document blocks cannot author template lock overrides.");
   lockedRow(carrier, before, after);
   if (before && isColumns(String(before[carrier.definitionColumn])) && !isColumns(String(after[carrier.definitionColumn]))) {
     const blocks = COLUMN_SLOTS.flatMap(slot => columnBlocks(record(before[carrier.valuesColumn])[slot]));

@@ -4,6 +4,12 @@
 
 ### Added
 
+- **Shared handler helpers** that plugins had each written by hand:
+  `moduleOperationError` and `moduleOperationSuccess` build the module
+  Operation result envelopes; `rawQuery` and `queryRows` build and run one raw
+  parameterized statement without importing Kysely into a plugin bundle;
+  `retryAfterMs` and `retryAfterAt` read a `Retry-After` header as
+  delta-seconds or an HTTP date, with an optional horizon.
 - **`childRelations` on the extension registry.** The single relations of a
   collection's child that is not extensible itself, by child entity, for
   `rollup.of` to follow: `RuntimeExtensionRegistryManifest.childRelations` and

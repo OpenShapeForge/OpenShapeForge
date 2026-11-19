@@ -161,6 +161,7 @@
         },
         "via": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*$" },
         "ownership": { "enum": ["owned", "reference"] },
+        "onTargetDelete": { "const": "unlink" },
         "version": {
           "type": "string", "enum": ["pinned", "current"],
           "description": "How a single reference relates to a versioned target. current (the default): the reference means the target's editable head. pinned: the reference names one immutable version and moves only through an authored command, never by itself."

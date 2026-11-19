@@ -214,3 +214,5 @@ export type {
   EntityGraphRelationship,
   ValuePathStep,
 } from "./value-paths.js";
+
+export type { OwnedDeletePlan, OwnedDeleteStep, OwnedDeleteUnlink, OwnedDeleteForeignKey, OwnedDeleteBlocker, OwnedDeleteGuard } from "./owned-delete-plan.js";

@@ -3,6 +3,7 @@ import { compileCollectionTable } from "./collection-table.js";
 import { operationForm } from "./operation-form-presentation.js";
 import { collectBlueprintOperations } from "../blueprint-operations.js";
 import { fieldDefinitionsPath, referencedByPath } from "../extension-operations.js";
+import type { AuthoringWebConfig } from "./layers.js";
 import type { ExtensionRegistry } from "./extension-registry-types.js";
 /** A REST-driven browser must positively project both its collection and transport. */
 export function hasWebRestCollection(contract: CompiledEntityContract): boolean {
@@ -2150,7 +2151,7 @@ const contextConditionValueTypes: Record<string, "string" | "number" | "boolean"
 
 export function buildWebManifest(
   entities: readonly Pick<CompiledEntityInfo, "slug" | "contract">[],
-  options: WebManifestOptions = {},
+  options: WebManifestOptions & AuthoringWebConfig = {},
   standalone: WebStandaloneOperationsInput = { catalogs: [], operations: [] },
   referentiedata: CoreReferentiedataSnapshot = {},
   /** The backend manifest's tenant-field registry; absent, no entity offers tenant fields. */
@@ -2192,10 +2193,15 @@ export function buildWebManifest(
   const projected = projectable.map((entity) => entity.contract.source
     ? providers.get(entity.contract.entity.name)! : projectEntity(entity, byName, providers));
   if (extensionRegistry) withCustomFields(projected, byName, extensionRegistry);
+  const defaultTimeZone = options.createDefaults?.timeZone;
   // Reading uses the same authored catalog labels as editing. Keep the source
   // identity for choices and preserve unknown stored codes as renderer fallbacks.
   for (const entity of [...projected, ...Object.values(pages?.entities ?? {})]) {
     for (const field of Object.values(entity.fields)) {
+      if (defaultTimeZone !== undefined && field.osfType === "timeZone" && field.cardinality === "one"
+        && field.supports.create && field.defaultValue === undefined) {
+        field.defaultValue = defaultTimeZone;
+      }
       if (field.optionSource?.type === "referentiedata" && !field.options?.length) {
         const options = referentiedata[field.optionSource.group];
         if (options?.length) field.options = options.map(item => ({ ...item, label: { ...item.label } }));

@@ -220,6 +220,7 @@ export type {
   SettingsProviderSource,
   StringSetSettingDefinition,
 } from "./settings.js";
+export { loadAuthoringConfig } from "./authoring/layers.js";
 export type {
   CompiledFieldSchemaOptions,
   FieldSchemaCompiler,
@@ -654,13 +655,13 @@ export async function collectAllArtifacts(
     // graphql group above. Web hosts generate the populated API + web pair as
     // part of their UI corpus.
     ui: [
-      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot, standaloneWeb, referentiedata, manifest.extensionRegistry) : []),
+      ...(webPresent ? await generateAuthoringUiArtifacts(authoringDir, repoRoot, standaloneWeb, referentiedata, manifest.extensionRegistry, authoringConfig.web) : []),
       ...(productWebPresent
         ? [{
             path: "apps/product-web/src/generated/web-manifest.json",
             contents: renderWebManifest(buildWebManifest(
               entities,
-              { locale: "nl", routeLocale: "en", authorizationOperations },
+              { ...authoringConfig.web, locale: "nl", routeLocale: "en", authorizationOperations },
               standaloneWeb,
               referentiedata,
               manifest.extensionRegistry,

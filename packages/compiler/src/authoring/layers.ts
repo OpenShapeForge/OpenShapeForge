@@ -60,6 +60,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import YAML from "yaml";
+import { isIanaTimeZone } from "@openshapeforge/operations";
 import { RECORD_ACTION_DEFAULT_PRINCIPAL_CLASSES } from "./principal-classes.js";
 import { packagedConfigFallback } from "../packaged-config.js";
 import {
@@ -78,6 +79,11 @@ export type AuthoringConfig = {
   restApi?: RestApiDocumentation;
   /** Committed host selections for settings defined by their owning source. */
   settings?: Record<string, AuthoringSettingValue>;
+  web?: AuthoringWebConfig;
+};
+
+export type AuthoringWebConfig = {
+  createDefaults?: { timeZone?: string };
 };
 
 export type AuthoringSettingValue = boolean | number | string | string[];
@@ -151,14 +157,15 @@ function readConfigFile(
     requireLayers,
     allowRestApi,
     allowSettings,
-  }: { requireLayers: boolean; allowRestApi: boolean; allowSettings: boolean },
+    allowWeb,
+  }: { requireLayers: boolean; allowRestApi: boolean; allowSettings: boolean; allowWeb: boolean },
 ): ParsedAuthoringConfig {
   const parsed = YAML.parse(readFileSync(path, "utf8"));
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error(`${filename} must be an object.`);
   }
   const candidate = parsed as Record<string, unknown>;
-  const allowedKeys = ["layers", "plugins", "restApi", "settings"];
+  const allowedKeys = ["layers", "plugins", "restApi", "settings", "web"];
   const unknownKeys = Object.keys(candidate).filter((key) => !allowedKeys.includes(key));
   if (unknownKeys.length > 0) {
     throw new Error(`${filename} has unknown field(s): ${unknownKeys.sort().join(", ")}.`);
@@ -189,6 +196,10 @@ function readConfigFile(
       `${filename} cannot declare "settings"; effective settings must be selected in the committed config.`,
     );
   }
+  if (!allowWeb && candidate.web !== undefined) {
+    throw new Error(`${filename} cannot declare "web"; web defaults belong in the committed config.`);
+  }
+  const web = candidate.web === undefined ? undefined : validateAuthoringWebConfig(candidate.web, filename);
   const restApi = candidate.restApi === undefined
     ? undefined
     : validateRestApiDocumentation(candidate.restApi, filename);
@@ -200,7 +211,29 @@ function readConfigFile(
     plugins: plugins as string[],
     ...(restApi ? { restApi } : {}),
     ...(settings ? { settings } : {}),
+    ...(web ? { web } : {}),
   };
+}
+
+function validateAuthoringWebConfig(value: unknown, filename: string): AuthoringWebConfig {
+  const web = readWebConfigObject(value, `${filename} web`, "createDefaults");
+  if (web.createDefaults === undefined) return {};
+  const defaults = readWebConfigObject(web.createDefaults, `${filename} web.createDefaults`, "timeZone");
+  if (defaults.timeZone === undefined) return { createDefaults: {} };
+  if (!isIanaTimeZone(defaults.timeZone)) {
+    throw new Error(`${filename} web.createDefaults.timeZone must be a valid IANA time zone.`);
+  }
+  return { createDefaults: { timeZone: defaults.timeZone } };
+}
+
+function readWebConfigObject(value: unknown, path: string, allowedKey: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${path} must be an object.`);
+  }
+  const record = value as Record<string, unknown>;
+  const unknownKeys = Object.keys(record).filter((key) => key !== allowedKey);
+  if (unknownKeys.length) throw new Error(`${path} has unknown field(s): ${unknownKeys.sort().join(", ")}.`);
+  return record;
 }
 
 function validateAuthoringSettings(
@@ -396,6 +429,7 @@ export function loadCommittedAuthoringConfig(repoRoot: string): ParsedAuthoringC
         requireLayers: true,
         allowRestApi: true,
         allowSettings: true,
+        allowWeb: true,
       })
     : { layers: [DEFAULT_LAYER], plugins: [] };
 }
@@ -410,12 +444,14 @@ export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
       plugins: base.plugins,
       ...(base.restApi ? { restApi: base.restApi } : {}),
       ...(base.settings ? { settings: base.settings } : {}),
+      ...(base.web ? { web: base.web } : {}),
     };
   }
   const local = readConfigFile(localPath, AUTHORING_LOCAL_CONFIG_FILENAME, {
     requireLayers: false,
     allowRestApi: false,
     allowSettings: false,
+    allowWeb: false,
   });
 
   // A duplicate is refused rather than de-duplicated. Appending a layer that
@@ -456,6 +492,7 @@ export function loadAuthoringConfig(repoRoot: string): AuthoringConfig {
     plugins: [...base.plugins, ...local.plugins],
     ...(base.restApi ? { restApi: base.restApi } : {}),
     ...(base.settings ? { settings: base.settings } : {}),
+    ...(base.web ? { web: base.web } : {}),
   };
 }
 

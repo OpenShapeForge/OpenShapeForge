@@ -56,7 +56,11 @@ const migration: VersionedMigration = {
   // Compatibility is limited to replacing the historical privileged RLS context
   // flag with its token. All schema/data statements and row scope are unchanged;
   // a previously completed migration must not run again or rewrite its checksum.
-  supersededChecksums: ["e69b06b09cd9f3e07538fd128c581699ca9221b6239a3b577904a58655925dad", "b399a6e7c50b166259636e5149c41d5270b9b189587392374876f005a29a4847"],
+  supersededChecksums: [
+    "1cfffa16dd68801160a8c3c09dedfdcb78ba6f93712846e5d8dc402cb15e1ff7",
+    "e137e8fac7a8316fb758299484e64dcf0e8fc8d26f96455e725b010e17a4ae82",
+    "e69b06b09cd9f3e07538fd128c581699ca9221b6239a3b577904a58655925dad",
+    "b399a6e7c50b166259636e5149c41d5270b9b189587392374876f005a29a4847"],
   fileUrl: import.meta.url,
   async up(db) { await makeConfigurationCodesUnique(db); },
 };

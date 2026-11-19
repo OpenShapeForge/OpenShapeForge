@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 // SPDX-License-Identifier: BUSL-1.1
+import { applyOwnedDeleteStorageRequirements } from "./owned-delete-plan.js";
 import { collectBlueprintOperations } from "./blueprint-operations.js";
 import { collectExtensionOperations } from "./extension-operations.js";
 import { collectJobOperations } from "./job-operations.js";
@@ -398,12 +399,6 @@ export async function collectAllArtifacts(
   const webPresent = existsSync(join(repoRoot, "apps/web"));
   const productWebPresent = existsSync(join(repoRoot, "apps/product-web"));
   assertReferentieGroepsResolve(entities, referentiedata);
-  const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins, {
-    databaseRoleNames,
-    repoRoot,
-    authoringDir,
-    webPresent,
-  });
   const operationContext = {
     repoRoot,
     authoringDir,
@@ -426,7 +421,8 @@ export async function collectAllArtifacts(
     // The catalogs travel with the entities: application search offers a
     // catalog's web collection as a page beside the core entities, and both
     // halves of its one source list are compiled together.
-    ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata, moduleOperationCatalogs),
+    ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata, moduleOperationCatalogs, manifest,
+      plugins.flatMap(plugin => plugin.ownedDeleteGuards ?? [])),
     ...collectAuthoredModulePluginOperations(moduleOperationCatalogs, operationContext),
   ].sort((left, right) => left.key.localeCompare(right.key));
   for (let index = 1; index < operations.length; index += 1) {
@@ -437,6 +433,14 @@ export async function collectAllArtifacts(
       );
     }
   }
+  const ownedDeletePlans = operations.flatMap(operation => operation.implementation?.type === "ownedDelete" ? [operation.implementation.plan] : []);
+  applyOwnedDeleteStorageRequirements(ownedDeletePlans, manifest.tables);
+  const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins, {
+    databaseRoleNames,
+    repoRoot,
+    authoringDir,
+    webPresent,
+  });
   const entityOperations = collectEntityOperations(entities);
   const moduleRegistry = buildModuleRegistry(repoRoot, pluginEntries, { entities });
   assertOperationRuntimeModules(operations, [

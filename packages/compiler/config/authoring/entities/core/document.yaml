@@ -793,6 +793,36 @@ operations:
     effects: { data: delete, external: none }
     reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
+  deleteWithContents:
+    name: { en: Delete document, nl: Document verwijderen }
+    description:
+      en: Delete this draft document with its editable variants and blocks.
+      nl: Verwijder dit conceptdocument met de bewerkbare varianten en blokken.
+    implementation: { type: ownedDelete }
+    target: { scope: record, inputField: id }
+    input:
+      schema:
+        type: object
+        required: [id]
+        additionalProperties: false
+        properties:
+          id: { type: string, format: uuid, x-osf-reference: { entity: Document }, x-osf-i18n: { title: { en: Document, nl: Document } } }
+    output:
+      schema:
+        type: object
+        required: [id]
+        additionalProperties: false
+        properties:
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Document, nl: Document } } }
+    auth: { mode: session, roles: [CaseFile.All.ReadWrite, Organization.All.ReadWrite] }
+    tenancy: { mode: required }
+    effects: { data: delete, external: none }
+    reliability: { idempotency: { mode: natural } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 409, code: OPERATION_REFUSED, description: The document or its contents are protected. }
+      - { status: 409, code: CONFLICT, description: The document changed during deletion. }
+      - { status: 403, code: FORBIDDEN, description: The caller cannot delete the document or its contents. }
 interfaces:
   rest:
     operations:

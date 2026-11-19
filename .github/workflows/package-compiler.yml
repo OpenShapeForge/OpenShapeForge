@@ -125,9 +125,14 @@ jobs:
       - name: Dry-run the publish plan
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISH_TARGET: ${{ github.base_ref || github.ref_name }}
         run: |
           printf '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' > ~/.npmrc
-          bun scripts/publish-packages.mjs --channel dev --sha "${GITHUB_SHA}" --dry-run
+          if [[ "$PUBLISH_TARGET" == main ]]; then
+            bun scripts/publish-packages.mjs --channel main --dry-run
+          else
+            bun scripts/publish-packages.mjs --channel dev --sha "${GITHUB_SHA}" --dry-run
+          fi
 
   # Publish to the GitHub Packages npm registry — pushes to main and hans/dev
   # only. On main the package.json version is published under `latest` when it

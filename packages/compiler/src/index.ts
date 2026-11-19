@@ -421,7 +421,8 @@ export async function collectAllArtifacts(
     // The catalogs travel with the entities: application search offers a
     // catalog's web collection as a page beside the core entities, and both
     // halves of its one source list are compiled together.
-    ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata, moduleOperationCatalogs, manifest),
+    ...collectAuthoredEntityPluginOperations(entities, operationContext, referentiedata, moduleOperationCatalogs, manifest,
+      plugins.flatMap(plugin => plugin.ownedDeleteGuards ?? [])),
     ...collectAuthoredModulePluginOperations(moduleOperationCatalogs, operationContext),
   ].sort((left, right) => left.key.localeCompare(right.key));
   for (let index = 1; index < operations.length; index += 1) {
@@ -432,10 +433,8 @@ export async function collectAllArtifacts(
       );
     }
   }
-  applyOwnedDeleteStorageRequirements(
-    operations.flatMap(operation => operation.implementation?.type === "ownedDelete" ? [operation.implementation.plan] : []),
-    manifest.tables,
-  );
+  const ownedDeletePlans = operations.flatMap(operation => operation.implementation?.type === "ownedDelete" ? [operation.implementation.plan] : []);
+  applyOwnedDeleteStorageRequirements(ownedDeletePlans, manifest.tables);
   const pluginMigrationRegistry = collectPluginMigrationRegistry(manifest, plugins, {
     databaseRoleNames,
     repoRoot,

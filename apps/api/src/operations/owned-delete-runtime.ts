@@ -66,8 +66,9 @@ export async function verifyOwnedDeleteDatabase(db: OpenShapeForgeDatabase, plan
     if (!table) unsupported();
     return `${table.schema}.${table.table}`;
   });
-  const triggers = await sql<{ table_name: string; function_name: string }>`
-    select ns.nspname || '.' || rel.relname as table_name, fn_ns.nspname || '.' || fn.proname as function_name
+  const triggers = await sql<{ table_name: string; function_name: string; trigger_name: string; trigger_type: number }>`
+    select ns.nspname || '.' || rel.relname as table_name, fn_ns.nspname || '.' || fn.proname as function_name,
+      t.tgname as trigger_name, t.tgtype as trigger_type
     from pg_catalog.pg_trigger t
     join pg_catalog.pg_class rel on rel.oid = t.tgrelid
     join pg_catalog.pg_namespace ns on ns.oid = rel.relnamespace
@@ -79,9 +80,21 @@ export async function verifyOwnedDeleteDatabase(db: OpenShapeForgeDatabase, plan
   `.execute(db);
   const known = new Set(["platform.audit_business_row", "platform.track_field_value_since",
     "app.guard_document_block_write", "app.guard_authorization_resource"]);
-  if (triggers.rows.some(trigger => !known.has(trigger.function_name)) ||
-      [...targetNames, ...updateNames].some(table => !triggers.rows.some(trigger =>
-        trigger.table_name === table && trigger.function_name === "platform.audit_business_row"))) unsupported();
+  const matchesGuard = (trigger: typeof triggers.rows[number], guard: OwnedDeletePlan["guards"][number]) =>
+    (trigger.trigger_type & 3) === 3 && trigger.table_name === guard.table && trigger.trigger_name === guard.trigger &&
+    trigger.function_name === guard.function;
+  const events = [
+    { name: "delete", bit: 8, tables: targetNames },
+    { name: "update", bit: 16, tables: updateNames },
+  ] as const;
+  if (events.some(({ name, bit, tables }) => {
+    const actual = triggers.rows.filter(trigger => tables.includes(trigger.table_name) && (trigger.trigger_type & bit) !== 0);
+    const guards = plan.guards.filter(guard => tables.includes(guard.table) && guard.events.includes(name));
+    return actual.some(trigger => !known.has(trigger.function_name) && !guards.some(guard => matchesGuard(trigger, guard))) ||
+      guards.some(guard => !actual.some(trigger => matchesGuard(trigger, guard))) ||
+      tables.some(table => !actual.some(trigger => trigger.table_name === table &&
+        (trigger.trigger_type & 3) === 1 && trigger.function_name === "platform.audit_business_row"));
+  })) unsupported();
 }
 
 async function discover(trx: Transaction<DB>, plan: OwnedDeletePlan, tenant: string, rootId: string): Promise<Snapshot> {

@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import type { CompiledEntityContract, CompiledRelationship } from "./authoring/types.js";
 import type { TableDefinition } from "./schema.js";
-import { compileOwnedDeletePlan } from "./owned-delete-plan.js";
+import { bindOwnedDeleteGuards, compileOwnedDeletePlan } from "./owned-delete-plan.js";
 
 const owned = (field: string, target: string, foreignKey: string): CompiledRelationship => ({
   kind: "hasMany", key: field, fieldKey: field, ownership: "owned", target, foreignKey,
@@ -63,4 +63,13 @@ test("owned delete refuses a non-tenant foreign key and recursive ownership", ()
     },
   });
   expect(() => compileOwnedDeletePlan("Root", models, [root, child])).toThrow("Repeated or unresolved target");
+});
+
+test("the composed plan binds only declared guards for tables and writes it touches", () => {
+  const tables = [table("Root", "erp", "roots"), table("Other", "erp", "others")];
+  const plan = compileOwnedDeletePlan("Root", [entity("Root"), entity("Other")], tables);
+  const guard = { table: "erp.roots", trigger: "protect_root", function: "policy.protect_root", events: ["delete"] } as const;
+  bindOwnedDeleteGuards([plan], tables, [guard, { ...guard, table: "erp.others" }, { ...guard, events: ["update"] }]);
+  expect(plan.guards).toEqual([guard]);
+  expect(() => bindOwnedDeleteGuards([plan], tables, [{ ...guard, table: "erp.missing" }])).toThrow("Invalid owned delete guard");
 });

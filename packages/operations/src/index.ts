@@ -215,4 +215,4 @@ export type {
   ValuePathStep,
 } from "./value-paths.js";
 
-export type { OwnedDeletePlan, OwnedDeleteStep, OwnedDeleteUnlink, OwnedDeleteForeignKey, OwnedDeleteBlocker } from "./owned-delete-plan.js";
+export type { OwnedDeletePlan, OwnedDeleteStep, OwnedDeleteUnlink, OwnedDeleteForeignKey, OwnedDeleteBlocker, OwnedDeleteGuard } from "./owned-delete-plan.js";

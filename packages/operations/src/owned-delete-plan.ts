@@ -34,6 +34,13 @@ export interface OwnedDeleteBlocker {
   query: string;
 }
 
+export interface OwnedDeleteGuard {
+  table: string;
+  trigger: string;
+  function: string;
+  events: readonly ("delete" | "update")[];
+}
+
 export interface OwnedDeletePlan {
   root: string;
   discover: readonly OwnedDeleteStep[];
@@ -42,6 +49,7 @@ export interface OwnedDeletePlan {
   unlinks: readonly OwnedDeleteUnlink[];
   foreignKeys: readonly OwnedDeleteForeignKey[];
   blockers: readonly OwnedDeleteBlocker[];
+  guards: readonly OwnedDeleteGuard[];
   hierarchies: readonly { entity: string; column: string }[];
   resultCounts: Readonly<Record<string, string>>;
 }

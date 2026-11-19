@@ -28,7 +28,8 @@ import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
 import { withOperationControlProperties, type JsonObject } from "./entity-operation-controls.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
-import { compileOwnedDeletePlan } from "./owned-delete-plan.js";
+import { bindOwnedDeleteGuards, compileOwnedDeletePlan } from "./owned-delete-plan.js";
+import type { OwnedDeleteGuard } from "@openshapeforge/operations";
 import { materializeCollectionOperations } from "./authoring/collection-operations.js";
 
 const nativeBindings = new WeakMap<PluginOperationContract, NonNullable<CompiledPluginOperation["implementation"]>>();
@@ -807,6 +808,7 @@ export function collectAuthoredEntityPluginOperations(
   /** Catalogs whose web collections application search also offers as pages. */
   catalogs: readonly OperationCatalogDefinition[] = [],
   manifest?: PlatformSchemaManifest,
+  ownedDeleteGuards: readonly OwnedDeleteGuard[] = [],
 ): CompiledPluginOperation[] {
   materializeCollectionOperations(entities, referentiedata);
   const byPlugin = new Map<string, PluginOperationContract[]>();
@@ -909,10 +911,9 @@ export function collectAuthoredEntityPluginOperations(
       });
       if (implementation.type === "ownedDelete") {
         if (!manifest) throw new Error(`Owned delete ${authored.id} needs the composed storage manifest.`);
-        nativeBindings.set(operation, {
-          type: "ownedDelete",
-          plan: compileOwnedDeletePlan(authored.entityName, entities.map((entry) => entry.contract), manifest.tables, implementation.counts),
-        });
+        const plan = compileOwnedDeletePlan(authored.entityName, entities.map((entry) => entry.contract), manifest.tables, implementation.counts);
+        bindOwnedDeleteGuards([plan], manifest.tables, ownedDeleteGuards);
+        nativeBindings.set(operation, { type: "ownedDelete", plan });
       }
       if (contract.source && authored.key === "get") resultProjections.set(operation, {
         kind: "entity-record", entityName: authored.entityName, idField: "id",

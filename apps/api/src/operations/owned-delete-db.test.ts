@@ -68,6 +68,12 @@ test("compiled document delete requires confirmation and role, removes owned row
     expect("error" in otherTenant).toBe(true);
     const unconfirmed = await execute(false);
     expect("error" in unconfirmed && unconfirmed.error.code).toBe("CONFIRMATION_REQUIRED");
+    await sql`create function erp.fixture_undeclared_delete() returns trigger language plpgsql as $$ begin return old; end $$`.execute(db);
+    await sql`create trigger fixture_undeclared_delete before delete on erp.documents
+      for each row execute function erp.fixture_undeclared_delete()`.execute(db);
+    const undeclaredTrigger = await execute(true);
+    expect("error" in undeclaredTrigger && undeclaredTrigger.error.code).toBe("INVALID_DEFINITION");
+    await sql`drop trigger fixture_undeclared_delete on erp.documents`.execute(db);
     await db.transaction().execute(async trx => {
       await sql`select set_config('app.document_command', 'follow', true)`.execute(trx);
       await sql`update erp.blocks set locked = true where id = ${block}::uuid`.execute(trx);

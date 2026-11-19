@@ -358,6 +358,8 @@ export type CompilerPlugin = {
   schemaMigrations?:
     | PluginSchemaMigration[]
     | ((context: PluginBaseContext) => PluginSchemaMigration[]);
+  /** Installed BEFORE ROW guards that may refuse a write and otherwise leave the row and related data untouched. */
+  ownedDeleteGuards?: readonly import("@openshapeforge/operations").OwnedDeleteGuard[];
   /** Nonsecret, JSON-serializable build configuration bound to this runtime module. */
   runtimeConfiguration?(context: Pick<PluginGenerateContext, "entities">): unknown;
   /** Emit artifacts; paths are repo-root-relative like all compiler output. */

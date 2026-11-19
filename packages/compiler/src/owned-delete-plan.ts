@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { CompiledEntityContract } from "./authoring/types.js";
 import type { TableDefinition } from "./schema.js";
 
-import type { OwnedDeleteBlocker, OwnedDeleteForeignKey, OwnedDeletePlan, OwnedDeleteStep, OwnedDeleteUnlink } from "@openshapeforge/operations";
+import type { OwnedDeleteBlocker, OwnedDeleteForeignKey, OwnedDeleteGuard, OwnedDeletePlan, OwnedDeleteStep, OwnedDeleteUnlink } from "@openshapeforge/operations";
 
 const compare = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
 
@@ -170,10 +170,31 @@ export function compileOwnedDeletePlan(
     }
   }
   return {
-    root, discover, writeOrder, unlinks, foreignKeys, blockers, hierarchies, resultCounts,
+    root, discover, writeOrder, unlinks, foreignKeys, blockers, guards: [], hierarchies, resultCounts,
     lockOrder: [...new Set([...lookup.keys(), ...unlinks.map((unlink) => unlink.entity)])]
       .sort((left, right) => compare(qualified(tableFor(left)), qualified(tableFor(right)))),
   };
+}
+
+export function bindOwnedDeleteGuards(
+  plans: readonly OwnedDeletePlan[], tables: readonly TableDefinition[], guards: readonly OwnedDeleteGuard[],
+): void {
+  const names = new Set(tables.map(table => `${table.schema}.${table.name}`));
+  const qualifiedName = /^[a-z_][a-z_0-9]*\.[a-z_][a-z_0-9]*$/;
+  for (const guard of guards) {
+    if (!names.has(guard.table) || !qualifiedName.test(guard.function) || !/^[a-z_][a-z_0-9]*$/.test(guard.trigger) ||
+        !guard.events.length || guard.events.some(event => event !== "delete" && event !== "update")) {
+      throw new Error(`Invalid owned delete guard on ${guard.table}: ${guard.trigger}.`);
+    }
+  }
+  for (const plan of plans) {
+    const deleteTables = new Set(plan.discover.map(step => step.table));
+    const updateTables = new Set(plan.unlinks.map(unlink => tables.find(table => table.source?.authoringEntityName === unlink.entity && !table.subtype))
+      .flatMap(table => table ? [`${table.schema}.${table.name}`] : []));
+    plan.guards = guards.filter(guard => guard.events.some(event =>
+      (event === "delete" ? deleteTables : updateTables).has(guard.table)))
+      .sort((left, right) => compare(`${left.table}.${left.trigger}`, `${right.table}.${right.trigger}`));
+  }
 }
 
 /** On a fresh schema, the explicit writes own every effect on this boundary. */

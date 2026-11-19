@@ -1416,5 +1416,11 @@ export type RuntimeModuleFactory = (configuration: unknown) => RuntimeModule;
 export type { MaintenanceQuery, MaintenanceConnection, MaintenanceStore, MaintenanceContext, MaintenanceRequest, RunMaintenanceSeed, RuntimeMaintenanceContribution } from "./maintenance.js";
 
 export { hostAllowed } from "./egress-policy.js";
+export { moduleOperationError, moduleOperationSuccess } from "./operation-result.js";
+export type { ModuleOperationErrorDetail } from "./operation-result.js";
+export { queryRows, rawQuery } from "./raw-query.js";
+export type { RawQuery, RawQueryExecutor } from "./raw-query.js";
+export { retryAfterAt, retryAfterMs } from "./retry-after.js";
+export type { RetryAfterOptions } from "./retry-after.js";
 
 export type { RuntimeExecutionProvider, RuntimeExecutionContext, RuntimeExecutionSnapshot } from "./execution.js";

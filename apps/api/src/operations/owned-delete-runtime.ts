@@ -23,11 +23,12 @@ import { fieldNameForColumn } from "./entity/columns.js";
 import { lockExtensionReferenceSources, enforceExtensionReferencesOnDelete } from "./entity/extensions/references.js";
 import { lockOwnerExtensionFields } from "./entity/extensions/write.js";
 import {
-  afterDeleteOfLinkedTarget, beforeDeleteOfLinkedTarget, lockLinkedRecords, propagateRecordChange,
+  afterDeleteOfLinkedTarget, beforeDeleteOfLinkedTarget, lockExtensionGraph, lockLinkedRecords, propagateRecordChange,
   revalidateAfterAuthorizationChange,
 } from "./entity/extensions/linked.js";
 import type { GeneratedCrudTable, GeneratedEntityRow } from "./entity/types.js";
 import { extensionRegistry } from "./entity/extensions/registry.js";
+import { AUTHORIZATION_MODEL } from "./entity/extensions/read-access.js";
 
 type RowId = { id: string };
 type Snapshot = { members: Map<string, string[]>; referring: string[][] };
@@ -153,6 +154,21 @@ export function nativeOwnedDeleteHandler(operation: OperationContract): ModuleOp
           return table;
         };
         const steps = new Map(plan.discover.map(step => [step.entity, step]));
+        let hasExtensionWork = extensionRegistry.entityNames().length > 0;
+        if (hasExtensionWork && !plan.lockOrder.some(entity => AUTHORIZATION_MODEL.includes(entity))) {
+          // The field designer takes the same graph lock exclusively before
+          // declaring a field. Definitions invisible to the caller still count.
+          await lockExtensionGraph(trx, tenant, "shared");
+          hasExtensionWork = await withTenantBypassInTransaction(trx, {
+            tenantId: tenant, actorSubject: session.userId!, reason: `Check tenant fields for ${operation.key}`,
+          }, async () => {
+            const result = await sql<{ present: boolean }>`select exists (
+              select 1 from platform.extension_field_definitions where tenant_id = ${tenant}::uuid
+                and is_current and state <> 'deleted'
+            ) as present`.execute(trx);
+            return result.rows[0]?.present !== false;
+          });
+        }
         // Preserve the verified trigger/FK catalogue until commit. Ordinary
         // writers can still share this lock and are governed by row locks.
         const tablesToLock = plan.lockOrder.map(entity => {
@@ -161,9 +177,11 @@ export function nativeOwnedDeleteHandler(operation: OperationContract): ModuleOp
         });
         await sql`lock table ${sql.join(tablesToLock)} in row exclusive mode`.execute(trx);
         await verifyOwnedDeleteDatabase(trx, plan);
-        for (const entity of plan.lockOrder) {
-          await lockExtensionReferenceSources(trx, session, tableFor(entity));
-          await lockOwnerExtensionFields(trx, session, tableFor(entity));
+        if (hasExtensionWork) {
+          for (const entity of plan.lockOrder) {
+            await lockExtensionReferenceSources(trx, session, tableFor(entity));
+            await lockOwnerExtensionFields(trx, session, tableFor(entity));
+          }
         }
         const snapshot = await discover(trx, plan, tenant, rootId);
         if (snapshot.members.get(plan.root)?.length !== 1) refuse();
@@ -245,13 +263,15 @@ export function nativeOwnedDeleteHandler(operation: OperationContract): ModuleOp
 
         // Share the existing extension locks and handle registered dependencies.
         const linkedSources = new Map<string, Awaited<ReturnType<typeof beforeDeleteOfLinkedTarget>>>();
-        for (const entity of plan.lockOrder) {
-          const table = tableFor(entity);
-          const ids = snapshot.members.get(entity) ?? [];
-          for (const id of ids) {
-            await lockLinkedRecords(trx, session, table, { operation: "delete", id });
-            await enforceExtensionReferencesOnDelete(trx, session, table, id);
-            linkedSources.set(id, await beforeDeleteOfLinkedTarget(trx, session, table, id));
+        if (hasExtensionWork) {
+          for (const entity of plan.lockOrder) {
+            const table = tableFor(entity);
+            const ids = snapshot.members.get(entity) ?? [];
+            for (const id of ids) {
+              await lockLinkedRecords(trx, session, table, { operation: "delete", id });
+              await enforceExtensionReferencesOnDelete(trx, session, table, id);
+              linkedSources.set(`${entity}\0${id}`, await beforeDeleteOfLinkedTarget(trx, session, table, id));
+            }
           }
         }
         await assertAdmittedBeforeEffects(trx, session);
@@ -262,9 +282,11 @@ export function nativeOwnedDeleteHandler(operation: OperationContract): ModuleOp
           const changed = await query<RowId>(trx, step.change, tenant, ids, versions, snapshot.members.get(step.target)!);
           if (!sameIds(ids, changed.map(row => row.id))) refuse();
           const table = tableFor(step.entity);
-          for (const id of ids) {
-            const before = locked.get(step.entity)!.get(id)!;
-            await propagateRecordChange(trx, session, table, { before, after: { ...before, [step.column]: null } });
+          if (hasExtensionWork) {
+            for (const id of ids) {
+              const before = locked.get(step.entity)!.get(id)!;
+              await propagateRecordChange(trx, session, table, { before, after: { ...before, [step.column]: null } });
+            }
           }
         }
         const counts: Record<string, number> = {};
@@ -277,11 +299,13 @@ export function nativeOwnedDeleteHandler(operation: OperationContract): ModuleOp
           if (!sameIds(ids, removed.map(row => row.id))) refuse();
           counts[entity] = removed.length;
           const table = tableFor(entity);
-          for (const id of ids) {
-            await afterDeleteOfLinkedTarget(trx, session, linkedSources.get(id)!);
-            await propagateRecordChange(trx, session, table, { before: locked.get(entity)!.get(id)! });
+          if (hasExtensionWork) {
+            for (const id of ids) {
+              await afterDeleteOfLinkedTarget(trx, session, linkedSources.get(`${entity}\0${id}`)!);
+              await propagateRecordChange(trx, session, table, { before: locked.get(entity)!.get(id)! });
+            }
+            await revalidateAfterAuthorizationChange(trx, session, table);
           }
-          await revalidateAfterAuthorizationChange(trx, session, table);
         }
         return { value: { id: rootId, ...Object.fromEntries(Object.entries(plan.resultCounts).map(([key, entity]) => [key, counts[entity]])) } };
       });

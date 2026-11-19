@@ -28,6 +28,7 @@ export function compileOwnedDeletePlan(
   contracts: readonly CompiledEntityContract[],
   tables: readonly TableDefinition[],
   resultCounts: Readonly<Record<string, string>> = {},
+  includeReferences: readonly string[] = [],
 ): OwnedDeletePlan {
   const models = new Map(contracts.map((contract) => [contract.entity.name, contract]));
   const tableFor = (entity: string): TableDefinition => {
@@ -46,7 +47,8 @@ export function compileOwnedDeletePlan(
   const lookup = new Map<string, OwnedDeleteStep>();
   const discover: OwnedDeleteStep[] = [];
   const writeOrder: string[] = [];
-  const visit = (entity: string, incoming?: Pick<OwnedDeleteStep, "parent" | "collection" | "childAuthorization" | "childLock">) => {
+  const remainingReferences = new Set(includeReferences);
+  const visit = (entity: string, path: string, incoming?: Pick<OwnedDeleteStep, "parent" | "collection" | "childAuthorization" | "childLock">) => {
     const model = models.get(entity);
     if (!model || lookup.has(entity)) {
       throw new Error(`[${root}] Owned delete requires a tree of distinct entity types. Repeated or unresolved target: ${entity}.`);
@@ -78,8 +80,10 @@ export function compileOwnedDeletePlan(
     };
     lookup.set(entity, step);
     discover.push(step);
-    const edges = model.model.relationships.filter((edge) => edge.ownership === "owned" && edge.kind === "hasMany");
+    const edges = model.model.relationships.filter(edge => edge.kind === "hasMany");
     for (const edge of [...edges].sort((left, right) => compare(left.key, right.key))) {
+      const edgePath = path ? `${path}.${edge.key}` : edge.key;
+      if (edge.ownership !== "owned" && !(edge.ownership === "reference" && remainingReferences.delete(edgePath))) continue;
       if (!edge.foreignKey || !edge.fieldKey || edge.via || edge.through || edge.provider) {
         throw new Error(`[${root}] Owned delete needs a direct persisted ownership edge at ${entity}.${edge.key}.`);
       }
@@ -89,16 +93,19 @@ export function compileOwnedDeletePlan(
       if (edge.childLock && (!childLock || childLock.type !== "boolean")) {
         throw new Error(`[${root}] Invalid child lock on ${entity}.${edge.key}.`);
       }
-      visit(edge.target, {
+      visit(edge.target, edgePath, {
         parent: { entity, column: edge.foreignKey },
         collection: edge.fieldKey,
-        ...(edge.childAuthorization ? { childAuthorization: edge.childAuthorization } : {}),
+        ...(edge.ownership === "owned" && edge.childAuthorization ? { childAuthorization: edge.childAuthorization } : {}),
         ...(childLock ? { childLock: childLock.name } : {}),
       });
     }
     writeOrder.push(entity);
   };
-  visit(root);
+  visit(root, "");
+  if (remainingReferences.size) {
+    throw new Error(`[${root}] Owned delete includes unknown or unreachable reference collections: ${[...remainingReferences].sort().join(", ")}.`);
+  }
 
   const unlinks: OwnedDeleteUnlink[] = [];
   const unlinkByColumn = new Set<string>();

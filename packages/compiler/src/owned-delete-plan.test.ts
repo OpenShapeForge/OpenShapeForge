@@ -65,6 +65,22 @@ test("owned delete refuses a non-tenant foreign key and recursive ownership", ()
   expect(() => compileOwnedDeletePlan("Root", models, [root, child])).toThrow("Repeated or unresolved target");
 });
 
+test("explicit reference collections join only this delete and retain their child authorization", () => {
+  const reference = { ...owned("lines", "Line", "budget_id"), ownership: "reference" } as const;
+  const models = [entity("Budget", [reference]), entity("Line")];
+  const tables = [table("Budget", "erp", "budgets"), table("Line", "erp", "lines", ["erp", "budgets", "budget_id"])];
+  const defaultPlan = compileOwnedDeletePlan("Budget", models, tables);
+  expect(defaultPlan.writeOrder).toEqual(["Budget"]);
+  expect(defaultPlan.blockers).toHaveLength(1);
+
+  const plan = compileOwnedDeletePlan("Budget", models, tables, { deletedLines: "Line" }, ["lines"]);
+  expect(plan.writeOrder).toEqual(["Line", "Budget"]);
+  expect(plan.discover[1]?.childAuthorization).toBeUndefined();
+  expect(plan.resultCounts).toEqual({ deletedLines: "Line" });
+  expect(reference.ownership).toBe("reference");
+  expect(() => compileOwnedDeletePlan("Budget", models, tables, {}, ["lines.unknown"])).toThrow("unknown or unreachable reference collections");
+});
+
 test("the composed plan binds only declared guards for tables and writes it touches", () => {
   const tables = [table("Root", "erp", "roots"), table("Other", "erp", "others")];
   const plan = compileOwnedDeletePlan("Root", [entity("Root"), entity("Other")], tables);

@@ -374,7 +374,7 @@ export interface EntityOperationDefinition {
   prerequisites?: OperationPrerequisite[];
   stamps?: EntityOperationStamp[];
   implementation:
-    | { type: "ownedDelete"; counts?: Record<string, string> }
+    | { type: "ownedDelete"; counts?: Record<string, string>; includeReferences?: string[] }
     | { type: "collection"; action: "insert" | "move" | "update" | "remove"; field: string }
     | {
         type: "entity";

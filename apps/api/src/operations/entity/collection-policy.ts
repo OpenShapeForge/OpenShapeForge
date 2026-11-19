@@ -37,23 +37,19 @@ export function collectionMutationError(
     collections.some((relationship) => typeof relationship.cardinality === "object" && (relationship.cardinality.min ?? 0) > 0) ||
     table.columns.some((column) => column.required && managed.has(column.name))
   );
-  // A required owner can be checked from metadata. With an optional owner,
-  // the locked row decides whether this delete would change a collection.
-  const affectsCollection = operation === "delete" && ownedParentColumns(table, tables)
-    .some(column => table.columns.find(candidate => candidate.name === column)?.required !== false);
+  // Deleting an owned child generically is always refused; deleting an
+  // OWNER is refused only while owned children exist, which is a row-level
+  // check the delete makes inside its transaction (ownedChildrenExist).
+  const affectsCollection = operation === "delete" &&
+    tables.some((owner) => owner.source?.graphql?.relationships?.some((relationship) =>
+      relationship.fieldKey && relationship.resolve !== "belongsTo" &&
+      relationship.target === table.source?.graphql?.typeName && relationship.ownership === "owned"));
   if (!explicit && !required && !affectsCollection) return undefined;
   return {
     code: "RELATION_COLLECTION_MUTATION_UNSUPPORTED",
     message: `Collection mutation${explicit ? ` of ${explicit}` : ""} is not supported by generic ${operation}; an atomic collection Operation is required.`,
     retryable: false,
   };
-}
-
-/** Physical owner columns, including optional ownership of only some rows. */
-export function ownedParentColumns(table: GeneratedCrudTable, tables: readonly GeneratedCrudTable[]): string[] {
-  return [...new Set(tables.flatMap(owner => ownedCollectionsOf(owner, tables)
-    .filter(edge => edge.child.name === table.name)
-    .map(edge => edge.column)))];
 }
 
 /** The owned collections of `table`: the child table and the child column that points back at the owner. */

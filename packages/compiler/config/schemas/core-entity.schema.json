@@ -552,6 +552,11 @@
               "required": ["type"],
               "properties": {
                 "type": { "const": "ownedDelete" },
+                "includeReferences": {
+                  "type": "array", "minItems": 1, "uniqueItems": true,
+                  "description": "Direct inverse reference collections included only by this delete. Name every reference edge along a path. Each child retains its own delete authorization and ordinary write contract.",
+                  "items": { "type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*$" }
+                },
                 "counts": {
                   "type": "object", "minProperties": 1,
                   "propertyNames": { "$ref": "#/$defs/fieldKey" },

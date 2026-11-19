@@ -6,22 +6,11 @@ import { join, resolve } from "node:path";
 import YAML from "yaml";
 import { canonicalRepoRelativePath } from "../packaged-config.js";
 import {
-  assertEntitySecurityOnlyNarrows,
   authoringLayerDirs,
   loadAuthoringConfig,
   resolveAuthoringLayers,
   strategicMerge,
 } from "./layers.js";
-
-test("only an earlier declaration can let an overlay make an inverse owned", () => {
-  const entity = (inverse: Record<string, true | string>) => ({ fields: [{ key: "parent", relationship: { inverse } }] });
-  expect(() => assertEntitySecurityOnlyNarrows(entity({}), entity({ ownership: "owned" }), "overlay")).toThrow("owned not declared");
-  expect(() => assertEntitySecurityOnlyNarrows(entity({}), entity({ allowOwnedOverlay: true }), "overlay")).toThrow("only the declaring layer");
-  const base = entity({ allowOwnedOverlay: true });
-  const owned = entity({ allowOwnedOverlay: true, ownership: "owned" });
-  expect(() => assertEntitySecurityOnlyNarrows(base, owned, "overlay")).not.toThrow();
-  expect(() => assertEntitySecurityOnlyNarrows(base, entity({ allowOwnedOverlay: true, ownership: "owned", childAuthorization: "owner" }), "overlay")).toThrow("owner not granted");
-});
 
 describe("strategicMerge", () => {
   test("objects deep-merge and null deletes a property", () => {

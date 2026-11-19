@@ -10571,15 +10571,7 @@
           },
           "osfType": "Budget",
           "relationship": {
-            "ownership": "reference",
-            "inverse": {
-              "key": "budgetLines",
-              "label": {
-                "en": "Budget lines",
-                "nl": "Begrotingsregels"
-              },
-              "allowOwnedOverlay": true
-            }
+            "ownership": "reference"
           }
         },
         {

@@ -911,7 +911,7 @@ export function collectAuthoredEntityPluginOperations(
       });
       if (implementation.type === "ownedDelete") {
         if (!manifest) throw new Error(`Owned delete ${authored.id} needs the composed storage manifest.`);
-        const plan = compileOwnedDeletePlan(authored.entityName, entities.map((entry) => entry.contract), manifest.tables, implementation.counts);
+        const plan = compileOwnedDeletePlan(authored.entityName, entities.map((entry) => entry.contract), manifest.tables, implementation.counts, implementation.includeReferences);
         bindOwnedDeleteGuards([plan], manifest.tables, ownedDeleteGuards);
         nativeBindings.set(operation, { type: "ownedDelete", plan });
       }

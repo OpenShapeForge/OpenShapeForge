@@ -806,14 +806,14 @@ operations:
         required: [id]
         additionalProperties: false
         properties:
-          id: { type: string, format: uuid, x-osf-reference: { entity: Document } }
+          id: { type: string, format: uuid, x-osf-reference: { entity: Document }, x-osf-i18n: { title: { en: Document, nl: Document } } }
     output:
       schema:
         type: object
         required: [id]
         additionalProperties: false
         properties:
-          id: { type: string, format: uuid }
+          id: { type: string, format: uuid, x-osf-i18n: { title: { en: Document, nl: Document } } }
     auth: { mode: session, roles: [CaseFile.All.ReadWrite, Organization.All.ReadWrite] }
     tenancy: { mode: required }
     effects: { data: delete, external: none }
@@ -875,7 +875,7 @@ interfaces:
           create: /documents/new
         title: "{{title}}"
         subtitle: "{{status}}"
-        actions: [linkTemplate, materialize, deleteWithContents]
+        actions: [linkTemplate, materialize]
         layout:
           context:
             fields: [ documentType, confidentiality, author, registeredAt, lifecycleStatus ]

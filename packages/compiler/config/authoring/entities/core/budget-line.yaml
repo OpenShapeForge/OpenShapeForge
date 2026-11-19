@@ -66,7 +66,7 @@ fields:
     osfType: Budget
     relationship:
       ownership: reference
-      inverse: { key: budgetLines, label: { en: Budget lines, nl: Begrotingsregels }, ownership: owned }
+      inverse: { key: budgetLines, label: { en: Budget lines, nl: Begrotingsregels }, allowOwnedOverlay: true }
   - key: fiscalPeriodId
     label:
       en: Fiscal period

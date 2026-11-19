@@ -2341,7 +2341,7 @@ export function operationGraphqlContribution(
   // the runtime, not with a module.
   const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN, TRANSITIONS_PLUGIN, BILLING_PLUGIN, EXTENSIONS_PLUGIN]);
   const projected = catalog.operations.filter((operation) =>
-    activePlugins.has(operation.plugin) && operation.transports.graphql.enabled
+    (activePlugins.has(operation.plugin) || operation.implementation?.type === "ownedDelete") && operation.transports.graphql.enabled
   );
   if (projected.length === 0 && !runtime.platform) return undefined;
   const bound = projected.length > 0 ? bindOperationHandlers(modules) : new Map();

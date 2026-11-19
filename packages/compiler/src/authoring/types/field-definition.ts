@@ -152,6 +152,7 @@ export interface FieldDefinitionInverseCollection {
   key?: string;
   label?: LocalizedText;
   ownership?: "owned" | "reference";
+  allowOwnedOverlay?: true;
   sortable?: boolean;
   childAuthorization?: "owner";
   /** Boolean field of the referencing (owned) entity; the owner's update, move and remove refuse a child whose flag is set. */

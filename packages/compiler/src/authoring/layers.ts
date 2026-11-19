@@ -900,9 +900,14 @@ function assertCollectionPolicyOnlyNarrows(
   path: string,
   origin: string,
 ): void {
+  const originalInverse = inverseCollection(before);
+  const patchedInverse = inverseCollection(after);
+  if (patchedInverse?.allowOwnedOverlay === true && originalInverse?.allowOwnedOverlay !== true) {
+    throw new Error(`${origin} adds ${path}.relationship.inverse.allowOwnedOverlay: only the declaring layer may permit ownership.`);
+  }
   for (const [policyPath, prior, next] of [
     [path, before, after],
-    [`${path}.relationship.inverse`, inverseCollection(before), inverseCollection(after)],
+    [`${path}.relationship.inverse`, originalInverse, patchedInverse],
   ] as const) {
     if (prior?.childAuthorization !== "owner" && next?.childAuthorization === "owner") {
       throw new Error(`${origin} adds ${policyPath}.childAuthorization: owner not granted by an earlier layer.`);
@@ -911,11 +916,11 @@ function assertCollectionPolicyOnlyNarrows(
       assertExactWhenPresent(prior.childLock, next?.childLock, `${policyPath}.childLock`, origin);
     }
   }
-  for (const [ownershipPath, prior, next] of [
-    [`${path}.relationship.ownership`, objectProperty(before, "relationship"), objectProperty(after, "relationship")],
-    [`${path}.relationship.inverse.ownership`, inverseCollection(before), inverseCollection(after)],
+  for (const [ownershipPath, prior, next, allowed] of [
+    [`${path}.relationship.ownership`, objectProperty(before, "relationship"), objectProperty(after, "relationship"), false],
+    [`${path}.relationship.inverse.ownership`, originalInverse, patchedInverse, originalInverse?.allowOwnedOverlay === true],
   ] as const) {
-    if (prior?.ownership !== "owned" && next?.ownership === "owned") {
+    if (!allowed && prior?.ownership !== "owned" && next?.ownership === "owned") {
       throw new Error(`${origin} adds ${ownershipPath}: owned not declared by an earlier layer.`);
     }
   }

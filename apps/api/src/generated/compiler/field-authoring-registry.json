@@ -10452,7 +10452,7 @@
           "cardinality": "collection",
           "relationship": {
             "inverse": "budgetId",
-            "ownership": "owned"
+            "ownership": "reference"
           }
         }
       ],
@@ -10578,7 +10578,7 @@
                 "en": "Budget lines",
                 "nl": "Begrotingsregels"
               },
-              "ownership": "owned"
+              "allowOwnedOverlay": true
             }
           }
         },

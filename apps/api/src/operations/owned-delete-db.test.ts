@@ -9,7 +9,7 @@ import migrateOwnedDelete from "../db/migrations/versioned/0030_owned-delete-for
 import { readOwnedDeleteForeignKeys } from "../db/owned-delete-foreign-keys.js";
 import { jsonbLiteral } from "../db/sql-helpers.js";
 import { ModulePlatformRuntime, withModuleOperationSession } from "../modules/platform.js";
-import { listOperationContracts, runtimeStaticOperationRegistrations } from "./runtime.js";
+import { listOperationContracts, operationGraphqlContribution, runtimeStaticOperationRegistrations } from "./runtime.js";
 
 test("compiled document delete requires confirmation and role, removes owned rows and audits the actor", async () => {
   const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
@@ -51,7 +51,9 @@ test("compiled document delete requires confirmation and role, removes owned row
     const operation = listOperationContracts().find(candidate => candidate.key === "Document.deleteWithContents")!;
     expect(operation.implementation?.type).toBe("ownedDelete");
     const runtime = new ModulePlatformRuntime(restricted.db);
-    runtime.registerStaticOperations(runtimeStaticOperationRegistrations([], { db: restricted.db, platform: runtime.services }, [operation]));
+    const context = { db: restricted.db, platform: runtime.services };
+    runtime.registerStaticOperations(runtimeStaticOperationRegistrations([], context, [operation]));
+    expect(operationGraphqlContribution([], context)?.graphql?.(context).mutationFields).toContain("documentDeleteWithContents");
     const editor = { tenantId: tenant, userId: actor, roles: ["Organization.All.ReadWrite", "CaseFile.All.ReadWrite"],
       groups: [], scope: "tenant" as const, credential: "trusted-context" as const };
     const execute = (confirmed: boolean, roles = editor.roles) =>

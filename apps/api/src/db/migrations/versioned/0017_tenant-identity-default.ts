@@ -153,10 +153,14 @@ export async function upgradeTenantIdentityDefaults(
 
 const migration: VersionedMigration = {
   version: "0017_tenant-identity-default",
-  // Compatibility is limited to replacing the historical privileged RLS context
-  // flag with its token. All schema/data statements and row scope are unchanged;
-  // a previously completed migration must not run again or rewrite its checksum.
-  supersededChecksums: ["dca607d5c61c2f2386dfedbb6b69edbdff34b94813a83925af18c926af0d8d3c", "be3dac8bfd258ce9e658de7d9b4b48b9600ac0b3771bd0d055c446fbb1504e6e"],
+  // These revisions differ only in how they enter privileged RLS context.
+  // The schema and data changes are identical, so completed revisions can be skipped.
+  supersededChecksums: [
+    "e43638ac6c8bde461d90d6c2e7c49f69e3a2a6628cab44a8f3caf42fb2d0b446",
+    "80c2e6fab6fdf2146b58003fb40b782269330c775fea18560adb6e67e498e47a",
+    "dca607d5c61c2f2386dfedbb6b69edbdff34b94813a83925af18c926af0d8d3c",
+    "be3dac8bfd258ce9e658de7d9b4b48b9600ac0b3771bd0d055c446fbb1504e6e",
+  ],
   fileUrl: import.meta.url,
   async up(db: Kysely<any>): Promise<void> {
     await upgradeTenantIdentityDefaults(db, manifest.tables as unknown as RegistryTable[]);

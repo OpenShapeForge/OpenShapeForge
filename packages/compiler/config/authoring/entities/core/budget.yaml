@@ -172,6 +172,7 @@ operations:
     implementation:
       type: entity
       action: update
+    concurrency: { version: { mode: required, field: updatedAt } }
     effects:
       data: write
       external: none
@@ -180,6 +181,20 @@ operations:
         mode: none
     confirmation:
       mode: none
+  insertBudgetLine:
+    name: Add a budget line
+    description: Adds a budget line through its owner.
+    implementation: { type: collection, action: insert, field: budgetLines }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+  removeBudgetLine:
+    name: Remove a budget line
+    description: Removes a budget line through its owner.
+    implementation: { type: collection, action: remove, field: budgetLines }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: acknowledgement }
   delete:
     name:
       en: Delete

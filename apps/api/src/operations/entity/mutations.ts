@@ -8,7 +8,7 @@ import type { OpenShapeForgeDatabase } from "../../db/connection.js";
 import type { DB } from "../../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../../db/session.js";
 import { operationFailure } from "@openshapeforge/operations";
-import { collectionMutationError, ownedCollectionsOf } from "./collection-policy.js";
+import { collectionMutationError, ownedCollectionsOf, ownedParentColumns } from "./collection-policy.js";
 import { entityValueCarriers, prepareEntityValueWriteInTransaction, type EntityValueIOContext } from "./entity-value-io.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
@@ -756,6 +756,9 @@ export async function deleteGeneratedEntity(
     await lockLinkedRecords(trx, session, table, { operation: "delete", id: input.id });
     const current = await fetchGeneratedRowInTransaction(trx, session, table, input.id, true);
     if (current) {
+      if (ownedParentColumns(table, getGeneratedCrudTables()).some(column => current[column] != null)) {
+        throw generatedCrudError("Delete an owned child through its owner’s collection Operation.", "RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+      }
       await guardColorWrite(trx, session, table, new Map(), current, true);
       await assertHardDeleteAllowedInTransaction(
         trx,

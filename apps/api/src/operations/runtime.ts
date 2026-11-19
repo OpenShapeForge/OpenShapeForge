@@ -114,6 +114,7 @@ import {
   resolveCapabilityGrantSession,
 } from "./capability-grant-resolution.js";
 import { grantTokenFromAuthorization } from "./capability-grant-token.js";
+import { nativeOwnedDeleteHandler } from "./owned-delete-runtime.js";
 import { nativeCollectionHandler } from "./collection-runtime.js";
 import { nativeConstrainedReferenceCreateHandler } from "./constrained-reference-create.js";
 import { EXTENSIONS_PLUGIN, nativeExtensionHandler } from "./entity/extensions/operations.js";
@@ -124,6 +125,7 @@ export type OperationContract = {
   key: string;
   /** Built-in executor selected only by the compiler, never request input. */
   implementation?:
+    | { type: "ownedDelete"; plan: import("@openshapeforge/operations").OwnedDeletePlan }
     | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" }
     | { type: "collection-options"; sources: Array<{entity:string;labels?:{en?:string;nl?:string};list:string;get?:string;labelField?:string;fields:Record<string,{type:string;many:boolean}>}> }
     | { type: "application-search"; sources: Array<{entity:string;labels:Record<string,string>;description:string|Record<string,string>;list:string;get?:string;field?:string;descriptionField?:string}> }
@@ -746,6 +748,10 @@ export function bindOperationHandlers(
     }
     if (operation.implementation?.type === "entity-type-list") {
       bound.set(operation.key, { operation, handler: nativeEntityTypeListHandler(operation) });
+      continue;
+    }
+    if (operation.implementation?.type === "ownedDelete") {
+      bound.set(operation.key, { operation, handler: nativeOwnedDeleteHandler(operation) });
       continue;
     }
     if (operation.implementation?.type === "collection") {

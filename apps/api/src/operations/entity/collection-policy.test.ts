@@ -14,7 +14,7 @@ const parent: GeneratedCrudTable = {
 };
 const child: GeneratedCrudTable = {
   ...parent, name: "erp.blocks", table: "blocks",
-  columns: [...columns(["id", "tenant_id"]), { ...columns(["page_id"])[0]!, sourceField: "page" }, { ...columns(["page_id_position"])[0]!, type: "integer", required: true }],
+  columns: [...columns(["id", "tenant_id"]), { ...columns(["page_id"])[0]!, sourceField: "page", required: true }, { ...columns(["page_id_position"])[0]!, type: "integer", required: true }],
   source: { graphql: { ...parent.source!.graphql!, typeName: "Block", relationships: [] } },
 };
 
@@ -30,10 +30,13 @@ describe("unsupported collection mutation boundary", () => {
   });
   test("required collections cannot be created empty and collection-affecting deletes are refused", () => {
     expect(collectionMutationError(parent, "create", [parent, child])?.code).toBe("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
-    // An owner's delete is decided per row (owned children present or not); an owned child's never is.
+    // A required owner can be refused from metadata. An optional owner is checked on the locked row.
     expect(collectionMutationError(parent, "delete", [parent, child])).toBeUndefined();
     expect(ownedCollectionsOf(parent, [parent, child]).map((owned) => [owned.key, owned.child.table, owned.column])).toEqual([["blocks", child.table, "page_id"]]);
     expect(collectionMutationError(child, "delete", [parent, child])?.code).toBe("RELATION_COLLECTION_MUTATION_UNSUPPORTED");
+    const optionalChild = structuredClone(child);
+    optionalChild.columns.find(column => column.name === "page_id")!.required = false;
+    expect(collectionMutationError(optionalChild, "delete", [parent, optionalChild])).toBeUndefined();
     expect(collectionMutationError(parent, "update", [parent, child], { title: "Safe scalar update" })).toBeUndefined();
     expect(collectionMutationError(parent, "get", [parent, child])).toBeUndefined();
   });

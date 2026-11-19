@@ -547,6 +547,19 @@
         "implementation": {
           "oneOf": [
             {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["type"],
+              "properties": {
+                "type": { "const": "ownedDelete" },
+                "counts": {
+                  "type": "object", "minProperties": 1,
+                  "propertyNames": { "$ref": "#/$defs/fieldKey" },
+                  "additionalProperties": { "type": "string", "pattern": "^[A-Z][A-Za-z0-9]*$" }
+                }
+              }
+            },
+            {
               "type": "object", "additionalProperties": false,
               "required": ["type", "action", "field"],
               "properties": {
@@ -685,7 +698,7 @@
             "if": {
               "properties": {
                 "implementation": {
-                  "properties": { "type": { "const": "plugin" } },
+                  "properties": { "type": { "enum": ["plugin", "ownedDelete"] } },
                   "required": ["type"]
                 }
               },

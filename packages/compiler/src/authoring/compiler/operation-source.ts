@@ -67,7 +67,7 @@ export function operationSourceEntity(entity: CoreEntity, fields: CompiledField[
   const idSchema = record.properties.id;
   const operations = Object.fromEntries(Object.entries(entity.operations ?? {}).map(([key, op]) => {
     const action = operationAction(op);
-    if (op.implementation.type === "entity" || op.implementation.type === "collection" ||
+    if (op.implementation.type === "entity" || op.implementation.type === "collection" || op.implementation.type === "ownedDelete" ||
         (op.implementation.type === "plugin" && action && action !== "list" && action !== "get")) {
       throw new Error(`${entity.entity}.${key}: an Operation-backed source permits named plugin mutations, never generated SQL CRUD.`);
     }

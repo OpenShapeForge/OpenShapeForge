@@ -37,7 +37,7 @@ export function operationEntries(
 export function operationAction(
   definition: EntityOperationDefinition,
 ): CrudOperationKey | undefined {
-  if (definition.implementation.type === "collection") return undefined;
+  if (definition.implementation.type === "collection" || definition.implementation.type === "ownedDelete") return undefined;
   return definition.implementation.action;
 }
 
@@ -61,7 +61,8 @@ export function operationByAction(
 
 export function pluginOperations(entity: CoreEntity) {
   return operationEntries(entity).flatMap(([key, definition]) => {
-    if (definition.implementation.type !== "collection" && (definition.implementation.type !== "plugin" || definition.implementation.action)) return [];
+    if (definition.implementation.type !== "ownedDelete" && definition.implementation.type !== "collection" &&
+        (definition.implementation.type !== "plugin" || definition.implementation.action)) return [];
     const projection = (name: "rest" | "graphql" | "mcp" | "web") => {
       const contract = entity.interfaces?.[name];
       if (!contract) return undefined;
@@ -191,7 +192,7 @@ export function webUi(entity: CoreEntity): UIDefinition | undefined {
       },
       actions: (record.actions ?? []).map((key) => {
         const implementation = entity.operations![key]!.implementation;
-        const action = implementation.action;
+        const action = "action" in implementation ? implementation.action : undefined;
         if (!action) return { key, route: key };
         return action === "delete"
           ? { key, mutation: "delete" }

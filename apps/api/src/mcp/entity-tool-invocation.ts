@@ -45,6 +45,12 @@ import { acceptedToolResult, ok, type ToolResult } from "./tool-results.js";
 import { partial } from "./composed-results.js";
 
 
+function mcpReferenceLabels(value: unknown): true | string[] | undefined {
+  if (value === true) return true;
+  if (Array.isArray(value) && value.every((field) => typeof field === "string")) return value;
+  return undefined;
+}
+
 export async function invokeTool(
   tool: CatalogTool,
   entity: CatalogEntity | undefined,
@@ -88,6 +94,7 @@ export async function invokeTool(
         operation: operationRef("list"),
         offerIntents, offerTransport: "mcp",
         input: {
+          referenceLabels: mcpReferenceLabels(args.referenceLabels),
           ...(typeof args.first === "number" ? { limit: args.first } : {}),
           ...(typeof args.after === "string" ? { cursor: args.after } : {}),
           ...(filter ? { filter } : {}),
@@ -103,6 +110,7 @@ export async function invokeTool(
           items: result.items.map((item) => ({
             data: serializeRowForEntity(entity, table, item.data),
             operations: item.operations,
+            ...(item.references ? { references: item.references } : {}),
           })),
           totalCount: result.totalCount,
           nextCursor: result.nextCursor,
@@ -115,7 +123,7 @@ export async function invokeTool(
       const result = await executeEntityOperation(db, session, {
         operation: operationRef("get"),
         offerIntents, offerTransport: "mcp",
-        input: { id: requireId(args) },
+        input: { id: requireId(args), referenceLabels: mcpReferenceLabels(args.referenceLabels) },
       });
       if (result.intent !== "get") throw new Error("Unexpected entity result.");
       if ("error" in result) throw new OperationFailure(result.error);
@@ -124,6 +132,7 @@ export async function invokeTool(
       return ok({
         data: serializeRowForEntity(entity, table, row),
         operations: result.operations,
+        ...(result.references ? { references: result.references } : {}),
       });
     }
 

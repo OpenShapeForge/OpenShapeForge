@@ -50,6 +50,8 @@ import type { CompiledPluginOperation } from "./generate-operations.js";
 import {
   entityListFilterFields,
   entityListPageSchema,
+  entityReferenceLabelsSchema,
+  entityReferenceLabelsInputSchema,
   entityRecordOutputSchema,
   entityRelationshipColumn,
   entityRelationshipKeys,
@@ -173,7 +175,7 @@ function offersSchema(): JsonObject {
   };
 }
 
-function recordEnvelopeSchema(record: JsonObject): JsonObject {
+function recordEnvelopeSchema(record: JsonObject, includeReferences: boolean): JsonObject {
   return {
     type: "object",
     additionalProperties: false,
@@ -181,6 +183,7 @@ function recordEnvelopeSchema(record: JsonObject): JsonObject {
     properties: {
       data: record,
       operations: offersSchema(),
+      ...(includeReferences ? { references: entityReferenceLabelsSchema } : {}),
     },
   };
 }
@@ -196,7 +199,7 @@ function entityToolOutputSchema(
       additionalProperties: false,
       required: ["data", "operations"],
       properties: {
-        data: entityListPageSchema(recordEnvelopeSchema(record), "counted"),
+        data: entityListPageSchema(recordEnvelopeSchema(record, true), "counted"),
         operations: offersSchema(),
       },
     };
@@ -216,7 +219,7 @@ function entityToolOutputSchema(
       },
     };
   } else {
-    success = recordEnvelopeSchema(record);
+    success = recordEnvelopeSchema(record, operation === "get");
   }
 
   return {
@@ -528,6 +531,7 @@ function buildToolsForEntity(
             description:
               "Field equality/substring filters. Omit for no filtering.",
           },
+          referenceLabels: entityReferenceLabelsInputSchema,
           sortField: {
             type: "string",
             ...(sortable.length > 0 ? { enum: sortable } : {}),
@@ -567,7 +571,7 @@ function buildToolsForEntity(
         "get",
         `${description} Fetches a single record by id.`,
       ),
-      inputSchema: idSchema,
+      inputSchema: { ...idSchema, properties: { ...(idSchema.properties as JsonObject), referenceLabels: entityReferenceLabelsInputSchema } },
       outputSchema: outputSchema("get"),
       annotations: entityAnnotations("get"),
       errors: declaredErrors("get"),

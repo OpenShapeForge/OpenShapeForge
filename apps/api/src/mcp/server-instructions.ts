@@ -8,14 +8,21 @@
  * the person never reads it. The order is deliberate:
  *
  *   1. the opening sentence — who this person is (`session-opening.ts`);
- *   2. what the server is, and the OAuth redirect URL when Adapters exist;
- *   3. the guides that must be read before creating something;
- *   4. data acquisition — how to fill in a field; working efficiently, and
- *      people and access when the session may invite;
- *   5. first-use onboarding (`onboarding.ts`);
- *   6. audience, vocabulary and presentation, told which client it faces;
- *   7. the person's language (`locale.ts`);
- *   8. update notices (`update-notices.ts`).
+ *   2. what the server is, and how to find and call what it offers;
+ *   3. working efficiently;
+ *   4. the person's language (`locale.ts`), and how to talk to them;
+ *   5. people and access when the session may invite, and support;
+ *   6. first-use onboarding (`onboarding.ts`) and update notices
+ *      (`update-notices.ts`);
+ *   7. the OAuth redirect URL when Adapters exist, the guides that must be
+ *      read before creating something, and data acquisition;
+ *   8. what only some Operations need (the private executor, a guide that
+ *      names another tool), and last the vocabulary of every record kind.
+ *
+ * What a model needs on every request comes first, and the longest part
+ * last: a client may show its model only the beginning of this text (one
+ * widely used client cuts it at 4,096 characters), and a session that reaches
+ * a hundred record kinds spends more than half of the text on vocabulary.
  *
  * The per-session parts (1, 6, 7) are resolved once, when the server for the
  * session is built, and never re-read: a second resolution could only
@@ -24,7 +31,7 @@
 import type { ResolvedLocale } from "./locale.js";
 import { ONBOARDING_INSTRUCTION } from "./onboarding.js";
 import { connectedViaLabel, type McpClientInfo } from "./session-client.js";
-import { UPDATE_INSTRUCTION } from "./update-notices.js";
+import { updateInstruction } from "./update-notices.js";
 
 export const ENTITY_CATALOG_URI = "osf://schema/entities";
 
@@ -270,6 +277,16 @@ export type ServerInstructionsInput = {
   skills?: ReadonlyArray<{ uri: string; description: string }>;
   /** Whether this session is offered invite_employee (PEOPLE_AND_ACCESS_GUIDANCE). */
   peopleAndAccess?: boolean;
+  /**
+   * How many update notices this person has not been told, read when the
+   * session is built; undefined when it was not read, and the instructions
+   * then point at `whoami` for it.
+   */
+  pendingUpdates?: number | undefined;
+  /** How this session finds and calls what the server offers, stated right after what the server is. */
+  workflow?: string;
+  /** What only some Operations of this session need, stated after everything a request always needs. */
+  closing?: string;
 };
 
 /**
@@ -303,31 +320,46 @@ export function buildServerInstructions(input: ServerInstructionsInput): string 
     (input.opening ? `${input.opening} ` : "") +
     // ---- end the opening sentence ----
     INSTRUCTIONS +
+    // ---- how to find and call what the server offers (mcp/server-scope.ts) ----
+    (input.workflow ?? "") +
+    // ---- end how to find and call ----
+    // ---- working efficiently ----
+    EFFICIENCY_GUIDANCE +
+    // ---- end working efficiently ----
+    // ---- the person's language (mcp/locale.ts, mcp/session-identity.ts) ----
+    languageInstruction(input.locale) +
+    // ---- end the person's language ----
+    // ---- audience and presentation, facing this client ----
+    audienceAndPresentationInstruction(input.client, []) +
+    // ---- end audience and presentation ----
+    // ---- people and access when offered ----
+    (input.peopleAndAccess ? PEOPLE_AND_ACCESS_GUIDANCE : "") +
+    // ---- end people and access ----
+    supportSentence(input) +
+    // ---- first-use onboarding (mcp/onboarding.ts) ----
+    ONBOARDING_INSTRUCTION +
+    // ---- end first-use onboarding ----
+    // ---- update notices (mcp/update-notices.ts) ----
+    updateInstruction(input.pendingUpdates) +
+    // ---- end update notices ----
     oauthRedirectSentence(input) +
     ((input.skills?.length ?? 0) > 0
       ? ` Agent Skills — read the relevant skill before managing its subject: ${input.skills!.map((skill) => `${skill.uri} (${skill.description})`).join("; ")}. Skills files are readable with resources/read; extension-aware clients can verify their manifest with skills/get.`
       : "") +
-    (input.skills?.some(skill => skill.uri.includes("osf-support"))
-      ? " Support — whenever an operation returns an error, read the osf-support skill and report a safe summary through osf-integration.support.report. Reuse the incident reference for follow-up; never include secrets or recursively report a support-service failure."
-      : "") +
     // ---- data acquisition guidance (the constant above) ----
     DATA_ACQUISITION_GUIDANCE +
     // ---- end data acquisition guidance ----
-    // ---- working efficiently, and people and access when offered ----
-    EFFICIENCY_GUIDANCE +
-    (input.peopleAndAccess ? PEOPLE_AND_ACCESS_GUIDANCE : "") +
-    // ---- end working efficiently ----
-    // ---- first-use onboarding (mcp/onboarding.ts) ----
-    ONBOARDING_INSTRUCTION +
-    // ---- end first-use onboarding ----
-    // ---- audience, vocabulary and presentation, facing this client ----
-    audienceAndPresentationInstruction(input.client, input.vocabulary ?? []) +
-    // ---- end audience, vocabulary and presentation ----
-    // ---- the person's language (mcp/locale.ts, mcp/session-identity.ts) ----
-    languageInstruction(input.locale) +
-    // ---- end the person's language ----
-    // ---- update notices (mcp/update-notices.ts) ----
-    UPDATE_INSTRUCTION
-    // ---- end update notices ----
+    // ---- what only some Operations need (mcp/server-scope.ts) ----
+    (input.closing ?? "") +
+    // ---- end what only some Operations need ----
+    // ---- vocabulary: the longest part, so the last ----
+    vocabularySentence(input.vocabulary ?? [])
+    // ---- end vocabulary ----
   );
+}
+
+function supportSentence(input: ServerInstructionsInput): string {
+  return input.skills?.some(skill => skill.uri.includes("osf-support"))
+    ? " Support — whenever an operation returns an error, read the osf-support skill and report a safe summary through osf-integration.support.report. Reuse the incident reference for follow-up; never include secrets or recursively report a support-service failure."
+    : "";
 }

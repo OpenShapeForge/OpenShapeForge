@@ -238,7 +238,9 @@ describe("onboarding roles and instructions", () => {
     expect(mayStartOrganizationSignIn(null)).toBe(false);
   });
   it("names both ways to the detail in the server instructions", () => {
-    expect(ONBOARDING_INSTRUCTION).toContain("Call `whoami` first");
+    // What whoami is for, not an order to call it: the opening sentence names the person already.
+    expect(ONBOARDING_INSTRUCTION).toContain("`whoami` says who this person is");
+    expect(ONBOARDING_INSTRUCTION).not.toContain("first");
     expect(ONBOARDING_INSTRUCTION).toContain("is an index");
     expect(ONBOARDING_INSTRUCTION).toContain("osf://onboarding/step/<key>");
     expect(ONBOARDING_INSTRUCTION).toContain("onboarding_status");

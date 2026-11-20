@@ -533,8 +533,8 @@ interfaces:
     entities:
       RecordActionAssignment:
         title:
-          en: Record actions
-          nl: Recordacties
+          en: Permissions
+          nl: Rechten
         route: /integrations/:integrationId/record-actions
         recordRoute: /integrations/:integrationId/record-actions/:id
         idField: id

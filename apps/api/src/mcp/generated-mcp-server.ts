@@ -179,10 +179,12 @@ export function buildServer(
   serverIcons?: import("@modelcontextprotocol/server").Icon[],
   /** A modern tools/call does not return discovery instructions. */
   includeInstructions = true,
+  /** This person's pending update notices, read with the opening sentence; undefined when not read. */
+  pendingUpdates?: number,
 ): Server {
   const scope = createServerScope({
     db, session, modules, modulePlatform, egressOwner, onDerivedDefinitionChanged,
-    stateful, tableOverride, opening, moduleSessionOverride, operationToolProjectionOverride, serverIcons, includeInstructions,
+    stateful, tableOverride, opening, moduleSessionOverride, operationToolProjectionOverride, serverIcons, includeInstructions, pendingUpdates,
   });
   const { server } = scope;
 

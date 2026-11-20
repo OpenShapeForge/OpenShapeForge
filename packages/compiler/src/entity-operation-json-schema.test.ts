@@ -227,13 +227,14 @@ describe("canonical entity Operation JSON Schemas", () => {
       "filter",
       "sort",
       "includeTotalCount",
+      "referenceLabels",
     ]);
     expect(
       ((list.inputSchema.$defs as Record<string, any>).entityFilter.properties),
     ).not.toHaveProperty("secretValues");
     expect(list.outputSchema).toMatchObject({
       properties: {
-        items: { items: { properties: { data: { properties: { reviewedAt: {} } } } } },
+        items: { items: { properties: { data: { properties: { reviewedAt: {} } }, references: { additionalProperties: { type: "string" } } } } },
       },
     });
 

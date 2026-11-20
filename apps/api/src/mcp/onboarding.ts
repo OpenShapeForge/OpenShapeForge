@@ -93,7 +93,7 @@ export function onboardingStepKeyFromUri(uri: string): OnboardingStepKey | null 
 
 /** Appended to the server's `initialize` instructions: the one sentence every client shows the model. */
 export const ONBOARDING_INSTRUCTION =
-  " Call `whoami` first. Its `onboarding` field is an index, not a how-to." +
+  " `whoami` says who this person is and what is open for them; its `onboarding` field is an index, not a how-to." +
   " Onboarding is optional guidance, not a prerequisite for using the app or its offered tools." +
   " On request, read a listed onboarding skill if available; step guidance is at `osf://onboarding/step/<key>`;" +
   " without resources call `onboarding_status`.";

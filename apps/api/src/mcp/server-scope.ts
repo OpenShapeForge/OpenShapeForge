@@ -71,6 +71,7 @@ function createServerScopePrologue(input: {
   operationToolProjectionOverride: OperationToolProjection | undefined;
   serverIcons: Icon[] | undefined;
   includeInstructions: boolean;
+  pendingUpdates?: number | undefined;
 }) {
   const {
     db,
@@ -126,9 +127,18 @@ function createServerScopePrologue(input: {
       client: sessionClientOf(session),
       skills: skillsForSession().map(({ entry }) => ({ uri: entry.uri, description: entry.frontmatter.description })),
       peopleAndAccess: sessionMayInviteEmployees(session),
-    }) + (operationToolProjection.mode === "searchable"
-      ? ` Use ${searchableOperationToolNames.search} to discover entity CRUD, integration management and published services. A word query returns ranked short summaries; follow nextCursor to continue. A compact tools/list is not the full capability catalog. Call ${searchableOperationToolNames.search} with only operationId set to the chosen id to read its full contract, including its exact input schema (no result means this session cannot use it), then execute that id with ${searchableOperationToolNames.execute}. Run required prerequisites through the same executor. When a guide names a tool absent from tools/list, find its canonical Operation instead: for example, osf_create with entity Connection means Connection.create, and osf_list with entity Adapter means Adapter.list. Operations declaring interaction.secureInput or confidential output use the separate secure executor when it is advertised; never send secret values through the ordinary executor. Confidential output is disclosed only in the private app after the person submits it; app-only completion tools and their results must never be relayed into chat. Ordinary Operations use ${searchableOperationToolNames.execute} without opening an app. Private configuration may pause; its resumeWith Operation is the read to poll through the executor.`
-      : "");
+      pendingUpdates: input.pendingUpdates,
+      ...(operationToolProjection.mode === "searchable"
+        ? {
+            // What every request needs: how to find a capability and call it. Stated
+            // near the start, because a client may show only the start of this text.
+            workflow:
+              ` How to work here — find, then act. (1) Find a capability with ${searchableOperationToolNames.search}: one short query per subject, such as "relation", "deal products" or "create deal", in English or the person's language. Results are ranked, and the best matches carry their inputSchema: execute one of those directly with ${searchableOperationToolNames.execute}, and look a match up by operationId only when it has no inputSchema (no result means this session cannot use it). (2) Records are found with their entity's list Operation: a text filter matches a substring, every other filter the exact value, and a reference field takes an id from that entity's own list, never a name. A list answers with items, totalCount and nextCursor; for a count ask first: 1 and read totalCount, and name fields to receive only the fields you need. (3) An Operation whose concurrency requires a version passes the record's version field as expectedVersion, and one that requires an edit lease first takes it with the edit-lease tool. Never guess an Operation id, a field or an allowed value: each is in a schema or a result you already have.`,
+            closing:
+              ` A compact tools/list is not the full capability catalog: entity CRUD, integration management and published services are all found through ${searchableOperationToolNames.search}. Run required prerequisites through the same executor. When a guide names a tool absent from tools/list, find its canonical Operation instead: for example, osf_create with entity Connection means Connection.create, and osf_list with entity Adapter means Adapter.list. Operations declaring interaction.secureInput or confidential output use the separate secure executor when it is advertised; never send secret values through the ordinary executor. Confidential output is disclosed only in the private app after the person submits it; app-only completion tools and their results must never be relayed into chat. Ordinary Operations use ${searchableOperationToolNames.execute} without opening an app. Private configuration may pause; its resumeWith Operation is the read to poll through the executor.`,
+          }
+        : {}),
+    });
   const server = new Server({ ...SERVER_INFO, ...(input.serverIcons ? { icons: input.serverIcons } : {}) }, {
     capabilities: {
       // listChanged is advertised only when the tool list can actually change

@@ -314,6 +314,27 @@ describe("the Team subtype is served from the relation groups table", () => {
     // The base sees the same membership on the same group.
     expect(rows(await run(actor, "RelationGroupMembership.list", { filter: { relationGroupId: teamId } })).map((row) => row.id)).toEqual([inserted.childId]);
 
+    const named = await run({ ...actor, roles: [...actor.roles, "Relations.Relation.ReadWrite"] },
+      "RelationGroupMembership.list", { filter: { relationGroupId: teamId }, referenceLabels: ["relationId"] });
+    if (named.intent !== "list" || "error" in named) throw new Error(JSON.stringify(named));
+    expect(named.data.items[0]).toMatchObject({ data: { relation_id: relationId }, references: { relationId: "Member" } });
+    expect(named.data.items[0]!.references).not.toHaveProperty("relationGroupId");
+
+    const denied = await run(actor, "RelationGroupMembership.get", { id: inserted.childId, referenceLabels: ["relationId"] });
+    expect(record(denied)).toMatchObject({ relation_id: relationId });
+    expect(denied).not.toHaveProperty("references");
+
+    await sql`create policy hidden_membership_target on erp.relations as restrictive
+      for select using (id <> ${sql.lit(relationId)}::uuid)`.execute(privileged.db);
+    try {
+      const restricted = await run({ ...actor, roles: [...actor.roles, "Relations.Relation.ReadWrite"] },
+        "RelationGroupMembership.get", { id: inserted.childId, referenceLabels: ["relationId"] });
+      expect(record(restricted)).toMatchObject({ relation_id: relationId });
+      expect(restricted).not.toHaveProperty("references");
+    } finally {
+      await sql`drop policy hidden_membership_target on erp.relations`.execute(privileged.db);
+    }
+
     // The child's own rights and version/lease contract still apply to an update through the parent.
     const update: CollectionMutationBinding = { entityName: "Team", field: "memberships", action: "update" };
     const childLease = membershipUpdate.concurrency?.editLease

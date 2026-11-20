@@ -2,6 +2,7 @@
 import { expect, test } from "bun:test";
 import { SQL } from "bun";
 import { sql } from "kysely";
+import { applyAppHelpersMigration } from "../migrations/app-helpers.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { withDbSession, withInvocationSavepoint } from "../session.js";
 import { auditContext, withAuditContext } from "../../platform/audit-context.js";
@@ -15,6 +16,7 @@ test("a context-free outer transaction retains its actual correlation around nes
   const runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 1 });
   const session = { tenantId: crypto.randomUUID(), userId: crypto.randomUUID(), roles: [], groups: [] };
   try {
+    await applyAppHelpersMigration(runtime.db);
     expect(auditContext()).toBeUndefined();
     await withDbSession(runtime.db, session, async tx => {
       const current = async () => (await sql<{ correlation: string; operation: string }>`select current_setting('app.audit_correlation') as correlation,current_setting('app.audit_operation') as operation`.execute(tx)).rows[0]!;

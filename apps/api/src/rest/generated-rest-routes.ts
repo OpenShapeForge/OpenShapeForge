@@ -57,6 +57,7 @@ type GeneratedColumn = GeneratedTable["columns"][number];
 type RestMetadata = NonNullable<NonNullable<GeneratedTable["source"]>["rest"]>;
 
 const RESERVED_LIST_PARAMS = new Set([
+  "referenceLabels",
   "filter",
   "first",
   "after",
@@ -376,6 +377,15 @@ export function generatedRestSession(
   return { ...resolved };
 }
 
+function restReferenceLabels(value: unknown): true | string[] | undefined {
+  if (value === undefined || value === "false") return undefined;
+  if (value === "true") return true;
+  if (typeof value !== "string" || !/^[A-Za-z_][\w]*(,[A-Za-z_][\w]*)*$/.test(value)) {
+    throw new HttpError(400, "BAD_USER_INPUT", "referenceLabels must be true or a comma-separated list of fields.");
+  }
+  return value.split(",");
+}
+
 export function registerGeneratedRestRoutes(
   app: FastifyInstance,
   options: { db?: OpenShapeForgeDatabase | undefined } = {},
@@ -487,6 +497,7 @@ export function registerGeneratedRestRoutes(
             operation: entityOperationRef(table, "list"),
             offerIntents,
             input: {
+              referenceLabels: restReferenceLabels(query.referenceLabels),
               ...buildListInput(table, query),
               includeTotalCount: true,
             },
@@ -499,6 +510,7 @@ export function registerGeneratedRestRoutes(
               items: result.items.map((item) => ({
                 data: serializeGeneratedRestRow(table, item.data),
                 operations: item.operations,
+                ...(item.references ? { references: item.references } : {}),
               })),
               totalCount: result.totalCount,
               nextCursor: result.nextCursor,
@@ -515,7 +527,7 @@ export function registerGeneratedRestRoutes(
           const result = await executeEntityOperation(context.db, context.session, {
             operation: entityOperationRef(table, "get"),
             offerIntents,
-            input: { id },
+            input: { id, referenceLabels: restReferenceLabels((request.query as Record<string, unknown>).referenceLabels) },
           });
           if (result.intent !== "get") throw new Error("Unexpected entity result.");
           if ("error" in result) throw new OperationFailure(result.error);
@@ -526,6 +538,7 @@ export function registerGeneratedRestRoutes(
           return reply.send({
             data: serializeGeneratedRestRow(table, row),
             operations: result.operations,
+            ...(result.references ? { references: result.references } : {}),
           });
         });
       }

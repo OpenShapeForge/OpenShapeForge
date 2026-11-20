@@ -42,6 +42,7 @@ import { EXTENSION_VALUES_COLUMN } from "./authoring/extensible.js";
 import {
   EXTENSION_SORT_FIELD_PATTERN,
   entityListPageSchema,
+  entityReferenceLabelsSchema,
   entityOperationControlSchema,
   entityOperationJsonSchemas,
   entityRecordOutputSchema,
@@ -54,6 +55,7 @@ const FIELD_DEFINITION_COMPONENT = "OpenShapeForgeFieldDefinition";
 const FIELD_DEFINITION_DEFS_BASE =
   `#/components/schemas/${FIELD_DEFINITION_COMPONENT}/$defs/`;
 const RESERVED_LIST_PARAMETER_NAMES = new Set([
+  "referenceLabels",
   "filter",
   "first",
   "after",
@@ -218,6 +220,13 @@ function filterSchemaForColumn(
     ? { type: "string" }
     : (scalarJsonSchema(column.type) as JsonObject);
 }
+
+const referenceLabelsParameter = {
+  name: "referenceLabels",
+  in: "query",
+  schema: { type: "string" },
+  description: "Use true for all readable reference labels, or pass a comma-separated list of field keys.",
+};
 
 function listParameters(
   table: TableDefinition,
@@ -929,6 +938,7 @@ export function renderOpenApiSpec(
         required: ["data", "operations"],
         properties: {
           data: { $ref: `#/components/schemas/${name}` },
+          references: entityReferenceLabelsSchema,
           operations: {
             type: "array",
             items: { $ref: "#/components/schemas/OperationOffer" },
@@ -1027,7 +1037,7 @@ export function renderOpenApiSpec(
           (description ? `${description} ` : "") +
           "Pagination, sorting, and every supported scalar field filter are " +
           "documented below. Unknown filter fields are rejected.",
-        parameters: listParameters(table, fieldsByKey, contract.entityOperations.list),
+        parameters: [...listParameters(table, fieldsByKey, contract.entityOperations.list), referenceLabelsParameter],
         responses: {
           "200": entityResponse(
             `${name}ListResult`,
@@ -1111,6 +1121,7 @@ export function renderOpenApiSpec(
         "x-osf-operation-id": canonicalOperationId("get"),
         summary: `Fetch ${label} by id`,
         tags: [name],
+        parameters: [referenceLabelsParameter],
         ...(description ? { description } : {}),
         responses: {
           "200": entityResponse(

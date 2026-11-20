@@ -19,14 +19,15 @@ export function searchableOperationToolDefinitions(
       name: names.search,
       title: "Search available Operations",
       description:
-        "Search the canonical Operations currently available to this signed-in person, or look one up. " +
-        "A word query returns ranked short summaries (id, name, description, effects), paged with " +
-        "nextCursor; it never returns a schema. Choose an id from them and call this tool again with " +
-        "only operationId: that returns the Operation's full current contract (the exact input and " +
-        "output schema, errors and controls the executor validates), or nothing when this session " +
-        "cannot use it. Search for one capability at a time and reuse a known contract instead of " +
-        "repeating broad or synonymous searches. An available Operation or stored connection does " +
-        "not prove a provider read will succeed.",
+        "Find the canonical Operations currently available to this signed-in person, or look one up. " +
+        "A word query — one subject per query, such as \"relation\" or \"create deal\" — returns " +
+        "ranked summaries (id, name, description), paged with nextCursor. The best matches of a " +
+        "first page already carry their inputSchema and execution controls: execute those as they " +
+        "stand. Call this tool again with only operationId for any other match: that returns its " +
+        "full current contract (the exact input and output schema, errors and controls the " +
+        "executor validates), or nothing when this session cannot use it. Reuse a contract you " +
+        "already have instead of repeating broad or synonymous searches. An available Operation " +
+        "or stored connection does not prove a provider read will succeed.",
       inputSchema: {
         type: "object",
         properties: {
@@ -40,7 +41,7 @@ export function searchableOperationToolDefinitions(
           query: {
             type: "string",
             maxLength: 200,
-            description: "Words in any language matched against Operation id, key, name, description and entity label.",
+            description: "Words in any language matched against Operation id, key, name, description, entity label and field labels.",
           },
           cursor: {
             type: "string",
@@ -70,6 +71,11 @@ export function searchableOperationToolDefinitions(
         properties: {
           operations: { type: "array", items: { type: "object" } },
           nextCursor: { type: "string" },
+          unmatchedWords: {
+            type: "array",
+            items: { type: "string" },
+            description: "Query words no available Operation matches: the results answer the other words only.",
+          },
         },
         required: ["operations"],
         additionalProperties: false,
@@ -85,8 +91,12 @@ export function searchableOperationToolDefinitions(
       name: names.execute,
       title: "Execute an available Operation",
       description:
-        "Execute one canonical Operation, with input matching the contract the search tool returns for " +
-        "its operationId. For a keyed Operation, reuse the same idempotencyKey only when retrying the " +
+        "Execute one canonical Operation, with input matching the inputSchema the search tool returned " +
+        "for its operationId. A list answers with items, totalCount and nextCursor: read totalCount " +
+        "for a count (first: 1 is enough) and pass nextCursor back as after. A list item omits " +
+        "fields without a value, and its operations name only what is not available on that item " +
+        "or is bound to more than its id; what can be done with a record is found with the search " +
+        "tool. For a keyed Operation, reuse the same idempotencyKey only when retrying the " +
         "exact same input. Use the selected Operation's actual input schema; arguments from a " +
         "different tool projection are not interchangeable. If a provider read fails, preserve the " +
         "error, respect retryability and do not loop on unchanged failures or delete a connection " +
@@ -109,6 +119,16 @@ export function searchableOperationToolDefinitions(
             maxLength: 512,
             description: "Required when the selected Operation declares keyed idempotency.",
           },
+          fields: {
+            type: "array",
+            items: { type: "string", minLength: 1, maxLength: 200 },
+            minItems: 1,
+            maxItems: 100,
+            description:
+              "For a list or get of records: return only these fields of each record (id always comes " +
+              "with them). The names are the record's field names, as in the list's filter; a name " +
+              "the record does not have returns the records whole.",
+          },
         },
         required: ["operationId", "input"],
         additionalProperties: false,
@@ -130,6 +150,7 @@ export function searchableOperationToolDefinitions(
         properties: {
           data: { $ref: "#/$defs/JsonValue" },
           operations: { type: "array", items: { type: "object" } },
+          references: { type: "object", additionalProperties: { type: "string" } },
           resources: { type: "array", items: { type: "object" } },
           execution: {
             type: "object",

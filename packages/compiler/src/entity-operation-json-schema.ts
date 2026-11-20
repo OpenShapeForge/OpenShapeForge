@@ -458,11 +458,24 @@ function openOperationOffers(): JsonObject {
   return { type: "array", items: { type: "object", additionalProperties: true } };
 }
 
+export const entityReferenceLabelsInputSchema: JsonObject = {
+  description: "Include display labels for all readable references, or only for the named fields.",
+  oneOf: [{ type: "boolean" }, { type: "array", items: { type: "string" } }],
+};
+
+export const entityReferenceLabelsSchema: JsonObject = {
+  type: "object",
+  "x-osf-i18n": { title: { en: "Reference labels", nl: "Referentielabels" } },
+  description: "Display labels of readable reference targets, keyed by the source record field.",
+  additionalProperties: { type: "string" },
+};
+
 /** Shared canonical record envelope; offers are additionally checked by core execution. */
 export function entityRecordEnvelopeSchema(record: JsonObject): JsonObject {
   return { type: "object", additionalProperties: false, required: ["data", "operations"],
     properties: {
       data: { ...record, "x-osf-i18n": { title: { en: "Record", nl: "Record" } } },
+      references: entityReferenceLabelsSchema,
       operations: { ...openOperationOffers(), "x-osf-i18n": { title: { en: "Available actions", nl: "Beschikbare acties" } } },
     } };
 }
@@ -738,7 +751,7 @@ export function entityOperationJsonSchemas(
       const pageSchema = entityListPageSchema(
         {
           type: "object",
-          properties: { data: record, operations: openOperationOffers() },
+          properties: { data: record, operations: openOperationOffers(), references: entityReferenceLabelsSchema },
           required: ["data", "operations"],
           additionalProperties: false,
         },
@@ -779,6 +792,7 @@ export function entityOperationJsonSchemas(
               additionalProperties: false,
             },
             includeTotalCount: { type: "boolean" },
+            referenceLabels: entityReferenceLabelsInputSchema,
             ...(boardAggregate ? { includeBoardTotals: { type: "boolean" } } : {}),
             ...(collectionGroups ? { includeCollectionGroups: { type: "boolean" } } : {}),
             ...(collectionSummary ? { includeCollectionSummary: { type: "boolean" } } : {}),
@@ -800,7 +814,7 @@ export function entityOperationJsonSchemas(
         type: "object", additionalProperties: false, properties: Object.fromEntries(fields.map(field => [field, { type: "array", items: { type: "object", additionalProperties: true } }]))
       } } } : record;
       return {
-        inputSchema: controlled({ id }, ["id"]),
+        inputSchema: controlled({ id, referenceLabels: entityReferenceLabelsInputSchema }, ["id"]),
         outputSchema: fields.length ? { anyOf: [projected, { type: "null" }] } : nullableRecord,
       };
       }

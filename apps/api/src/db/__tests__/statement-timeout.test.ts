@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
  * Proves the per-request DB statement timeout (issue #130) is actually applied
- * by withDbSession/applyDbSession against a real Postgres. A bare connection is
- * enough: with no session groups the closure-expansion queries are skipped, so
- * applyDbSession only sets GUCs (custom `app.*` placeholders need no schema).
+ * by withDbSession/applyDbSession against a scratch PostgreSQL database
+ * with the platform session helpers installed.
  *
  * Uses the same throwaway Postgres the other db tests target (localhost:5434 in
  * CI, overridable via SCRATCH_ADMIN_DATABASE_URL).
@@ -11,8 +10,10 @@
  * Run (cwd apps/api):
  *   set -o pipefail; bun test src/db/__tests__/statement-timeout.test.ts 2>&1
  */
-import { afterAll, afterEach, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
+import { SQL } from "bun";
+import { applyAppHelpersMigration } from "../migrations/app-helpers.js";
 import { sql } from "kysely";
 import { createDatabaseRuntime } from "../connection.js";
 import { STATEMENT_TIMEOUT_ENV } from "../../config/limits.js";
@@ -23,7 +24,16 @@ const ADMIN_URL =
   "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
 
 const TEST_TIMEOUT = 30_000;
-const runtime = createDatabaseRuntime({ databaseUrl: ADMIN_URL });
+const admin = new SQL(ADMIN_URL, { max: 1 });
+const database = `statement_timeout_${randomUUID().replaceAll("-", "")}`;
+const databaseUrl = new URL(ADMIN_URL);
+databaseUrl.pathname = `/${database}`;
+const runtime = createDatabaseRuntime({ databaseUrl: databaseUrl.toString() });
+
+beforeAll(async () => {
+  await admin.unsafe(`create database "${database}"`);
+  await applyAppHelpersMigration(runtime.db);
+}, TEST_TIMEOUT);
 const session = { tenantId: randomUUID(), userId: randomUUID() };
 
 const originalTimeout = process.env[STATEMENT_TIMEOUT_ENV];
@@ -33,6 +43,8 @@ afterEach(() => {
 });
 afterAll(async () => {
   await runtime.close();
+  await admin.unsafe(`drop database if exists "${database}" with (force)`);
+  await admin.close();
 });
 
 describe("per-request DB statement timeout", () => {

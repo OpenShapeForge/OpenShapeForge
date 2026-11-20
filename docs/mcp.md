@@ -374,20 +374,56 @@ When the deployment selects the **searchable Operation projection**, the fixed
 entity CRUD and runtime provider Operations. A word `query` ranks its matches:
 the words that name an Operation (id, key, entity, the entity's authored labels
 in every language, the Operation name) count more than its description, and a
-query that is exactly an entity's name ranks that entity first. It pages short
-summaries — identity, name, description, target, effects and reliability —
-with a `nextCursor` bound to that query and to an entry of its result (a cursor that no longer names one is refused), and never returns a schema. The same
-tool called with only `operationId` looks one Operation up: the exact canonical
-id, or a generated tool name the existing exact matcher resolves without
-ambiguity, returns that available Operation alone with its full contract — the
-exact MCP input schema including field withholding and concurrency controls,
-the output schema, errors, and canonical interaction and prerequisite metadata.
+query that is exactly an entity's name ranks that entity first; an entity whose
+whole name the query contains ranks before one the query only touches, and
+Operations that rank equally come in the order list, get, create, update,
+delete, because a request about records starts with the read that finds them.
+Every query word must be found, one of them in the Operation's own name, to
+rank as a full match: resemblances of every word ("knowledge" in "acknowledge")
+do not outrank an Operation a word names. It pages short summaries — identity,
+name, a description cut at a sentence, target, and effects and reliability
+where they differ from a plain, naturally idempotent read — with a `nextCursor`
+bound to that query and to an entry of its result (a cursor that no longer
+names one is refused). `unmatchedWords` names the query words no available
+Operation matches. On a first page the best matches carry their `inputSchema`
+and execution controls, ready for the executor: the best match, the list of
+its entity when it is not itself a list, and the best match of another entity
+the query names in full. The same tool called with only `operationId` looks
+one Operation up: the exact canonical id, or a generated tool name the existing
+exact matcher resolves without ambiguity, returns that available Operation
+alone with its full contract — the exact MCP input schema including field
+withholding and concurrency controls, the output schema, errors, and canonical
+interaction and prerequisite metadata. A schema handed to a model keeps every
+validation keyword and description and omits `title` and the `x-osf-*`
+annotations a form needs.
 An id this session cannot use returns nothing; ids are compared exactly, never
 case-folded or guessed. `operationId` cannot be combined with `query`, `cursor`
 or `limit`. Covered
 CRUD, authored operation and provider tools no longer consume individual slots
 in `tools/list`; tools without a canonical replacement remain advertised.
 The dedicated projection continues to offer its authored tool names.
+
+The searchable executor answers a model, so a record read comes as a model
+reads it (`apps/api/src/mcp/model-view.ts`). The canonical Operation still
+validates its own inputs and outputs. The MCP executor returns a projection
+that may omit some record fields. A row of a list page keeps the offers that are
+about that row — an Operation that is not available on it, with the reason,
+and an offer bound to more than its id — and not the available ones every row
+repeats with only its own id and version bound in: what can be done with a
+record of a kind is what the search answers. A field without a value is left
+out of a row. `fields` on the executor returns only the named fields of each
+record, with its id; a selection that names a field the record does not have
+is not applied, so the records come whole and show the names that exist. A page larger than 40,000 characters is requested again with as
+many records as fit, and its `nextCursor` continues from there. A single
+record keeps its empty fields and every offer, without the binding that only
+repeats its own id. An unknown property in an input is refused with the names
+allowed there.
+
+The session's `instructions` put what every request needs first — who the
+person is, how to find and call a capability, working efficiently, the
+person's language — and the vocabulary of every record kind last, because a
+client may show its model only the beginning of that text (one widely used
+client cuts it at 4,096 characters).
 
 A runtime provider may mark an Operation as one tool of an external MCP server
 (`RuntimeOperationDefinition.nativeMcpTool`, contract in
@@ -520,6 +556,11 @@ their list methods return valid empty catalogs. This keeps generic MCP clients
 from treating an intentionally empty optional surface as a protocol failure.
 
 ## Who am I: `whoami` and `osf://session`
+
+`whoami` is small on purpose: behind a named role (administrator, employee) it
+gives the role and `permissionCount`, not the permission names, which run to
+hundreds for an administrator; the names appear only when no named role stands
+for them.
 
 Every authenticated session sees one tool that takes no arguments, `whoami`,
 and one resource, `osf://session`. Both return the same answer: who the server
@@ -822,8 +863,11 @@ Onboarding is optional guidance. It never blocks app use or an offered
 Operation; the runtime still enforces the ordinary authorization and validation
 contract. Checklist progress is a server-side fact, not remembered prose:
 
-- the server's `initialize` instructions ask the model to call `whoami` first,
-  explain that onboarding is optional, and offer a listed onboarding skill, when available, on request;
+- the server's `initialize` instructions say what `whoami` is for — the opening
+  sentence already names the person, so it is not a first call — explain that
+  onboarding is optional, and offer a listed onboarding skill, when available, on request;
+- the same instructions state how many update notices are pending for this
+  person, read when the session is built, and say nothing when there are none;
 - `whoami` carries an `onboarding` object: a **computed checklist**, also
   available on its own as the `onboarding_status` tool;
 - `complete_onboarding` records completion durably, once, per (identity,
@@ -1062,3 +1106,13 @@ be present), rather than Task objects. Read the execution status with
 `tasks/get`; cancellation is cooperative and the acknowledgement does not promise
 a terminal cancelled state. See the normative [update and cancellation
 responses](https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks#task-cancellation).
+
+### Reference labels in read results
+
+The searchable Operation executor requests labels for the reference fields
+in the requested `fields` selection (or all returned fields when omitted).
+For example, requesting `salesStageId` can return both
+`data.salesStageId` and `references.salesStageId` in the same record
+envelope. A dedicated entity read tool also accepts `referenceLabels` as a
+boolean or an array of field keys. The server omits labels the caller cannot
+read or that it cannot resolve.

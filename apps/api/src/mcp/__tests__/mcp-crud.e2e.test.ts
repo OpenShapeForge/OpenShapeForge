@@ -148,11 +148,11 @@ describe("generated MCP server", () => {
       limit: 20,
     });
     // The Operation matching every word first; Operations "notebook" names
-    // follow it. All of them compact summaries this session may use.
+    // follow it. The best match carries its input schema, ready to execute;
+    // none carries the whole contract, and all are ones this session may use.
     const hits = (toolEnvelope(searched.body) as { operations: Record<string, unknown>[] }).operations;
-    expect(hits[0]).toMatchObject({ operation: { id: "notebook.import" } });
+    expect(hits[0]).toMatchObject({ operation: { id: "notebook.import" }, inputSchema: { type: "object" } });
     for (const hit of hits) {
-      expect(hit).not.toHaveProperty("inputSchema");
       expect(hit).not.toHaveProperty("outputSchema");
       const lookup = await callTool(notebookWriter, "osf_search_operations", {
         operationId: (hit.operation as { id: string }).id,

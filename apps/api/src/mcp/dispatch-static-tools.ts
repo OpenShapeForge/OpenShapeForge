@@ -16,6 +16,7 @@ import { entityOperationContract } from "../operations/entity/index.js";
 import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import { entityIsGeneric } from "./generic-tool-projection.js";
 import { assertOperationExecutionRoute, parseOperationExecuteArguments, searchOperationDefinitions } from "./operation-search.js";
+import { fittingRecordPage, isRecordPage, modelRecord, recordFieldSelection } from "./model-view.js";
 import { invokeOperation } from "../operations/runtime.js";
 import {
   catalog,
@@ -39,6 +40,20 @@ import {
 } from "./tool-results.js";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import type { DirectCallScope } from "./tool-dispatch.js";
+
+/** The same result with its payload replaced by the model's view of it, in both carriers. */
+function modelResult(result: CallToolResult, payload: Record<string, unknown>): CallToolResult {
+  return {
+    ...result,
+    structuredContent: payload,
+    content: result.content.map((block) => {
+      if (block.type !== "text") return block;
+      try { JSON.parse(block.text); return { ...block, text: JSON.stringify(payload) }; }
+      catch { return block; }
+    }),
+  };
+}
+
 
 /**
  * The static-tool section of tool dispatch. Split out of generated-mcp-server.ts.
@@ -187,6 +202,12 @@ export async function staticToolCall(
       if (needsPrivateOutput(definition)) return await startPrivateOutput(ctx, definition, parsed.input);
       const entity = entities.get(definition.id);
       if (entity) {
+        const selection = recordFieldSelection(parsed, {
+          fields: (entity.entity as { fields?: ReadonlyArray<{ key: string }> }).fields?.map((field) => field.key),
+          read: entity.tool.operation === "list" || entity.tool.operation === "get",
+        });
+        parsed.input = selection.input;
+        if (selection.fields) parsed.fields = selection.fields; else delete parsed.fields;
         // Enter the same adapter as the dedicated/generic tool, including
         // private elicitation, edit controls, classified fields and notifications.
         const input = parsed.idempotencyKey === undefined ? parsed.input : pluginEntityTransportInput(
@@ -203,7 +224,22 @@ export async function staticToolCall(
           parsed.idempotencyKey,
         );
         const result = outcome.result;
-        const payload = result.structuredContent;
+        let payload = result.structuredContent;
+        if (!result.isError && isRecordPage(payload)) {
+          const page = await fittingRecordPage(payload, {
+            ...(parsed.fields ? { fields: parsed.fields } : {}),
+            refetch: async (first) => (await ctx.dispatchTool(
+              entity.tool.name,
+              { ...input, first, ...(entityIsGeneric(entity.entity) ? { entity: entity.tool.entity } : {}) },
+              ctx.requestId, true, undefined, assertParentInvocationActive, signal, false, parsed.idempotencyKey,
+            )).result.structuredContent,
+          });
+          return modelResult(result, page);
+        }
+        if (!result.isError && payload && typeof payload === "object" && "data" in payload && "operations" in payload) {
+          return modelResult(result, modelRecord(payload, parsed.fields) as Record<string, unknown>);
+        }
+        payload = result.structuredContent;
         if (result.isError || !payload || typeof payload !== "object" || Array.isArray(payload) || ("data" in payload && "operations" in payload)) return result;
         const continuation = payload as Record<string, unknown>;
         // Private configuration may pause before a record exists. Preserve

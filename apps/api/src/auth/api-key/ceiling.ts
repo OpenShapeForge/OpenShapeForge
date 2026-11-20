@@ -29,6 +29,7 @@
  * so an external party cannot acquire it through ordinary business access.
  */
 export const API_KEY_MANAGE_ROLE = "Platform.ApiKeys.Manage";
+export const INTEGRATION_KEY_CREATE_ROLE = "Platform.ApiKeys.IntegrationCreate";
 
 import type { SessionCredential } from "../trusted-context.js";
 
@@ -126,15 +127,21 @@ export function assertMayGrantRoles(
   session: CeilingSession,
   requestedRoles: readonly string[],
 ): void {
-  // The carrier first, and with its own message: a service principal that
-  // holds every role must not learn that roles were even consulted.
+  assertMayManageApiKeys(session);
+  assertHeldIntegrationRoles(session, requestedRoles);
+}
+
+/** Create a new integration and its first credential. */
+export function assertMayCreateIntegration(session: CeilingSession, requestedRoles: readonly string[]): void {
   assertKeyManagementCarrier(session);
-
-  const held = new Set(session.roles);
-  if (!held.has(API_KEY_MANAGE_ROLE)) {
-    throw new ApiKeyAuthorizationError("Not authorized to manage API keys.");
+  if (!session.roles.includes(API_KEY_MANAGE_ROLE) && !session.roles.includes(INTEGRATION_KEY_CREATE_ROLE)) {
+    throw new ApiKeyAuthorizationError("Not authorized to create API key integrations.");
   }
+  assertHeldIntegrationRoles(session, requestedRoles);
+}
 
+function assertHeldIntegrationRoles(session: CeilingSession, requestedRoles: readonly string[]): void {
+  const held = new Set(session.roles);
   // Sorted for a deterministic message; the caller already knows which roles it
   // asked for, so naming them back discloses nothing it did not supply. What is
   // never named is the caller's own role set.
@@ -156,7 +163,10 @@ export function assertMayGrantRoles(
  * with.
  */
 export function assertMayManageApiKeys(session: CeilingSession): void {
-  assertMayGrantRoles(session, []);
+  assertKeyManagementCarrier(session);
+  if (!session.roles.includes(API_KEY_MANAGE_ROLE)) {
+    throw new ApiKeyAuthorizationError("Not authorized to manage API keys.");
+  }
 }
 
 /** The carrier rule, with the message that names why it refused. */
@@ -184,29 +194,26 @@ function assertKeyManagementCarrier(session: CeilingSession): void {
 
 /** Hold, list and revoke your own personal keys. */
 export const PERSONAL_KEY_ROLE = "Platform.ApiKeys.Personal";
+export const PERSONAL_KEY_CREATE_ROLE = "Platform.ApiKeys.PersonalCreate";
 /** See every person's personal keys in the organization — metadata only. */
 export const PERSONAL_KEY_READ_ROLE = "Platform.ApiKeys.PersonalRead";
 /** Revoke any person's personal key in the organization. */
 export const PERSONAL_KEY_REVOKE_ROLE = "Platform.ApiKeys.PersonalRevoke";
 
-/**
- * Gate minting a personal key, and every read or revoke of one's own.
- *
- * `requestedRoles` is the key's narrowing, when it has one. A key without
- * one carries whatever its owner holds at the time of each request, so there
- * is nothing more to bound here; a key WITH one may only name roles the owner
- * holds now — a narrowing naming a role the owner lacks would be inert today
- * (the resolver intersects) but would quietly come alive the day the role is
- * granted, which is not what anybody asked for.
- */
-export function assertMayHoldPersonalKeys(
-  session: CeilingSession,
-  requestedRoles: readonly string[] = [],
-): void {
+/** Gate reading or revoking one's own keys. */
+export function assertMayHoldPersonalKeys(session: CeilingSession): void {
+  assertKeyManagementCarrier(session);
+  if (!session.roles.includes(PERSONAL_KEY_ROLE)) {
+    throw new ApiKeyAuthorizationError("Not authorized to hold personal API keys.");
+  }
+}
+
+/** A personal key may narrow its owner's live permissions to roles they already hold. */
+export function assertMayCreatePersonalKey(session: CeilingSession, requestedRoles: readonly string[]): void {
   assertKeyManagementCarrier(session);
   const held = new Set(session.roles);
-  if (!held.has(PERSONAL_KEY_ROLE)) {
-    throw new ApiKeyAuthorizationError("Not authorized to hold personal API keys.");
+  if (!held.has(PERSONAL_KEY_ROLE) && !held.has(PERSONAL_KEY_CREATE_ROLE)) {
+    throw new ApiKeyAuthorizationError("Not authorized to create personal API keys.");
   }
   const ungranted = [...new Set(requestedRoles)].filter((role) => !held.has(role)).sort();
   if (ungranted.length > 0) {

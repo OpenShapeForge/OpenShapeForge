@@ -194,10 +194,12 @@ operations:
       en: Create a personal API key that acts as you, with the roles you hold at the time of each request. Copy
         the key when it appears; you cannot view it again later. It stops working when it expires, when you
         revoke it, when an administrator revokes it, or when your access to this organization ends.
+        For implementation, read the MCP resource skill://osf/implementing-api-keys/SKILL.md.
       nl: Maak een persoonlijke API-sleutel die namens jou handelt, met de rollen die je op het moment van elk
         verzoek hebt. Kopieer de sleutel zodra hij verschijnt; je kunt hem later niet opnieuw bekijken. Hij werkt
         niet meer zodra hij verloopt, als jij of een beheerder hem intrekt, of als je toegang tot deze organisatie
         eindigt.
+        Lees voor de implementatie de MCP-resource skill://osf/implementing-api-keys/SKILL.md.
     implementation: { type: plugin, plugin: osf-api-keys, handler: createMyPersonalKey }
     input:
       schema:
@@ -273,7 +275,7 @@ operations:
                 format: date-time
                 x-osf-i18n: { title: { en: Expires, nl: Verloopt } }
             x-osf-i18n: { title: { en: New API key, nl: Nieuwe API-sleutel } }
-    auth: *ownAuth
+    auth: { mode: session, roles: [Platform.ApiKeys.Personal, Platform.ApiKeys.PersonalCreate] }
     tenancy: { mode: required }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }

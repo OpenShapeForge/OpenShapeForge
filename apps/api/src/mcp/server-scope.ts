@@ -46,6 +46,7 @@ import { buildServerInstructions, ENTITY_CATALOG_URI } from "./server-instructio
 import { sessionMayInviteEmployees } from "./employee-invitation-tools.js";
 import { projectAgentSkills, visibleAgentSkills, SKILLS_EXTENSION } from "./agent-skills.js";
 import { BUILTIN_AGENT_SKILL_MODULE } from "./builtin-agent-skills.js";
+import { API_KEY_AGENT_SKILL_MODULE } from "./api-key-agent-skill.js";
 import { type SearchableOperationToolNames } from "./operation-search.js";
 import { bindOperationHandlers } from "../operations/runtime.js";
 import { describeTool, entityDescription, entityTitle } from "./entity-tool-projection.js";
@@ -106,10 +107,8 @@ function createServerScopePrologue(input: {
       module.mcp?.resourceTemplates !== undefined,
   );
   const tables = tableOverride ?? tablesByName();
-  // The built-in contribution first, so a plugin claiming one of its URIs
-  // fails projection rather than shadowing it; it carries no roles, so it is
-  // visible to an ordinary, a guest and a server-to-server session alike.
-  const allAgentSkills = projectAgentSkills([BUILTIN_AGENT_SKILL_MODULE, ...runtimeModules]);
+  // Reserve the core skill URIs before projecting plugin contributions.
+  const allAgentSkills = projectAgentSkills([BUILTIN_AGENT_SKILL_MODULE, API_KEY_AGENT_SKILL_MODULE, ...runtimeModules]);
   const prompts = projectPrompts(runtimeModules);
   const skillsForSession = () => visibleAgentSkills(allAgentSkills, session.roles);
   const diagnosticInstructions = input.includeInstructions === false ? "" : buildServerInstructions({

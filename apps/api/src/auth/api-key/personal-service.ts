@@ -46,6 +46,7 @@ import {
   type SortColumn,
 } from "./catalog-page.js";
 import {
+  assertMayCreatePersonalKey,
   assertMayHoldPersonalKeys,
   assertMayReadPersonalKeys,
   assertMayRevokePersonalKeys,
@@ -154,7 +155,7 @@ export async function createPersonalKey(
   now: Date = new Date(),
 ): Promise<CreatedPersonalKey> {
   const roleSubset = subsetOrThrow(input.roleSubset);
-  assertMayHoldPersonalKeys(session, roleSubset ?? []);
+  assertMayCreatePersonalKey(session, roleSubset ?? []);
   const displayName = input.displayName.trim();
   if (displayName === "") throw new ApiKeyValidationError("A personal API key needs a name.");
   let allowedIps: string[];

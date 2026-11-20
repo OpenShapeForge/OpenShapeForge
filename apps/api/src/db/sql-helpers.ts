@@ -25,3 +25,17 @@ export function jsonbLiteral(value: unknown): RawBuilder<unknown> {
   // encodes objects into jsonb strings, which breaks downstream `->>` reads.
   return sql`cast(${value} as jsonb)`;
 }
+
+export function postgresArrayLiteral(values: readonly unknown[]): string {
+  // Bun/kysely serializes a JS array as a comma-joined scalar, which Postgres
+  // rejects for a typed [] cast. Bind the Postgres array text form instead.
+  return `{${values.map(postgresArrayElement).join(",")}}`;
+}
+
+function postgresArrayElement(value: unknown): string {
+  if (value === null || value === undefined) return "NULL";
+  if (typeof value === "boolean") return value ? "t" : "f";
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  const text = String(value);
+  return `"${text.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
+}

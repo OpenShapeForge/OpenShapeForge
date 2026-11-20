@@ -97,6 +97,20 @@ export async function securitySubjectChoices(context:Pick<import('../modules/con
   const {sql}=await import('kysely');
   const {withDbSession}=await import('../db/session.js');
   const session=context.session!;
+  if (input.kind === 'integration') {
+    return withDbSession(context.db!, session, async trx => {
+      const rows = (await sql<{value: string; label: string}>`
+        select id::text as value, display_name as label
+        from platform.api_key_integrations
+        where tenant_id = ${session.tenantId}::uuid and status = 'active'
+          and (${input.search} = '' or display_name ilike ${'%' + input.search + '%'} or id::text = ${input.search})
+          and id::text > ${input.after ?? ''}
+        order by id::text limit ${input.first + 1}
+      `.execute(trx)).rows;
+      const items = rows.slice(0, input.first);
+      return {items, nextCursor: rows.length > input.first ? items.at(-1)!.value : null};
+    });
+  }
   if(input.kind==='user')return withDbSession(context.db!,session,async trx=>{
     const rows=(await sql<{value:string;label:string}>`select i.id::text as value,coalesce(i.display_name,'Account') as label
       from platform.identities i join platform.identity_relations ir on ir.identity_id=i.id
@@ -124,5 +138,5 @@ export async function securitySubjectChoices(context:Pick<import('../modules/con
     const page=await withAuditContext('RelationGroup.list',session.credential,()=>listGeneratedEntitiesForTable(context.db!,session,table,{limit:input.first,...(input.after?{cursor:input.after}:{}),fixedWhere:[{column:entityColumnName('RelationGroup','status'),value:'active'}],...(input.search?{filter:{name:{contains:input.search}}}:{})}));
     return {items:page.rows.map(row=>({value:String(row[table.primaryKey!]),label:String(row[entityColumnName('RelationGroup','name')]??row[table.primaryKey!])})),nextCursor:page.nextCursor};
   }
-  invalid('Choose a user, group or role.');
+  invalid('Choose a user, group, role or API integration.');
 }

@@ -92,13 +92,17 @@ test('a tenant assignment stays inside the ceiling and a withdrawn profile stops
  const group=randomUUID();
  await sql`insert into erp.relation_groups(id,tenant_id,name,status,group_type) values(${group}::uuid,${tenant}::uuid,'Readers','active','team')`.execute(privileged());
  await sql`insert into erp.relation_group_memberships(tenant_id,relation_id,relation_group_id,status) values(${tenant}::uuid,${customer}::uuid,${group}::uuid,'active')`.execute(privileged());
- const addProfile=async(operationId:string,condition:CompilerConditionInput,subjectKind:string,subjectKey:string)=>{
+ const addProfile=async(operationId:string,condition:CompilerConditionInput,subjectKind:string,subjectKey:string,extraOperation?:string)=>{
   const profile=await createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfile'),values:{name:operationId,targetEntity:'Relation',active:true}});
   const rev=(await sql<{version:string}>`select updated_at::text as version from erp.authorization_profiles where id=${profile.id}::uuid`.execute(privileged())).rows[0]!.version;
   await executeCollectionMutation(restricted(),dbInput(manager),{entityName:'AuthorizationProfile',field:'policies',action:'insert'},{id:String(profile.id),expectedVersion:rev,values:{operationId,condition}});
+  if (extraOperation) {
+   const updatedRevision=(await sql<{version:string}>`select updated_at::text as version from erp.authorization_profiles where id=${profile.id}::uuid`.execute(privileged())).rows[0]!.version;
+   await executeCollectionMutation(restricted(),dbInput(manager),{entityName:'AuthorizationProfile',field:'policies',action:'insert'},{id:String(profile.id),expectedVersion:updatedRevision,values:{operationId:extraOperation,condition}});
+  }
   const result=await versioning.operationHandlers.publishAuthorizationProfileToAuthorizationProfileVersion!({id:profile.id},platformFor(manager).context);
   const version=(result as {value:{id:string}}).value;
-  return createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfileAssignment'),values:{name:operationId,profileVersion:version.id,subjectKind,subjectKey,active:true}});
+  return createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationProfileAssignment'),values:{name:operationId,profileVersion:version.id,subjectKind,subjectKey,active:true,...(extraOperation?{operationId}:{})}});
  };
  const {securitySubjectChoices}=await import('./security-profiles.js');
  const people=await securitySubjectChoices({session:manager,db:restricted()},{kind:'user',search:'Reader',first:25,locale:'en'});
@@ -115,6 +119,79 @@ test('a tenant assignment stays inside the ceiling and a withdrawn profile stops
  await sql`update erp.relation_groups set status='inactive' where id=${group}::uuid`.execute(privileged());
  const withdrawnGroup=await executeEntityOperation(restricted(),{...grouped},{operation:{id:'Relation.get',intent:'get'},input:{id:supplier}});
  expect('error' in withdrawnGroup || withdrawnGroup.data===null).toBe(true);
+
+ const integrationId = randomUUID();
+ const credentialId = randomUUID();
+ const { mintApiKey } = await import('../auth/api-key/format.js');
+ const { lookupId, secretHash } = mintApiKey();
+ await sql`insert into platform.api_key_integrations
+   (id, tenant_id, display_name, keycloak_client_id, status, granted_roles, created_by)
+   values (${integrationId}::uuid, ${tenant}::uuid, 'Public website', ${'osf-int-' + integrationId},
+     'active', '[]'::jsonb, ${manager.userId}::uuid)`.execute(privileged());
+ const foreignTenant = randomUUID();
+ const foreignIntegration = randomUUID();
+ await sql`insert into platform.tenants(id,slug,name,status)
+   values(${foreignTenant}::uuid,${'foreign-'+foreignTenant},'Foreign security proof','active')`.execute(privileged());
+ await sql`insert into platform.api_key_integrations
+   (id, tenant_id, display_name, keycloak_client_id, status, granted_roles, created_by)
+   values (${foreignIntegration}::uuid, ${foreignTenant}::uuid, 'Public website', ${'osf-int-' + foreignIntegration},
+     'active', '[]'::jsonb, ${manager.userId}::uuid)`.execute(privileged());
+ const integrationChoices = (search: string) =>
+   securitySubjectChoices({session: manager, db: restricted()}, {kind: 'integration', search, first: 10, locale: 'en'});
+ expect((await integrationChoices('Public website')).items).toEqual([{value: integrationId, label: 'Public website'}]);
+ expect((await integrationChoices(integrationId)).items).toEqual([{value: integrationId, label: 'Public website'}]);
+ expect((await integrationChoices(foreignIntegration)).items).toEqual([]);
+ await sql`insert into platform.api_keys
+   (id, tenant_id, integration_id, lookup_id, secret_hash, display_name, created_by)
+   values (${credentialId}::uuid, ${tenant}::uuid, ${integrationId}::uuid, ${lookupId},
+     ${secretHash}, 'Website key', ${manager.userId}::uuid)`.execute(privileged());
+ await addProfile('Relation.get', rule('equals', literal('customer')), 'integration', integrationId, 'Relation.list');
+ for (const subjectKey of [randomUUID(), foreignIntegration]) {
+   await expect(createGeneratedEntity(restricted(), dbInput(manager), {
+     table: tableName('AuthorizationProfileAssignment'),
+     values: { name: 'Unavailable integration', operationId: 'Relation.get', subjectKind: 'integration', subjectKey, active: true },
+   })).rejects.toThrow('Choose an active subject in this organization');
+ }
+ const website = { ...dbInput(editor), userId: randomUUID(), roles: [], credential: 'api-key' as const,
+   principalKind: 'service' as const, appPrincipal: { integrationId, credentialId } };
+ const allowedRelation = await executeEntityOperation(restricted(), website, {
+   operation: { id: 'Relation.get', intent: 'get' }, input: { id: customer },
+ });
+ expect(!('error' in allowedRelation) && (allowedRelation.data as {id: string})?.id).toBe(customer);
+ const deniedRelation = await executeEntityOperation(restricted(), website, {
+   operation: { id: 'Relation.get', intent: 'get' }, input: { id: supplier },
+ });
+ expect('error' in deniedRelation || deniedRelation.data === null).toBe(true);
+ // Default-mode reads use only the named integration's published rules.
+ await sql`update erp.authorization_operation_policies set managed=false where tenant_id=${tenant}::uuid and operation_id='Relation.get'`.execute(privileged());
+ await sql`delete from erp.authorization_operation_policies where tenant_id=${tenant}::uuid and operation_id='Relation.list'`.execute(privileged());
+ const listOperation = {operation:{id:'Relation.list',intent:'list' as const},input:{}};
+ const getOperation = (id:string) => ({operation:{id:'Relation.get',intent:'get' as const},input:{id}});
+ expect(await executeEntityOperation(restricted(), {...website}, listOperation)).toMatchObject({error:{code:'FORBIDDEN'}});
+ const listGrant = await addProfile('Relation.list', rule('equals', literal('customer')), 'integration', integrationId);
+ const scopedStates = await withDbSession(restricted(), website, async trx => (await sql<{ states: Record<string, unknown> }>`
+   select app.authorization_rules_for_actor()->'states' as states`.execute(trx)).rows[0]!.states);
+ expect(scopedStates['Relation.list']).toMatchObject({entity:'Relation',managed:true,integrationRead:true});
+ const websiteList = await executeEntityOperation(restricted(), {...website}, listOperation);
+ expect(websiteList).toMatchObject({data:{items:[{data:{id:customer,display_name:'Customer',relation_type:'customer'}}]}});
+ expect(await executeEntityOperation(restricted(), {...website}, getOperation(customer))).toMatchObject({data:{id:customer}});
+ const outsideScope = await executeEntityOperation(restricted(), {...website}, getOperation(supplier));
+ expect('error' in outsideScope || outsideScope.data===null).toBe(true);
+ expect(await executeEntityOperation(restricted(), {...website,appPrincipal:{integrationId:foreignIntegration,credentialId}}, listOperation)).toMatchObject({error:{code:'FORBIDDEN'}});
+ const defaultPerson = await executeEntityOperation(restricted(), {...dbInput(editor),roles:['Relations.All.Read'],auditIdentityId:identity,principalKind:'person'}, listOperation);
+ expect('error' in defaultPerson ? [] : (defaultPerson.data as {items:{data:{id:string}}[]}).items.map(item=>item.data.id).sort()).toEqual([customer,supplier].sort());
+ await sql`update erp.authorization_profile_assignments set active=false where id=${listGrant.id}::uuid`.execute(privileged());
+ expect(await executeEntityOperation(restricted(), {...website}, listOperation)).toMatchObject({error:{code:'FORBIDDEN'}});
+ await sql`update erp.authorization_profile_assignments set active=true where id=${listGrant.id}::uuid`.execute(privileged());
+ await sql`update platform.api_keys set revoked_at = now() where id = ${credentialId}::uuid`.execute(privileged());
+ const revoked = await executeEntityOperation(restricted(), {...website}, {
+   operation: { id: 'Relation.get', intent: 'get' }, input: { id: customer },
+ });
+ expect(revoked).toMatchObject({error: {code: 'FORBIDDEN'}});
+
+ // Restore managed mode for the remaining existing behavior and load checks.
+ await createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationOperationPolicy'),values:{operationId:'Relation.list',entityType:'Relation',managed:true}});
+ await sql`update erp.authorization_operation_policies set managed=true where operation_id='Relation.get' and tenant_id=${tenant}::uuid`.execute(privileged());
 
  // Representative scoped-list load: 20k records, 8 applicable profiles, 200 actor groups.
  for(let index=0;index<7;index++)await addProfile('Relation.list',rule('equals',literal('customer')),'user',identity);

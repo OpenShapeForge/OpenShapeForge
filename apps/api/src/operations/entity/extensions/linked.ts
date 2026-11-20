@@ -784,8 +784,9 @@ export function presentLinkedDefinition(
 // The graph over every entity of the tenant.
 
 /** Serializes the definition changes of one tenant: a cycle across two entities is closed by two designers otherwise. */
-export async function lockExtensionGraph(trx: Transaction<DB>, tenantId: string): Promise<void> {
-  await sql`select pg_advisory_xact_lock(hashtextextended(${`osf-extensions-graph:${tenantId}`}, 0))`.execute(trx);
+export async function lockExtensionGraph(trx: Transaction<DB>, tenantId: string, mode: "exclusive" | "shared" = "exclusive"): Promise<void> {
+  const acquire = sql.id(mode === "shared" ? "pg_advisory_xact_lock_shared" : "pg_advisory_xact_lock");
+  await sql`select ${acquire}(hashtextextended(${`osf-extensions-graph:${tenantId}`}, 0))`.execute(trx);
 }
 
 /**

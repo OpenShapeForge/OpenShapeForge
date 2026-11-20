@@ -789,7 +789,7 @@ describe("web manifest projection", () => {
     const firstView = coreView();
     firstView.form!.variants.create!.groups[0]!.fields = fields.map(({ key }) => key);
     const secondView = coreView();
-    secondView.form!.variants.create!.groups[0]!.fields.push("otherZone");
+    secondView.form!.variants.create!.groups[0]!.fields = ["displayName", "otherZone"];
     const first = entity("First", "first", fields, firstView);
     const second = entity("Second", "second", [field("displayName"), field("otherZone", timezone)], secondView);
 

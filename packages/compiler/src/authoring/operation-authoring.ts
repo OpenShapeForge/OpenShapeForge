@@ -45,6 +45,20 @@ export function assertOperationAuthoring(
       throw new Error(`${origin} Operation ${operationKey} input ${inputKey}: x-osf-inputFields must reference a fieldDefinition collection on its target record.`);
     }
   }
+  if (operation.implementation.type === "ownedDelete") {
+    const id = operation.input?.schema.properties as Record<string, { type?: string; format?: string }> | undefined;
+    if (operation.target?.scope !== "record" || operation.target.inputField !== "id" ||
+        operation.target.inputBindings || operation.auth?.mode !== "session" || !operation.auth.roles?.length ||
+        operation.tenancy?.mode !== "required" || operation.effects.data !== "delete" ||
+        operation.effects.external !== "none" || operation.confirmation.mode !== "acknowledgement" ||
+        operation.reliability.idempotency.mode !== "natural" || operation.concurrency ||
+        operation.prerequisites || operation.stamps || operation.interaction || !operation.errors ||
+        !operation.output || id?.id?.type !== "string" || id.id.format !== "uuid" ||
+        !(operation.input?.schema.required as string[] | undefined)?.includes("id")) {
+      throw new Error(`${origin} ${operationKey}: owned delete needs a tenant-bound session Operation, record UUID, acknowledgement and intrinsic idempotency.`);
+    }
+    return;
+  }
   if (operation.implementation.type === "collection") {
     const implementation = operation.implementation;
     if (!["insert", "move", "update", "remove"].includes(implementation.action) ||

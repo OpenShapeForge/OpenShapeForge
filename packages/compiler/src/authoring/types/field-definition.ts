@@ -174,6 +174,8 @@ export interface FieldDefinitionRelationship {
   /** Compiler-derived join source, not an authored SQL/storage choice. */
   through?: { field: string; column: string; target: string };
   ownership?: "owned" | "reference";
+  /** Clear this optional reference when the target is removed by an owned delete. */
+  onTargetDelete?: "unlink";
   /**
    * How a single reference relates to a versioned target: `current` (the
    * default, the target's editable head) or `pinned` (one immutable version,

@@ -211,7 +211,7 @@ function customOperation(
 ): WebCustomOperationRef | undefined {
   if (source.interfaces.web === false) return undefined;
   const definition = source.definition;
-  if ((definition.implementation.type !== "plugin" && definition.implementation.type !== "collection") || !definition.target ||
+  if ((definition.implementation.type !== "plugin" && definition.implementation.type !== "collection" && definition.implementation.type !== "ownedDelete") || !definition.target ||
     !definition.input || !definition.output) return undefined;
   const rest = source.interfaces.rest;
   return {
@@ -255,7 +255,7 @@ function customOperation(
           rest: {
             method: rest.method ?? (definition.effects.data === "read" ? "GET" : "POST"),
             path: rest.path ??
-              `/api/${definition.implementation.type === "collection" ? "core" : definition.implementation.plugin}/${kebab(source.entityName)}` +
+              `/api/${definition.implementation.type === "plugin" ? definition.implementation.plugin : "core"}/${kebab(source.entityName)}` +
                 `${definition.target.scope === "record" ? `/:${definition.target.inputField}` : ""}` +
                 `/${kebab(source.key)}`,
             response: rest.response ?? { kind: "json" as const },

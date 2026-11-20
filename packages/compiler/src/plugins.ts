@@ -50,6 +50,7 @@ export type CompiledPluginOperation = PluginOperationContract & {
   resultProjection?: { kind: "entity-record"; entityName: string; idField: string };
   /** Compiler-owned native dispatch; never accepted from plugin contributions. */
   implementation?:
+    | { type: "ownedDelete"; plan: import("@openshapeforge/operations").OwnedDeletePlan }
     | { type: "collection"; entityName: string; field: string; action: "insert" | "move" | "update" | "remove" }
     | { type: "collection-options"; sources: Array<{entity:string;labels?:{en?:string;nl?:string};list:string;get?:string;labelField?:string;fields:Record<string,{type:string;many:boolean}>}> }
     | { type: "application-search"; sources: Array<{entity:string;labels:Record<string,string>;description:string|Record<string,string>;list:string;get?:string;field?:string;descriptionField?:string}> }
@@ -357,6 +358,8 @@ export type CompilerPlugin = {
   schemaMigrations?:
     | PluginSchemaMigration[]
     | ((context: PluginBaseContext) => PluginSchemaMigration[]);
+  /** Installed BEFORE ROW guards that may refuse a write and otherwise leave the row and related data untouched. */
+  ownedDeleteGuards?: readonly import("@openshapeforge/operations").OwnedDeleteGuard[];
   /** Nonsecret, JSON-serializable build configuration bound to this runtime module. */
   runtimeConfiguration?(context: Pick<PluginGenerateContext, "entities">): unknown;
   /** Emit artifacts; paths are repo-root-relative like all compiler output. */

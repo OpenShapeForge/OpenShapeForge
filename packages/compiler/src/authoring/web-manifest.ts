@@ -1368,17 +1368,7 @@ function projectEntity(
     }
     if (definition.kind === "collection" && definition.collectionLayout === "matrix" && "source" in definition.matrix) {
       const { read, apply, rows, measures, total, refresh = [] } = definition.matrix;
-      // The browser invokes these by id; they must be Operations a compiled entity really owns.
-      const operation = (role: string, id: string) => {
-        const [owner, key] = id.split(".");
-        const found = all.get(owner!)?.contract.pluginOperations?.find(candidate => candidate.key === key);
-        if (!found) throw new Error(`${entityName}.${name}: matrix ${role} names unknown Operation ${id}.`);
-        return found.definition.effects?.data;
-      };
-      if (operation("read", read) !== "read") throw new Error(`${entityName}.${name}: matrix read Operation ${read} must only read.`);
-      if (apply && operation("apply", apply) === "read") throw new Error(`${entityName}.${name}: matrix apply Operation ${apply} must write.`);
       if (rows && (!fields[rows.parentField]?.supports.read || fields[rows.parentField]?.cardinality !== "one")) throw new Error(`${entityName}.${name}: matrix field ${rows.parentField} must be readable and single.`);
-      for (const entity of refresh) if (!all.has(entity)) throw new Error(`${entityName}.${name}: matrix refresh names unknown entity ${entity}.`);
       return [name, { kind: "collection" as const, collectionLayout: "matrix" as const, matrix: {
         source: "operation" as const, read, ...(apply ? { apply } : {}), ...(rows ? { rows } : {}),
         measures: measures.map(measure => ({
@@ -2217,6 +2207,22 @@ export function buildWebManifest(
   }
   const projected = projectable.map((entity) => entity.contract.source
     ? providers.get(entity.contract.entity.name)! : projectEntity(entity, byName, providers));
+  // An operation matrix names Operations and entities by id. They need no Web projection of their
+  // own, so they are checked against every compiled entity rather than the projectable ones.
+  const compiled = new Map(entities.map(({ contract }) => [contract.entity.name, contract]));
+  for (const entity of projected) for (const [name, view] of Object.entries(entity.views.named ?? {})) {
+    if (view.kind !== "collection" || !("collectionLayout" in view) || view.collectionLayout !== "matrix" || !("source" in view.matrix)) continue;
+    const at = `${entity.entityId}.${name}`, { read, apply, refresh } = view.matrix;
+    const effect = (role: string, id: string) => {
+      const [owner, key] = id.split(".");
+      const found = compiled.get(owner!)?.pluginOperations?.find(candidate => candidate.key === key);
+      if (!found) throw new Error(`${at}: matrix ${role} names unknown Operation ${id}.`);
+      return found.definition.effects?.data;
+    };
+    if (effect("read", read) !== "read") throw new Error(`${at}: matrix read Operation ${read} must only read.`);
+    if (apply && effect("apply", apply) === "read") throw new Error(`${at}: matrix apply Operation ${apply} must write.`);
+    for (const refreshed of refresh) if (!compiled.has(refreshed)) throw new Error(`${at}: matrix refresh names unknown entity ${refreshed}.`);
+  }
   if (extensionRegistry) withCustomFields(projected, byName, extensionRegistry);
   const defaultTimeZone = options.createDefaults?.timeZone;
   // Reading uses the same authored catalog labels as editing. Keep the source

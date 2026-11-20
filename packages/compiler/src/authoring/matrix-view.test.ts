@@ -83,9 +83,13 @@ test("an operation matrix without measures shows row names only and needs no app
   expect(view).not.toHaveProperty("matrix.apply");
 });
 test("refuses Operations, fields and entities the compiled application does not have", () => {
-  expect(() => buildWebManifest(withPlanning(matrix => { matrix.read = "Budget.missing"; }))).toThrow("unknown Operation Budget.missing");
+  expect(() => buildWebManifest(withPlanning(matrix => { matrix.read = "Budget.missing"; }))).toThrow("BudgetLine.planning: matrix read names unknown Operation Budget.missing");
   expect(() => buildWebManifest(withPlanning(matrix => { matrix.apply = "Ledger.applyMatrix"; }))).toThrow("unknown Operation Ledger.applyMatrix");
   expect(() => buildWebManifest(withPlanning(matrix => { matrix.refresh = ["Nowhere"]; }))).toThrow("unknown entity Nowhere");
+  // An entity needs no Web projection of its own to be named.
+  const sources = withPlanning(matrix => { matrix.refresh = ["CostDimension"]; });
+  delete sources.find(source => source.slug === "cost-dimension")!.contract.interfaces!.web;
+  expect(buildWebManifest(sources).entities.BudgetLine!.views.named!.planning).toMatchObject({ matrix: { refresh: ["BudgetLine", "CostDimension"] } });
   expect(() => buildWebManifest(withPlanning(matrix => { matrix.rows = { parentField: "nowhere" }; }))).toThrow("readable and single");
 });
 test("refuses a read that writes and an apply that only reads", () => {

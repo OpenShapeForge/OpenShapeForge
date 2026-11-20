@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { sql } from "kysely";
 import type { OpenShapeForgeDatabase } from "../connection.js";
-import { DATABASE_ROLES } from "../database-roles.js";
+import { databaseRole, DATABASE_ROLES } from "../database-roles.js";
 import { rlsBypassTokenDigest } from "../rls-bypass.js";
 
 /**
@@ -464,6 +464,67 @@ export async function applyAppHelpersMigration(db: OpenShapeForgeDatabase) {
       where entry.key = any(coalesce(declared, array[]::text[]))
         and coalesce((entry.value -> 'integrations') ? integration, false)
     $$;
+
+    -- A named PL/pgSQL function lets each connection reuse the plans for
+    -- these statements. The policy is still resolved live for each audit
+    -- operation under its existing database role and transaction.
+    create or replace function app.apply_session_authorization() returns void
+    language plpgsql volatile security invoker set search_path=pg_catalog,pg_temp as $function$
+    declare
+      rules jsonb;
+      operation_id text;
+      dependencies jsonb;
+      locked boolean;
+    begin
+      -- The policy functions are installed after the generated tables.
+      if to_regprocedure('app.authorization_rules_for_actor()') is null then return; end if;
+      if app.bypass_rls() or app.current_tenant() is null then
+        perform set_config('app.authorization_rules','',true);
+        return;
+      end if;
+      -- Workers may touch only worker-granted tables. They receive a
+      -- tenant-fenced list of managed entities and no grant rules: any access
+      -- to a managed entity is denied, while canonical Operations execute
+      -- separately under the API's verified service identity.
+      if current_user = ${sql.lit(databaseRole("worker").name)} then
+        if to_regprocedure('app.authorization_worker_rules()') is null then
+          raise exception 'Worker authorization projection is not installed';
+        end if;
+        rules := app.authorization_worker_rules();
+        if jsonb_array_length(coalesce(rules->'managedEntities','[]'::jsonb)) > 0 then
+          perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
+          -- A policy may have changed while this worker waited.
+          rules := app.authorization_worker_rules();
+        end if;
+        perform set_config('app.authorization_rules',rules::text,true);
+        return;
+      end if;
+      operation_id := current_setting('app.audit_operation',true);
+      dependencies := coalesce(nullif(current_setting('app.audit_read_operations',true),''),'[]')::jsonb;
+      locked := app.authorization_requires_lock(operation_id,dependencies);
+      if locked then
+        perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
+      end if;
+      rules := app.authorization_rules_for_actor();
+      if not locked and (
+        rules->'states'->operation_id->>'managed'='true' or exists (
+          select 1 from jsonb_array_elements_text(dependencies) dependency
+          where rules->'states'->dependency->>'managed'='true'
+        )
+      ) then
+        perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
+        locked := true;
+        -- A withdrawal may have committed while admission waited for its lock.
+        rules := app.authorization_rules_for_actor();
+      end if;
+      if locked and app.current_principal_class()='application' and not app.record_action_principal_live() then
+        raise exception 'AUTHORIZATION_INTEGRATION_CREDENTIAL_INACTIVE' using errcode='42501';
+      end if;
+      perform set_config('app.authorization_rules',rules::text,true);
+    end;
+    $function$;
+    revoke all on function app.apply_session_authorization() from public;
+    grant execute on function app.apply_session_authorization() to ${sql.id(databaseRole("app").name)}, ${sql.id(databaseRole("worker").name)};
 
     -- The body is replaced, privilege-scoped and transferred to the dedicated
     -- identity-resolver role by identity-link.ts after the generated registry

@@ -277,14 +277,18 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
       integration_states as (
         select i.id, jsonb_build_object(
           'entity',i.entity_name,'managed',true,'integrationRead',true,'grantable',true,'fields',i.fields,
-          'rules',case when count(*)>100 then '[]'::jsonb else jsonb_agg(p.condition) end) as state
-        from integration_policies p
-        join platform.authorization_operation_inventory i on i.id=p.operation_id and i.entity_name=p.entity_name
+          'rules',matched.rules) as state
+        from (select distinct operation_id, entity_name from integration_policies) target
+        join platform.authorization_operation_inventory i on i.id=target.operation_id and i.entity_name=target.entity_name
+        cross join lateral (
+          select case when count(*)>100 then '[]'::jsonb else jsonb_agg(bounded.condition) end as rules
+          from (select p.condition from integration_policies p
+            where p.operation_id=i.id and p.entity_name=i.entity_name limit 101) bounded
+        ) matched
         where i.grantable and i.id in (i.entity_name||'.list',i.entity_name||'.get')
           and not exists(select 1 from ${policies} s where s.tenant_id=app.current_tenant()
             and ${col('s','AuthorizationOperationPolicy','operationId')}=i.id
             and ${col('s','AuthorizationOperationPolicy','managed')})
-        group by i.id,i.entity_name,i.fields
       )
       select jsonb_build_object(
         'actor',actor.context,
@@ -310,6 +314,8 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
           || coalesce((select jsonb_object_agg(id,state) from integration_states),'{}'::jsonb)) from actor;
     $function$;
 
+    -- The session also locks and reloads scoped reads when their resolved state
+    -- shows a match under application defaults.
     create or replace function app.authorization_requires_lock(operation text, dependencies jsonb) returns boolean
     language sql stable as $function$
       select exists(select 1 from ${policies} s where s.tenant_id=app.current_tenant() and ${col('s','AuthorizationOperationPolicy','managed')}

@@ -66,7 +66,9 @@ the key also holds an authored role. Calls with no matching integration profile
 continue to use the authored defaults. Managed Operations still use their
 configured profiles and list projection. For a scoped integration read under
 defaults, the normal Operation field projection and record policies still
-apply.
+apply. See Authorization Profile Assignments for the integration-specific
+audience on an Operation labelled as using defaults. Direct grants without a
+published profile still require managed mode.
 
 Other unmanaged Operations retain their authored defaults. On first activation for an
 entity, the existing Operation inventory is retained as explicit default states.

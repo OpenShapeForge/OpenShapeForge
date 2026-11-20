@@ -440,6 +440,8 @@ export interface EntityRestOperationProjectionConfig
 }
 
 export interface EntityWebOperationProjectionConfig extends EntityInterfaceOperationProjectionConfig {
+  /** Show this record action only while the current record matches. */
+  visibleWhen?: VisibilityConfig;
   /** Presentation only; never changes the operation result or its authorization. */
   resultRenderer?: string;
   /** Completion copy; {{field}} binds a declared scalar output field. */

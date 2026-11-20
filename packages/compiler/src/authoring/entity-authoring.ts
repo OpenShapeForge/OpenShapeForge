@@ -72,6 +72,13 @@ export function assertEntityAuthoring(entity: CoreEntity, origin: string): void 
 
   const web = entity.interfaces?.web;
   if (web) {
+    for (const [key, projection] of Object.entries(web.operations ?? {})) {
+      if (!projection || !projection.visibleWhen) continue;
+      const operation = entity.operations[key];
+      if (operation?.target?.scope !== "record" || !web.views?.record?.actions?.includes(key)) {
+        throw new Error(`${origin} Web operation "${key}" may use visibleWhen only as a record action.`);
+      }
+    }
     const namedViews = authoredNamedViews(web.views);
     for (const [name, namedView] of Object.entries(namedViews)) {
       if (name === "record" || name === "collection") {

@@ -1735,6 +1735,21 @@ without being placed in the visible groups. Other layout properties and multiple
 content tabs are rejected explicitly; related route tabs remain unchanged.
 Omitting `recordLayout` preserves the existing default.
 
+## Web create defaults
+
+Set a time zone for new entity records in the host's committed `authoring.config.yaml`.
+
+```yaml
+web:
+  createDefaults:
+    timeZone: Europe/Amsterdam
+```
+
+The web manifest preselects this IANA time zone on writable single-value
+`timeZone` fields. An explicit field `defaultValue` takes precedence.
+The setting applies to create forms. The stored database default and API
+input contract are unaffected.
+
 ## Record-action test composition
 
 The default `authoring.config.yaml` is the production composition. The

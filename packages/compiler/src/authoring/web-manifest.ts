@@ -3,6 +3,7 @@ import { compileCollectionTable } from "./collection-table.js";
 import { operationForm } from "./operation-form-presentation.js";
 import { collectBlueprintOperations } from "../blueprint-operations.js";
 import { fieldDefinitionsPath, referencedByPath } from "../extension-operations.js";
+import type { AuthoringWebConfig } from "./layers.js";
 import type { ExtensionRegistry } from "./extension-registry-types.js";
 /** A REST-driven browser must positively project both its collection and transport. */
 export function hasWebRestCollection(contract: CompiledEntityContract): boolean {
@@ -233,6 +234,7 @@ function customOperation(
     // drop those keys before the wire.
     input: { kind: "json-schema", schema: withOperationControls(definition.input.schema, definition) },
     output: { kind: "json-schema", schema: definition.output.schema },
+    ...(source.interfaces.web?.visibleWhen ? { visibleWhen: source.interfaces.web.visibleWhen } : {}),
     ...(source.interfaces.web?.successMessage ? { successMessage: localized(source.interfaces.web.successMessage, "Action completed.") } : {}),
     ...(source.interfaces.web?.resultRenderer ? { resultRenderer: source.interfaces.web.resultRenderer } : {}),
     ...(source.interfaces.web?.form ? { form: operationForm(source.interfaces.web.form, definition.input.schema, source.id, definition.reliability.idempotency.mode === "keyed" ? [definition.reliability.idempotency.inputField] : []) } : {}),
@@ -961,6 +963,7 @@ function projectEntity(
   // Every single entity reference is an authored field, so its writability and
   // presentation are projected above; relationships add no implicit fields.
   const fields = Object.fromEntries(explicitFields);
+  assertVisibilityFields(entityName, "Web action", Object.values(customOperations), fields);
   const tree = collectionTree(contract);
   const table = compileCollectionTable(source, all);
   const authoredBoard = contract.interfaces?.web?.collectionBoard;
@@ -1356,7 +1359,7 @@ function projectEntity(
       if (definition.collectionLayout !== "table") throw new Error(`${entityName}.${name}: a routed collection requires table layout.`);
       const route = projectedRoute(definition.route, source.routeLocale ?? "en", source.route);
       if (route === source.route) throw new Error(`${entityName}.${name}: a named collection route must differ from the default route.`);
-      const { namedViews: _named, collectionTree: _tree, collectionTable: _table, collectionFilter: _filter, ...web } = contract.interfaces!.web!;
+      const { namedViews: _named, collectionTree: _tree, collectionTable: _table, collectionFilter: _filter, collectionBoard: _board, ...web } = contract.interfaces!.web!;
       const projected = projectEntity({ ...source, route,
         collection: { ...source.collection, route, title: localized(definition.title, source.collection.title.en) },
         contract: { ...contract, interfaces: { ...contract.interfaces, web: { ...web, ...(definition.tree ? { collectionTree: definition.tree } : {}), ...(definition.table ? { collectionTable: definition.table } : {}) } } },
@@ -2150,7 +2153,7 @@ const contextConditionValueTypes: Record<string, "string" | "number" | "boolean"
 
 export function buildWebManifest(
   entities: readonly Pick<CompiledEntityInfo, "slug" | "contract">[],
-  options: WebManifestOptions = {},
+  options: WebManifestOptions & AuthoringWebConfig = {},
   standalone: WebStandaloneOperationsInput = { catalogs: [], operations: [] },
   referentiedata: CoreReferentiedataSnapshot = {},
   /** The backend manifest's tenant-field registry; absent, no entity offers tenant fields. */
@@ -2192,10 +2195,15 @@ export function buildWebManifest(
   const projected = projectable.map((entity) => entity.contract.source
     ? providers.get(entity.contract.entity.name)! : projectEntity(entity, byName, providers));
   if (extensionRegistry) withCustomFields(projected, byName, extensionRegistry);
+  const defaultTimeZone = options.createDefaults?.timeZone;
   // Reading uses the same authored catalog labels as editing. Keep the source
   // identity for choices and preserve unknown stored codes as renderer fallbacks.
   for (const entity of [...projected, ...Object.values(pages?.entities ?? {})]) {
     for (const field of Object.values(entity.fields)) {
+      if (defaultTimeZone !== undefined && field.osfType === "timeZone" && field.cardinality === "one"
+        && field.supports.create && field.defaultValue === undefined) {
+        field.defaultValue = defaultTimeZone;
+      }
       if (field.optionSource?.type === "referentiedata" && !field.options?.length) {
         const options = referentiedata[field.optionSource.group];
         if (options?.length) field.options = options.map(item => ({ ...item, label: { ...item.label } }));

@@ -547,7 +547,7 @@ operations:
         properties:
           integrationId: { type: string, format: uuid }
           displayName: { type: string }
-    auth: &profileAdminAuth { mode: session, roles: [Organization.Security.Manage] }
+    auth: &profileAdminAuth { mode: session, roles: [Organization.Security.Manage], roleGroups: [[Platform.ApiKeys.Manage]] }
     tenancy: { mode: required }
     effects: { data: write, external: write }
     reliability: { idempotency: { mode: none } }
@@ -559,31 +559,33 @@ operations:
       - { status: 404, code: NOT_FOUND, description: The integration was removed or disabled during provisioning. }
       - { status: 502, code: PROVISIONING_FAILED, description: The identity provider could not provision the integration. }
       - { status: 503, code: NOT_CONFIGURED, description: API key provisioning is unavailable. }
-  setIntegrationIssuers:
-    id: api-keys.set-integration-issuers
-    name: { en: Set approved key issuers, nl: Goedgekeurde sleuteluitgevers instellen }
+  updateIntegrationIssuers:
+    id: api-keys.update-integration-issuers
+    name: { en: Update approved key issuers, nl: Goedgekeurde sleuteluitgevers wijzigen }
     description:
-      en: Replaces the accounts that can issue keys for this profile. An empty list removes all approvals. Existing keys keep working until revoked or expired.
-      nl: Vervangt de accounts die sleutels voor dit profiel kunnen uitgeven. Een lege lijst trekt alle toestemmingen in. Bestaande sleutels werken totdat ze zijn ingetrokken of verlopen.
-    implementation: { type: plugin, plugin: osf-api-keys, handler: setIntegrationIssuers }
+      en: Approve or remove specific accounts and return the full current approval list. Omit both lists to inspect the approvals. Existing keys keep working until revoked or expired.
+      nl: Voeg specifieke accounts toe of verwijder ze en ontvang de actuele lijst met goedkeuringen. Laat beide lijsten weg om de goedkeuringen te bekijken. Bestaande sleutels werken totdat ze zijn ingetrokken of verlopen.
+    implementation: { type: plugin, plugin: osf-api-keys, handler: updateIntegrationIssuers }
     input:
-      schema:
-        type: object
-        additionalProperties: false
-        required: [integrationId, accountIds]
-        properties:
-          integrationId: *integrationIdInput
-          accountIds:
-            type: array
-            maxItems: 100
-            items: { type: string, format: uuid }
-    output:
       schema:
         type: object
         additionalProperties: false
         required: [integrationId]
         properties:
+          integrationId: *integrationIdInput
+          approveAccountIds: &issuerAccountIds
+            type: array
+            maxItems: 100
+            items: { type: string, format: uuid }
+          removeAccountIds: *issuerAccountIds
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId, accountIds]
+        properties:
           integrationId: { type: string, format: uuid }
+          accountIds: *issuerAccountIds
     auth: *profileAdminAuth
     tenancy: { mode: required }
     effects: { data: write, external: none }
@@ -598,28 +600,34 @@ operations:
       nl: Toont de integratieprofielen waarvoor je een sleutel kunt uitgeven. Kies een profiel en gebruik api-keys.issue-credential met de integrationId.
     implementation: { type: plugin, plugin: osf-api-keys, handler: listApprovedIntegrations }
     input:
-      schema: { type: object, additionalProperties: false }
+      schema:
+        type: object
+        additionalProperties: false
+        properties:
+          first: *first
+          after: { type: string, format: uuid }
     output:
       schema:
         type: object
         additionalProperties: false
-        required: [integrations]
+        required: [integrations, nextCursor]
         properties:
           integrations:
             type: array
             items: *profileSummary
+          nextCursor: { type: [string, 'null'], format: uuid }
     auth: &integrationCreateAuth { mode: session, roles: [Platform.ApiKeys.Manage, Platform.ApiKeys.IntegrationCreate] }
     tenancy: { mode: required }
     effects: { data: read, external: none }
-    reliability: { idempotency: { mode: none } }
+    reliability: { idempotency: { mode: natural } }
     confirmation: { mode: none }
     errors: *catalogErrors
   issueCredential:
     id: api-keys.issue-credential
     name: { en: Issue a credential, nl: Credential uitgeven }
     description:
-      en: Issue an API key for an integration you manage or a profile you have been approved to use. Find approved profiles with api-keys.list-approved-integrations. Copy the key when it appears. A profile key uses its configured Operation and record grants.
-      nl: Geef een API-sleutel uit voor een integratie die je beheert of een goedgekeurd profiel. Vind je profielen met api-keys.list-approved-integrations. Kopieer de sleutel zodra hij verschijnt. Een profielsleutel gebruikt de ingestelde rechten op operations en records.
+      en: Issue an API key for a regular integration you manage or a profile you have been approved to use. Every person issuing a profile key needs explicit approval. Find approved profiles with api-keys.list-approved-integrations. Copy the key when it appears. A profile key uses its configured Operation and record grants.
+      nl: Geef een API-sleutel uit voor een reguliere integratie die je beheert of een goedgekeurd profiel. Ook beheerders hebben expliciete toestemming nodig om profielsleutels uit te geven. Vind je profielen met api-keys.list-approved-integrations. Kopieer de sleutel zodra hij verschijnt. Een profielsleutel gebruikt de ingestelde rechten op operations en records.
     implementation: { type: plugin, plugin: osf-api-keys, handler: issueCredential }
     input:
       schema:
@@ -859,7 +867,7 @@ interfaces:
       getCredential: { method: POST, path: /api/api-key-integrations/get-credential, response: { status: 200, kind: json } }
       createIntegration: { method: POST, path: /api/api-key-integrations/create, response: { status: 200, kind: json } }
       createIntegrationProfile: { method: POST, path: /api/api-key-integrations/create-profile, response: { status: 200, kind: json } }
-      setIntegrationIssuers: { method: POST, path: /api/api-key-integrations/set-issuers, response: { status: 200, kind: json } }
+      updateIntegrationIssuers: { method: POST, path: /api/api-key-integrations/update-issuers, response: { status: 200, kind: json } }
       listApprovedIntegrations: { method: POST, path: /api/api-key-integrations/list-approved, response: { status: 200, kind: json } }
       issueCredential: { method: POST, path: /api/api-key-integrations/issue-credential, response: { status: 200, kind: json } }
       revokeCredential: { method: POST, path: /api/api-key-integrations/revoke-credential, response: { status: 200, kind: json } }

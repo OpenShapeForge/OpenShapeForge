@@ -3,9 +3,8 @@
  * Provisioning: what happens when a customer presses "add API key".
  *
  * Every mutation here starts by calling the ceiling (`ceiling.ts`). Profile
- * issuance additionally checks the current tenant account approval. Tenant containment comes from
- * RLS on `platform.api_key_integrations`, which every read and write below goes
- * through.
+ * issuance additionally checks the current tenant account approval. RLS on
+ * `platform.api_key_integrations` confines reads and writes to the tenant.
  *
  * The cross-system ordering is the other thing worth reading carefully. Postgres
  * and Keycloak share no transaction, so a crash between them must not leave a
@@ -627,8 +626,10 @@ function approvedIssuer(
 export async function listApprovedIntegrations(
   deps: ApiKeyServiceDeps,
   session: ProvisioningSession,
-): Promise<{ integrationId: string; displayName: string }[]> {
+  query: { first?: number; after?: string },
+): Promise<{ integrations: { integrationId: string; displayName: string }[]; nextCursor: string | null }> {
   assertMayCreateIntegration(session);
+  const first = boundedFirst(query.first);
   return withSession(deps, session, async (trx) => {
     const result = await sql<{ integrationId: string; displayName: string }>`
       select i.id as "integrationId", i.display_name as "displayName"
@@ -637,34 +638,50 @@ export async function listApprovedIntegrations(
          and i.status = 'active'
          and i.granted_roles = '[]'::jsonb
          and ${approvedIssuer(session, sql`i.approved_issuer_identity_ids`)}
-       order by i.display_name, i.id
+         ${query.after ? sql`and i.id > ${query.after}::uuid` : sql``}
+       order by i.id
+       limit ${first + 1}
     `.execute(trx);
-    return result.rows;
+    const integrations = result.rows.slice(0, first);
+    return {
+      integrations,
+      nextCursor: result.rows.length > first ? integrations.at(-1)!.integrationId : null,
+    };
   });
 }
 
-export async function setIntegrationIssuers(
+export async function updateIntegrationIssuers(
   deps: ApiKeyServiceDeps,
   session: ProvisioningSession,
-  input: { integrationId: string; accountIds: string[] },
+  input: { integrationId: string; approveAccountIds: string[]; removeAccountIds: string[] },
   now = new Date(),
-): Promise<void> {
+): Promise<string[]> {
   assertMayManageIntegrationProfiles(session);
-  const accountIds = [...new Set(input.accountIds)].sort();
-  await withSession(deps, session, async (trx) => {
+  const approve = [...new Set(input.approveAccountIds.map(id => id.toLowerCase()))];
+  const remove = new Set(input.removeAccountIds.map(id => id.toLowerCase()));
+  if (approve.some(id => remove.has(id))) {
+    throw new ApiKeyValidationError("An account cannot be approved and removed in the same change.");
+  }
+  return withSession(deps, session, async (trx) => {
     const integration = await lockIntegration(trx, session.tenantId, input.integrationId);
     if (integration?.status !== "active" || !Array.isArray(integration.approved_issuer_identity_ids)) {
       throw new ApiKeyNotFoundError("No such active integration profile.");
     }
+    const previous = storedList(integration.approved_issuer_identity_ids);
+    const accountIds = [...new Set([...previous.filter(id => !remove.has(id)), ...approve])].sort();
+    if (accountIds.length > 100) throw new ApiKeyValidationError("A profile may have at most 100 approved issuers.");
     const eligible = await sql<{ id: string }>`
       select identity_id as id from platform.identity_relations
        where tenant_id = ${session.tenantId}
-         and identity_id = any(${postgresArrayLiteral(accountIds)}::uuid[])
+         and identity_id = any(${postgresArrayLiteral(approve)}::uuid[])
          and status = 'linked'
          and not access_blocked
     `.execute(trx);
-    if (eligible.rows.length !== accountIds.length) {
+    if (eligible.rows.length !== approve.length) {
       throw new ApiKeyValidationError("Each approved issuer must have an active linked account in this organization.");
+    }
+    if (accountIds.length === previous.length && accountIds.every((id, index) => id === previous[index])) {
+      return accountIds;
     }
     await sql`
       update platform.api_key_integrations
@@ -675,8 +692,9 @@ export async function setIntegrationIssuers(
       aggregateType: API_KEY_INTEGRATION_AGGREGATE,
       aggregateId: input.integrationId,
       eventType: "api_key_integration_issuers_changed",
-      payload: { previousAccountIds: integration.approved_issuer_identity_ids, accountIds, actor: session.userId },
+      payload: { previousAccountIds: previous, accountIds, actor: session.userId },
     });
+    return accountIds;
   });
 }
 
@@ -730,17 +748,21 @@ export async function issueKey(
     if (!parent || parent.status !== "active") {
       throw new ApiKeyNotFoundError(manager ? "No such active integration." : "No such approved integration.");
     }
-    if (manager) {
-      assertMayGrantRoles(session, roleSubset ?? (parseRoleSubset(parent.granted_roles) ?? []));
-    } else {
-      if (!Array.isArray(parent.approved_issuer_identity_ids) ||
-          !Array.isArray(parent.granted_roles) || parent.granted_roles.length !== 0) {
+    if (Array.isArray(parent.approved_issuer_identity_ids)) {
+      if (!Array.isArray(parent.granted_roles) || parent.granted_roles.length !== 0) {
         throw new ApiKeyNotFoundError("No such approved integration.");
       }
       const approval = await sql<{ approved: boolean }>`
         select ${approvedIssuer(session, jsonbLiteral(parent.approved_issuer_identity_ids))} as approved
       `.execute(trx);
       if (!approval.rows[0]?.approved) throw new ApiKeyNotFoundError("No such approved integration.");
+      if (roleSubset) {
+        throw new ApiKeyAuthorizationError("An approved integration credential uses the profile's operation grants.");
+      }
+    } else if (manager) {
+      assertMayGrantRoles(session, roleSubset ?? (parseRoleSubset(parent.granted_roles) ?? []));
+    } else {
+      throw new ApiKeyNotFoundError("No such approved integration.");
     }
 
     await insertKeyRow(trx, {

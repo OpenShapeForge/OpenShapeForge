@@ -243,7 +243,7 @@ describe("integration catalog Operations", () => {
       "createIntegration", "createIntegrationProfile", "createMyPersonalKey", "disableIntegration", "getCredential",
       "getIntegration", "getMyPersonalKey", "getPersonalKey", "issueCredential",
       "listApprovedIntegrations", "listCredentials", "listIntegrations", "listMyPersonalKeys", "listPersonalKeys",
-      "revokeCredential", "revokeMyPersonalKey", "revokePersonalKey", "setIntegrationIssuers", "updateIntegrationRestrictions", "updateIntegrationRoles",
+      "revokeCredential", "revokeMyPersonalKey", "revokePersonalKey", "updateIntegrationIssuers", "updateIntegrationRestrictions", "updateIntegrationRoles",
     ]);
     expect([...contracts.keys()].sort()).toEqual([...apiKeyOperationHandlerNames()]);
     expect(() => apiKeyOperationHandler({ key: "api-keys.unknown", handler: "mintEverything" }))

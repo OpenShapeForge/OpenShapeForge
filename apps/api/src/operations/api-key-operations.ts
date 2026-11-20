@@ -48,7 +48,7 @@ import {
   pageIntegrations,
   pageKeys,
   revokeKey,
-  setIntegrationIssuers,
+  updateIntegrationIssuers,
   updateIntegrationRoles,
   updateIntegrationRestrictions,
   type ApiKeyServiceDeps,
@@ -682,6 +682,9 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
   async createIntegrationProfile(input, context): Promise<ModuleOperationResult> {
     const resolved = resolve(context);
     if (isFailure(resolved)) return resolved;
+    if (!resolved.deps.admin.hasApiAudience) {
+      return declaredFailure(503, "NOT_CONFIGURED", "Integration profiles require a configured API verifier audience.");
+    }
     try {
       const value = await createIntegrationProfile(resolved.deps, resolved.session, {
         displayName: text(input.displayName),
@@ -692,26 +695,31 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
     }
   },
 
-  async listApprovedIntegrations(_input, context): Promise<ModuleOperationResult> {
+  async listApprovedIntegrations(input, context): Promise<ModuleOperationResult> {
     const resolved = resolve(context);
     if (isFailure(resolved)) return resolved;
     try {
-      return { value: { integrations: await listApprovedIntegrations(resolved.deps, resolved.session) } };
+      const value = await listApprovedIntegrations(resolved.deps, resolved.session, {
+        ...(typeof input.first === "number" ? { first: input.first } : {}),
+        ...(typeof input.after === "string" ? { after: input.after } : {}),
+      });
+      return { value };
     } catch (error) {
       return declaredServiceFailure(error);
     }
   },
 
-  async setIntegrationIssuers(input, context): Promise<ModuleOperationResult> {
+  async updateIntegrationIssuers(input, context): Promise<ModuleOperationResult> {
     const resolved = resolve(context);
     if (isFailure(resolved)) return resolved;
     try {
       const integrationId = text(input.integrationId);
-      await setIntegrationIssuers(resolved.deps, resolved.session, {
+      const accountIds = await updateIntegrationIssuers(resolved.deps, resolved.session, {
         integrationId,
-        accountIds: (input.accountIds as string[]).map(id => id.toLowerCase()),
+        approveAccountIds: (input.approveAccountIds as string[] | undefined) ?? [],
+        removeAccountIds: (input.removeAccountIds as string[] | undefined) ?? [],
       });
-      return { value: { integrationId } };
+      return { value: { integrationId, accountIds } };
     } catch (error) {
       return declaredServiceFailure(error);
     }

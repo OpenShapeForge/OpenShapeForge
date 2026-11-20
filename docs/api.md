@@ -1710,3 +1710,17 @@ tenant.
 `bun scripts/e2e-crud-proof.ts` walks a full signed-header CRUD lifecycle
 against a running API and doubles as a live smoke test (remember to set the
 context secret, above).
+
+### Reference labels on entity reads
+
+For generated entity `list` and `get` requests, append
+`?referenceLabels=true` to request labels for all visible references or
+`?referenceLabels=customerId,stageId` to choose fields. Each record envelope
+can include a `references` object beside `data`. Keys are source field names,
+and values are display labels rendered from the target's existing template.
+Stored values in `data` keep their original types.
+
+In GraphQL, select `references` on the get result or on a list's
+`data { items { references } }`. A reference label requires access to the
+target record and its display values. Unreadable or unresolved labels are
+omitted.

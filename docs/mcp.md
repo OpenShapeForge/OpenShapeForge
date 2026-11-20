@@ -1106,3 +1106,13 @@ be present), rather than Task objects. Read the execution status with
 `tasks/get`; cancellation is cooperative and the acknowledgement does not promise
 a terminal cancelled state. See the normative [update and cancellation
 responses](https://tasks.extensions.modelcontextprotocol.io/specification/2026-07-28/tasks#task-cancellation).
+
+### Reference labels in read results
+
+The searchable Operation executor requests labels for the reference fields
+in the requested `fields` selection (or all returned fields when omitted).
+For example, requesting `salesStageId` can return both
+`data.salesStageId` and `references.salesStageId` in the same record
+envelope. A dedicated entity read tool also accepts `referenceLabels` as a
+boolean or an array of field keys. The server omits labels the caller cannot
+read or that it cannot resolve.

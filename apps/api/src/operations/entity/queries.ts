@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { operationErrorOf } from "@openshapeforge/operations";
 import { postgresArrayLiteral } from "../../db/sql-helpers.js";
 import { authorizationProfilePredicate } from "../../auth/authorization-profile-sql.js";
 import { auditContext, runWithAuditContext } from "../../platform/audit-context.js";
@@ -466,6 +467,45 @@ export async function getGeneratedEntity(
       return (await resolveComputedEntityRows(trx, resolvedSession, table, bound))[0] ?? null;
     }, temporalReadOperations(table).length ? { isolationLevel: "repeatable read" } : {}));
   });
+}
+
+/** Read a page's distinct reference targets with the same operation policy as get. */
+export async function getGeneratedEntitiesForReferences(
+  db: OpenShapeForgeDatabase,
+  session: DbSessionInput,
+  table: GeneratedCrudTable,
+  ids: readonly string[],
+): Promise<GeneratedEntityRow[]> {
+  await resolveAuthorizationProfileAccess(session, db);
+  try {
+    requireEntityOperation(table, "get", session);
+  } catch (error) {
+    if (["FORBIDDEN", "GENERATED_CRUD_OPERATION_NOT_ENABLED"].includes(operationErrorOf(error)?.code ?? "")) return [];
+    throw error;
+  }
+  const operationId = `${table.source?.authoringEntityName}.get`;
+  return withAuditContext(operationId, undefined, () =>
+    runWithAuditContext({ ...auditContext()!, readOperations: temporalReadOperations(table) }, () =>
+      withDbSession(db, session, async (trx, resolvedSession) => {
+        const config = (await sql<{ rules: AuthorizationProfileRules }>`
+          select nullif(current_setting('app.authorization_rules', true), '')::jsonb as rules
+        `.execute(trx)).rows[0]?.rules;
+        const predicate = authorizationProfilePredicate(config?.states[operationId], config?.actor ?? {}, "row_source");
+        const tenant = table.tenantScoped ? sql`and row_source.tenant_id = ${session.tenantId}` : sql``;
+        const idsMatch = sql.join(ids.map((id) => primaryKeyEquals(table, id, "row_source")), sql` or `);
+        const result = await sql<{ row: GeneratedEntityRow }>`
+          select to_jsonb(row_source.*) as row
+          from ${sql.id(table.schema, table.table)} as row_source
+          where (${idsMatch}) and (${predicate}) ${tenant}
+          ${subtypeScopeWhere(table, "row_source")}
+        `.execute(trx);
+        const storageRows = result.rows.map(({ row }) => row);
+        const extensionSet = await loadExtensionFields(trx, resolvedSession, table);
+        await proveExtensionStaleness(trx, resolvedSession, extensionSet, storageRows);
+        const projected = projectRows(table, resolvedSession, storageRows);
+        const bound = await resolveBoundEntityRows(trx, resolvedSession, table, projected);
+        return resolveComputedEntityRows(trx, resolvedSession, table, bound);
+      })));
 }
 
 /**

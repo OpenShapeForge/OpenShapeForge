@@ -60,7 +60,7 @@ type Offer = {
   [key: string]: unknown;
 };
 
-type RecordPage = { data: { items: Array<{ data: JsonObject; operations?: Offer[] }> } & JsonObject; operations?: unknown };
+type RecordPage = { data: { items: Array<{ data: JsonObject; operations?: Offer[]; references?: JsonObject }> } & JsonObject; operations?: unknown };
 
 /** Whether an offer's binding only repeats the record it is offered on: its id, in one input. */
 function bindsOnlyItsRecord(offer: Offer, recordId: unknown): boolean {
@@ -96,6 +96,7 @@ export function modelRecordPage(payload: RecordPage, fields?: readonly string[])
       ...payload.data,
       items: payload.data.items.map((item) => ({
         data: selectFields(item.data, fields),
+        ...(isObject(item.references) ? { references: selectReferenceLabels(item.references, fields) } : {}),
         operations: (item.operations ?? [])
           .filter((offer) => offer.available === false || (offer.binding !== undefined && !bindsOnlyItsRecord(offer, item.data.id)))
           .map(withoutTranslations),
@@ -116,6 +117,10 @@ function withoutTranslations(offer: Offer): Offer {
  * the record's own id and version. A single record keeps its empty fields:
  * an update needs to see what exists.
  */
+function selectReferenceLabels(labels: JsonObject, fields: readonly string[] | undefined): JsonObject {
+  return fields ? Object.fromEntries(Object.entries(labels).filter(([field]) => fields.includes(field) || (field.startsWith("extensions.") && fields.includes("extensions")))) : labels;
+}
+
 export function modelRecord(payload: unknown, fields?: readonly string[]): unknown {
   if (!isObject(payload) || !isObject(payload.data) || typeof payload.data.id !== "string" || !Array.isArray(payload.operations)) return payload;
   const record = payload.data;
@@ -124,7 +129,8 @@ export function modelRecord(payload: unknown, fields?: readonly string[]): unkno
     const { binding: _binding, ...rest } = offer;
     return rest;
   });
-  return { ...payload, data: fields ? selectFields(record, fields) : record, operations };
+  return { ...payload, data: fields ? selectFields(record, fields) : record, operations,
+    ...(isObject(payload.references) ? { references: selectReferenceLabels(payload.references, fields) } : {}) };
 }
 
 /**

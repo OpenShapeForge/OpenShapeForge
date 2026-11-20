@@ -212,9 +212,12 @@ export async function staticToolCall(
         // private elicitation, edit controls, classified fields and notifications.
         const input = parsed.idempotencyKey === undefined ? parsed.input : pluginEntityTransportInput(
           entityOperationContract(definition.id), parsed.input, undefined, parsed.idempotencyKey);
+        const canIncludeLabels = (entity.tool.operation === "list" || entity.tool.operation === "get") &&
+          Object.hasOwn(entity.tool.inputSchema.properties ?? {}, "referenceLabels");
+        const referenceLabels = canIncludeLabels ? { referenceLabels: parsed.fields ?? input.referenceLabels ?? true } : {};
         const outcome = await ctx.dispatchTool(
           entity.tool.name,
-          { ...input, ...(entityIsGeneric(entity.entity) ? { entity: entity.tool.entity } : {}) },
+          { ...input, ...referenceLabels, ...(entityIsGeneric(entity.entity) ? { entity: entity.tool.entity } : {}) },
           ctx.requestId,
           true,
           undefined,
@@ -230,7 +233,7 @@ export async function staticToolCall(
             ...(parsed.fields ? { fields: parsed.fields } : {}),
             refetch: async (first) => (await ctx.dispatchTool(
               entity.tool.name,
-              { ...input, first, ...(entityIsGeneric(entity.entity) ? { entity: entity.tool.entity } : {}) },
+              { ...input, ...referenceLabels, first, ...(entityIsGeneric(entity.entity) ? { entity: entity.tool.entity } : {}) },
               ctx.requestId, true, undefined, assertParentInvocationActive, signal, false, parsed.idempotencyKey,
             )).result.structuredContent,
           });

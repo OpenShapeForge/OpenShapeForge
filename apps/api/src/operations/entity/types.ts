@@ -320,6 +320,7 @@ export type EntityOperationContract = EntityOperationRef & {
 export type EntityOperationInput = ListPageInput & {
   /** Plugin-backed CRUD takes its canonical authored input, not forced values. */
   [key: string]: unknown;
+  referenceLabels?: boolean | readonly string[] | undefined;
   includeBoardTotals?: boolean;
   includeCollectionGroups?: boolean;
   includeCollectionSummary?: boolean;
@@ -340,6 +341,8 @@ export type EntityOperationInput = ListPageInput & {
   confirmationToken?: string;
   confirmationAnswer?: string;
 };
+
+export type EntityReferenceLabels = Record<string, string>;
 
 export type EntityOperationRequest = {
   operation: EntityOperationRef;
@@ -362,7 +365,7 @@ export type EntityRecordEnvelope = OperationEnvelope<
   GeneratedCrudExposureOperation | "invoke"
 >;
 export type EntityCollectionData = {
-  items: OperationEnvelope<GeneratedEntityRow, GeneratedCrudExposureOperation | "invoke">[];
+  items: Array<OperationEnvelope<GeneratedEntityRow, GeneratedCrudExposureOperation | "invoke"> & { references?: EntityReferenceLabels }>;
   nextCursor: string | null;
   totalCount: number | null;
   boardTotals?: import("./board-aggregate.js").BoardGroupTotal[];
@@ -383,6 +386,6 @@ type EntityDirectResult<TData> = Exclude<
  */
 export type EntityOperationResult =
   | ({ intent: "list" } & EntityDirectResult<EntityCollectionData>)
-  | ({ intent: "get" | "create" } & EntityDirectResult<GeneratedEntityRow | null>)
+  | ({ intent: "get" | "create"; references?: EntityReferenceLabels } & EntityDirectResult<GeneratedEntityRow | null>)
   | ({ intent: "update" } & OperationResult<GeneratedEntityRow | null, EntityOfferIntent>)
   | ({ intent: "delete" } & OperationResult<{ deleted: boolean }, EntityOfferIntent>);

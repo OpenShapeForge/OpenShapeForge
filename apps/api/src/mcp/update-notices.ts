@@ -642,6 +642,32 @@ export async function gatherUpdateFacts(env: UpdateNoticesEnvironment): Promise<
   };
 }
 
+/**
+ * How many notices this person has not been told, for the session's
+ * instructions: the two reads the pending list starts from, without the
+ * personal instructions a full list resolves. Zero without a person.
+ */
+export async function pendingUpdateCount(db: OpenShapeForgeDatabase, session: TrustedSessionContext): Promise<number> {
+  if (!session.tenantId || !session.userId) return 0;
+  const store = updateNoticesStore(db, session);
+  const [notices, acknowledgements] = await Promise.all([store.notices(), store.acknowledgements()]);
+  const acknowledged = new Set(acknowledgements.map((entry) => entry.noticeKey));
+  return notices.filter((notice) => !acknowledged.has(notice.key)).length;
+}
+
+/**
+ * The update sentence of one session's instructions. With the count known it
+ * states the fact — and says nothing when nothing is pending — so no call is
+ * spent finding out; without it, the instruction to look in `whoami` stands.
+ */
+export function updateInstruction(pending: number | undefined): string {
+  if (pending === undefined) return UPDATE_INSTRUCTION;
+  if (pending === 0) return "";
+  return ` ${plural(pending, "update notice")} ${pending === 1 ? "is" : "are"} pending for this person: follow \`updates_guide\` before ` +
+    "their request. A notice can carry steps only they can take and can name services whose " +
+    "behaviour no longer matches the personal instructions they stored for those services.";
+}
+
 /** The pending list for one live session. */
 export async function describeUpdates(env: UpdateNoticesEnvironment): Promise<UpdatesSummary> {
   return computeUpdates(await gatherUpdateFacts(env));

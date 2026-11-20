@@ -858,8 +858,11 @@ Onboarding is optional guidance. It never blocks app use or an offered
 Operation; the runtime still enforces the ordinary authorization and validation
 contract. Checklist progress is a server-side fact, not remembered prose:
 
-- the server's `initialize` instructions ask the model to call `whoami` first,
-  explain that onboarding is optional, and offer a listed onboarding skill, when available, on request;
+- the server's `initialize` instructions say what `whoami` is for — the opening
+  sentence already names the person, so it is not a first call — explain that
+  onboarding is optional, and offer a listed onboarding skill, when available, on request;
+- the same instructions state how many update notices are pending for this
+  person, read when the session is built, and say nothing when there are none;
 - `whoami` carries an `onboarding` object: a **computed checklist**, also
   available on its own as the `onboarding_status` tool;
 - `complete_onboarding` records completion durably, once, per (identity,

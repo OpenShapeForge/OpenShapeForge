@@ -85,6 +85,15 @@ describe("buildServerInstructions", () => {
     expect(text.endsWith('Relation is "Client" — A person or organisation the company deals with..')).toBe(true);
   });
 
+  it("states pending update notices as a fact, and says nothing when there are none", () => {
+    const base = { opening: null, hasConnectors: false, oauthCallbackUrl: null, locale: nl, client: null };
+    expect(buildServerInstructions(base)).toContain(UPDATE_INSTRUCTION);
+    expect(buildServerInstructions({ ...base, pendingUpdates: 0 })).not.toContain("update notice");
+    const pending = buildServerInstructions({ ...base, pendingUpdates: 2 });
+    expect(pending).toContain("2 update notices are pending for this person");
+    expect(pending).not.toContain(UPDATE_INSTRUCTION);
+  });
+
   it("leaves the opening out entirely when the session has no person", () => {
     const text = buildServerInstructions({
       opening: null,

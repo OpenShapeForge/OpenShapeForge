@@ -158,11 +158,35 @@ test('a tenant assignment stays inside the ceiling and a withdrawn profile stops
    operation: { id: 'Relation.get', intent: 'get' }, input: { id: supplier },
  });
  expect('error' in deniedRelation || deniedRelation.data === null).toBe(true);
+ // Default-mode reads use only the named integration's published rules.
+ const listGrant = await addProfile('Relation.list', rule('equals', literal('customer')), 'integration', integrationId);
+ await sql`update erp.authorization_operation_policies set managed=false where tenant_id=${tenant}::uuid and operation_id='Relation.get'`.execute(privileged());
+ await sql`delete from erp.authorization_operation_policies where tenant_id=${tenant}::uuid and operation_id='Relation.list'`.execute(privileged());
+ const listOperation = {operation:{id:'Relation.list',intent:'list' as const},input:{}};
+ const getOperation = (id:string) => ({operation:{id:'Relation.get',intent:'get' as const},input:{id}});
+ const scopedStates = await withDbSession(restricted(), website, async trx => (await sql<{ states: Record<string, unknown> }>`
+   select app.authorization_rules_for_actor()->'states' as states`.execute(trx)).rows[0]!.states);
+ expect(scopedStates['Relation.list']).toMatchObject({entity:'Relation',managed:true,integrationRead:true});
+ const websiteList = await executeEntityOperation(restricted(), {...website}, listOperation);
+ expect(websiteList).toMatchObject({data:{items:[{data:{id:customer,display_name:'Customer',relation_type:'customer'}}]}});
+ expect(await executeEntityOperation(restricted(), {...website}, getOperation(customer))).toMatchObject({data:{id:customer}});
+ const outsideScope = await executeEntityOperation(restricted(), {...website}, getOperation(supplier));
+ expect('error' in outsideScope || outsideScope.data===null).toBe(true);
+ expect(await executeEntityOperation(restricted(), {...website,appPrincipal:{integrationId:foreignIntegration,credentialId}}, listOperation)).toMatchObject({error:{code:'FORBIDDEN'}});
+ const defaultPerson = await executeEntityOperation(restricted(), {...dbInput(editor),roles:['Relations.All.Read'],auditIdentityId:identity,principalKind:'person'}, listOperation);
+ expect('error' in defaultPerson ? [] : (defaultPerson.data as {items:{data:{id:string}}[]}).items.map(item=>item.data.id).sort()).toEqual([customer,supplier].sort());
+ await sql`update erp.authorization_profile_assignments set active=false where id=${listGrant.id}::uuid`.execute(privileged());
+ expect(await executeEntityOperation(restricted(), {...website}, listOperation)).toMatchObject({error:{code:'FORBIDDEN'}});
+ await sql`update erp.authorization_profile_assignments set active=true where id=${listGrant.id}::uuid`.execute(privileged());
  await sql`update platform.api_keys set revoked_at = now() where id = ${credentialId}::uuid`.execute(privileged());
- const revoked = await executeEntityOperation(restricted(), website, {
+ const revoked = await executeEntityOperation(restricted(), {...website}, {
    operation: { id: 'Relation.get', intent: 'get' }, input: { id: customer },
  });
  expect(revoked).toMatchObject({error: {code: 'FORBIDDEN'}});
+
+ // Restore managed mode for the remaining existing behavior and load checks.
+ await createGeneratedEntity(restricted(),dbInput(manager),{table:tableName('AuthorizationOperationPolicy'),values:{operationId:'Relation.list',entityType:'Relation',managed:true}});
+ await sql`update erp.authorization_operation_policies set managed=true where operation_id='Relation.get' and tenant_id=${tenant}::uuid`.execute(privileged());
 
  // Representative scoped-list load: 20k records, 8 applicable profiles, 200 actor groups.
  for(let index=0;index<7;index++)await addProfile('Relation.list',rule('equals',literal('customer')),'user',identity);

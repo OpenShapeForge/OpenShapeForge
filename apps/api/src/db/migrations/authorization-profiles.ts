@@ -226,6 +226,18 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
     revoke create on schema app from ${sql.id(resolver)};
   `.execute(db);
   const policies=table('AuthorizationOperationPolicy'),assignments=table('AuthorizationProfileAssignment'),profiles=table('AuthorizationProfile'),versions=table('AuthorizationProfileVersion');
+  const snapshotOperation=sql`policy_row->'row'->>${sql.lit(entityColumnName('AuthorizationProfilePolicy','operationId'))}`;
+  const snapshotCondition=sql`policy_row->'row'->${sql.lit(entityColumnName('AuthorizationProfilePolicy','condition'))}`;
+  const snapshotEntity=sql`v.snapshot->'head'->'row'->>${sql.lit(entityColumnName('AuthorizationProfile','targetEntity'))}`;
+  const publishedPolicies=sql`
+    from ${assignments} a
+    join ${versions} v on v.tenant_id=a.tenant_id and v.id=${col('a','AuthorizationProfileAssignment','profileVersion')}
+    join ${profiles} p on p.tenant_id=v.tenant_id and p.id=${col('v','AuthorizationProfileVersion','profile')}
+    cross join lateral jsonb_array_elements(coalesce(v.snapshot->'head'->'children'->${sql.lit(entityTableName('AuthorizationProfilePolicy').split('.').at(-1)!)},'[]'::jsonb)) policy_row
+    where a.tenant_id=app.current_tenant() and ${col('a','AuthorizationProfileAssignment','active')}
+      and ${col('p','AuthorizationProfile','active')} and v.status='published'
+      and v.snapshot->>'entity'='AuthorizationProfile'`;
+  const matchesOperation=sql`(${col('a','AuthorizationProfileAssignment','operationId')} is null or ${col('a','AuthorizationProfileAssignment','operationId')}=i.id)`;
   // A worker needs to fail closed for managed entities while handling a
   // tenant's queued work, but must not gain the API role's access to the
   // authorization catalog. The existing non-login resolver may read only
@@ -249,7 +261,31 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
   await sql`
     create or replace function app.authorization_rules_for_actor() returns jsonb
     language sql stable as $function$
-      with actor as materialized(select app.authorization_actor() as context)
+      with actor as materialized(select app.authorization_actor() as context),
+      -- Resolve only explicitly assigned integration reads. The default
+      -- role rules and the tenant's managed policy remain separate.
+      integration_policies as (
+        select distinct v.id as version_id, ${snapshotOperation} as operation_id,
+          ${snapshotEntity} as entity_name, ${snapshotCondition} as condition
+        ${publishedPolicies}
+          and app.current_principal_class()='application'
+          and ${col('a','AuthorizationProfileAssignment','subjectKind')}='integration'
+          and ${col('a','AuthorizationProfileAssignment','subjectKey')}=app.current_app_principal()::text
+          and (${col('a','AuthorizationProfileAssignment','operationId')} is null
+            or ${col('a','AuthorizationProfileAssignment','operationId')}=${snapshotOperation})
+      ),
+      integration_states as (
+        select i.id, jsonb_build_object(
+          'entity',i.entity_name,'managed',true,'integrationRead',true,'grantable',true,'fields',i.fields,
+          'rules',case when count(*)>100 then '[]'::jsonb else jsonb_agg(p.condition) end) as state
+        from integration_policies p
+        join platform.authorization_operation_inventory i on i.id=p.operation_id and i.entity_name=p.entity_name
+        where i.grantable and i.id in (i.entity_name||'.list',i.entity_name||'.get')
+          and not exists(select 1 from ${policies} s where s.tenant_id=app.current_tenant()
+            and ${col('s','AuthorizationOperationPolicy','operationId')}=i.id
+            and ${col('s','AuthorizationOperationPolicy','managed')})
+        group by i.id,i.entity_name,i.fields
+      )
       select jsonb_build_object(
         'actor',actor.context,
         'managedEntities',coalesce((select jsonb_agg(distinct ${col('s','AuthorizationOperationPolicy','entityType')}) from ${policies} s where s.tenant_id=app.current_tenant() and ${col('s','AuthorizationOperationPolicy','managed')}),'[]'::jsonb),
@@ -264,18 +300,14 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
           'listFields',${col('s','AuthorizationOperationPolicy','listFields')},
           'rules',case when exists(select 1 from ${assignments} direct where direct.tenant_id=app.current_tenant()
             and ${col('direct','AuthorizationProfileAssignment','active')} and ${col('direct','AuthorizationProfileAssignment','profileVersion')} is null and ${col('direct','AuthorizationProfileAssignment','operationId')}=i.id
-            and ${matchingSubject('direct')}) then '[null]'::jsonb else coalesce((select case when count(*)>100 then '[]'::jsonb else jsonb_agg(matched.condition) end from (select distinct v.id, policy_row->'row'->${sql.lit(entityColumnName('AuthorizationProfilePolicy','condition'))} as condition
-            from ${assignments} a
-            join ${versions} v on v.tenant_id=a.tenant_id and v.id=${col('a','AuthorizationProfileAssignment','profileVersion')}
-            join ${profiles} p on p.tenant_id=v.tenant_id and p.id=${col('v','AuthorizationProfileVersion','profile')}
-            cross join lateral jsonb_array_elements(coalesce(v.snapshot->'head'->'children'->${sql.lit(entityTableName('AuthorizationProfilePolicy').split('.').at(-1)!)},'[]'::jsonb)) policy_row
-            where a.tenant_id=app.current_tenant() and (${col('a','AuthorizationProfileAssignment','operationId')} is null or ${col('a','AuthorizationProfileAssignment','operationId')}=i.id) and ${col('a','AuthorizationProfileAssignment','active')} and ${col('p','AuthorizationProfile','active')}
-              and v.status='published' and v.snapshot->>'entity'='AuthorizationProfile'
-              and v.snapshot->'head'->'row'->>${sql.lit(entityColumnName('AuthorizationProfile','targetEntity'))}=i.entity_name
-              and policy_row->'row'->>${sql.lit(entityColumnName('AuthorizationProfilePolicy','operationId'))}=i.id
+            and ${matchingSubject('direct')}) then '[null]'::jsonb else coalesce((select case when count(*)>100 then '[]'::jsonb else jsonb_agg(matched.condition) end from (
+            select distinct v.id, ${snapshotCondition} as condition
+            ${publishedPolicies} and ${matchesOperation}
+              and ${snapshotEntity}=i.entity_name and ${snapshotOperation}=i.id
               and ${matchingSubject('a')} limit 101) matched),'[]'::jsonb) end) end)
           from ${policies} s left join platform.authorization_operation_inventory i on i.id=${col('s','AuthorizationOperationPolicy','operationId')}
-          where s.tenant_id=app.current_tenant()),'{}'::jsonb)) from actor;
+          where s.tenant_id=app.current_tenant()),'{}'::jsonb)
+          || coalesce((select jsonb_object_agg(id,state) from integration_states),'{}'::jsonb)) from actor;
     $function$;
 
     create or replace function app.authorization_requires_lock(operation text, dependencies jsonb) returns boolean
@@ -286,7 +318,15 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
 
     create or replace function app.authorization_entity_managed(entity text) returns boolean
     language sql stable parallel safe as $function$
-      select coalesce(nullif(current_setting('app.authorization_rules',true),'')::jsonb->'managedEntities' ? entity, false);
+      select coalesce(
+        config->'managedEntities' ? entity
+        or (config->'states'->operation->>'integrationRead'='true'
+          and config->'states'->operation->>'entity'=entity)
+        or (dependencies ? (entity||'.list')
+          and config->'states'->(entity||'.list')->>'integrationRead'='true'), false)
+      from (select nullif(current_setting('app.authorization_rules',true),'')::jsonb as config,
+        nullif(current_setting('app.audit_operation',true),'') as operation,
+        coalesce(nullif(current_setting('app.audit_read_operations',true),'')::jsonb,'[]'::jsonb) as dependencies) session;
     $function$;
 
     create or replace function app.authorization_allows(entity text, resource jsonb) returns boolean

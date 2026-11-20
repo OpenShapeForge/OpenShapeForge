@@ -7,7 +7,6 @@ import { inheritAuthorizationProfileAccess } from "../auth/authorization-profile
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely, type Transaction } from "kysely";
 import { readStatementTimeoutMs } from "../config/limits.js";
-import { databaseRole } from "./database-roles.js";
 import { actingRelationId, type ActingRelationSource } from "./acting-relation.js";
 import { withReadBarrierDatabase } from "./read-barrier.js";
 import { boundedReadTransaction } from "./bounded-read-transaction.js";
@@ -146,47 +145,9 @@ function auditSessionSettings(audit: AuditContext) {
   ];
 }
 
-/** Shared policy admission locks use the same transaction-scoped advisory-lock convention as account management. */
+/** Refresh transaction-local policy state for the active audit operation. */
 async function applyAuthorizationSession<T>(trx: Transaction<T>): Promise<void> {
-  await sql`do $authorization$ declare rules jsonb; dependencies jsonb; locked boolean; begin
-    if to_regprocedure('app.authorization_rules_for_actor()') is not null then
-      if app.bypass_rls() or app.current_tenant() is null then
-        perform set_config('app.authorization_rules','',true);
-        return;
-      end if;
-      -- Workers may touch only worker-granted tables. They receive a
-      -- tenant-fenced list of managed entities and no grant rules: any access
-      -- to a managed entity is denied, while canonical Operations execute
-      -- separately under the API's verified service identity.
-      if current_user = ${sql.lit(databaseRole("worker").name)} then
-        if to_regprocedure('app.authorization_worker_rules()') is null then
-          raise exception 'Worker authorization projection is not installed';
-        end if;
-        rules := app.authorization_worker_rules();
-        if jsonb_array_length(coalesce(rules->'managedEntities','[]'::jsonb)) > 0 then
-          perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
-          -- A policy may have changed while this worker waited.
-          rules := app.authorization_worker_rules();
-        end if;
-        perform set_config('app.authorization_rules',rules::text,true);
-        return;
-      end if;
-      dependencies:=coalesce(nullif(current_setting('app.audit_read_operations',true),''),'[]')::jsonb;
-      locked:=app.authorization_requires_lock(current_setting('app.audit_operation',true),dependencies);
-      if locked then perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0)); end if;
-      rules := app.authorization_rules_for_actor();
-      if not locked and (rules->'states'->current_setting('app.audit_operation',true)->>'managed'='true' or exists(select 1 from jsonb_array_elements_text(coalesce(nullif(current_setting('app.audit_read_operations',true),''),'[]')::jsonb) dependency where rules->'states'->dependency->>'managed'='true')) then
-        perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
-        locked := true;
-        -- A withdrawal may have committed while admission waited for its lock.
-        rules := app.authorization_rules_for_actor();
-      end if;
-      if locked and app.current_principal_class()='application' and not app.record_action_principal_live() then
-        raise exception 'AUTHORIZATION_INTEGRATION_CREDENTIAL_INACTIVE' using errcode='42501';
-      end if;
-      perform set_config('app.authorization_rules',rules::text,true);
-    end if;
-  end $authorization$`.execute(trx).catch(error => {
+  await sql`select app.apply_session_authorization()`.execute(trx).catch(error => {
     if (error instanceof Error &&
         (("errno" in error && error.errno === "42501") || ("code" in error && error.code === "42501")) &&
         error.message.includes("AUTHORIZATION_INTEGRATION_CREDENTIAL_INACTIVE")) {

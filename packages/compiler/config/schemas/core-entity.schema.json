@@ -1303,12 +1303,40 @@
         "matrix": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "rowField",
-            "columnField",
-            "valueField",
-            "aggregate"
-          ],
+          "if": {
+            "required": [
+              "source"
+            ]
+          },
+          "then": {
+            "required": [
+              "source",
+              "read",
+              "measures"
+            ],
+            "properties": {
+              "rowField": false,
+              "columnField": false,
+              "valueField": false,
+              "aggregate": false
+            }
+          },
+          "else": {
+            "required": [
+              "rowField",
+              "columnField",
+              "valueField",
+              "aggregate"
+            ],
+            "properties": {
+              "read": false,
+              "apply": false,
+              "rows": false,
+              "measures": false,
+              "total": false,
+              "refresh": false
+            }
+          },
           "properties": {
             "rowField": {
               "$ref": "#/$defs/fieldKey",
@@ -1346,6 +1374,225 @@
                 "title": {
                   "en": "Aggregation",
                   "nl": "Aggregatie"
+                }
+              }
+            },
+            "source": {
+              "const": "operation",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Source",
+                  "nl": "Bron"
+                }
+              }
+            },
+            "read": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Za-z0-9]*\\.[a-z][A-Za-z0-9]*$",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Read Operation",
+                  "nl": "Leesoperatie"
+                }
+              }
+            },
+            "apply": {
+              "type": "string",
+              "pattern": "^[A-Z][A-Za-z0-9]*\\.[a-z][A-Za-z0-9]*$",
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Apply Operation",
+                  "nl": "Schrijfoperatie"
+                }
+              }
+            },
+            "rows": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "parentField"
+              ],
+              "properties": {
+                "parentField": {
+                  "$ref": "#/$defs/fieldKey",
+                  "x-osf-choice": "field",
+                  "x-osf-i18n": {
+                    "title": {
+                      "en": "Parent field",
+                      "nl": "Bovenliggend veld"
+                    }
+                  }
+                }
+              },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Rows",
+                  "nl": "Rijen"
+                }
+              }
+            },
+            "measures": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "key",
+                  "label",
+                  "format"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "pattern": "^[a-z][A-Za-z0-9]*$",
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Key",
+                        "nl": "Sleutel"
+                      }
+                    }
+                  },
+                  "label": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "$ref": "#/$defs/localizedText"
+                      }
+                    ],
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Label",
+                        "nl": "Label"
+                      }
+                    }
+                  },
+                  "heading": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      {
+                        "$ref": "#/$defs/localizedText"
+                      }
+                    ],
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Column heading",
+                        "nl": "Kolomkop"
+                      }
+                    }
+                  },
+                  "format": {
+                    "enum": [
+                      "amount",
+                      "percentage"
+                    ],
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Format",
+                        "nl": "Notatie"
+                      },
+                      "enum": {
+                        "amount": {
+                          "en": "Amount",
+                          "nl": "Bedrag"
+                        },
+                        "percentage": {
+                          "en": "Percentage",
+                          "nl": "Percentage"
+                        }
+                      }
+                    }
+                  },
+                  "align": {
+                    "enum": [
+                      "start",
+                      "center",
+                      "end"
+                    ],
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Alignment",
+                        "nl": "Uitlijning"
+                      },
+                      "enum": {
+                        "start": {
+                          "en": "Start",
+                          "nl": "Begin"
+                        },
+                        "center": {
+                          "en": "Centre",
+                          "nl": "Midden"
+                        },
+                        "end": {
+                          "en": "End",
+                          "nl": "Einde"
+                        }
+                      }
+                    }
+                  },
+                  "editable": {
+                    "type": "boolean",
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Editable",
+                        "nl": "Bewerkbaar"
+                      }
+                    }
+                  }
+                },
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Measure",
+                    "nl": "Meetwaarde"
+                  }
+                }
+              },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Measures",
+                  "nl": "Meetwaarden"
+                }
+              }
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1
+                },
+                {
+                  "$ref": "#/$defs/localizedText"
+                }
+              ],
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Total heading",
+                  "nl": "Kop van het totaal"
+                }
+              }
+            },
+            "refresh": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Z][A-Za-z0-9]*$",
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Entity",
+                    "nl": "Entiteit"
+                  }
+                }
+              },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Refresh on",
+                  "nl": "Verversen bij"
                 }
               }
             }

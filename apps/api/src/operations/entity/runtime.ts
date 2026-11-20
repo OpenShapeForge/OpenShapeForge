@@ -10,6 +10,7 @@ import { extensibleEntityOf } from "./extensions/store.js";
 import { generatedCrudTablesRevision, getGeneratedCrudTables } from "./table-registry.js";
 import { authorizationProfileDecision } from "../../auth/authorization-profile-decision.js";
 import { resolveAuthorizationProfileAccess } from "../../auth/authorization-profile-session.js";
+import { readReferenceLabels } from "./reference-labels.js";
 import { withAuditContext } from "../../platform/audit-context.js";
 import { createFromBlueprint } from "./blueprints.js";
 import { assertCallerTopLevelFields } from "./field-policy.js";
@@ -1112,6 +1113,11 @@ async function consumeTakeoverControls(
   });
 }
 
+function canonicalReferenceTarget(table: GeneratedCrudTable): boolean {
+  const operation = entityOperationsById.get(`${table.source?.authoringEntityName}.get`);
+  return Boolean(operation && !operation.withheld && operation.implementation?.type !== "plugin");
+}
+
 async function executeEntityOperationWithContext(
   db: OpenShapeForgeDatabase,
   session: DbSessionInput,
@@ -1284,6 +1290,7 @@ async function executeEntityOperationWithContext(
         const { connection, boardTotals, collectionGroups, collectionSummary } = (request.input?.includeBoardTotals || request.input?.includeCollectionGroups || request.input?.includeCollectionSummary)
           ? await withDbSession(db, session, readPage, { isolationLevel: "repeatable read" })
           : await readPage();
+        const references = await readReferenceLabels(db, session, table, connection.rows, request.input?.referenceLabels || undefined, canonicalReferenceTarget);
         const targets = connection.rows.map((row) => offerTarget(row, table));
         const recordOffers = entityOperationOfferEvaluator(entityName, session, projectedOfferIntents(request, RECORD_OFFER_INTENTS));
         const unavailableByTarget = await businessAndLeaseUnavailability(
@@ -1299,6 +1306,7 @@ async function executeEntityOperationWithContext(
           data: {
             items: connection.rows.map((row, index) => ({
               data: row,
+              ...(references.has(row) ? { references: references.get(row)! } : {}),
               operations: recordOffers(unavailableByTarget.get(targets[index]!.id) ?? {}, targets[index]),
             })),
             totalCount: connection.totalCount,
@@ -1320,9 +1328,11 @@ async function executeEntityOperationWithContext(
           id: requireId(request.input),
         });
         const data = row ? await withFrozenFieldDefinitions(db, session, table, row) : row;
+        const references = data ? (await readReferenceLabels(db, session, table, [data], request.input?.referenceLabels || undefined, canonicalReferenceTarget)).get(data) : undefined;
         return {
           intent: "get",
           data,
+          ...(references ? { references } : {}),
           operations: data
             ? await currentRecordOffers(db, session, entityName, table, offerTarget(data, table),
                 projectedOfferIntents(request, RECORD_OFFER_INTENTS))

@@ -24,6 +24,21 @@ export const ajv = new Ajv({ allErrors: true, strict: false, coerceTypes: false,
 // ajv-formats is CJS; under NodeNext the default import is typed as the
 // module namespace rather than the callable it is at runtime.
 (addFormats as unknown as (instance: Ajv) => unknown)(ajv);
+/**
+ * The property names a schema allows where an unknown one was sent, so the
+ * caller can correct the call from the error instead of reading the contract.
+ */
+function allowedProperties(schema: unknown, schemaPath: string): string {
+  let node: unknown = schema;
+  for (const segment of schemaPath.replace(/^#\//, "").split("/").slice(0, -1)) {
+    if (!node || typeof node !== "object") return "";
+    node = (node as Record<string, unknown>)[decodeURIComponent(segment.replace(/~1/g, "/").replace(/~0/g, "~"))];
+  }
+  const properties = node && typeof node === "object" ? (node as { properties?: Record<string, unknown> }).properties : undefined;
+  const names = properties ? Object.keys(properties) : [];
+  return names.length ? `; allowed here: ${names.slice(0, 60).join(", ")}${names.length > 60 ? ", …" : ""}` : "";
+}
+
 export function assertSchemaValid(
   schema: Record<string, unknown>,
   value: unknown,
@@ -68,7 +83,7 @@ export function assertSchemaValid(
         .map((error) => {
           const offender =
             typeof error.params?.additionalProperty === "string"
-              ? ` ("${error.params.additionalProperty}")`
+              ? ` ("${error.params.additionalProperty}")${allowedProperties(schema, error.schemaPath)}`
               : "";
           return `${error.instancePath || what} ${error.message ?? "invalid"}${offender}`;
         })

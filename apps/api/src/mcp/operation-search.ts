@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { ENTITY_CONFIGURATION_APP_URI } from "./handoff-config.js";
 import { HttpError } from "../rest/http-error.js";
 import { localizedText, type ResolvedLocale } from "./locale.js";
+import { modelSchema, summaryDescription } from "./model-view.js";
 
 export type SearchableOperationToolNames = CoreSearchableOperationToolNames;
 
@@ -167,13 +168,21 @@ export function parseOperationExecuteArguments(value: unknown): {
   operationId: string;
   input: Record<string, unknown>;
   idempotencyKey?: string;
+  fields?: string[];
 } {
   const args = objectInput(value, "Operation execution input");
   rejectUnknownKeys(
     args,
-    ["operationId", "input", "idempotencyKey"],
+    ["operationId", "input", "idempotencyKey", "fields"],
     "Operation execution input",
   );
+  if (
+    args.fields !== undefined &&
+    (!Array.isArray(args.fields) || args.fields.length === 0 || args.fields.length > 100 ||
+      args.fields.some((field) => typeof field !== "string" || field.length === 0 || field.length > 200))
+  ) {
+    throw new HttpError(400, "BAD_USER_INPUT", "fields must be a non-empty list of field names.");
+  }
   if (typeof args.operationId !== "string" || args.operationId.trim().length === 0) {
     throw new HttpError(400, "BAD_USER_INPUT", "A canonical Operation id is required.");
   }
@@ -192,6 +201,7 @@ export function parseOperationExecuteArguments(value: unknown): {
     ...(typeof args.idempotencyKey === "string"
       ? { idempotencyKey: args.idempotencyKey }
       : {}),
+    ...(Array.isArray(args.fields) ? { fields: args.fields as string[] } : {}),
   };
 }
 
@@ -310,6 +320,21 @@ const RANK_STEPS = 1_000;
 const ENTITY_NAMED = 4;
 
 /**
+ * The rank a query earns per word of an entity's name when it contains that
+ * whole name: "relation" names Relation and only touches ProductRelationRule,
+ * and "deal products" names DealProduct more fully than Deal.
+ */
+const ENTITY_COVERED = 2;
+
+/**
+ * The least a word scores when the word itself was found (wordScore): below
+ * it the match is a resemblance. Resemblances of every word ("knowledge" in
+ * "acknowledge", "base" in "database") do not make an Operation the answer to
+ * "knowledge base", so they earn no EVERY_WORD.
+ */
+const WORD_FOUND = 3;
+
+/**
  * What a query verb is worth to an Operation of the intent it asks for ("find"
  * asks to read): a verb is matched by the intent, as fully as a word that
  * names the Operation, and weighted like any other word (wordWeight).
@@ -390,12 +415,19 @@ function decodeCursor(value: string, fingerprint: string): SearchCursor {
 /** The complete current contract of one Operation, as the executor validates it. */
 function operationContract(definition: RuntimeOperationDefinition, name: string, description: string): Record<string, unknown> {
   return {
-    ...operationSummary(definition, name, description),
-    inputSchema: canonicalRuntimeOperationSchema(definition.input, definition.id, "input"),
-    outputSchema: canonicalRuntimeOperationSchema(definition.output, definition.id, "output"),
+    ...operationSummary(definition, name, description, false),
+    inputSchema: modelSchema(canonicalRuntimeOperationSchema(definition.input, definition.id, "input")),
+    outputSchema: modelSchema(canonicalRuntimeOperationSchema(definition.output, definition.id, "output")),
     // The declared failure catalogue: in searchable mode this result is the
     // only description of the operation the model ever reads.
     ...(definition.errors ? { errors: structuredClone(definition.errors) } : {}),
+    ...executionControls(definition),
+  };
+}
+
+/** What an execution must respect beyond its input: version and lease, the private route, what comes first. */
+function executionControls(definition: RuntimeOperationDefinition): Record<string, unknown> {
+  return {
     ...(definition.concurrency
       ? { concurrency: structuredClone(definition.concurrency) }
       : {}),
@@ -409,22 +441,76 @@ function operationContract(definition: RuntimeOperationDefinition, name: string,
   };
 }
 
+/** A plain internal read: what an Operation is unless its summary says otherwise. */
+const isPlainRead = (effects: RuntimeOperationDefinition["effects"]) =>
+  JSON.stringify(effects) === JSON.stringify({ data: "read", external: "none" });
+
 /**
- * What tells several candidates apart: identity, wording, scope and declared
- * effects. No schema — reading the chosen id's contract is one exact search.
+ * What tells several candidates apart: identity, wording, scope and what it
+ * does beyond a plain read. A search summary keeps the description short and
+ * states effects and idempotency only where they differ from a plain,
+ * naturally idempotent read; the contract states all of it.
  */
-function operationSummary(definition: RuntimeOperationDefinition, name: string, description: string): Record<string, unknown> {
+function operationSummary(definition: RuntimeOperationDefinition, name: string, description: string, brief = true): Record<string, unknown> {
+  const keyed = (definition.reliability as { idempotency?: { mode?: string } } | undefined)?.idempotency?.mode === "keyed";
   return {
     operation: { id: definition.id, intent: definition.intent },
-    ...(definition.key ? { key: definition.key } : {}),
-    ...(definition.entityId ? { entityId: definition.entityId } : {}),
-    ...(definition.entityName ? { entityName: definition.entityName } : {}),
+    ...(brief ? {} : {
+      ...(definition.key ? { key: definition.key } : {}),
+      ...(definition.entityId ? { entityId: definition.entityId } : {}),
+      ...(definition.entityName ? { entityName: definition.entityName } : {}),
+    }),
     name,
-    description,
+    description: brief ? summaryDescription(description) : description,
     ...(definition.target ? { target: structuredClone(definition.target) } : {}),
-    effects: structuredClone(definition.effects),
-    reliability: structuredClone(definition.reliability),
+    ...(!brief || !isPlainRead(definition.effects) ? { effects: structuredClone(definition.effects) } : {}),
+    ...(!brief || keyed ? { reliability: structuredClone(definition.reliability) } : {}),
   };
+}
+
+/**
+ * The order of Operations a query ranks equally: the read that finds records
+ * first, because a request about records starts there whatever follows. The
+ * id (compareCodeUnits) still decides among Operations of one intent.
+ */
+const INTENT_ORDER = ["list", "get", "create", "update", "delete"];
+const intentOrder = (definition: RuntimeOperationDefinition) => {
+  const at = INTENT_ORDER.indexOf(definition.intent);
+  return at < 0 ? INTENT_ORDER.length : at;
+};
+
+/** How many of a first page's best matches carry their input schema, and how much schema text that may add. */
+const INLINE_CONTRACTS = 3;
+const INLINE_CONTRACT_CHARACTERS = 14_000;
+
+/**
+ * The matches of a first page that carry their input schema, so the model can
+ * execute without a lookup round: the best match, the list that finds the
+ * best match's records when that match is not itself a list, and the best
+ * match of another entity the query names in full (a request often spans
+ * two, "relation contact details").
+ */
+function inlineContracts(
+  page: readonly RuntimeOperationDefinition[],
+  named: (definition: RuntimeOperationDefinition) => boolean,
+): Map<string, Record<string, unknown>> {
+  const first = page[0];
+  if (!first) return new Map();
+  const picked = [
+    first,
+    first.intent === "list" || !first.entityName ? undefined : page.find((definition) => definition.entityName === first.entityName && definition.intent === "list"),
+    page.find((definition) => definition.entityName !== first.entityName && definition.intent !== "delete" && named(definition)),
+  ].filter((definition): definition is RuntimeOperationDefinition => definition !== undefined).slice(0, INLINE_CONTRACTS);
+  const inline = new Map<string, Record<string, unknown>>();
+  let used = 0;
+  for (const definition of picked) {
+    const inputSchema = modelSchema(canonicalRuntimeOperationSchema(definition.input, definition.id, "input"));
+    const size = JSON.stringify(inputSchema).length;
+    if (inline.size > 0 && used + size > INLINE_CONTRACT_CHARACTERS) continue;
+    used += size;
+    inline.set(definition.id, { inputSchema, ...executionControls(definition) });
+  }
+  return inline;
 }
 
 /**
@@ -445,7 +531,7 @@ export function searchOperationDefinitions(input: {
   allowedIds: ReadonlySet<string>;
   arguments: unknown;
   locale: ResolvedLocale;
-} & OperationSearchContext): { operations: Record<string, unknown>[]; nextCursor?: string } {
+} & OperationSearchContext): { operations: Record<string, unknown>[]; nextCursor?: string; unmatchedWords?: string[] } {
   const args = parseOperationSearchArguments(input.arguments);
   const available = input.definitions.filter((definition) => input.allowedIds.has(definition.id));
   const shown = (definition: RuntimeOperationDefinition) => {
@@ -490,9 +576,19 @@ export function searchOperationDefinitions(input: {
   const subjectHit = (scores: number[], at: number) => isSubject[at] && query[at]!.length >= 3 ? scores[at]! : 0;
   const partial = (scores: number[]) => scores.map((score, index) => isSubject[index] ? subjectHit(scores, index) : score);
   const every = scored.filter(({ scores }) => scores.every((score) => score > 0));
+  const unmatched = query.filter((_, index) => isSubject[index] && !scored.some(({ scores }) => scores[index]! > 0));
+  // The entity a query names in full, by how many words of its name.
+  const subjects = query.filter((_, index) => isSubject[index]);
+  const covered = (definition: RuntimeOperationDefinition) => {
+    const entityWords = words(definition.entityName ?? "");
+    return entityWords.length > 0 && entityWords.every((word) => subjects.some((subject) => sameWord(subject, word))) ? entityWords.length : 0;
+  };
   const matched = (every.length > 0 || query.length < 2
     ? [
-        ...every.map((entry) => ({ ...entry, every: query.length > 0 })),
+        // Every word found, and one of them in the Operation's own name: words that
+        // all occur only in descriptions or field labels describe it, they do not ask for it.
+        ...every.map((entry) => ({ ...entry, every: query.length > 0 && entry.scores.every((score) => score >= WORD_FOUND) &&
+          (query.length < 2 || entry.scores.some((score) => score >= NAMED)) })),
         ...scored
           .filter(({ scores }) => query.length >= 2 && !scores.every((score) => score > 0) && scores.some((_, index) => subjectHit(scores, index) === NAMED))
           .map(({ definition, scores }) => ({ definition, scores: partial(scores), every: false })),
@@ -506,13 +602,15 @@ export function searchOperationDefinitions(input: {
       const entityWords = words(definition.entityName ?? "");
       const namesEntity = query.length > 0 && entityWords.length === query.length && query.every((word) => entityWords.includes(word));
       const rank = (every ? EVERY_WORD : 0) +
-        scores.reduce((total, score, index) => total + score * weights[index]!, 0) + (namesEntity ? ENTITY_NAMED : 0);
+        scores.reduce((total, score, index) => total + score * weights[index]!, 0) + (namesEntity ? ENTITY_NAMED : 0) +
+        covered(definition) * ENTITY_COVERED;
       return { definition, score: Math.round(rank * RANK_STEPS) };
     })
     // Rank, then id. The sort and the cursor comparison below must be the
     // same total order, and ids compare by code unit (compareCodeUnits): a
     // collation-sorted list loops and skips.
-    .sort((left, right) => right.score - left.score || compareCodeUnits(left.definition.id, right.definition.id));
+    .sort((left, right) => right.score - left.score || intentOrder(left.definition) - intentOrder(right.definition) ||
+      compareCodeUnits(left.definition.id, right.definition.id));
   const fingerprint = queryFingerprint(query);
   const after = args.cursor ? decodeCursor(args.cursor, fingerprint) : undefined;
   // A cursor names the last entry of the previous page. One that names no
@@ -528,13 +626,22 @@ export function searchOperationDefinitions(input: {
   const page = matched.slice(start, start + args.limit);
   const end = start + page.length;
   const last = page.at(-1);
+  // Only a first page: a model that pages on has already passed over the best matches.
+  const inline = start === 0
+    ? inlineContracts(page.map(({ definition }) => definition), (definition) => covered(definition) > 0)
+    : new Map<string, Record<string, unknown>>();
   return {
     operations: page.map(({ definition }) => {
       const { name, description } = shown(definition);
-      return operationSummary(definition, name, description);
+      const contract = inline.get(definition.id);
+      // A match that carries its schema is one the model may execute as it stands: its text is whole.
+      return { ...operationSummary(definition, name, description, !contract), ...contract };
     }),
     ...(end < matched.length && last
       ? { nextCursor: encodeCursor({ v: 1, q: fingerprint, s: last.score, id: last.definition.id }) }
       : {}),
+    // A subject word no available Operation knows: the results answer the
+    // other words only, and the model should not read them as that subject.
+    ...(unmatched.length > 0 ? { unmatchedWords: unmatched } : {}),
   };
 }

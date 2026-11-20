@@ -45279,8 +45279,8 @@
       "entity": "RecordActionAssignment",
       "baseType": "object",
       "label": {
-        "en": "Record actions",
-        "nl": "Recordacties"
+        "en": "Permissions",
+        "nl": "Rechten"
       }
     }
   },

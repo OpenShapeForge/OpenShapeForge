@@ -385,6 +385,7 @@ export function renderTypeDefinition(
   const canonicalResultTypes = `
     type ${graphql.typeName}RecordEnvelope {
       data: ${graphql.typeName}!
+      references: JSON
       operations: [EntityOperationOffer!]!
     }
 
@@ -396,6 +397,7 @@ export function renderTypeDefinition(
 
     type ${canonicalRecordResultType(graphql)} {
       data: ${graphql.typeName}
+      references: JSON
       operations: [EntityOperationOffer!]
       error: EntityOperationError
     }
@@ -679,7 +681,8 @@ function selectionIncludes(info: GraphQLResolveInfo, name: string): boolean {
         // is descended: a record's own nested selections never carry a count,
         // and walking them would charge a count pass to a query that asked
         // for none.
-        if (selection.name.value === "data" && walk(selection.selectionSet)) return true;
+        if ((selection.name.value === "data" || (name === "references" && selection.name.value === "items")) &&
+            walk(selection.selectionSet)) return true;
       } else if (selection.kind === Kind.INLINE_FRAGMENT) {
         if (walk(selection.selectionSet)) return true;
       } else if (selection.kind === Kind.FRAGMENT_SPREAD) {
@@ -773,11 +776,11 @@ const queryResolvers = Object.fromEntries(
     return [
       ...(operationEnabled(table, "get") ? [[
         graphql.singleQueryName,
-        async (_parent: unknown, args: { id: string }, context: GraphqlContext) => {
+        async (_parent: unknown, args: { id: string }, context: GraphqlContext, info: GraphQLResolveInfo) => {
           return executeCanonicalGraphqlOperation(
             table,
             "get",
-            { id: args.id },
+            { id: args.id, ...(selectionIncludes(info, "references") ? { referenceLabels: true } : {}) },
             context,
           );
         },
@@ -808,6 +811,7 @@ const queryResolvers = Object.fromEntries(
               ...(selectionIncludes(info, "totalCount")
                 ? { includeTotalCount: true as const }
                 : {}),
+              ...(selectionIncludes(info, "references") ? { referenceLabels: true } : {}),
             },
             context,
           );

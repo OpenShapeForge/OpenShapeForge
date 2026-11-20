@@ -46,7 +46,7 @@ describe("a successful tool result", () => {
     // only; a text-only success reached it as `{}`.
     const result = ok({ id: "example", openFindingsTotal: 3 });
     expect(result).toEqual({
-      content: [{ type: "text", text: '{\n  "id": "example",\n  "openFindingsTotal": 3\n}' }],
+      content: [{ type: "text", text: '{"id":"example","openFindingsTotal":3}' }],
       structuredContent: { id: "example", openFindingsTotal: 3 },
     });
     expect(result).not.toHaveProperty("isError");
@@ -54,7 +54,7 @@ describe("a successful tool result", () => {
 
   it("keeps arrays and scalars text-only, since they have no structured form", () => {
     expect(ok([{ id: "a" }])).toEqual({
-      content: [{ type: "text", text: '[\n  {\n    "id": "a"\n  }\n]' }],
+      content: [{ type: "text", text: '[{"id":"a"}]' }],
     });
     expect(ok(true)).toEqual({ content: [{ type: "text", text: "true" }] });
     expect(ok(null)).toEqual({ content: [{ type: "text", text: "null" }] });

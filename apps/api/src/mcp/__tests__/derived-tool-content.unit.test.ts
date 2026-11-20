@@ -48,7 +48,7 @@ describe("derivedToolResult", () => {
   it("answers JSON outputs as one text block", () => {
     const result = derivedToolResult({ findings: [], totalCount: 0 });
     expect(result.content).toEqual([
-      { type: "text", text: JSON.stringify({ findings: [], totalCount: 0 }, null, 2) },
+      { type: "text", text: JSON.stringify({ findings: [], totalCount: 0 }) },
     ]);
     expect(result.structuredContent).toEqual({ findings: [], totalCount: 0 });
   });
@@ -67,7 +67,7 @@ describe("derivedToolResult", () => {
     for (const content of ["hello", [], [{ type: "video", data: "AAAA" }], { type: "text", text: "x" }]) {
       const result = derivedToolResult({ content, other: 1 });
       expect(result.content).toEqual([
-        { type: "text", text: JSON.stringify({ content, other: 1 }, null, 2) },
+        { type: "text", text: JSON.stringify({ content, other: 1 }) },
       ]);
     }
   });

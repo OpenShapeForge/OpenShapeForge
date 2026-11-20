@@ -1731,8 +1731,8 @@ describe("relationship keys", () => {
     expect((filter.properties as object)).not.toHaveProperty("evidenceId");
     expect((filter.properties as object)).not.toHaveProperty("findingId");
 
-    // The get and delete tools take only an id.
-    expect(Object.keys(toolNamed(catalog, "finding_get").inputSchema.properties as object)).toEqual(["id"]);
+    // A get can optionally include display labels beside the unchanged record.
+    expect(Object.keys(toolNamed(catalog, "finding_get").inputSchema.properties as object)).toEqual(["id", "referenceLabels"]);
   });
 
   it("requires the key exactly when the storage column refuses null", () => {

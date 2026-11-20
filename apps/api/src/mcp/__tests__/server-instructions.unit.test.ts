@@ -35,16 +35,63 @@ describe("buildServerInstructions", () => {
     const order = [
       opening,
       INSTRUCTIONS,
-      "Data acquisition —",
-      ONBOARDING_INSTRUCTION,
+      EFFICIENCY_GUIDANCE,
+      "Language — this person reads Dutch (nl)",
       "Talking to a person —",
       "introduced itself as Claude Desktop 1.2.3",
-      "Language — this person reads Dutch (nl)",
+      ONBOARDING_INSTRUCTION,
       UPDATE_INSTRUCTION,
+      "Data acquisition —",
     ];
     const positions = order.map((part) => text.indexOf(part));
     expect(positions.every((position) => position >= 0)).toBe(true);
     expect([...positions].sort((left, right) => left - right)).toEqual(positions);
+  });
+
+  it("states how to find and call a capability right after what the server is, and the vocabulary last", () => {
+    const workflow = " How to work here — find, then act.";
+    const closing = " A compact tools/list is not the full capability catalog.";
+    const text = buildServerInstructions({
+      opening: "You assist Alex Dev at Acme; Alex Dev is an employee. Answer in English.",
+      hasConnectors: true,
+      oauthCallbackUrl: "https://example.test/api/entity-oauth/callback",
+      locale: resolveLocale({ user: "en" }),
+      client,
+      skills: [{ uri: "skill://osf-support/SKILL.md", description: "Report every operation error." }],
+      vocabulary: [{ entity: "Relation", label: "Client", description: "A person or organisation the company deals with." }],
+      workflow,
+      closing,
+    });
+    const order = [
+      INSTRUCTIONS,
+      workflow,
+      EFFICIENCY_GUIDANCE,
+      "Language —",
+      "Talking to a person —",
+      "Support —",
+      ONBOARDING_INSTRUCTION,
+      "OAuth redirect (callback) URL",
+      "Agent Skills —",
+      "Data acquisition —",
+      closing,
+      "The records here, by the word their colleagues use:",
+    ];
+    const positions = order.map((part) => text.indexOf(part));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect([...positions].sort((left, right) => left - right)).toEqual(positions);
+    // One widely used client shows its model the first 4,096 characters only:
+    // what every request needs has to be inside them.
+    expect(text.indexOf(EFFICIENCY_GUIDANCE) + EFFICIENCY_GUIDANCE.length).toBeLessThan(4096);
+    expect(text.endsWith('Relation is "Client" — A person or organisation the company deals with..')).toBe(true);
+  });
+
+  it("states pending update notices as a fact, and says nothing when there are none", () => {
+    const base = { opening: null, hasConnectors: false, oauthCallbackUrl: null, locale: nl, client: null };
+    expect(buildServerInstructions(base)).toContain(UPDATE_INSTRUCTION);
+    expect(buildServerInstructions({ ...base, pendingUpdates: 0 })).not.toContain("update notice");
+    const pending = buildServerInstructions({ ...base, pendingUpdates: 2 });
+    expect(pending).toContain("2 update notices are pending for this person");
+    expect(pending).not.toContain(UPDATE_INSTRUCTION);
   });
 
   it("leaves the opening out entirely when the session has no person", () => {

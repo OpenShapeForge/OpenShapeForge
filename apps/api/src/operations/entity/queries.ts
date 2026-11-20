@@ -38,7 +38,7 @@ import type {
   ListPageInput,
 } from "./types.js";
 
-function normalizeLimit(limit?: number | null) {
+export function normalizeLimit(limit?: number | null) {
   if (!Number.isFinite(limit ?? NaN)) {
     return 50;
   }
@@ -89,7 +89,7 @@ function decodeOffsetCursor(cursor?: string | null) {
   return parsed;
 }
 
-function encodeOffsetCursor(offset: number) {
+export function encodeOffsetCursor(offset: number) {
   return Buffer.from(String(offset), "utf8").toString("base64url");
 }
 
@@ -260,7 +260,7 @@ export function tenantFixedWhere(table: GeneratedCrudTable, session: DbSessionIn
   return [{ column: "tenant_id", value: session.tenantId }];
 }
 
-function buildSortExpression(
+export function buildSortExpression(
   table: GeneratedCrudTable,
   sort?: { field?: string | null; direction?: string | null } | null,
 ) {
@@ -289,6 +289,29 @@ function buildSortExpression(
   return direction === "desc"
     ? sql`${sql.id("row_source", column.name)} desc nulls last`
     : sql`${sql.id("row_source", column.name)} asc`;
+}
+
+/**
+ * The predicate of one entity's authorized list page, as `row_source`: the
+ * caller's filter, the runtime's fixed conditions, the subtype scope and the
+ * authorization profile state of the Operation the read is admitted under.
+ * Every read that returns list rows builds its predicate here, so a page and
+ * anything derived from it cannot disagree about which rows the session sees.
+ * Row-level security remains the backstop underneath it.
+ */
+export function authorizedListWhere(
+  table: GeneratedCrudTable,
+  session: DbSessionInput,
+  filter: Record<string, unknown> | null | undefined,
+  fixedWhere: Array<{ column: string; value: unknown }>,
+  rules: AuthorizationProfileRules | undefined,
+  operationId: string,
+  relationScope?: { where: RawBuilder<unknown> },
+): RawBuilder<unknown> {
+  const ordinaryWhere = sql`(${buildFilterConditions(table, session, filter, fixedWhere, rules)})${subtypeScopeWhere(table, "row_source")}`;
+  const scopedWhere = relationScope ? sql`(${ordinaryWhere}) and (${relationScope.where})` : ordinaryWhere;
+  const profileWhere = authorizationProfilePredicate(rules?.states[operationId], rules?.actor ?? {}, "row_source");
+  return sql`(${scopedWhere}) and (${profileWhere})`;
 }
 
 /**
@@ -334,10 +357,7 @@ async function listGeneratedEntityRowsForTable(
     // filter, sort or projection reads them.
     const extensionSet = await loadExtensionFields(trx, resolvedSession, table);
     assertExtensionQueryAllowed(table, session, input);
-  const ordinaryWhere = sql`(${buildFilterConditions(table, session, input.filter, fixedWhere, config)})${subtypeScopeWhere(table, "row_source")}`;
-  const scopedWhere = relationScope ? sql`(${ordinaryWhere}) and (${relationScope.where})` : ordinaryWhere;
-  const profileWhere=authorizationProfilePredicate(config?.states[auditContext()?.operationId ?? ""],config?.actor ?? {},"row_source");
-  const where=sql`(${scopedWhere}) and (${profileWhere})`;
+  const where = authorizedListWhere(table, session, input.filter, fixedWhere, config, auditContext()?.operationId ?? "", relationScope);
   const tenantSort = relationScope?.orderBy ? undefined : extensionSort(table, session, input.sort);
   const orderBy = relationScope?.orderBy ?? buildSortExpression(table, tenantSort ? undefined : input.sort);
 

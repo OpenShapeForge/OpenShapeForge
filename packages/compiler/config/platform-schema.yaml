@@ -735,6 +735,9 @@ tables:
       # provisioning caller authorized them. Kept so the reconciler can rebuild
       # the realm client after a realm reset without re-asking the customer.
       - { name: granted_roles, type: jsonb, required: true, default: "'[]'::jsonb" }
+      # NULL for regular integrations. Profile integrations hold tenant account
+      # ids approved to issue credentials; an empty array approves nobody.
+      - { name: approved_issuer_identity_ids, type: jsonb }
       # Scope the provisioned service account is intended to operate at. Nothing
       # reads it until row scoping ships; recorded now so that decision has
       # somewhere to land instead of silently defaulting to "self".

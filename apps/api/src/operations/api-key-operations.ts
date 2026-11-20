@@ -38,14 +38,17 @@ import {
   ApiKeyProvisioningError,
   ApiKeyValidationError,
   createIntegration,
+  createIntegrationProfile,
   disableIntegration,
   getIntegration,
   getKey,
   issueKey,
+  listApprovedIntegrations,
   MAX_PAGE_SIZE,
   pageIntegrations,
   pageKeys,
   revokeKey,
+  updateIntegrationIssuers,
   updateIntegrationRoles,
   updateIntegrationRestrictions,
   type ApiKeyServiceDeps,
@@ -136,6 +139,7 @@ function resolve(context: ModuleOperationContext): Resolved | ModuleOperationErr
     session: {
       tenantId: session.tenantId,
       userId: session.userId,
+      ...(session.issuer ? { issuer: session.issuer } : {}),
       roles: session.roles,
       groups: session.groups,
       credential: session.credential,
@@ -670,6 +674,52 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
         },
         credential: mintedCredential(created),
       });
+    } catch (error) {
+      return declaredServiceFailure(error);
+    }
+  },
+
+  async createIntegrationProfile(input, context): Promise<ModuleOperationResult> {
+    const resolved = resolve(context);
+    if (isFailure(resolved)) return resolved;
+    if (!resolved.deps.admin.hasApiAudience) {
+      return declaredFailure(503, "NOT_CONFIGURED", "Integration profiles require a configured API verifier audience.");
+    }
+    try {
+      const value = await createIntegrationProfile(resolved.deps, resolved.session, {
+        displayName: text(input.displayName),
+      });
+      return { value };
+    } catch (error) {
+      return declaredServiceFailure(error);
+    }
+  },
+
+  async listApprovedIntegrations(input, context): Promise<ModuleOperationResult> {
+    const resolved = resolve(context);
+    if (isFailure(resolved)) return resolved;
+    try {
+      const value = await listApprovedIntegrations(resolved.deps, resolved.session, {
+        ...(typeof input.first === "number" ? { first: input.first } : {}),
+        ...(typeof input.after === "string" ? { after: input.after } : {}),
+      });
+      return { value };
+    } catch (error) {
+      return declaredServiceFailure(error);
+    }
+  },
+
+  async updateIntegrationIssuers(input, context): Promise<ModuleOperationResult> {
+    const resolved = resolve(context);
+    if (isFailure(resolved)) return resolved;
+    try {
+      const integrationId = text(input.integrationId);
+      const accountIds = await updateIntegrationIssuers(resolved.deps, resolved.session, {
+        integrationId,
+        approveAccountIds: (input.approveAccountIds as string[] | undefined) ?? [],
+        removeAccountIds: (input.removeAccountIds as string[] | undefined) ?? [],
+      });
+      return { value: { integrationId, accountIds } };
     } catch (error) {
       return declaredServiceFailure(error);
     }

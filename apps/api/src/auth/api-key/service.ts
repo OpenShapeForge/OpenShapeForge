@@ -2,10 +2,9 @@
 /**
  * Provisioning: what happens when a customer presses "add API key".
  *
- * Every mutation here starts by calling the ceiling (`ceiling.ts`). That is the
- * only authorization decision this module makes; tenant containment comes from
- * RLS on `platform.api_key_integrations`, which every read and write below goes
- * through.
+ * Every mutation here starts by calling the ceiling (`ceiling.ts`). Profile
+ * issuance additionally checks the current tenant account approval. RLS on
+ * `platform.api_key_integrations` confines reads and writes to the tenant.
  *
  * The cross-system ordering is the other thing worth reading carefully. Postgres
  * and Keycloak share no transaction, so a crash between them must not leave a
@@ -28,7 +27,8 @@
 import { randomUUID } from "node:crypto";
 import { sql, type RawBuilder } from "kysely";
 import type { OpenShapeForgeDatabase } from "../../db/connection.js";
-import { jsonbLiteral } from "../../db/sql-helpers.js";
+import { SECURITY_MANAGE } from "../../accounts/security-profiles.js";
+import { jsonbLiteral, postgresArrayLiteral } from "../../db/sql-helpers.js";
 import {
   activeDbSessionContext,
   withDbSession,
@@ -49,6 +49,8 @@ import {
   type SortColumn,
 } from "./catalog-page.js";
 import {
+  API_KEY_MANAGE_ROLE,
+  ApiKeyAuthorizationError,
   assertMayCreateIntegration,
   assertMayGrantRoles,
   assertMayManageApiKeys,
@@ -74,6 +76,7 @@ import {
 export type ProvisioningSession = CeilingSession & {
   tenantId: string;
   userId: string;
+  issuer?: string;
   groups?: readonly string[];
 };
 
@@ -268,17 +271,45 @@ export async function createIntegration(
   assertMayCreateIntegration(session);
   const roleSubset = roleSubsetOrThrow(input.roleSubset);
   assertMayCreateIntegration(session, [...input.roles, ...(roleSubset ?? [])]);
+  const expiresAt = expiryFrom(input.expiresInDays, deps.lifetime, now);
+  const credential = { ...mintApiKey(), keyId: randomUUID(), roleSubset, expiresAt };
+  const integration = await provisionIntegration(deps, session, input, credential, now);
+  return { ...integration, keyId: credential.keyId, token: credential.token, expiresAt };
+}
+
+function assertMayManageIntegrationProfiles(session: ProvisioningSession): void {
+  assertMayManageApiKeys(session);
+  if (!session.roles.includes(SECURITY_MANAGE)) {
+    throw new ApiKeyAuthorizationError("Organization security management permission is required to configure API key profiles.");
+  }
+}
+
+export async function createIntegrationProfile(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+  input: Omit<CreateIntegrationInput, "roles" | "roleSubset" | "expiresInDays">,
+  now: Date = new Date(),
+): Promise<{ integrationId: string; displayName: string }> {
+  assertMayManageIntegrationProfiles(session);
+  const created = await provisionIntegration(deps, session, { ...input, roles: [] }, null, now);
+  return { integrationId: created.integrationId, displayName: created.integration.displayName };
+}
+
+async function provisionIntegration(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+  input: CreateIntegrationInput,
+  credential: (ReturnType<typeof mintApiKey> & Pick<CreatedApiKey, "keyId" | "expiresAt"> & {
+    roleSubset: string[] | null;
+  }) | null,
+  now: Date,
+): Promise<Pick<CreatedIntegration, "integrationId" | "integration">> {
   if (input.roles.length === 0 && !deps.admin.hasApiAudience) {
     throw new ApiKeyValidationError("Role-free integrations require a configured API verifier audience.");
   }
 
   const displayName = displayNameOrThrow(input.displayName, "An integration");
   const restrictions = restrictionsOrThrow(input);
-  // Resolved here rather than beside the mint below: a lifetime the
-  // deployment's policy refuses must leave neither an intent row nor a realm
-  // client behind, and everything from the insert onwards is external.
-  const expiresAt = expiryFrom(input.expiresInDays, deps.lifetime, now);
-
   const integrationId = randomUUID();
   const keycloakClientId = `osf-int-${integrationId}`;
 
@@ -322,11 +353,8 @@ export async function createIntegration(
   }
 
   // 3. Commit the credential and flip the integration live, in ONE transaction:
-  //    a key row that outlived a failed activation would be unusable but
-  //    listed, and an active integration with no key would look provisioned
-  //    while nothing had been handed to anyone.
-  const minted = mintApiKey();
-  const keyId = randomUUID();
+  //    regular integrations start with their first key and profiles start
+  //    without any credentials or approved issuers.
   const encrypted = encryptSecret(
     deps.keyring,
     integrationId,
@@ -370,6 +398,7 @@ export async function createIntegration(
              client_secret_ciphertext = ${encrypted.ciphertext},
              client_secret_key_id = ${encrypted.keyId},
              client_secret_algorithm = ${encrypted.algorithm},
+             approved_issuer_identity_ids = ${credential ? sql`null` : sql`'[]'::jsonb`},
              updated_at = ${now}
        where id = ${integrationId}
          and tenant_id = ${session.tenantId}
@@ -384,18 +413,20 @@ export async function createIntegration(
     // lock, so its verdict is handled rather than assumed.
     if (!row) return { fenced: "absent", rowExists: true } as const;
 
-    await insertKeyRow(trx, {
-      keyId,
-      tenantId: session.tenantId,
-      integrationId,
-      lookupId: minted.lookupId,
-      secretHash: minted.secretHash,
-      displayName,
-      roleSubset,
-      expiresAt,
-      createdBy: session.userId,
-      now,
-    });
+    if (credential) {
+      await insertKeyRow(trx, {
+        keyId: credential.keyId,
+        tenantId: session.tenantId,
+        integrationId,
+        lookupId: credential.lookupId,
+        secretHash: credential.secretHash,
+        displayName,
+        roleSubset: credential.roleSubset,
+        expiresAt: credential.expiresAt,
+        createdBy: session.userId,
+        now,
+      });
+    }
     return { row };
   });
 
@@ -427,9 +458,6 @@ export async function createIntegration(
 
   return {
     integrationId,
-    keyId,
-    token: minted.token,
-    expiresAt,
     integration: {
       displayName: activated.row.display_name,
       status: integrationStatus(activated.row.status),
@@ -558,6 +586,7 @@ type LockedIntegration = {
   status: string;
   granted_roles: unknown;
   keycloak_client_id: string;
+  approved_issuer_identity_ids: unknown;
 };
 
 async function lockIntegration(
@@ -566,7 +595,7 @@ async function lockIntegration(
   integrationId: string,
 ): Promise<LockedIntegration | undefined> {
   const found = await sql<LockedIntegration>`
-    select id, status, granted_roles, keycloak_client_id
+    select id, status, granted_roles, keycloak_client_id, approved_issuer_identity_ids
       from platform.api_key_integrations
      where id = ${integrationId}
        and tenant_id = ${tenantId}
@@ -574,6 +603,99 @@ async function lockIntegration(
      for update
   `.execute(trx as never);
   return found.rows[0];
+}
+
+/** Account ids come from the membership, while authentication uses its verified issuer and subject. */
+function approvedIssuer(
+  session: ProvisioningSession,
+  approvedIds: RawBuilder<unknown>,
+) {
+  return sql`exists (
+    select 1
+      from platform.identity_relations membership
+      join platform.identities identity on identity.id = membership.identity_id
+     where membership.tenant_id = ${session.tenantId}
+       and membership.status = 'linked'
+       and not membership.access_blocked
+       and identity.issuer = ${session.issuer ?? null}
+       and identity.subject = ${session.userId}
+       and ${approvedIds} @> jsonb_build_array(identity.id)
+  )`;
+}
+
+export async function listApprovedIntegrations(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+  query: { first?: number; after?: string },
+): Promise<{ integrations: { integrationId: string; displayName: string }[]; nextCursor: string | null }> {
+  assertMayCreateIntegration(session);
+  const first = boundedFirst(query.first ?? 25);
+  return withSession(deps, session, async (trx) => {
+    const result = await sql<{ integrationId: string; displayName: string }>`
+      select i.id as "integrationId", i.display_name as "displayName"
+        from platform.api_key_integrations i
+       where i.tenant_id = ${session.tenantId}
+         and i.status = 'active'
+         and i.granted_roles = '[]'::jsonb
+         and ${approvedIssuer(session, sql`i.approved_issuer_identity_ids`)}
+         ${query.after ? sql`and i.id > ${query.after}::uuid` : sql``}
+       order by i.id
+       limit ${first + 1}
+    `.execute(trx);
+    const integrations = result.rows.slice(0, first);
+    return {
+      integrations,
+      nextCursor: result.rows.length > first ? integrations.at(-1)!.integrationId : null,
+    };
+  });
+}
+
+export async function updateIntegrationIssuers(
+  deps: ApiKeyServiceDeps,
+  session: ProvisioningSession,
+  input: { integrationId: string; approveAccountIds: string[]; removeAccountIds: string[] },
+  now = new Date(),
+): Promise<string[]> {
+  assertMayManageIntegrationProfiles(session);
+  const approve = [...new Set(input.approveAccountIds.map(id => id.toLowerCase()))];
+  const remove = new Set(input.removeAccountIds.map(id => id.toLowerCase()));
+  if (approve.some(id => remove.has(id))) {
+    throw new ApiKeyValidationError("An account cannot be approved and removed in the same change.");
+  }
+  return withSession(deps, session, async (trx) => {
+    const integration = await lockIntegration(trx, session.tenantId, input.integrationId);
+    if (integration?.status !== "active" || !Array.isArray(integration.approved_issuer_identity_ids)) {
+      throw new ApiKeyNotFoundError("No such active integration profile.");
+    }
+    const previous = storedList(integration.approved_issuer_identity_ids);
+    const accountIds = [...new Set([...previous.filter(id => !remove.has(id)), ...approve])].sort();
+    if (accountIds.length > 100) throw new ApiKeyValidationError("A profile may have at most 100 approved issuers.");
+    const eligible = await sql<{ id: string }>`
+      select identity_id as id from platform.identity_relations
+       where tenant_id = ${session.tenantId}
+         and identity_id = any(${postgresArrayLiteral(approve)}::uuid[])
+         and status = 'linked'
+         and not access_blocked
+    `.execute(trx);
+    if (eligible.rows.length !== approve.length) {
+      throw new ApiKeyValidationError("Each approved issuer must have an active linked account in this organization.");
+    }
+    if (accountIds.length === previous.length && accountIds.every((id, index) => id === previous[index])) {
+      return accountIds;
+    }
+    await sql`
+      update platform.api_key_integrations
+         set approved_issuer_identity_ids = ${jsonbLiteral(accountIds)}, updated_at = ${now}
+       where tenant_id = ${session.tenantId} and id = ${input.integrationId}
+    `.execute(trx);
+    await appendScopedEntityEventInTransaction(trx, {
+      aggregateType: API_KEY_INTEGRATION_AGGREGATE,
+      aggregateId: input.integrationId,
+      eventType: "api_key_integration_issuers_changed",
+      payload: { previousAccountIds: previous, accountIds, actor: session.userId },
+    });
+    return accountIds;
+  });
 }
 
 export type IssueKeyInput = {
@@ -600,8 +722,13 @@ export async function issueKey(
   input: IssueKeyInput,
   now: Date = new Date(),
 ): Promise<CreatedApiKey> {
-  assertMayManageApiKeys(session);
+  const manager = session.roles.includes(API_KEY_MANAGE_ROLE);
+  if (manager) assertMayManageApiKeys(session);
+  else assertMayCreateIntegration(session);
   const roleSubset = roleSubsetOrThrow(input.roleSubset);
+  if (!manager && roleSubset) {
+    throw new ApiKeyAuthorizationError("An approved integration credential uses the profile's operation grants.");
+  }
   // Trimmed only. A credential's name is a label on a row the caller already
   // identified by its integration, so an empty one is not an ambiguity — and
   // the REST and GraphQL mounts have been storing it that way since before
@@ -619,9 +746,24 @@ export async function issueKey(
   await withSession(deps, session, async (trx) => {
     const parent = await lockIntegration(trx, session.tenantId, input.integrationId);
     if (!parent || parent.status !== "active") {
-      throw new ApiKeyNotFoundError("No such active integration.");
+      throw new ApiKeyNotFoundError(manager ? "No such active integration." : "No such approved integration.");
     }
-    assertMayGrantRoles(session, roleSubset ?? (parseRoleSubset(parent.granted_roles) ?? []));
+    if (Array.isArray(parent.approved_issuer_identity_ids)) {
+      if (!Array.isArray(parent.granted_roles) || parent.granted_roles.length !== 0) {
+        throw new ApiKeyNotFoundError("No such approved integration.");
+      }
+      const approval = await sql<{ approved: boolean }>`
+        select ${approvedIssuer(session, jsonbLiteral(parent.approved_issuer_identity_ids))} as approved
+      `.execute(trx);
+      if (!approval.rows[0]?.approved) throw new ApiKeyNotFoundError("No such approved integration.");
+      if (roleSubset) {
+        throw new ApiKeyAuthorizationError("An approved integration credential uses the profile's operation grants.");
+      }
+    } else if (manager) {
+      assertMayGrantRoles(session, roleSubset ?? (parseRoleSubset(parent.granted_roles) ?? []));
+    } else {
+      throw new ApiKeyNotFoundError("No such approved integration.");
+    }
 
     await insertKeyRow(trx, {
       keyId,
@@ -1347,6 +1489,9 @@ export async function updateIntegrationRoles(
         throw new ApiKeyNotFoundError(
           "No such active integration. A disabled or still provisioning integration's roles cannot be changed.",
         );
+      }
+      if (Array.isArray(locked.approved_issuer_identity_ids)) {
+        throw new ApiKeyValidationError("Configure access for integration profiles through operation and record grants.");
       }
       const previous = grantedRolesOf(locked.granted_roles);
 

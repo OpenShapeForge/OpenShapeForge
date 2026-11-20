@@ -147,6 +147,7 @@ function sessionFrom(context: GraphqlContext): ProvisioningSession {
   return {
     tenantId: session.tenantId,
     userId: session.userId,
+    ...(session.issuer ? { issuer: session.issuer } : {}),
     roles: session.roles,
     groups: session.groups,
     credential: session.credential,

@@ -58,7 +58,8 @@ export const runtimeHostOperationExecutors =
  */
 export function ok(payload: unknown): ToolResult {
   return {
-    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+    // Compact: the text is read by a model, and indentation is a third of it.
+    content: [{ type: "text", text: JSON.stringify(payload) }],
     ...(payload && typeof payload === "object" && !Array.isArray(payload)
       ? { structuredContent: payload as Record<string, unknown> }
       : {}),

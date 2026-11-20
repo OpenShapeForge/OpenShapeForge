@@ -126,7 +126,7 @@ describe("searchable MCP Operations", () => {
       .toEqual(["payroll.run", "a.create", "b.create", "c.create"]);
   });
 
-  test("filters before paging; a multi-hit set pages summaries even at limit 1, an operationId lookup answers its contract", () => {
+  test("filters before paging; the best match carries its input schema, later pages are summaries, an operationId lookup answers its contract", () => {
     const definitions = [
       definition("demo.alpha", {
         concurrency: {
@@ -144,6 +144,8 @@ describe("searchable MCP Operations", () => {
       searchOperationDefinitions({ definitions, allowedIds, arguments: args, locale });
     const first = search({ query: "demo", limit: 1 });
     expect(first.operations).toHaveLength(1);
+    // The best match of a first page is ready to execute: its whole summary,
+    // its input schema and the controls an execution must respect.
     expect(first.operations[0]).toEqual({
       operation: { id: "demo.alpha", intent: "invoke" },
       key: "alpha",
@@ -151,10 +153,17 @@ describe("searchable MCP Operations", () => {
       description: "Description for demo.alpha",
       effects: { data: "write", external: "none" },
       reliability: { idempotency: { mode: "natural" } },
+      inputSchema: definitions[0]!.input.schema,
+      concurrency: definitions[0]!.concurrency,
     });
     expect(first.nextCursor).toEqual(expect.any(String));
     const second = search({ query: "demo", cursor: first.nextCursor, limit: 20 });
-    expect(second.operations.map((entry) => entry.operation)).toEqual([{ id: "demo.bravo", intent: "invoke" }]);
+    // A later page is summaries only, and a plain naturally idempotent read states neither effects nor reliability.
+    expect(second.operations).toEqual([{
+      operation: { id: "demo.bravo", intent: "invoke" },
+      name: "Operation demo.bravo",
+      description: "Description for demo.bravo",
+    }]);
     expect(second.nextCursor).toBeUndefined();
     expect(JSON.stringify([...first.operations, ...second.operations])).not.toContain("secret.hidden");
 
@@ -169,18 +178,55 @@ describe("searchable MCP Operations", () => {
     })] });
     // An id this session cannot use answers nothing about it.
     expect(search({ operationId: "secret.hidden" })).toEqual({ operations: [] });
-    // A word query never returns a contract, even when it names one id.
-    expect(search({ query: "demo.alpha" }).operations.every((entry) => !("inputSchema" in entry))).toBe(true);
+    // A word query never returns the whole contract: the output schema and the failure catalogue are the lookup's.
+    expect(search({ query: "demo.alpha" }).operations.every((entry) => !("outputSchema" in entry) && !("errors" in entry))).toBe(true);
   });
 
-  test("a word query ranks an id it names first but stays a summary", () => {
+  test("a word query ranks an id it names first and hands only that match its input schema", () => {
     const definitions = ["Block.update", "Template.get", "Template.list", "TemplateVersion.get"].map((id) =>
       definition(id, { name: { en: `Template ${id}` } }));
     const found = searchOperationDefinitions({
       definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query: "Template.get" }, locale,
     }).operations;
     expect((found[0]!.operation as { id: string }).id).toBe("Template.get");
-    expect(found.some((entry) => "inputSchema" in entry)).toBe(false);
+    expect(found.map((entry) => "inputSchema" in entry)).toEqual([true, ...found.slice(1).map(() => false)]);
+    expect(found.some((entry) => "outputSchema" in entry)).toBe(false);
+  });
+
+  test("ranks the read that finds records first among equals, and inlines what a request needs next", () => {
+    const entity = (id: string, intent: string, entityName: string) =>
+      definition(id, { intent, entityName, name: { en: `${intent} ${entityName}` }, description: { en: `Does it for ${entityName}.` } } as Partial<RuntimeOperationDefinition>);
+    const definitions = [
+      ...["create", "delete", "get", "list", "update"].map((intent) => entity(`Relation.${intent}`, intent, "Relation")),
+      ...["create", "delete", "get", "list", "update"].map((intent) => entity(`ContactDetail.${intent}`, intent, "ContactDetail")),
+      ...["get", "list"].map((intent) => entity(`ProductRelationRule.${intent}`, intent, "ProductRelationRule")),
+    ];
+    const search = (query: string) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query, limit: 20 }, locale,
+    }).operations;
+    const inlined = (query: string) => search(query).filter((entry) => "inputSchema" in entry).map((entry) => (entry.operation as { id: string }).id);
+    // Equal matches: list, get, create, update, delete; and the entity the query names in full before one it only touches.
+    expect(search("relation").map((entry) => (entry.operation as { id: string }).id).slice(0, 6))
+      .toEqual(["Relation.list", "Relation.get", "Relation.create", "Relation.update", "Relation.delete", "ProductRelationRule.list"]);
+    expect(inlined("relation")).toEqual(["Relation.list"]);
+    // A write needs the record first: the list of the same entity comes with it.
+    expect(inlined("update relation")).toEqual(["Relation.update", "Relation.list"]);
+    // A request spanning two entities it names in full gets the best match of each.
+    expect(inlined("relation contact detail").sort()).toEqual(["ContactDetail.list", "Relation.list"]);
+  });
+
+  test("names the query words no Operation matches, and resemblances of every word do not outrank a named entity", () => {
+    const definitions = [
+      definition("KnowledgeItem.list", { intent: "list", entityName: "KnowledgeItem", name: { en: "List knowledge items" }, description: { en: "Returns the knowledge items." } } as Partial<RuntimeOperationDefinition>),
+      definition("Adapter.list", { intent: "list", entityName: "Adapter", name: { en: "List adapters" }, description: { en: "Adapters acknowledge provider events in a database." } } as Partial<RuntimeOperationDefinition>),
+    ];
+    const search = (query: string) => searchOperationDefinitions({
+      definitions, allowedIds: new Set(definitions.map((d) => d.id)), arguments: { query }, locale,
+    });
+    // "knowledge" resembles "acknowledge" and "base" resembles "database": the Operation that is named wins.
+    expect((search("knowledge base").operations[0]!.operation as { id: string }).id).toBe("KnowledgeItem.list");
+    expect(search("knowledge base").unmatchedWords).toBeUndefined();
+    expect(search("invoice adapters").unmatchedWords).toEqual(["invoice"]);
   });
 
   test("operationId looks up exactly: the canonical id or an exact generated name, only when available", () => {
@@ -328,6 +374,11 @@ describe("searchable MCP Operations", () => {
       input: {},
       tenantId: "tenant-b",
     })).toThrow(/unknown property/i);
+    // A field selection is the executor's own argument, beside the Operation's input.
+    expect(parseOperationExecuteArguments({ operationId: "Relation.list", input: {}, fields: ["displayName"] }))
+      .toEqual({ operationId: "Relation.list", input: {}, fields: ["displayName"] });
+    expect(() => parseOperationExecuteArguments({ operationId: "Relation.list", input: {}, fields: [] })).toThrow(/fields/);
+    expect(() => parseOperationExecuteArguments({ operationId: "Relation.list", input: {}, fields: "displayName" })).toThrow(/fields/);
   });
 
   /**
@@ -462,8 +513,8 @@ describe("operation search weighs the word itself over a resemblance", () => {
 
   test("a compound ends in the word it is built from", () => {
     // "naam" is only in Relation's "Weergavenaam".
-    expect(ids("relation naam")).toEqual(["Relation.delete", "Relation.list"]);
-    expect(ids("naam")).toEqual(["Relation.delete", "Relation.list"]);
+    expect(ids("relation naam")).toEqual(["Relation.list", "Relation.delete"]);
+    expect(ids("naam")).toEqual(["Relation.list", "Relation.delete"]);
   });
 
   test("field labels are only searched when the session sees them", () => {

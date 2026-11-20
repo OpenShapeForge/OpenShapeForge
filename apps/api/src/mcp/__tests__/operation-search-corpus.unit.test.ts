@@ -97,7 +97,7 @@ describe("operation search over the compiled catalogue", () => {
   });
 
   test("the same question in Dutch, in the entity's authored Dutch labels", () => {
-    expect(search("zoek relatie op naam").slice(0, 2)).toEqual(["Relation.get", "Relation.list"]);
+    expect(search("zoek relatie op naam").slice(0, 2)).toEqual(["Relation.list", "Relation.get"]);
   });
 
   test("a contact detail is found by its own name, before the entities that only reference it", () => {

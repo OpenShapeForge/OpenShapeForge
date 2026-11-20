@@ -7,6 +7,10 @@ export function canReadClassifiedColumns(
   session: { roles?: readonly string[] | null } | null | undefined,
 ): boolean {
   const roles = authorization?.roles;
+  // Read once: a module session capability answers `roles` with a fresh
+  // frozen copy per read, and this runs per row and column of a list.
+  const held = session?.roles;
+  if (!held?.length) return false;
   return [...(roles?.create ?? []), ...(roles?.update ?? []), ...(roles?.delete ?? [])]
-    .some(role => session?.roles?.includes(role));
+    .some(role => held.includes(role));
 }

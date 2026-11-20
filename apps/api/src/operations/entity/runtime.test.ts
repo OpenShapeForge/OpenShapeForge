@@ -2,7 +2,9 @@
 import { describe, expect, test } from "bun:test";
 import { emptyCatalogDatabase } from "../../db/__tests__/empty-catalog-db.js";
 import { getGeneratedCrudTables } from "./catalog.js";
+import { generatedCrudTables, generatedCrudTablesRevision } from "./table-registry.js";
 import {
+  entityOperationOfferEvaluator,
   entityOperationRef,
   entityRecordOfferBinding,
   executeEntityOperation,
@@ -422,6 +424,49 @@ describe("entity operation runtime", () => {
       });
     expect(offers.find(({ operation }) => operation.id === "Relation.get"))
       .not.toHaveProperty("concurrency");
+  });
+
+  test("one evaluator per request answers every record as a fresh evaluation does", () => {
+    const roles = [...new Set(getEntityOperationContracts()
+      .filter((operation) => operation.entityName === "Relation")
+      .flatMap((operation) => operation.authorization.roles))];
+    const intents = ["get", "update", "delete"] as const;
+    const evaluate = entityOperationOfferEvaluator("Relation", { roles }, intents);
+    const records = [
+      { id: "a", version: "2026-11-20T09:00:00Z", row: { id: "a", updated_at: "2026-11-20T09:00:00Z" } },
+      { id: "b", row: { id: "b" } },
+    ];
+    const locked = { "Relation.update": { code: "LOCKED", message: "Being edited.", retryable: true } };
+    for (const record of records) {
+      for (const unavailable of [{}, locked]) {
+        expect(evaluate(unavailable, record)).toEqual(getEntityOperationOffers("Relation", { roles }, intents, unavailable, record));
+      }
+    }
+    expect(evaluate()).toEqual(getEntityOperationOffers("Relation", { roles }, intents));
+  });
+
+  test("a collection refusal follows the table registry it was derived from", () => {
+    const roles = [...new Set(getEntityOperationContracts()
+      .filter((operation) => operation.entityName === "Relation")
+      .flatMap((operation) => operation.authorization.roles))];
+    const target = { id: "a", row: { id: "a" } };
+    const deleteOffer = () => getEntityOperationOffers("Relation", { roles }, ["delete"], {}, target)[0];
+    expect(deleteOffer()).toMatchObject({ available: true });
+    const before = generatedCrudTablesRevision();
+    const owner = {
+      ...relation,
+      name: "test.relation_owner",
+      source: { ...relation.source, authoringEntityName: "RelationOwnerFixture", graphql: { ...relation.source!.graphql!, typeName: "RelationOwnerFixture",
+        relationships: [{ name: "members", fieldKey: "members", kind: "hasMany", resolve: "hasMany", ownership: "owned", target: relation.source!.graphql!.typeName, type: relation.source!.graphql!.typeName, foreignKey: "owner_id" }] } },
+    } as unknown as typeof relation;
+    generatedCrudTables.set(owner.name, owner);
+    try {
+      expect(generatedCrudTablesRevision()).not.toBe(before);
+      expect(deleteOffer()).toMatchObject({ available: false, error: { code: "RELATION_COLLECTION_MUTATION_UNSUPPORTED" } });
+    } finally {
+      generatedCrudTables.delete(owner.name);
+    }
+    expect(deleteOffer()).toMatchObject({ available: true });
   });
 
   test("keeps an authorized temporary refusal visible with retryAt", () => {

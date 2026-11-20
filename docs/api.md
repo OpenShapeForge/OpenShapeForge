@@ -237,6 +237,22 @@ verified control credential. A tenant session cannot stand in for a control
 credential, and an operator role cannot grant organization access. A business
 refusal is returned once, without retry under another session.
 
+### Compact record offers on a list
+
+A list execute answers every row with its full offers, most of which repeat on
+every row. A caller that sends `"offerFormat": "compact"` beside `intent` and
+`input` receives each Operation's shared parts once, in
+`data.offerTemplates`, and per row only `target` (the record id and version)
+and `offers` (each `{ id }`, `{ id, input }` for record-bound values beyond
+the id, `{ id, error }` when unavailable, or `{ offer }` for an offer no
+template expresses), with `data.offerFormat: "compact"`. The collection's own
+`operations` are unchanged. `expandCompactRecordOffers` in
+`@openshapeforge/operations` rebuilds exactly the default page and returns a
+default page unchanged, so a client may send the option to a server that
+predates it. Without the option, or with `"full"`, the answer is unchanged;
+any other value, or `"compact"` on another intent, is refused as
+`BAD_USER_INPUT`.
+
 ## The tenant control surface
 
 The platform's own administration is a catalog of canonical Operations

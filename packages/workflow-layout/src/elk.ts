@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { loadElkEngine } from "#elk-engine";
 import { resolveElkSourceHandleId } from "./graph.ts";
 import type {
   WorkflowLayoutEdge,
@@ -17,7 +18,7 @@ type ElkEdgeSection = {
   bendPoints?: ElkBendPoint[];
 };
 
-type ElkLayoutGraph = {
+export type ElkLayoutGraph = {
   id: string;
   layoutOptions?: Record<string, string>;
   children?: Array<{
@@ -40,11 +41,7 @@ type ElkLayoutGraph = {
   }>;
 };
 
-type ElkConstructor = new (options?: { workerUrl?: string }) => {
-  layout: (graph: ElkLayoutGraph) => Promise<ElkLayoutGraph>;
-};
-
-let elkPromise: Promise<InstanceType<ElkConstructor>> | null = null;
+let elkPromise: ReturnType<typeof loadElkEngine> | null = null;
 
 export async function getElk(runtime: WorkflowLayoutRuntime) {
   if (runtime === "browser" && typeof Worker === "undefined") {
@@ -52,41 +49,13 @@ export async function getElk(runtime: WorkflowLayoutRuntime) {
   }
 
   if (!elkPromise) {
-    elkPromise = (runtime === "server"
-      ? Promise.resolve(require("elkjs/lib/main.js"))
-      : import("elkjs/lib/elk.bundled.js"))
-      .then((module: unknown) => {
-        const record = module as { default?: unknown };
-        const Elk = (record.default ?? module) as ElkConstructor;
-        return runtime === "server"
-          ? new Elk({ workerUrl: resolveServerElkWorkerUrl() })
-          : new Elk();
-      })
-      .catch((error) => {
-        elkPromise = null;
-        throw error;
-      });
+    elkPromise = loadElkEngine(runtime).catch((error) => {
+      elkPromise = null;
+      throw error;
+    });
   }
 
   return elkPromise;
-}
-
-function resolveServerElkWorkerUrl() {
-  const bun = (globalThis as {
-    Bun?: {
-      resolveSync?: (specifier: string, from: string) => string;
-    };
-  }).Bun;
-  const resolved = bun?.resolveSync?.(
-    "elkjs/lib/elk-worker.min.js",
-    import.meta.dir,
-  );
-  if (!resolved) {
-    throw new Error(
-      "Server workflow layout requires Bun.resolveSync to locate the ELK worker.",
-    );
-  }
-  return resolved;
 }
 
 export function buildElkLayoutGraph(input: {

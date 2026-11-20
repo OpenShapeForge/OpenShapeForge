@@ -23,6 +23,7 @@ test("real JWT verification admits only a configured service client without pers
     const connection = await acquire();
     connection.executeQuery = async (query) => {
       if (query.sql.includes("set_config(")) return { rows: [] };
+      if (query.sql.includes("perform app.apply_session_authorization()")) return { rows: [] };
       if (query.sql.includes("current_setting('app.authorization_rules'")) return { rows: [] };
       if (query.sql.includes("select ir.access_blocked")) {
         memberAccessChecks++;

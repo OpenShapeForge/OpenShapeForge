@@ -114,7 +114,7 @@ export function deriveEntityOsfTypes(
     // separate options endpoint to point at. Navigation (the localized web
     // routes) stays on the entity's web interface, not on the type.
     const enumerable = Object.values(entity.operations ?? {}).some((operation) =>
-      operation.implementation.type !== "collection" && operation.implementation.action === "list");
+      "action" in operation.implementation && operation.implementation.action === "list");
     // The identity alias is distinct from a relationship to that entity: an
     // entity's own primary key must never acquire a self-referencing FK. It
     // carries no classification: `internal` restricts nothing (only
@@ -440,6 +440,9 @@ function relationshipOf(
   const path = `${entity.entity}.${field.key}`;
   const target = semantic.entity!;
   const metadata = field.relationship ?? {};
+  if (metadata.onTargetDelete && (collection || result.required || result.immutable || result.writtenBy?.length)) {
+    throw new Error(`${path}: onTargetDelete requires an optional mutable single reference.`);
+  }
   if (!collection && metadata.ownership === "owned") {
     throw new Error(`${path}: single owned references require a single-storage ownership contract; use an owned inverse collection until supported.`);
   }
@@ -457,6 +460,7 @@ function relationshipOf(
       ownership: metadata.ownership ?? "reference",
       foreignKey,
       ...(metadata.displayField ? { displayField: metadata.displayField } : {}),
+      ...(metadata.onTargetDelete ? { onTargetDelete: metadata.onTargetDelete } : {}),
       ...(metadata.version ? { version: metadata.version } : {}),
       ...(metadata.constraints ? { constraints: structuredClone(metadata.constraints) } : {}),
     };

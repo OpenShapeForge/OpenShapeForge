@@ -28,6 +28,8 @@ import { entityOperationJsonSchemas } from "./entity-operation-json-schema.js";
 import { withOperationControlProperties, type JsonObject } from "./entity-operation-controls.js";
 import type { PlatformSchemaManifest } from "./schema.js";
 import { isGeneratedCrudEligible } from "./schema.js";
+import { bindOwnedDeleteGuards, compileOwnedDeletePlan } from "./owned-delete-plan.js";
+import type { OwnedDeleteGuard } from "@openshapeforge/operations";
 import { materializeCollectionOperations } from "./authoring/collection-operations.js";
 
 const nativeBindings = new WeakMap<PluginOperationContract, NonNullable<CompiledPluginOperation["implementation"]>>();
@@ -805,15 +807,17 @@ export function collectAuthoredEntityPluginOperations(
   referentiedata: CoreReferentiedataSnapshot = {},
   /** Catalogs whose web collections application search also offers as pages. */
   catalogs: readonly OperationCatalogDefinition[] = [],
+  manifest?: PlatformSchemaManifest,
+  ownedDeleteGuards: readonly OwnedDeleteGuard[] = [],
 ): CompiledPluginOperation[] {
   materializeCollectionOperations(entities, referentiedata);
   const byPlugin = new Map<string, PluginOperationContract[]>();
   for (const { contract } of entities) {
     for (const authored of contract.pluginOperations ?? []) {
       const definition = authored.definition;
-      if (definition.implementation.type !== "plugin" && definition.implementation.type !== "collection") continue;
       const implementation = definition.implementation;
-      const pluginName = implementation.type === "collection" ? "core" : implementation.plugin;
+      if (implementation.type === "entity") continue;
+      const pluginName = implementation.type === "plugin" ? implementation.plugin : "core";
       const restProjection = authored.interfaces.rest;
       if (restProjection === undefined || restProjection === false) {
         throw new Error(
@@ -835,7 +839,8 @@ export function collectAuthoredEntityPluginOperations(
         key: authored.id,
         title: authoredText(definition.name),
         description: [authoredText(definition.description), authoredText(definition.guidance?.assistant ?? '')].filter(Boolean).join(' '),
-        handler: implementation.type === "collection" ? "collectionMutation" : implementation.handler,
+        handler: implementation.type === "plugin" ? implementation.handler :
+          implementation.type === "collection" ? "collectionMutation" : "ownedDelete",
         target: {
           entityId: authored.entityId,
           entityName: authored.entityName,
@@ -904,6 +909,12 @@ export function collectAuthoredEntityPluginOperations(
       if (implementation.type === "collection") nativeBindings.set(operation, {
         type: "collection", entityName: authored.entityName, field: implementation.field, action: implementation.action,
       });
+      if (implementation.type === "ownedDelete") {
+        if (!manifest) throw new Error(`Owned delete ${authored.id} needs the composed storage manifest.`);
+        const plan = compileOwnedDeletePlan(authored.entityName, entities.map((entry) => entry.contract), manifest.tables, implementation.counts, implementation.includeReferences);
+        bindOwnedDeleteGuards([plan], manifest.tables, ownedDeleteGuards);
+        nativeBindings.set(operation, { type: "ownedDelete", plan });
+      }
       if (contract.source && authored.key === "get") resultProjections.set(operation, {
         kind: "entity-record", entityName: authored.entityName, idField: "id",
       });
@@ -1268,7 +1279,7 @@ export function assertOperationRuntimeModules(
 ): void {
   const available = new Set(runtimeModuleNames);
   for (const operation of operations) {
-    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "listColors", "listEntityTypes", "constrainedReferenceCreate", "searchApplication", "listCollectionOptions"].includes(operation.handler) ||
+    if (operation.implementation && (operation.plugin !== "core" || !["collectionMutation", "ownedDelete", "listColors", "listEntityTypes", "constrainedReferenceCreate", "searchApplication", "listCollectionOptions"].includes(operation.handler) ||
       verifiedNativeOperations.get(operation) !== JSON.stringify(operation.implementation))) {
       throw new Error(`Operation ${operation.id} has unverified native implementation metadata.`);
     }

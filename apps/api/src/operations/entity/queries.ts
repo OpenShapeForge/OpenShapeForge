@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { postgresArrayLiteral } from "../../db/sql-helpers.js";
 import { authorizationProfilePredicate } from "../../auth/authorization-profile-sql.js";
 import { auditContext, runWithAuditContext } from "../../platform/audit-context.js";
 import { authorizationListFields } from "../../auth/authorization-profile-decision.js";
@@ -106,20 +107,6 @@ function membershipSqlType(columnType: string): string {
     );
   }
   return columnType;
-}
-
-function postgresArrayLiteral(values: unknown[]): string {
-  // Bun/kysely serializes a JS array as a comma-joined scalar, which Postgres
-  // rejects for a typed [] cast. Bind the Postgres array text form instead.
-  return `{${values.map(postgresArrayElement).join(",")}}`;
-}
-
-function postgresArrayElement(value: unknown): string {
-  if (value === null || value === undefined) return "NULL";
-  if (typeof value === "boolean") return value ? "t" : "f";
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  const text = String(value);
-  return `"${text.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"`;
 }
 
 function membershipCondition(columnName: string, values: unknown[], columnType: string) {

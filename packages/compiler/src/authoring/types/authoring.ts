@@ -475,12 +475,47 @@ export interface EntityWebRecordLayout {
   context?: { fields: string[]; relationships?: string[]; contacts?: import("./views.js").ContactContextPresentation; records?: import("./views.js").RelatedRecordContextPresentation[] };
 }
 
+/** A pivot of this entity's own records: one row and column per distinct key, the measure summed. */
+export type RecordMatrixDefinition = { rowField: string; columnField: string; valueField: string; aggregate: "sum" };
+
+/** One value kind shown in every period of an operation matrix, e.g. budget, last year and their difference. */
+export type MatrixMeasureDefinition = {
+  /** Property of each cell in the read Operation's result. */
+  key: string;
+  label: LocalizedText | string;
+  /** Compact column heading; defaults to the label. */
+  heading?: LocalizedText | string;
+  format: "amount" | "percentage";
+  align?: "start" | "center" | "end";
+  /** Cells of this measure take input through `apply`. */
+  editable?: boolean;
+};
+
+/**
+ * A matrix the server computes: `read` returns rows, periods and one cell per row and period, with
+ * formulas, totals and comparisons already evaluated; `apply` writes rows and cells against the
+ * revision `read` returned. Both are qualified Operation ids (`Entity.operation`).
+ */
+export type OperationMatrixDefinition = {
+  source: "operation";
+  read: string;
+  apply?: string;
+  /** Rows nest through this single field of the view's entity. */
+  rows?: { parentField: string };
+  /** An empty list shows row names only. */
+  measures: MatrixMeasureDefinition[];
+  /** Heading of a leading column group that totals all periods. */
+  total?: LocalizedText | string;
+  /** Entities whose changes make the shown matrix stale, besides the view's own entity. */
+  refresh?: string[];
+};
+
 export type EntityWebNamedViewDefinition =
     | { kind: "record"; title?: string; fields: string[] }
     /** `actions: [update]` makes the fields in this view's own layout editable through the entity's canonical update Operation. */
     | { kind: "record"; title?: string; layout: EntityWebRecordLayout; actions?: Array<"update"> }
     | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; route?: string | LocalizedText; title?: LocalizedText; filter?: Record<string, unknown>; tree?: { children: string; parent?: string; label?: string; count?: string; through?: { record: string; orderBy?: string } }; table?: CollectionTableDefinition; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
-    | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
+    | { kind: "collection"; collectionLayout: "matrix"; matrix: RecordMatrixDefinition | OperationMatrixDefinition };
 
 
 export type CollectionTableValueDefinition = {

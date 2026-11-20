@@ -436,6 +436,41 @@ export type WebRecordTab = {
   targetView?: string;
 };
 
+/** A pivot of the target's own records: one row and column per distinct key, the measure summed in the browser. */
+export type WebRecordMatrix = { rowField: string; columnField: string; valueField: string; aggregate: "sum" };
+
+/** One value kind shown in every period of an operation matrix. */
+export type WebMatrixMeasure = {
+  /** Property of each cell in the read Operation's result. */
+  key: string;
+  label: LocalizedText;
+  /** Compact column heading. */
+  heading: LocalizedText;
+  format: "amount" | "percentage";
+  align: "start" | "center" | "end";
+  /** Cells of this measure take input through `apply`. */
+  editable: boolean;
+};
+
+/**
+ * A matrix the server computes. `read` and `apply` are canonical Operation ids: the browser invokes
+ * them and never evaluates a formula, a total or a comparison itself.
+ */
+export type WebOperationMatrix = {
+  source: "operation";
+  read: string;
+  apply?: string;
+  rows?: { parentField: string };
+  /** An empty list shows row names only. */
+  measures: WebMatrixMeasure[];
+  /** Heading of a leading column group that totals all periods. */
+  total?: LocalizedText;
+  /** Entities whose changes make the shown matrix stale, the view's own entity included. */
+  refresh: string[];
+};
+
+export type WebMatrixDefinition = WebRecordMatrix | WebOperationMatrix;
+
 export type WebRecordView = {
   id: string;
   kind: "record";
@@ -486,7 +521,7 @@ export type WebNamedView =
       layout: { tabs: WebRecordTab[] };
     }
   | { kind: "collection"; collectionLayout: "table" | "tabs" | "stack"; itemView?: string; tabLabel?: string; showItemTitle?: boolean }
-  | { kind: "collection"; collectionLayout: "matrix"; matrix: { rowField: string; columnField: string; valueField: string; aggregate: "sum" } };
+  | { kind: "collection"; collectionLayout: "matrix"; matrix: WebMatrixDefinition };
 
 export type WebEntityView = WebCollectionView | WebRecordView | WebNamedView;
 

@@ -1366,8 +1366,21 @@ function projectEntity(
       }, all, providers);
       return [name, { ...projected.views.collection, ...(definition.filter ? { filter: definition.filter } : {}), id: `${entityName}.${name}`, collectionLayout: "table" as const }];
     }
+    if (definition.kind === "collection" && definition.collectionLayout === "matrix" && "source" in definition.matrix) {
+      const { read, apply, rows, measures, total, refresh = [] } = definition.matrix;
+      if (rows && (!fields[rows.parentField]?.supports.read || fields[rows.parentField]?.cardinality !== "one")) throw new Error(`${entityName}.${name}: matrix field ${rows.parentField} must be readable and single.`);
+      return [name, { kind: "collection" as const, collectionLayout: "matrix" as const, matrix: {
+        source: "operation" as const, read, ...(apply ? { apply } : {}), ...(rows ? { rows } : {}),
+        measures: measures.map(measure => ({
+          key: measure.key, label: localized(measure.label, measure.key), heading: localized(measure.heading ?? measure.label, measure.key),
+          format: measure.format, align: measure.align ?? "end", editable: measure.editable ?? false,
+        })),
+        ...(total ? { total: localized(total, "Total") } : {}),
+        refresh: [...new Set([entityName, ...refresh])],
+      } }];
+    }
     if (definition.kind === "collection" && definition.collectionLayout === "matrix") {
-      const { rowField, columnField, valueField } = definition.matrix;
+      const { rowField, columnField, valueField } = definition.matrix as import("./types.js").RecordMatrixDefinition;
       for (const key of [rowField, columnField, valueField]) {
         if (!fields[key]?.supports.read || fields[key]?.cardinality !== "one") throw new Error(`${entityName}.${name}: matrix field ${key} must be readable and single.`);
       }
@@ -2194,6 +2207,22 @@ export function buildWebManifest(
   }
   const projected = projectable.map((entity) => entity.contract.source
     ? providers.get(entity.contract.entity.name)! : projectEntity(entity, byName, providers));
+  // An operation matrix names Operations and entities by id. They need no Web projection of their
+  // own, so they are checked against every compiled entity rather than the projectable ones.
+  const compiled = new Map(entities.map(({ contract }) => [contract.entity.name, contract]));
+  for (const entity of projected) for (const [name, view] of Object.entries(entity.views.named ?? {})) {
+    if (view.kind !== "collection" || !("collectionLayout" in view) || view.collectionLayout !== "matrix" || !("source" in view.matrix)) continue;
+    const at = `${entity.entityId}.${name}`, { read, apply, refresh } = view.matrix;
+    const effect = (role: string, id: string) => {
+      const [owner, key] = id.split(".");
+      const found = compiled.get(owner!)?.pluginOperations?.find(candidate => candidate.key === key);
+      if (!found) throw new Error(`${at}: matrix ${role} names unknown Operation ${id}.`);
+      return found.definition.effects?.data;
+    };
+    if (effect("read", read) !== "read") throw new Error(`${at}: matrix read Operation ${read} must only read.`);
+    if (apply && effect("apply", apply) === "read") throw new Error(`${at}: matrix apply Operation ${apply} must write.`);
+    for (const refreshed of refresh) if (!compiled.has(refreshed)) throw new Error(`${at}: matrix refresh names unknown entity ${refreshed}.`);
+  }
   if (extensionRegistry) withCustomFields(projected, byName, extensionRegistry);
   const defaultTimeZone = options.createDefaults?.timeZone;
   // Reading uses the same authored catalog labels as editing. Keep the source

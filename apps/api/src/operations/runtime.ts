@@ -45,9 +45,11 @@ import type {
   RuntimeOperationRequest,
 } from "@openshapeforge/plugin-runtime";
 import {
+  compactRecordOffers,
   isOperationAccepted,
   operationFailure,
   type OperationEnvelope,
+  type OperationOffer,
   type OperationError,
   type OperationPrerequisite,
 } from "@openshapeforge/operations";
@@ -2148,6 +2150,28 @@ export function registerOperationRestRoutes(
 const addressable = <T extends { id: string }>(definitions: readonly T[]): T[] =>
   definitions.filter((definition) => !isWithheldOperation(definition.id));
 
+/**
+ * The record offers of a list page in the compact format, when the caller
+ * asked for it (`offerFormat: "compact"`, see @openshapeforge/operations
+ * compact-offers.ts). Every other answer — a failure, an acceptance, a
+ * non-list result — is returned as it is, and so is a page of any other shape.
+ */
+export function projectRecordOfferFormat(
+  result: RuntimeOperationExecutionResult,
+  format: "full" | "compact" | undefined,
+): RuntimeOperationExecutionResult {
+  if (format !== "compact" || !result || typeof result !== "object" || "error" in result || isOperationAccepted(result)) return result;
+  const data = (result as { data?: unknown }).data as { items?: unknown } | null | undefined;
+  const items = data && typeof data === "object" ? data.items : undefined;
+  if (!Array.isArray(items) || !items.every((item) => item && typeof item === "object" &&
+    Object.hasOwn(item, "data") && Array.isArray((item as { operations?: unknown }).operations))) return result;
+  const compact = compactRecordOffers(items as { data: unknown; operations: OperationOffer[] }[]);
+  return {
+    ...result,
+    data: { ...data, items: compact.items, offerFormat: "compact", offerTemplates: compact.offerTemplates },
+  } as RuntimeOperationExecutionResult;
+}
+
 function executeForCaller(
   platform: ModulePlatformServices,
   session: TrustedSessionContext,
@@ -2296,6 +2320,13 @@ export function registerRuntimeOperationRestRoutes(
             "Expected Operation contract fingerprint is invalid.",
           );
         }
+        const offerFormat = body.offerFormat;
+        if (offerFormat !== undefined && offerFormat !== "full" && offerFormat !== "compact") {
+          throw new HttpError(400, "BAD_USER_INPUT", "offerFormat must be \"full\" or \"compact\".");
+        }
+        if (offerFormat === "compact" && body.intent !== "list") {
+          throw new HttpError(400, "BAD_USER_INPUT", "offerFormat \"compact\" applies to a list only.");
+        }
         const idempotencyKey = request.headers["idempotency-key"];
         if (idempotencyKey !== undefined && typeof idempotencyKey !== "string") {
           throw new HttpError(
@@ -2318,7 +2349,7 @@ export function registerRuntimeOperationRestRoutes(
         );
         // Taken over by an operation override: answered, not yet in effect.
         if (isOperationAccepted(result)) return reply.status(202).send(result);
-        return result;
+        return projectRecordOfferFormat(result, offerFormat);
       } catch (error) {
         return failed(reply, error);
       }

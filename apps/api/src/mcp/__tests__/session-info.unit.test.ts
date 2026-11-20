@@ -128,11 +128,9 @@ describe("buildSessionInfo", () => {
     expect(info.email).toBe("alex@example.com");
     expect(info.organization).toBe("Acme");
     expect(info.role).toBe("Organization administrator");
-    expect(info.permissions).toEqual([
-      "Advies.All.ReadWrite",
-      "integration_admin",
-      "Relations.All.ReadWrite",
-    ]);
+    // A named role stands for its permissions: their number, not their names.
+    expect(info.permissions).toBeUndefined();
+    expect(info.permissionCount).toBe(3);
     expect(info.groups).toEqual([{ name: "Acme", active: true }]);
     expect(info.signedInVia).toBe("Codex");
     expect(info.accessTokenExpiresAt).toBe("2026-09-04T10:12:00.000Z");
@@ -166,7 +164,8 @@ describe("buildSessionInfo", () => {
     });
 
     expect(info.role).toBe("Employee");
-    expect(info.permissions).toEqual(["Advies.All.Read"]);
+    expect(info.permissions).toBeUndefined();
+    expect(info.permissionCount).toBe(1);
     expect(info.signedInVia).toBe("Atlas");
     expect(info.summary).toStartWith(
       "You are Alex Dev, employee of Acme, signed in via Atlas.",
@@ -642,7 +641,7 @@ describe("the language a person reads", () => {
     const info = buildSessionInfo({ ...base, identity });
     expect(info.language.tag).toBe("nl");
     // The language is not a permission: it appears nowhere near roles.
-    expect(info.permissions).not.toContain("nl");
+    expect(info.permissions ?? []).not.toContain("nl");
     expect(info.role).not.toContain("nl");
   });
 

@@ -136,8 +136,15 @@ export type SessionInfo = {
   organization: string | null;
   /** "Organization administrator", "Employee", or the raw role list. */
   role: string;
-  /** The permission names behind the role, e.g. `Advies.All.ReadWrite`. */
-  permissions: string[];
+  /**
+   * The permission names, e.g. `Advies.All.ReadWrite`, when no named role
+   * stands for them. Behind a named role they are left out: an administrator
+   * has hundreds, the role says what they amount to, and `permissionCount`
+   * says how many.
+   */
+  permissions?: string[];
+  /** How many permissions the person has, named here or not. */
+  permissionCount: number;
   /** The organizations (groups) the person belongs to; exactly one is active. */
   groups: Array<{ name: string; active: boolean }>;
   /**
@@ -326,7 +333,8 @@ export function buildSessionInfo(input: SessionInfoInput): SessionInfo {
     email: identity.email,
     organization: organizationName,
     role,
-    permissions,
+    ...(composite ? {} : { permissions }),
+    permissionCount: permissions.length,
     groups,
     language: { tag: locale.tag, name: locale.name, source: locale.source },
     signedInVia,

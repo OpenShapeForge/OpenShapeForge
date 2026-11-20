@@ -2,8 +2,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   API_KEY_MANAGE_ROLE,
+  INTEGRATION_KEY_CREATE_ROLE,
+  PERSONAL_KEY_CREATE_ROLE,
   ApiKeyAuthorizationError,
+  assertMayCreateIntegration,
+  assertMayCreatePersonalKey,
   assertMayGrantRoles,
+  assertMayHoldPersonalKeys,
   assertMayManageApiKeys,
   type CeilingSession,
 } from "./ceiling.js";
@@ -179,4 +184,21 @@ describe("assertMayManageApiKeys", () => {
       assertMayManageApiKeys({ roles: [API_KEY_MANAGE_ROLE], credential: "api-key" }),
     ).toThrow(/API keys cannot manage API keys/);
   });
+});
+
+test("creation-only roles admit the matching verified person without granting key management", () => {
+  const person = { credential: "bearer", principalKind: "person" } as const;
+  const integration = { ...person, roles: [INTEGRATION_KEY_CREATE_ROLE] };
+  const personal = { ...person, roles: [PERSONAL_KEY_CREATE_ROLE] };
+
+  expect(() => assertMayCreateIntegration(integration, [])).not.toThrow();
+  expect(() => assertMayCreatePersonalKey(personal, [])).not.toThrow();
+  expect(() => assertMayCreateIntegration(personal, [])).toThrow(ApiKeyAuthorizationError);
+  expect(() => assertMayCreatePersonalKey(integration, [])).toThrow(ApiKeyAuthorizationError);
+  expect(() => assertMayManageApiKeys(integration)).toThrow(ApiKeyAuthorizationError);
+  expect(() => assertMayHoldPersonalKeys(personal)).toThrow(ApiKeyAuthorizationError);
+  expect(() => assertMayCreateIntegration(integration, ["Finance.All.Read"])).toThrow(ApiKeyAuthorizationError);
+  expect(() => assertMayCreatePersonalKey(personal, ["Finance.All.Read"])).toThrow(ApiKeyAuthorizationError);
+  expect(() => assertMayCreateIntegration({ ...integration, principalKind: "service" }, [])).toThrow(ApiKeyAuthorizationError);
+  expect(() => assertMayCreatePersonalKey({ ...personal, credential: "personal-key" }, [])).toThrow(ApiKeyAuthorizationError);
 });

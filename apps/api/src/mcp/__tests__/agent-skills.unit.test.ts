@@ -58,9 +58,11 @@ describe("MCP Agent Skills", () => {
         const uri = "skill://osf/implementing-api-keys/SKILL.md";
         expect((await client.listResources()).resources.map((resource) => resource.uri)).toEqual([uri]);
         const result = await client.readResource({ uri });
-        expect(result.contents[0]).toMatchObject({ uri, mimeType: "text/markdown" });
-        expect(result.contents[0]?.text).toContain("/api/rest/docs");
-        expect(result.contents[0]?.text).toContain("/api/rest/openapi.json");
+        const content = result.contents[0]!;
+        expect(content).toMatchObject({ uri, mimeType: "text/markdown" });
+        const guide = "text" in content ? content.text : "";
+        expect(guide).toContain("/api/rest/docs");
+        expect(guide).toContain("/api/rest/openapi.json");
       }, [API_KEY_AGENT_SKILL_MODULE]);
     }
   });

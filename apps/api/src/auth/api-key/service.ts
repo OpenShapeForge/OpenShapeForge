@@ -265,6 +265,7 @@ export async function createIntegration(
   input: CreateIntegrationInput,
   now: Date = new Date(),
 ): Promise<CreatedIntegration> {
+  assertMayCreateIntegration(session);
   const roleSubset = roleSubsetOrThrow(input.roleSubset);
   assertMayCreateIntegration(session, [...input.roles, ...(roleSubset ?? [])]);
   if (input.roles.length === 0 && !deps.admin.hasApiAudience) {

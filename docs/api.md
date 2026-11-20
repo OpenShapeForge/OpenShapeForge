@@ -708,8 +708,9 @@ the API runtime, `OPENSHAPEFORGE_API_KEY_TOKEN_URL` can name the trusted realm's
 internal token endpoint. Without it, the endpoint is derived from the public
 issuer. Token verification still pins the configured issuer and audience.
 Provisioning lives at `/api/api-keys` and
-on the GraphQL surface, gated by `Platform.ApiKeys.Manage` and by a privilege
-ceiling — a caller cannot grant roles it does not hold, and only a session this
+on the GraphQL surface. Management requires `Platform.ApiKeys.Manage`.
+`Platform.ApiKeys.IntegrationCreate` also authorizes creating an integration and
+its first key via REST or MCP. A caller can grant only roles it holds, and only a session this
 deployment can show to be a PERSON may manage keys at all. That carrier rule is
 decided before any role (`auth/api-key/ceiling.ts`) and it asks ONE question of
 the two admitted carriers: did this deployment classify the principal as a
@@ -1195,18 +1196,18 @@ credential: no API key, personal or not, reaches any key management
 (`auth/api-key/ceiling.ts`), and OAuth-scoped Operations refuse it as they
 refuse an integration key.
 
-**Who sees and manages them.** Three rights, all `Platform.*` client roles so
-no entity grant confers them, deliberately separate:
+**Who sees and manages them.** Personal API-key permissions are `Platform.*` client roles.
 
 | Role | Grants |
 |---|---|
 | `Platform.ApiKeys.Personal` | Mint, list, read and revoke your OWN personal keys. |
+| `Platform.ApiKeys.PersonalCreate` | Mint your own personal key through REST or MCP. An administrator with `PersonalRevoke` can retire that key. |
 | `Platform.ApiKeys.PersonalRead` | See every person's personal keys in the organization — metadata only. |
 | `Platform.ApiKeys.PersonalRevoke` | Revoke any person's personal key in the organization. |
 
 Nobody mints a key for somebody else; there is no Operation for it. Holding
-`Platform.ApiKeys.Manage` (integrations) confers none of the three. The shipped
-`org_admin` composite carries all three and `org_employee` carries the first.
+The shipped `org_admin` composite carries `Personal`, `PersonalRead` and
+`PersonalRevoke`. The `org_employee` composite carries `Personal`.
 The service states the owner or oversight predicate on every statement, and RLS
 on `platform.personal_api_keys` (`db/migrations/api-keys.ts`) carries the same
 one: a session reads its own rows, or every row of its tenant with an oversight
@@ -1222,7 +1223,7 @@ plugin), REST under `/api/personal-api-keys/*` and MCP:
 |---|---|---|
 | `api-keys.list-my-personal-keys` | `POST mine/list` | `Personal` |
 | `api-keys.get-my-personal-key` | `POST mine/get` | `Personal` |
-| `api-keys.create-my-personal-key` | `POST mine/create` | `Personal` |
+| `api-keys.create-my-personal-key` | `POST mine/create` | `Personal` or `PersonalCreate` |
 | `api-keys.revoke-my-personal-key` | `POST mine/revoke` | `Personal` |
 | `api-keys.list-personal-keys` | `POST list` | `PersonalRead` |
 | `api-keys.get-personal-key` | `POST get` | `PersonalRead` |

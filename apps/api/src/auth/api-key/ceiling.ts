@@ -2,17 +2,9 @@
 /**
  * The privilege ceiling: nobody may grant what they do not hold.
  *
- * This is the security control of the provisioning surface, and it exists as
- * ONE function on purpose. The canonical failure of this feature across the
- * industry is not a missing check — it is a check present on `create` and
- * absent on `update`, which lets a low-privilege credential edit itself upward
- * (Immich GHSA-237r-x578-h5mv). Every mutation path calls this; there is no
- * second implementation to drift.
- *
- * Two rules, both enforced here:
- *
- *   1. The caller must hold the management role.
- *   2. Every role being granted must already be held by the caller.
+ * Integration operations require the management role. Creating an integration
+ * and its first key also accepts the integration creation role. Creation and
+ * later role changes share the same held-role check.
  *
  * And one rule that is not about roles at all: only a session this deployment
  * can show to be a PERSON may reach this surface — whichever carrier brought
@@ -116,8 +108,7 @@ export function isVerifiedPersonSession(session: CeilingSession): boolean {
 }
 
 /**
- * Gate every API key mutation. Throws `ApiKeyAuthorizationError` — never
- * returns a boolean, so a caller cannot forget to branch on it.
+ * Gate an integration management operation that grants or changes roles.
  *
  * `requestedRoles` is the set being granted to a key or integration. Pass the
  * FULL resulting set on an update, not the delta: a check over the delta alone
@@ -132,7 +123,10 @@ export function assertMayGrantRoles(
 }
 
 /** Create a new integration and its first credential. */
-export function assertMayCreateIntegration(session: CeilingSession, requestedRoles: readonly string[]): void {
+export function assertMayCreateIntegration(
+  session: CeilingSession,
+  requestedRoles: readonly string[] = [],
+): void {
   assertKeyManagementCarrier(session);
   if (!session.roles.includes(API_KEY_MANAGE_ROLE) && !session.roles.includes(INTEGRATION_KEY_CREATE_ROLE)) {
     throw new ApiKeyAuthorizationError("Not authorized to create API key integrations.");
@@ -182,9 +176,8 @@ function assertKeyManagementCarrier(session: CeilingSession): void {
 // ---------------------------------------------------------------------------
 // Personal keys
 //
-// Three rights, kept apart on purpose (the same split Datadog and GitHub
-// make): holding keys for yourself, seeing everyone's, and withdrawing
-// anyone's. An administrator who may see every key need not be one who may
+// Personal rights distinguish creation, managing your own keys, and
+// organization-wide read and revoke permissions. An administrator who may see every key need not be one who may
 // cut a colleague off, and neither right lets anyone mint a key for somebody
 // else — there is no Operation for that at all.
 //

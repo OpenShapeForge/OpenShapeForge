@@ -3,9 +3,11 @@
 # request — optionally narrowed, never widened — and which stop working when
 # the person's membership is blocked or their account is disabled.
 #
-# Two audiences, three rights (apps/api/src/auth/api-key/ceiling.ts):
+# Four rights (apps/api/src/auth/api-key/ceiling.ts):
 #   - the owner: Platform.ApiKeys.Personal — mint, list and revoke their OWN
-#     keys. Nobody mints a key for somebody else; there is no Operation for it.
+#     keys. Nobody mints a key for somebody else.
+#   - a creation-only caller: Platform.ApiKeys.PersonalCreate — mint a key
+#     for themselves through REST or MCP. Administrative revocation is available.
 #   - an administrator: Platform.ApiKeys.PersonalRead to see every person's
 #     keys (metadata only, never the secret) and Platform.ApiKeys.PersonalRevoke
 #     to withdraw any of them. The owner sees such a key as revoked by an
@@ -194,12 +196,10 @@ operations:
       en: Create a personal API key that acts as you, with the roles you hold at the time of each request. Copy
         the key when it appears; you cannot view it again later. It stops working when it expires, when you
         revoke it, when an administrator revokes it, or when your access to this organization ends.
-        For implementation, read the MCP resource skill://osf/implementing-api-keys/SKILL.md.
       nl: Maak een persoonlijke API-sleutel die namens jou handelt, met de rollen die je op het moment van elk
         verzoek hebt. Kopieer de sleutel zodra hij verschijnt; je kunt hem later niet opnieuw bekijken. Hij werkt
         niet meer zodra hij verloopt, als jij of een beheerder hem intrekt, of als je toegang tot deze organisatie
         eindigt.
-        Lees voor de implementatie de MCP-resource skill://osf/implementing-api-keys/SKILL.md.
     implementation: { type: plugin, plugin: osf-api-keys, handler: createMyPersonalKey }
     input:
       schema:

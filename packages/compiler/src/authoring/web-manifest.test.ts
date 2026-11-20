@@ -2191,7 +2191,11 @@ test("board card paths preserve related entity type and collection cardinality",
   const line = entity("Line", "line", [field("productId", { osfType: "Product" })], coreView(), [{ key: "productId", fieldKey: "productId", kind: "belongsTo", target: "Product", foreignKey: "product_id" }]);
   const product = entity("Product", "product", [field("displayName")], coreView());
   owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", subtitle: ["lines.productId"], body: ["lines.productId", "lines.productId.displayName"] } };
+  owner.contract.interfaces!.web!.namedViews = { list: { kind: "collection", collectionLayout: "table", route: "/deals/list" } };
   const build = () => buildWebManifest([owner, line, product]);
+  const list = build().entities.Deal!.views.named!.list;
+  expect(list).toMatchObject({ route: "/deals/list" });
+  expect(list).not.toHaveProperty("board");
   expect(build().entities.Deal!.views.collection.board!.card.subtitle![0]).toMatchObject({ targetEntityId: "Product", cardinality: "many" });
   expect(build().entities.Deal!.views.collection.board!.card.title).toMatchObject([{ field: "displayName" }]);
   owner.contract.interfaces!.web!.collectionBoard!.card.title = ["productId", "displayName"];

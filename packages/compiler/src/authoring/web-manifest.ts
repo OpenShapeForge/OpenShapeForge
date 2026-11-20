@@ -1359,7 +1359,7 @@ function projectEntity(
       if (definition.collectionLayout !== "table") throw new Error(`${entityName}.${name}: a routed collection requires table layout.`);
       const route = projectedRoute(definition.route, source.routeLocale ?? "en", source.route);
       if (route === source.route) throw new Error(`${entityName}.${name}: a named collection route must differ from the default route.`);
-      const { namedViews: _named, collectionTree: _tree, collectionTable: _table, collectionFilter: _filter, ...web } = contract.interfaces!.web!;
+      const { namedViews: _named, collectionTree: _tree, collectionTable: _table, collectionFilter: _filter, collectionBoard: _board, ...web } = contract.interfaces!.web!;
       const projected = projectEntity({ ...source, route,
         collection: { ...source.collection, route, title: localized(definition.title, source.collection.title.en) },
         contract: { ...contract, interfaces: { ...contract.interfaces, web: { ...web, ...(definition.tree ? { collectionTree: definition.tree } : {}), ...(definition.table ? { collectionTable: definition.table } : {}) } } },

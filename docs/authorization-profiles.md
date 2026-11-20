@@ -59,7 +59,18 @@ The caller cannot supply the actor input.
 
 ## Rollout
 
-Unmanaged Operations retain their authored defaults. On first activation for an
+For Operations using application defaults, a published profile assigned to an
+API integration can grant a grantable entity list or get Operation to that
+integration. Its conditions apply to that integration's records, including if
+the key also holds an authored role. Calls with no matching integration profile
+continue to use the authored defaults. Managed Operations still use their
+configured profiles and list projection. For a scoped integration read under
+defaults, the normal Operation field projection and record policies still
+apply. See Authorization Profile Assignments for the integration-specific
+audience on an Operation labelled as using defaults. Direct grants without a
+published profile still require managed mode.
+
+Other unmanaged Operations retain their authored defaults. On first activation for an
 entity, the existing Operation inventory is retained as explicit default states.
 An unknown Operation on a managed entity is closed until reviewed. On an
 unmanaged entity it retains its application defaults. The Security view identifies

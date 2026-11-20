@@ -177,12 +177,21 @@ async function applyAuthorizationSession<T>(trx: Transaction<T>): Promise<void> 
       rules := app.authorization_rules_for_actor();
       if not locked and (rules->'states'->current_setting('app.audit_operation',true)->>'managed'='true' or exists(select 1 from jsonb_array_elements_text(coalesce(nullif(current_setting('app.audit_read_operations',true),''),'[]')::jsonb) dependency where rules->'states'->dependency->>'managed'='true')) then
         perform pg_advisory_xact_lock_shared(hashtextextended('osf.authorization:'||app.current_tenant()::text,0));
+        locked := true;
         -- A withdrawal may have committed while admission waited for its lock.
         rules := app.authorization_rules_for_actor();
       end if;
+      if locked and app.current_principal_class()='application' and not app.record_action_principal_live() then
+        raise exception 'AUTHORIZATION_INTEGRATION_CREDENTIAL_INACTIVE' using errcode='42501';
+      end if;
       perform set_config('app.authorization_rules',rules::text,true);
     end if;
-  end $authorization$`.execute(trx);
+  end $authorization$`.execute(trx).catch(error => {
+    if (error instanceof Error && error.message === "AUTHORIZATION_INTEGRATION_CREDENTIAL_INACTIVE") {
+      throw operationFailure({ code: "FORBIDDEN", message: "The integration credential is inactive.", retryable: false });
+    }
+    throw error;
+  });
 }
 
 async function applyAuditSession<T>(trx: Transaction<T>, input: AuditContext | null | undefined): Promise<AuditContext> {

@@ -154,7 +154,7 @@ describe("a schema and a summary for a model", () => {
       required: ["title"],
       $defs: { title: { title: "Title", type: "string" } },
     };
-    expect(modelSchema(schema)).toEqual({
+    expect(modelSchema<unknown>(schema)).toEqual({
       ...schema,
       properties: { title: { type: "string" }, payload: { const: literal } },
       $defs: { title: { type: "string" } },

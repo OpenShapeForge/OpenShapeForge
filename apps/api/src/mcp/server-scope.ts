@@ -71,6 +71,7 @@ function createServerScopePrologue(input: {
   operationToolProjectionOverride: OperationToolProjection | undefined;
   serverIcons: Icon[] | undefined;
   includeInstructions: boolean;
+  pendingUpdates?: number | undefined;
 }) {
   const {
     db,
@@ -126,6 +127,7 @@ function createServerScopePrologue(input: {
       client: sessionClientOf(session),
       skills: skillsForSession().map(({ entry }) => ({ uri: entry.uri, description: entry.frontmatter.description })),
       peopleAndAccess: sessionMayInviteEmployees(session),
+      pendingUpdates: input.pendingUpdates,
       ...(operationToolProjection.mode === "searchable"
         ? {
             // What every request needs: how to find a capability and call it. Stated

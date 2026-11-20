@@ -31,7 +31,7 @@
 import type { ResolvedLocale } from "./locale.js";
 import { ONBOARDING_INSTRUCTION } from "./onboarding.js";
 import { connectedViaLabel, type McpClientInfo } from "./session-client.js";
-import { UPDATE_INSTRUCTION } from "./update-notices.js";
+import { updateInstruction } from "./update-notices.js";
 
 export const ENTITY_CATALOG_URI = "osf://schema/entities";
 
@@ -277,6 +277,12 @@ export type ServerInstructionsInput = {
   skills?: ReadonlyArray<{ uri: string; description: string }>;
   /** Whether this session is offered invite_employee (PEOPLE_AND_ACCESS_GUIDANCE). */
   peopleAndAccess?: boolean;
+  /**
+   * How many update notices this person has not been told, read when the
+   * session is built; undefined when it was not read, and the instructions
+   * then point at `whoami` for it.
+   */
+  pendingUpdates?: number | undefined;
   /** How this session finds and calls what the server offers, stated right after what the server is. */
   workflow?: string;
   /** What only some Operations of this session need, stated after everything a request always needs. */
@@ -334,7 +340,7 @@ export function buildServerInstructions(input: ServerInstructionsInput): string 
     ONBOARDING_INSTRUCTION +
     // ---- end first-use onboarding ----
     // ---- update notices (mcp/update-notices.ts) ----
-    UPDATE_INSTRUCTION +
+    updateInstruction(input.pendingUpdates) +
     // ---- end update notices ----
     oauthRedirectSentence(input) +
     ((input.skills?.length ?? 0) > 0

@@ -21,6 +21,7 @@ import { currentLiveRequestSignal, externalDiscoveryOf, withLiveRequestSignal } 
 import { carrySessionIdentity } from "./session-info.js";
 import { clientInfoFromEnvelopeBody, clientInfoFromInitializeBody, rememberSessionClient } from "./session-client.js";
 import { sessionOpeningSentence } from "./session-opening.js";
+import { pendingUpdateCount } from "./update-notices.js";
 import { catalogDerivedTools } from "./catalog.js";
 import { handleModernMcpRequest } from "./modern-http.js";
 import type { McpRegistrationOptions, McpRouteContext } from "./route-context.js";
@@ -145,6 +146,7 @@ export function createTransportSessions(input: {
         notifyDerivedDefinitionChanged, false, undefined,
         includeInstructions ? await sessionOpeningSentence({ db, session }) : null,
         undefined, undefined, undefined, includeInstructions,
+        includeInstructions ? await pendingUpdateCount(db, session) : undefined,
       );
       if ((request.body as { method?: unknown } | null)?.method === "server/discover") {
         await externalDiscoveryOf(server)?.discover({ signal: currentLiveRequestSignal() });
@@ -242,6 +244,8 @@ export function createTransportSessions(input: {
         undefined,
         undefined,
         await resolveServerIcons(options.modules, options.modulePlatform, statefulSession),
+        true,
+        await pendingUpdateCount(db, statefulSession),
       );
       const transport = new FastifyStreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),

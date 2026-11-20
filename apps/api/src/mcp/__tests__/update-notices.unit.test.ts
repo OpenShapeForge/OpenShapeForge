@@ -13,6 +13,7 @@ import {
   noticeFromRow,
   openItems,
   UPDATE_INSTRUCTION,
+  updateInstruction,
   UPDATES_GUIDE_TOOL,
   UPDATES_STATUS_TOOL,
   updatesGuideText,
@@ -186,6 +187,16 @@ describe("the one sentence in the server instructions", () => {
     expect(UPDATE_INSTRUCTION).toContain("personal instructions");
     // One sentence, not a paragraph.
     expect(UPDATE_INSTRUCTION.trim().split(/(?<=\.)\s+(?=[A-Z])/)).toHaveLength(1);
+  });
+
+  it("states the pending notices when the session read them, and nothing when there are none", () => {
+    // Not read: the model is told where to look.
+    expect(updateInstruction(undefined)).toBe(UPDATE_INSTRUCTION);
+    // Read, none pending: no sentence and no call spent finding out.
+    expect(updateInstruction(0)).toBe("");
+    expect(updateInstruction(1)).toContain("1 update notice is pending for this person: follow `updates_guide` before their request.");
+    expect(updateInstruction(3)).toContain("3 update notices are pending");
+    expect(updateInstruction(3)).not.toContain("whoami");
   });
 });
 

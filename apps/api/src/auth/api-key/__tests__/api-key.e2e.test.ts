@@ -673,7 +673,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
     expect(graphqlOperationErrorCode((await write(readOnly)).body, "createRelation")).toBe("FORBIDDEN");
   }, 60_000);
 
-  test("a user without the management role cannot provision at all", async () => {
+  test("a user with neither integration creation nor management permission cannot provision", async () => {
     // A real seeded identity, broadly privileged on business data and holding
     // no Platform.* role — the shape an ordinary employee has.
     const ordinaryUser = await userToken("tenant-a-user");
@@ -684,7 +684,7 @@ describe.skipIf(!ready)("API keys end to end", () => {
       ordinaryUser,
     );
     expect(refused.status).toBe(403);
-    expect(refused.body.error.message).toContain("Not authorized to manage API keys");
+    expect(refused.body.error.code).toBe("FORBIDDEN");
   }, 30_000);
 
   test("the GraphQL surface mirrors REST, ceiling included", async () => {

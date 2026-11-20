@@ -3,9 +3,11 @@
 # request — optionally narrowed, never widened — and which stop working when
 # the person's membership is blocked or their account is disabled.
 #
-# Two audiences, three rights (apps/api/src/auth/api-key/ceiling.ts):
+# Four rights (apps/api/src/auth/api-key/ceiling.ts):
 #   - the owner: Platform.ApiKeys.Personal — mint, list and revoke their OWN
-#     keys. Nobody mints a key for somebody else; there is no Operation for it.
+#     keys. Nobody mints a key for somebody else.
+#   - a creation-only caller: Platform.ApiKeys.PersonalCreate — mint a key
+#     for themselves through REST or MCP. Administrative revocation is available.
 #   - an administrator: Platform.ApiKeys.PersonalRead to see every person's
 #     keys (metadata only, never the secret) and Platform.ApiKeys.PersonalRevoke
 #     to withdraw any of them. The owner sees such a key as revoked by an
@@ -273,7 +275,7 @@ operations:
                 format: date-time
                 x-osf-i18n: { title: { en: Expires, nl: Verloopt } }
             x-osf-i18n: { title: { en: New API key, nl: Nieuwe API-sleutel } }
-    auth: *ownAuth
+    auth: { mode: session, roles: [Platform.ApiKeys.Personal, Platform.ApiKeys.PersonalCreate] }
     tenancy: { mode: required }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }

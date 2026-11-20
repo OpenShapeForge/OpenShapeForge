@@ -49,6 +49,7 @@ import {
   type SortColumn,
 } from "./catalog-page.js";
 import {
+  assertMayCreateIntegration,
   assertMayGrantRoles,
   assertMayManageApiKeys,
   type CeilingSession,
@@ -264,9 +265,9 @@ export async function createIntegration(
   input: CreateIntegrationInput,
   now: Date = new Date(),
 ): Promise<CreatedIntegration> {
-  assertMayManageApiKeys(session);
+  assertMayCreateIntegration(session);
   const roleSubset = roleSubsetOrThrow(input.roleSubset);
-  assertMayGrantRoles(session, [...input.roles, ...(roleSubset ?? [])]);
+  assertMayCreateIntegration(session, [...input.roles, ...(roleSubset ?? [])]);
   if (input.roles.length === 0 && !deps.admin.hasApiAudience) {
     throw new ApiKeyValidationError("Role-free integrations require a configured API verifier audience.");
   }

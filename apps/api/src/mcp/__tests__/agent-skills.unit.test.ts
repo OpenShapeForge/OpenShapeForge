@@ -7,6 +7,7 @@ import { Server, fromJsonSchema } from "@modelcontextprotocol/server";
 import { NodeStreamableHTTPServerTransport } from "@modelcontextprotocol/node";
 import type { RuntimeModule } from "../../modules/contract.js";
 import { projectAgentSkills, visibleAgentSkills, readAgentSkillResource, registerAgentSkillHandlers, SKILLS_EXTENSION } from "../agent-skills.js";
+import { API_KEY_AGENT_SKILL_MODULE } from "../api-key-agent-skill.js";
 import { handleModernMcpRequest } from "../modern-http.js";
 
 const markdown = "---\nname: sync-records\ndescription: Sync records from a source.\nmetadata:\n  audience: author\n---\n# Sync\nUse the source identity. Één bron.\n";
@@ -18,8 +19,8 @@ const module: RuntimeModule = {
   } }],
 };
 
-function serverFor(roles: string[]) {
-  const allSkills = projectAgentSkills([module]);
+function serverFor(roles: string[], modules = [module]) {
+  const allSkills = projectAgentSkills(modules);
   const skillsForSession = () => visibleAgentSkills(allSkills, roles);
   const server = new Server({ name: "skill-test", version: "1" }, {
     capabilities: { resources: {}, tools: {}, extensions: { [SKILLS_EXTENSION]: {} } },
@@ -35,8 +36,8 @@ function serverFor(roles: string[]) {
   return server;
 }
 
-async function withClient(roles: string[], work: (client: Client) => Promise<void>) {
-  const server = serverFor(roles);
+async function withClient(roles: string[], work: (client: Client) => Promise<void>, modules?: RuntimeModule[]) {
+  const server = serverFor(roles, modules);
   const client = new Client({ name: "skill-reader", version: "1" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   try {
@@ -51,6 +52,21 @@ async function withClient(roles: string[], work: (client: Client) => Promise<voi
 
 const anyResult = fromJsonSchema<Record<string, unknown>>({ type: "object", additionalProperties: true });
 describe("MCP Agent Skills", () => {
+  it("serves the API key guide to create-only roles with the live REST contract pointers", async () => {
+    for (const role of ["Platform.ApiKeys.IntegrationCreate", "Platform.ApiKeys.PersonalCreate"]) {
+      await withClient([role], async (client) => {
+        const uri = "skill://osf/implementing-api-keys/SKILL.md";
+        expect((await client.listResources()).resources.map((resource) => resource.uri)).toEqual([uri]);
+        const result = await client.readResource({ uri });
+        const content = result.contents[0]!;
+        expect(content).toMatchObject({ uri, mimeType: "text/markdown" });
+        const guide = "text" in content ? content.text : "";
+        expect(guide).toContain("/api/rest/docs");
+        expect(guide).toContain("/api/rest/openapi.json");
+      }, [API_KEY_AGENT_SKILL_MODULE]);
+    }
+  });
+
   it("publishes complete manifests whose digest and byte size match the readable content", async () => {
     await withClient(["Workflow.All.Manage"], async (client) => {
       const result = await client.request({ method: "skills/list", params: {} }, anyResult);

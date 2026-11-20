@@ -324,10 +324,13 @@ clientRoles:
     # Platform.* role, so it is never emitted by an entity's authorization
     # block and cannot be acquired through ordinary business access.
     - Platform.ApiKeys.Manage
+    # Create an integration and its first key through REST or MCP.
+    - Platform.ApiKeys.IntegrationCreate
     # Personal API keys (operations/personal-api-keys.yaml): hold your own
-    # keys, see everyone's, revoke anyone's. Three roles because they are
-    # three different trusts; all Platform.*, so no entity grant confers them.
+    # keys, create your own, see everyone's, or revoke anyone's.
+    # The create-only right is for REST and MCP callers.
     - Platform.ApiKeys.Personal
+    - Platform.ApiKeys.PersonalCreate
     - Platform.ApiKeys.PersonalRead
     - Platform.ApiKeys.PersonalRevoke
     # Grants the durable job queue's operator surface (jobs.list / jobs.get /

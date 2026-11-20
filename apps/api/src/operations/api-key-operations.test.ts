@@ -340,6 +340,21 @@ describe("integration catalog Operations", () => {
       expect(ONE_TIME_CREDENTIAL_HEADERS["cache-control"]).toContain("no-store");
     });
 
+    test("an integration creation role can mint the first key and cannot manage the integration", async () => {
+      const session = sessionFor({ roles: ["Platform.ApiKeys.IntegrationCreate"] });
+      const store = fixtureStore();
+      const created = value((await run("createIntegration", {
+        displayName: "Creation-only integration", roles: [],
+      }, { store, session })).result);
+      expect(created.credential.secret).toBeString();
+      const blocked = failure((await run("listIntegrations", {}, { store, session })).result);
+      expect(blocked).toMatchObject({ status: 403, code: "FORBIDDEN" });
+      const issued = failure((await run("issueCredential", {
+        integrationId: created.integration.integrationId, displayName: "Second key",
+      }, { store, session })).result);
+      expect(issued).toMatchObject({ status: 403, code: "FORBIDDEN" });
+    });
+
     test("holds the privilege ceiling on the roles it would grant", async () => {
       const store = fixtureStore();
       const refused = failure((await run("createIntegration", {

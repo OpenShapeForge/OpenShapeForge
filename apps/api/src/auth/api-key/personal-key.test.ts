@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import {
   API_KEY_MANAGE_ROLE,
   ApiKeyAuthorizationError,
+  assertMayCreatePersonalKey,
   assertMayHoldPersonalKeys,
   assertMayManageApiKeys,
   assertMayReadPersonalKeys,
@@ -64,12 +65,12 @@ describe("personal key rights", () => {
   test("the owner right admits holding keys, and narrowing to roles held", () => {
     const owner = person([PERSONAL_KEY_ROLE, "Relations.All.Read"]);
     expect(() => assertMayHoldPersonalKeys(owner)).not.toThrow();
-    expect(() => assertMayHoldPersonalKeys(owner, ["Relations.All.Read"])).not.toThrow();
+    expect(() => assertMayCreatePersonalKey(owner, ["Relations.All.Read"])).not.toThrow();
   });
 
   test("narrowing to a role the owner does not hold is refused", () => {
     expect(() =>
-      assertMayHoldPersonalKeys(person([PERSONAL_KEY_ROLE]), ["Relations.All.ReadWrite"]),
+      assertMayCreatePersonalKey(person([PERSONAL_KEY_ROLE]), ["Relations.All.ReadWrite"]),
     ).toThrow(ApiKeyAuthorizationError);
   });
 

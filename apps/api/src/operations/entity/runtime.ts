@@ -7,7 +7,7 @@ import { classifyDatabaseError } from "../../db/database-refusals.js";
 import { applyRelatedChanges } from "./related-update.js";
 import { splitExtensionInput } from "./extensions/write.js";
 import { extensibleEntityOf } from "./extensions/store.js";
-import { getGeneratedCrudTables } from "./table-registry.js";
+import { generatedCrudTablesRevision, getGeneratedCrudTables } from "./table-registry.js";
 import { authorizationProfileDecision } from "../../auth/authorization-profile-decision.js";
 import { resolveAuthorizationProfileAccess } from "../../auth/authorization-profile-session.js";
 import { withAuditContext } from "../../platform/audit-context.js";
@@ -774,121 +774,166 @@ export function acquireEditLeaseForEntityOperation(db:OpenShapeForgeDatabase,ses
   return withAuditContext(input.operationId,session.credential as import('../../auth/trusted-context.js').SessionCredential|undefined,()=>acquireEditLeaseWithContext(db,session,input));
 }
 
+type OfferSession = Pick<
+  DbSessionInput,
+  "roles" | "userId" | "relationGroupIds" | "appPrincipal" | "principalKind" | "relation"
+> & { oauthScopes?: readonly string[]; credential?: string };
+type OfferRecordTarget = { id: string; version?: string; row?: Readonly<Record<string, unknown>> };
+/** Offers for one record (or, without a target, the collection), given that record's unavailability. */
+export type EntityOperationOfferEvaluator = (
+  unavailable?: Readonly<Record<string, OperationError | undefined>>,
+  target?: OfferRecordTarget,
+) => EntityOperationOffer[];
+
 /**
- * Produce the request-bound offers an interface may show. Operations the
- * session is not authorized to invoke are omitted rather than disclosed.
+ * The collection-shape refusal of a generated intent with no values: the same
+ * for every record and every request until the table registry changes, and
+ * costly to derive (it scans every table's relationships).
  */
-export function getEntityOperationOffers(
+const collectionOfferErrors = new WeakMap<GeneratedCrudTable, { revision: number; byIntent: Map<string, OperationError | undefined> }>();
+function collectionOfferError(table: GeneratedCrudTable, intent: GeneratedCrudExposureOperation): OperationError | undefined {
+  const revision = generatedCrudTablesRevision();
+  let cached = collectionOfferErrors.get(table);
+  if (!cached || cached.revision !== revision) {
+    cached = { revision, byIntent: new Map() };
+    collectionOfferErrors.set(table, cached);
+  }
+  if (!cached.byIntent.has(intent)) cached.byIntent.set(intent, collectionMutationError(table, intent, getGeneratedCrudTables()));
+  return cached.byIntent.get(intent);
+}
+
+/**
+ * The request-bound half of offer evaluation, decided once per request: which
+ * Operations this session may be offered on the entity at all, and the
+ * collection-shape refusals that hold for every record alike. What remains
+ * per record — record permissions and actions, the business and lease
+ * unavailability passed in, and the binding to the record's id and version —
+ * is evaluated by the returned function. A list evaluates it once per row, so
+ * nothing that is the same for every row is recomputed per row.
+ */
+export function entityOperationOfferEvaluator(
   entityName: string,
-  session: Pick<
-    DbSessionInput,
-    "roles" | "userId" | "relationGroupIds" | "appPrincipal" | "principalKind" | "relation"
-  > & { oauthScopes?: readonly string[]; credential?: string },
+  session: OfferSession,
   intents: readonly GeneratedCrudExposureOperation[],
-  unavailable: Readonly<Record<string, OperationError | undefined>> = {},
-  target?: { id: string; version?: string; row?: Readonly<Record<string, unknown>> },
-): EntityOperationOffer[] {
+): EntityOperationOfferEvaluator {
   const heldRoles = new Set(session.roles ?? []);
-  const table = target
-    ? getGeneratedCrudTables().find((candidate) =>
-        candidate.source?.authoringEntityName === entityName
-      )
-    : undefined;
-  const hasRecordPermissions = (
-    permissions: readonly RecordPermissionAction[] | undefined,
-  ) =>
-    !permissions?.length ||
-    Boolean(
-      table &&
-      target?.row &&
-      recordPermissionsAllowRow(table, target.row, permissions, session),
-    );
+  const tables = getGeneratedCrudTables();
+  const table = tables.find((candidate) => candidate.source?.authoringEntityName === entityName);
   // The entity's principal-class policy governs the GENERATED operations and
   // the search derived from them — not the authored plugin Operations below.
   // That distinction is the whole point: an entity may exclude applications
   // from its collection and its record read while still offering one an
   // action-gated Operation on a record it was granted.
-  const admitsPrincipal = entityAdmitsPrincipal(
-    getGeneratedCrudTables().find((candidate) =>
-      candidate.source?.authoringEntityName === entityName) ??
-      ({ source: {} } as GeneratedCrudTable),
-    session,
-  );
-  const generatedOffers = (admitsPrincipal ? entityOperations : [])
+  const admitsPrincipal = entityAdmitsPrincipal(table ?? ({ source: {} } as GeneratedCrudTable), session);
+  const generated = (admitsPrincipal ? entityOperations : [])
     .filter(
       (operation) =>
         operation.entityName === entityName &&
         intents.includes(operation.intent) &&
         !operation.withheld &&
-        (authorizationProfileDecision(session, operation.id, operation.entityName) ?? operation.authorization.roles.some((role) => heldRoles.has(role))) &&
-        (!target || hasRecordPermissions(operation.authorization.recordPermissions)),
+        (authorizationProfileDecision(session, operation.id, operation.entityName) ?? operation.authorization.roles.some((role) => heldRoles.has(role))),
     )
-    .map((operation) => {
-      const operationTable = getGeneratedCrudTables().find((table) => table.source?.authoringEntityName === entityName);
-      const error = unavailable[operation.id] ?? (operation.implementation?.type !== "plugin" && operationTable
-        ? collectionMutationError(operationTable, operation.intent, getGeneratedCrudTables()) : undefined);
-      const reference = { id: operation.id, intent: operation.intent };
-      return error
-        ? { operation: reference, available: false as const, error }
-        : {
-            operation: reference,
-            available: true as const,
-            ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
-            ...entityRecordOfferBinding(operation, target),
-          };
-    });
-  const scope = target ? "record" : "collection";
-  const customOffers: EntityOperationOffer[] = pluginOperations
+    .map((operation) => ({
+      operation,
+      reference: { id: operation.id, intent: operation.intent },
+      collectionError: operation.implementation?.type !== "plugin" && table
+        ? collectionOfferError(table, operation.intent) : undefined,
+    }));
+  const authorizedPlugins = (scope: "record" | "collection") => pluginOperations
     .filter((operation) =>
       operation.target?.entityName === entityName &&
       operation.target.scope === scope &&
-      pluginOperationAuthAllowsOffer(operation.auth, session, operation) &&
-      (!target ||
-        operation.auth.mode !== "session" ||
-        !operation.auth.recordPermission ||
-        hasRecordPermissions([operation.auth.recordPermission])) &&
-      // An action-gated Operation is offered only on a record that actually
-      // grants it. A holder that cannot see the record has no row here, so
-      // nothing is offered — correct, since offers are a convenience for a
-      // reader and the runtime check is the gate either way.
-      (!target ||
-        operation.auth.mode !== "session" ||
-        !operation.auth.recordAction ||
-        Boolean(
-          table && target.row &&
-          recordActionsAllowRow(table, target.row, [operation.auth.recordAction], session),
-        ))
-    )
-    .map((operation) => {
-      const bindings = Object.entries(operation.target?.inputBindings ?? {});
-      const missingBinding = target && bindings.some(([, fieldKey]) =>
-        target.row?.[fieldKey] === undefined || target.row?.[fieldKey] === null);
-      const error = unavailable[operation.key] ?? (missingBinding
-        ? { code: "OPERATION_UNAVAILABLE", message: "The record is missing an action input. Read it again before continuing.", retryable: false }
-        : undefined);
-      const reference = { id: operation.key, intent: "invoke" as const };
-      if (error) return { operation: reference, available: false as const, error };
-      return {
-        operation: reference,
-        available: true as const,
-        ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
-        ...(target && operation.target?.inputField
-          ? {
-              binding: {
-                target: {
-                  entityId: operation.target.entityId,
-                  id: target.id,
-                  ...(target.version ? { version: target.version } : {}),
+      pluginOperationAuthAllowsOffer(operation.auth, session, operation));
+  const recordPlugins = authorizedPlugins("record");
+  const collectionPlugins = authorizedPlugins("collection");
+  return (unavailable = {}, target) => {
+    const hasRecordPermissions = (
+      permissions: readonly RecordPermissionAction[] | undefined,
+    ) =>
+      !permissions?.length ||
+      Boolean(
+        table &&
+        target?.row &&
+        recordPermissionsAllowRow(table, target.row, permissions, session),
+      );
+    const generatedOffers = generated
+      .filter(({ operation }) => !target || hasRecordPermissions(operation.authorization.recordPermissions))
+      .map(({ operation, reference, collectionError }) => {
+        const error = unavailable[operation.id] ?? (collectionError ? { ...collectionError } : undefined);
+        return error
+          ? { operation: reference, available: false as const, error }
+          : {
+              operation: reference,
+              available: true as const,
+              ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
+              ...entityRecordOfferBinding(operation, target),
+            };
+      });
+    const customOffers: EntityOperationOffer[] = (target ? recordPlugins : collectionPlugins)
+      .filter((operation) =>
+        (!target ||
+          operation.auth.mode !== "session" ||
+          !operation.auth.recordPermission ||
+          hasRecordPermissions([operation.auth.recordPermission])) &&
+        // An action-gated Operation is offered only on a record that actually
+        // grants it. A holder that cannot see the record has no row here, so
+        // nothing is offered — correct, since offers are a convenience for a
+        // reader and the runtime check is the gate either way.
+        (!target ||
+          operation.auth.mode !== "session" ||
+          !operation.auth.recordAction ||
+          Boolean(
+            table && target.row &&
+            recordActionsAllowRow(table, target.row, [operation.auth.recordAction], session),
+          ))
+      )
+      .map((operation) => {
+        const bindings = Object.entries(operation.target?.inputBindings ?? {});
+        const missingBinding = target && bindings.some(([, fieldKey]) =>
+          target.row?.[fieldKey] === undefined || target.row?.[fieldKey] === null);
+        const error = unavailable[operation.key] ?? (missingBinding
+          ? { code: "OPERATION_UNAVAILABLE", message: "The record is missing an action input. Read it again before continuing.", retryable: false }
+          : undefined);
+        const reference = { id: operation.key, intent: "invoke" as const };
+        if (error) return { operation: reference, available: false as const, error };
+        return {
+          operation: reference,
+          available: true as const,
+          ...(operation.concurrency ? { concurrency: operation.concurrency } : {}),
+          ...(target && operation.target?.inputField
+            ? {
+                binding: {
+                  target: {
+                    entityId: operation.target.entityId,
+                    id: target.id,
+                    ...(target.version ? { version: target.version } : {}),
+                  },
+                  input: { [operation.target.inputField]: target.id,
+                    ...Object.fromEntries(Object.entries(operation.target.inputBindings ?? {}).map(([inputKey, fieldKey]) =>
+                      [inputKey, target.row?.[fieldKey]])) },
                 },
-                input: { [operation.target.inputField]: target.id,
-                  ...Object.fromEntries(Object.entries(operation.target.inputBindings ?? {}).map(([inputKey, fieldKey]) =>
-                    [inputKey, target.row?.[fieldKey]])) },
-              },
-            }
-          : {}),
-      };
-    });
-  return [...generatedOffers, ...customOffers];
+              }
+            : {}),
+        };
+      });
+    return [...generatedOffers, ...customOffers];
+  };
+}
+
+/**
+ * Produce the request-bound offers an interface may show. Operations the
+ * session is not authorized to invoke are omitted rather than disclosed.
+ * Evaluating many records under one session: build one
+ * {@link entityOperationOfferEvaluator} and call it per record.
+ */
+export function getEntityOperationOffers(
+  entityName: string,
+  session: OfferSession,
+  intents: readonly GeneratedCrudExposureOperation[],
+  unavailable: Readonly<Record<string, OperationError | undefined>> = {},
+  target?: OfferRecordTarget,
+): EntityOperationOffer[] {
+  return entityOperationOfferEvaluator(entityName, session, intents)(unavailable, target);
 }
 
 async function businessAndLeaseUnavailability(
@@ -897,11 +942,11 @@ async function businessAndLeaseUnavailability(
   entityName: string,
   table: GeneratedCrudTable,
   targets: Array<ReturnType<typeof offerTarget>>,
-  intents: readonly GeneratedCrudExposureOperation[],
+  offers: EntityOperationOfferEvaluator,
 ): Promise<ReadonlyMap<string, Readonly<Record<string, OperationError>>>> {
   const business = await entityBusinessUnavailability(db, session, targets.map(target => ({
     id: target.id,
-    operationIds: getEntityOperationOffers(entityName, session, intents, {}, target).map(offer => offer.operation.id),
+    operationIds: offers({}, target).map(offer => offer.operation.id),
   })));
   const leases = await leaseUnavailabilityByTarget(db, session, entityName, table, targets.map(target => target.id));
   for (const [id, errors] of leases) business.set(id, { ...errors, ...business.get(id) });
@@ -913,8 +958,9 @@ export async function currentRecordOffers(
   table: GeneratedCrudTable, target: ReturnType<typeof offerTarget>,
   intents: readonly GeneratedCrudExposureOperation[],
 ): Promise<EntityOperationOffer[]> {
-  const unavailable = await businessAndLeaseUnavailability(db, session, entityName, table, [target], intents);
-  return getEntityOperationOffers(entityName, session, intents, unavailable.get(target.id), target);
+  const offers = entityOperationOfferEvaluator(entityName, session, intents);
+  const unavailable = await businessAndLeaseUnavailability(db, session, entityName, table, [target], offers);
+  return offers(unavailable.get(target.id), target);
 }
 
 /** Bind each record mutation to its canonical identity and current version. */
@@ -1239,26 +1285,21 @@ async function executeEntityOperationWithContext(
           ? await withDbSession(db, session, readPage, { isolationLevel: "repeatable read" })
           : await readPage();
         const targets = connection.rows.map((row) => offerTarget(row, table));
+        const recordOffers = entityOperationOfferEvaluator(entityName, session, projectedOfferIntents(request, RECORD_OFFER_INTENTS));
         const unavailableByTarget = await businessAndLeaseUnavailability(
           db,
           session,
           entityName,
           table,
           targets,
-          projectedOfferIntents(request, RECORD_OFFER_INTENTS),
+          recordOffers,
         );
         return {
           intent: "list",
           data: {
             items: connection.rows.map((row, index) => ({
               data: row,
-              operations: getEntityOperationOffers(
-                entityName,
-                session,
-                projectedOfferIntents(request, RECORD_OFFER_INTENTS),
-                unavailableByTarget.get(targets[index]!.id) ?? {},
-                targets[index],
-              ),
+              operations: recordOffers(unavailableByTarget.get(targets[index]!.id) ?? {}, targets[index]),
             })),
             totalCount: connection.totalCount,
             nextCursor: connection.nextCursor,
@@ -1279,27 +1320,12 @@ async function executeEntityOperationWithContext(
           id: requireId(request.input),
         });
         const data = row ? await withFrozenFieldDefinitions(db, session, table, row) : row;
-        const unavailableByTarget = data
-          ? await businessAndLeaseUnavailability(
-              db,
-              session,
-              entityName,
-              table,
-              [offerTarget(data, table)],
-              projectedOfferIntents(request, RECORD_OFFER_INTENTS),
-            )
-          : new Map();
         return {
           intent: "get",
           data,
           operations: data
-            ? getEntityOperationOffers(
-                entityName,
-                session,
-                projectedOfferIntents(request, RECORD_OFFER_INTENTS),
-                unavailableByTarget.get(offerTarget(data, table).id) ?? {},
-                offerTarget(data, table),
-              )
+            ? await currentRecordOffers(db, session, entityName, table, offerTarget(data, table),
+                projectedOfferIntents(request, RECORD_OFFER_INTENTS))
             : [],
         };
       }

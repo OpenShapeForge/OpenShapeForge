@@ -99,8 +99,9 @@ interfaces:
 
 The compiler rejects an unknown or unqualified Operation, a `read` that writes,
 an `apply` that only reads, repeated measure keys, an editable measure without
-`apply`, an unknown or collection-valued parent field, an unknown refresh
-entity, and a view that mixes these settings with the record pivot above.
+`apply`, an unknown or collection-valued parent field, and a view that mixes
+these settings with the record pivot above. Refresh entities are names of
+change events and are not checked against the entities a host projects.
 
 The generic record workspace renders the record pivot. An operation matrix is
 a contract for a renderer that knows the shape of its `read` result: the

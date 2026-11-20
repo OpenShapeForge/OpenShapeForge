@@ -2207,12 +2207,14 @@ export function buildWebManifest(
   }
   const projected = projectable.map((entity) => entity.contract.source
     ? providers.get(entity.contract.entity.name)! : projectEntity(entity, byName, providers));
-  // An operation matrix names Operations and entities by id. They need no Web projection of their
-  // own, so they are checked against every compiled entity rather than the projectable ones.
+  // An operation matrix names its Operations by id. Their owner needs no Web projection of its own,
+  // so they are checked against every entity this manifest was given. The entities it refreshes on
+  // are not checked here: a host may build the manifest from its Web entities only, and an entity
+  // that only emits change events (a stored value, say) is then legitimately absent.
   const compiled = new Map(entities.map(({ contract }) => [contract.entity.name, contract]));
   for (const entity of projected) for (const [name, view] of Object.entries(entity.views.named ?? {})) {
     if (view.kind !== "collection" || !("collectionLayout" in view) || view.collectionLayout !== "matrix" || !("source" in view.matrix)) continue;
-    const at = `${entity.entityId}.${name}`, { read, apply, refresh } = view.matrix;
+    const at = `${entity.entityId}.${name}`, { read, apply } = view.matrix;
     const effect = (role: string, id: string) => {
       const [owner, key] = id.split(".");
       const found = compiled.get(owner!)?.pluginOperations?.find(candidate => candidate.key === key);
@@ -2221,7 +2223,6 @@ export function buildWebManifest(
     };
     if (effect("read", read) !== "read") throw new Error(`${at}: matrix read Operation ${read} must only read.`);
     if (apply && effect("apply", apply) === "read") throw new Error(`${at}: matrix apply Operation ${apply} must write.`);
-    for (const refreshed of refresh) if (!compiled.has(refreshed)) throw new Error(`${at}: matrix refresh names unknown entity ${refreshed}.`);
   }
   if (extensionRegistry) withCustomFields(projected, byName, extensionRegistry);
   const defaultTimeZone = options.createDefaults?.timeZone;

@@ -557,6 +557,11 @@ from treating an intentionally empty optional surface as a protocol failure.
 
 ## Who am I: `whoami` and `osf://session`
 
+`whoami` is small on purpose: behind a named role (administrator, employee) it
+gives the role and `permissionCount`, not the permission names, which run to
+hundreds for an administrator; the names appear only when no named role stands
+for them.
+
 Every authenticated session sees one tool that takes no arguments, `whoami`,
 and one resource, `osf://session`. Both return the same answer: who the server
 thinks the caller is, in plain language. No role is required — the answer only

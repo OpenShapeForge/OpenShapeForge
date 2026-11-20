@@ -184,8 +184,8 @@ describe("shipped integration and API-key catalog", () => {
       const roles = ["Platform.ApiKeys.Manage"];
       if (ISSUER_OPERATIONS.has(operation.key)) roles.push("Platform.ApiKeys.IntegrationCreate");
       const auth = PROFILE_ADMIN_OPERATIONS.has(operation.key)
-        ? { mode: "session", roles: ["Organization.Security.Manage"], roleGroups: [roles] }
-        : { mode: "session", roles };
+        ? { mode: "session" as const, roles: ["Organization.Security.Manage"], roleGroups: [roles] }
+        : { mode: "session" as const, roles };
       expect(operation.auth).toEqual(auth);
       expect(operation.tenancy).toEqual({ mode: "required" });
       // Every refusal the handlers can return is declared, the unconfigured

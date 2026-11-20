@@ -372,18 +372,24 @@ export function createModuleSessionCapability(
     configurable: false,
     get: () => Object.freeze([...(session.relationGroupIds ?? [])]),
   });
+  let clonedFrom: TrustedSessionContext["relation"] | undefined;
+  let clonedRelation: TrustedSessionContext["relation"] | undefined;
   // The acting Relation is request-scoped on a stateful MCP session too (a
   // getter there); a copy taken when the capability was minted would be the
   // Relation of no request, and person-owned rows would be written as nobody.
   Object.defineProperty(capability, "relation", {
     enumerable: true,
     configurable: false,
-    // A detached deep-frozen clone per read, for the same reason the sweep
-    // above exists: the link carries the identity row this session acts as,
-    // and a plugin can never rewrite whom core acts as.
+    // A detached deep-frozen clone, for the same reason the sweep above
+    // exists: the link carries the identity row this session acts as, and a
+    // plugin can never rewrite whom core acts as. Core replaces the link
+    // rather than editing it, so one clone serves every read of the same
+    // link; being frozen, it cannot be changed by whoever reads it.
     get: () => {
       const link = session.relation;
-      return link ? deepFreezeClone(link) : link;
+      if (!link) return link;
+      if (link !== clonedFrom) { clonedFrom = link; clonedRelation = deepFreezeClone(link); }
+      return clonedRelation;
     },
   });
   inheritAuthorizationProfileAccess(session,capability);

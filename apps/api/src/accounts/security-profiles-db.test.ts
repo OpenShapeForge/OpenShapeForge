@@ -59,6 +59,12 @@ test('a tenant assignment stays inside the ceiling and a withdrawn profile stops
  const read=(operation:string)=>withAuditContext(operation,'bearer',()=>withDbSession(restricted(),{...dbInput(editor),auditIdentityId:identity,principalKind:'person'},async trx=>(await sql<{id:string}>`select id from erp.relations order by id`.execute(trx)).rows.map(row=>row.id)));
  expect(await read('Relation.list')).toEqual([customer]);
  expect((await read('Relation.get')).sort()).toEqual([customer,supplier].sort()); // existing Operations preserve defaults
+ // The per-transaction rules carry the full state only for a managed
+ // Operation; an unmanaged one is its entity and nothing to evaluate.
+ const states=await withAuditContext('Relation.list','bearer',()=>withDbSession(restricted(),{...dbInput(editor),auditIdentityId:identity,principalKind:'person'},async trx=>(await sql<{states:Record<string,Record<string,unknown>>}>`select nullif(current_setting('app.authorization_rules',true),'')::jsonb->'states' as states`.execute(trx)).rows[0]!.states));
+ expect(states['Relation.get']).toEqual({entity:'Relation',managed:false});
+ expect(states['Relation.list']).toMatchObject({entity:'Relation',managed:true,grantable:true});
+ expect(Object.keys(states['Relation.list']!).sort()).toEqual(['entity','fields','grantable','listFields','managed','rules']);
  await sql`update platform.authorization_operation_inventory set grantable=true where id='Relation.get'`.execute(privileged());
  await sql`update erp.authorization_operation_policies set managed=true where operation_id='Relation.get' and tenant_id=${tenant}::uuid`.execute(privileged());
  expect(await read('Relation.get')).toEqual([]);

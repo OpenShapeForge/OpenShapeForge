@@ -89,6 +89,20 @@ export type {
   OperationExecutionReference,
   OperationViolation,
 } from "./contract.js";
+export type {
+  CompactOfferPage,
+  CompactRecordItem,
+  CompactRecordOffer,
+  CompactRecordTarget,
+  FullItem as RecordOfferItem,
+  OperationOfferTemplate,
+  RecordOfferPage,
+} from "./compact-offers.js";
+export {
+  compactRecordOffers,
+  expandCompactRecordOffer,
+  expandCompactRecordOffers,
+} from "./compact-offers.js";
 export {
   isOperationAccepted,
   isOperationFailure,

@@ -39,12 +39,32 @@ function assertSubtypeTable(table: GeneratedCrudTable): void {
 }
 for (const table of subtypeTables) assertSubtypeTable(table);
 
-export const generatedCrudTables = new Map(
+/**
+ * The table registry, counting its own changes so a value derived from the
+ * whole registry can be reused until a table is registered, replaced or
+ * removed (see {@link generatedCrudTablesRevision}).
+ */
+class RevisionedTableMap extends Map<string, GeneratedCrudTable> {
+  #revision = 0;
+  get revision(): number { return this.#revision; }
+  override set(key: string, value: GeneratedCrudTable): this {
+    // Map's constructor adds the initial entries through set(), before the
+    // private field exists; those entries are revision 0.
+    if (#revision in this) this.#revision += 1;
+    return super.set(key, value);
+  }
+  override delete(key: string): boolean { this.#revision += 1; return super.delete(key); }
+  override clear(): void { this.#revision += 1; super.clear(); }
+}
+
+export const generatedCrudTables: Map<string, GeneratedCrudTable> = new RevisionedTableMap(
   [...physicalTables, ...subtypeTables]
     .filter((table) => isGeneratedCrudTableEligible(table) && table.primaryKey)
     .map((table) => [table.name, table]),
 );
 export function getGeneratedCrudTables(): GeneratedCrudTable[] { return [...generatedCrudTables.values()]; }
+/** Changes whenever the registry does; equal revisions mean the same tables. */
+export function generatedCrudTablesRevision(): number { return (generatedCrudTables as RevisionedTableMap).revision; }
 
 /**
  * Physical tables that declare a named record action, by AUTHORED entity name.

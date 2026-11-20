@@ -12,8 +12,7 @@
  * and were re-requested in ever smaller pieces, and each contract cost a
  * round of its own.
  *
- * Nothing here changes an Operation, what it accepts, or the shape it
- * declares: every result still satisfies its Operation's output schema. A
+ * These projections keep the MCP executor's envelope. A
  * row keeps the offers that say something about that row (an Operation that
  * is not available on it, an offer bound to more than its id) and leaves out
  * the ones every row has, which the search already answers; a field without
@@ -28,6 +27,12 @@ type JsonObject = Record<string, unknown>;
 const isObject = (value: unknown): value is JsonObject =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
+const schemaMaps = new Set(["properties", "patternProperties", "$defs", "definitions", "dependentSchemas", "dependencies"]);
+const nestedSchemas = new Set([
+  "items", "prefixItems", "additionalItems", "additionalProperties", "unevaluatedItems", "unevaluatedProperties",
+  "propertyNames", "contains", "allOf", "anyOf", "oneOf", "not", "if", "then", "else", "contentSchema",
+]);
+
 /**
  * A schema as the executor validates it: every validation keyword and
  * description, without the `x-osf-*` annotations (presentation, translations,
@@ -39,7 +44,12 @@ export function modelSchema<T>(schema: T): T {
   return Object.fromEntries(
     Object.entries(schema)
       .filter(([key]) => !key.startsWith("x-osf") && key !== "title")
-      .map(([key, value]) => [key, modelSchema(value)]),
+      .map(([key, value]) => {
+        if (schemaMaps.has(key) && isObject(value)) {
+          return [key, Object.fromEntries(Object.entries(value).map(([name, child]) => [name, modelSchema(child)]))];
+        }
+        return [key, nestedSchemas.has(key) ? modelSchema(value) : value];
+      }),
   ) as T;
 }
 

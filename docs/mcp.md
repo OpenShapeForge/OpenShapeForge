@@ -404,9 +404,9 @@ in `tools/list`; tools without a canonical replacement remain advertised.
 The dedicated projection continues to offer its authored tool names.
 
 The searchable executor answers a model, so a record read comes as a model
-reads it (`apps/api/src/mcp/model-view.ts`); the Operation, what it accepts
-and the shape it declares are unchanged, and every result still satisfies its
-Operation's output schema. A row of a list page keeps the offers that are
+reads it (`apps/api/src/mcp/model-view.ts`). The canonical Operation still
+validates its own inputs and outputs. The MCP executor returns a projection
+that may omit some record fields. A row of a list page keeps the offers that are
 about that row — an Operation that is not available on it, with the reason,
 and an offer bound to more than its id — and not the available ones every row
 repeats with only its own id and version bound in: what can be done with a

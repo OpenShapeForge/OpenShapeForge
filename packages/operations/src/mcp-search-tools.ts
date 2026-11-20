@@ -150,6 +150,7 @@ export function searchableOperationToolDefinitions(
         properties: {
           data: { $ref: "#/$defs/JsonValue" },
           operations: { type: "array", items: { type: "object" } },
+          references: { type: "object", additionalProperties: { type: "string" } },
           resources: { type: "array", items: { type: "object" } },
           execution: {
             type: "object",

@@ -251,7 +251,13 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
       select jsonb_build_object(
         'actor',actor.context,
         'managedEntities',coalesce((select jsonb_agg(distinct ${col('s','AuthorizationOperationPolicy','entityType')}) from ${policies} s where s.tenant_id=app.current_tenant() and ${col('s','AuthorizationOperationPolicy','managed')}),'[]'::jsonb),
-        'states',coalesce((select jsonb_object_agg(${col('s','AuthorizationOperationPolicy','operationId')},jsonb_build_object(
+        -- Every reader stops at managed=false (allowed, as without profiles),
+        -- so an unmanaged state carries only its entity: its field map, list
+        -- projection and rule lookup would be built and parsed per transaction
+        -- for nothing — for every Operation of every entity that has one
+        -- managed Operation.
+        'states',coalesce((select jsonb_object_agg(${col('s','AuthorizationOperationPolicy','operationId')},case when not ${col('s','AuthorizationOperationPolicy','managed')}
+          then jsonb_build_object('entity',i.entity_name,'managed',false) else jsonb_build_object(
           'entity',i.entity_name,'managed',${col('s','AuthorizationOperationPolicy','managed')},'grantable',coalesce(i.grantable,false),'fields',i.fields,
           'listFields',${col('s','AuthorizationOperationPolicy','listFields')},
           'rules',case when exists(select 1 from ${assignments} direct where direct.tenant_id=app.current_tenant()
@@ -265,7 +271,7 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
               and v.status='published' and v.snapshot->>'entity'='AuthorizationProfile'
               and v.snapshot->'head'->'row'->>${sql.lit(entityColumnName('AuthorizationProfile','targetEntity'))}=i.entity_name
               and policy_row->'row'->>${sql.lit(entityColumnName('AuthorizationProfilePolicy','operationId'))}=i.id
-              and ${matchingSubject('a')} limit 101) matched),'[]'::jsonb) end))
+              and ${matchingSubject('a')} limit 101) matched),'[]'::jsonb) end) end)
           from ${policies} s left join platform.authorization_operation_inventory i on i.id=${col('s','AuthorizationOperationPolicy','operationId')}
           where s.tenant_id=app.current_tenant()),'{}'::jsonb)) from actor;
     $function$;

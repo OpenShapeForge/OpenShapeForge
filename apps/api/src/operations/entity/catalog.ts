@@ -102,6 +102,15 @@ export function requireEntityOperation(
       message: `Generated CRUD operation ${operation} is not enabled for ${table.source?.authoringEntityName ?? table.name}.`,
     });
   }
+  assertEntityOperationAuthorization(table, operation, session);
+}
+
+/** Record authority is also used by a native owner Operation with its own exposure. */
+export function assertEntityOperationAuthorization(
+  table: GeneratedCrudTable,
+  operation: GeneratedCrudExposureOperation,
+  session: DbSessionInput,
+): void {
   const authorizationOperation = AUTHORIZATION_OPERATION[operation];
   const allowed = entityRoleSets.get(table.name)?.[authorizationOperation];
   if (!allowed || allowed.size === 0) {

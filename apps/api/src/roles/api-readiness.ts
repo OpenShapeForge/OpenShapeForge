@@ -20,6 +20,8 @@ import {
 import type { ModuleSeed, RuntimeModule } from "../modules/contract.js";
 import type { InitializedMaintenanceOwner } from "../modules/maintenance.js";
 import type { ModuleRegistry } from "../modules/registry.js";
+import { listOperationContracts } from "../operations/runtime.js";
+import { verifyOwnedDeleteDatabase } from "../operations/owned-delete-runtime.js";
 
 const DRIFT_CHECK_TIMEOUT_MS = 5_000;
 const READINESS_CHECK_NAME = /^[a-z][a-z0-9_]*$/;
@@ -262,6 +264,11 @@ export function createApiReadinessChecks(
           );
         }
         if (!(await auditHistoryReady(databaseRuntime.db))) throw readinessError("AUDIT_HISTORY_UNAVAILABLE");
+        for (const { implementation } of listOperationContracts()) {
+          if (implementation?.type === "ownedDelete") {
+            await verifyOwnedDeleteDatabase(databaseRuntime.db, implementation.plan);
+          }
+        }
         if (isForeign(await findUndeclaredDatabaseSchema(databaseRuntime.db))) {
           throw readinessError("GENERATED_SCHEMA_FOREIGN");
         }

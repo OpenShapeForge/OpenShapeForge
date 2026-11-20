@@ -158,6 +158,8 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
     when 'user' then app.current_principal_class()='person' and ${col(alias,'AuthorizationProfileAssignment','subjectKey')}=actor.context->>'identityId'
     when 'group' then app.current_principal_class()='person' and actor.context->'groupIds' ? ${col(alias,'AuthorizationProfileAssignment','subjectKey')}
     when 'role' then actor.context->'roles' ? ${col(alias,'AuthorizationProfileAssignment','subjectKey')}
+    when 'integration' then app.current_principal_class()='application' and
+      ${col(alias,'AuthorizationProfileAssignment','subjectKey')}=app.current_app_principal()::text
     else false end`;
   const roleExpansions=Object.fromEntries(Object.keys(roleComposites).map(realm=>[realm,Object.fromEntries(knownRoles.map(role=>[role,expandRoleComposites(realm,[role],memberRoleClientId()).filter(role=>!role.startsWith('Platform.'))]))]));
   await sql`
@@ -361,6 +363,10 @@ export async function installAuthorizationPolicyFunctions(db: OpenShapeForgeData
           when 'user' then exists(select 1 from platform.identity_relations member where member.tenant_id=new.tenant_id and member.identity_id::text=new.subject_key and member.status='linked' and not member.access_blocked)
           when 'group' then app.authorization_group_exists(new.subject_key)
           when 'role' then new.subject_key in (select jsonb_array_elements_text(${sql.lit(JSON.stringify(knownRoles))}::jsonb)) or exists(select 1 from platform.organization_access_roles role where role.tenant_id=new.tenant_id and 'custom:'||role.id::text=new.subject_key)
+          when 'integration' then exists (
+            select 1 from platform.api_key_integrations integration
+            where integration.tenant_id=new.tenant_id and integration.id::text=new.subject_key and integration.status='active'
+          )
           else false end) then
           raise exception 'VALIDATION: Choose an active subject in this organization' using errcode='23514';
         end if;

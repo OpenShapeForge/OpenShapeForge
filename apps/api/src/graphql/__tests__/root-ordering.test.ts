@@ -34,7 +34,7 @@ const CORE_OPERATION_PLUGINS = ["osf-billing", "osf-extensions", "osf-jobs", "os
  */
 function operationContribution(kind: "query" | "mutation", named: string[]): string[] {
   const fields = operationCatalog.operations
-    .filter((operation) => CORE_OPERATION_PLUGINS.includes(operation.plugin) && operation.transports.graphql.enabled &&
+    .filter((operation) => (CORE_OPERATION_PLUGINS.includes(operation.plugin) || operation.implementation?.type === "ownedDelete") && operation.transports.graphql.enabled &&
       operation.transports.graphql.kind === kind)
     .map((operation) => operation.transports.graphql.field as string)
     .sort();
@@ -66,6 +66,7 @@ function expectedRootOrder() {
         "agreementMilestoneInvoice",
         "agreementMilestoneTrigger",
         "billingRunExecute",
+        "documentDeleteWithContents",
         "jobRetry",
       ]),
     ],

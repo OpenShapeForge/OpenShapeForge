@@ -23,6 +23,7 @@ import { migrationFileChecksum, type VersionedMigration } from "../versioned-run
 import { sql } from "kysely";
 import m0020LegacySealedTenantSettings, { upgradeLegacySealedTenantSettings } from "./0020_legacy-sealed-tenant-settings.js";
 // migration-registry:imports — `bun run db:migration:new` inserts imports below this line.
+import m0030OwnedDeleteForeignKeys from "./0030_owned-delete-foreign-keys.js";
 import m0025CheckStoredFieldPatterns from "./0025_check-stored-field-patterns.js";
 import m0024RemoveTaskForm from "./0024_remove-task-form.js";
 import m0023UniqueConfigurationCodes from "./0023_unique-configuration-codes.js";
@@ -57,5 +58,6 @@ export const versionedMigrations: VersionedMigration[] = [
   m0027PageBackgroundImageFiles,
   m0028DropApiKeyAllowedOrigins,
   m0029TextColumnsBlocks,
+  m0030OwnedDeleteForeignKeys,
   // migration-registry:entries — `bun run db:migration:new` inserts entries above this line.
 ];

@@ -483,11 +483,13 @@ describe("canonical operation runtime", () => {
     expect(bound.has("entity.record-action.delegate")).toBe(true);
     expect(bound.has("AgreementMilestone.trigger")).toBe(true);
     expect(bound.has("BillingRun.execute")).toBe(true);
+    expect(bound.get("Document.deleteWithContents")?.operation.implementation?.type).toBe("ownedDelete");
     expect(bound.has("source-sync.upsert")).toBe(true);
     expect(bound.has("entity.edit-lease.acquire")).toBe(true);
     expect(
       [...bound.entries()].filter(([, { operation }]) => !(
         operation.implementation?.type === "collection" ||
+        operation.implementation?.type === "ownedDelete" ||
         operation.implementation?.type === "entity-type-list" ||
         operation.implementation?.type === "application-search" ||
         operation.implementation?.type === "collection-options" ||

@@ -525,12 +525,101 @@ operations:
       - { status: 404, code: NOT_FOUND, description: The integration or credential does not exist in this organization. }
       - { status: 502, code: PROVISIONING_FAILED, description: The identity provider refused or could not complete the service account; nothing usable was handed out and the attempt is left for the reconciler. }
       - { status: 503, code: NOT_CONFIGURED, description: 'This deployment has no API key provisioning configuration, so no integration can be managed here.' }
+  createIntegrationProfile:
+    id: api-keys.create-integration-profile
+    name: { en: Create an integration profile, nl: Integratieprofiel maken }
+    description:
+      en: Creates a role-free integration for Operation and record grants. Configure its access before approving any account to issue its keys.
+      nl: Maakt een integratie zonder rollen voor rechten op operations en records. Configureer de toegang voordat je accounts toestemming geeft om sleutels uit te geven.
+    implementation: { type: plugin, plugin: osf-api-keys, handler: createIntegrationProfile }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [displayName]
+        properties:
+          displayName: { type: string, minLength: 1, maxLength: 200 }
+    output:
+      schema: &profileSummary
+        type: object
+        additionalProperties: false
+        required: [integrationId, displayName]
+        properties:
+          integrationId: { type: string, format: uuid }
+          displayName: { type: string }
+    auth: &profileAdminAuth { mode: session, roles: [Organization.Security.Manage] }
+    tenancy: { mode: required }
+    effects: { data: write, external: write }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: acknowledgement }
+    errors:
+      - { status: 400, code: VALIDATION, description: The integration settings are invalid. }
+      - { status: 401, code: UNAUTHENTICATED, description: An authenticated tenant session is required. }
+      - { status: 403, code: FORBIDDEN, description: A verified person with organization security and API key management access is required. }
+      - { status: 404, code: NOT_FOUND, description: The integration was removed or disabled during provisioning. }
+      - { status: 502, code: PROVISIONING_FAILED, description: The identity provider could not provision the integration. }
+      - { status: 503, code: NOT_CONFIGURED, description: API key provisioning is unavailable. }
+  setIntegrationIssuers:
+    id: api-keys.set-integration-issuers
+    name: { en: Set approved key issuers, nl: Goedgekeurde sleuteluitgevers instellen }
+    description:
+      en: Replaces the accounts that can issue keys for this profile. An empty list removes all approvals. Existing keys keep working until revoked or expired.
+      nl: Vervangt de accounts die sleutels voor dit profiel kunnen uitgeven. Een lege lijst trekt alle toestemmingen in. Bestaande sleutels werken totdat ze zijn ingetrokken of verlopen.
+    implementation: { type: plugin, plugin: osf-api-keys, handler: setIntegrationIssuers }
+    input:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId, accountIds]
+        properties:
+          integrationId: *integrationIdInput
+          accountIds:
+            type: array
+            maxItems: 100
+            items: { type: string, format: uuid }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrationId]
+        properties:
+          integrationId: { type: string, format: uuid }
+    auth: *profileAdminAuth
+    tenancy: { mode: required }
+    effects: { data: write, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: acknowledgement }
+    errors: *catalogErrors
+  listApprovedIntegrations:
+    id: api-keys.list-approved-integrations
+    name: { en: List your approved key profiles, nl: Je goedgekeurde sleutelprofielen tonen }
+    description:
+      en: Lists the organization's integration profiles you can issue a key for. Select one and use api-keys.issue-credential with its integrationId.
+      nl: Toont de integratieprofielen waarvoor je een sleutel kunt uitgeven. Kies een profiel en gebruik api-keys.issue-credential met de integrationId.
+    implementation: { type: plugin, plugin: osf-api-keys, handler: listApprovedIntegrations }
+    input:
+      schema: { type: object, additionalProperties: false }
+    output:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [integrations]
+        properties:
+          integrations:
+            type: array
+            items: *profileSummary
+    auth: &integrationCreateAuth { mode: session, roles: [Platform.ApiKeys.Manage, Platform.ApiKeys.IntegrationCreate] }
+    tenancy: { mode: required }
+    effects: { data: read, external: none }
+    reliability: { idempotency: { mode: none } }
+    confirmation: { mode: none }
+    errors: *catalogErrors
   issueCredential:
     id: api-keys.issue-credential
     name: { en: Issue a credential, nl: Credential uitgeven }
     description:
-      en: Issue an additional API key. Copy it when it appears; you cannot view it again later. Once the application uses the new key, you can revoke the old one.
-      nl: Geef een extra API-sleutel uit. Kopieer hem zodra hij verschijnt; je kunt hem later niet opnieuw bekijken. Zodra de applicatie de nieuwe sleutel gebruikt, kun je de oude intrekken.
+      en: Issue an API key for an integration you manage or a profile you have been approved to use. Find approved profiles with api-keys.list-approved-integrations. Copy the key when it appears. A profile key uses its configured Operation and record grants.
+      nl: Geef een API-sleutel uit voor een integratie die je beheert of een goedgekeurd profiel. Vind je profielen met api-keys.list-approved-integrations. Kopieer de sleutel zodra hij verschijnt. Een profielsleutel gebruikt de ingestelde rechten op operations en records.
     implementation: { type: plugin, plugin: osf-api-keys, handler: issueCredential }
     input:
       schema:
@@ -562,7 +651,7 @@ operations:
             format: uuid
             x-osf-i18n: { title: { en: Integration, nl: Integratie } }
           credential: *mintedCredential
-    auth: *manageAuth
+    auth: *integrationCreateAuth
     tenancy: { mode: required }
     effects: { data: write, external: none }
     reliability: { idempotency: { mode: none } }
@@ -769,6 +858,9 @@ interfaces:
       listCredentials: { method: POST, path: /api/api-key-integrations/list-credentials, response: { status: 200, kind: json } }
       getCredential: { method: POST, path: /api/api-key-integrations/get-credential, response: { status: 200, kind: json } }
       createIntegration: { method: POST, path: /api/api-key-integrations/create, response: { status: 200, kind: json } }
+      createIntegrationProfile: { method: POST, path: /api/api-key-integrations/create-profile, response: { status: 200, kind: json } }
+      setIntegrationIssuers: { method: POST, path: /api/api-key-integrations/set-issuers, response: { status: 200, kind: json } }
+      listApprovedIntegrations: { method: POST, path: /api/api-key-integrations/list-approved, response: { status: 200, kind: json } }
       issueCredential: { method: POST, path: /api/api-key-integrations/issue-credential, response: { status: 200, kind: json } }
       revokeCredential: { method: POST, path: /api/api-key-integrations/revoke-credential, response: { status: 200, kind: json } }
       disableIntegration: { method: POST, path: /api/api-key-integrations/disable, response: { status: 200, kind: json } }

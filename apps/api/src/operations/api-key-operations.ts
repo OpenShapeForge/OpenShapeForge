@@ -38,14 +38,17 @@ import {
   ApiKeyProvisioningError,
   ApiKeyValidationError,
   createIntegration,
+  createIntegrationProfile,
   disableIntegration,
   getIntegration,
   getKey,
   issueKey,
+  listApprovedIntegrations,
   MAX_PAGE_SIZE,
   pageIntegrations,
   pageKeys,
   revokeKey,
+  setIntegrationIssuers,
   updateIntegrationRoles,
   updateIntegrationRestrictions,
   type ApiKeyServiceDeps,
@@ -136,6 +139,7 @@ function resolve(context: ModuleOperationContext): Resolved | ModuleOperationErr
     session: {
       tenantId: session.tenantId,
       userId: session.userId,
+      ...(session.issuer ? { issuer: session.issuer } : {}),
       roles: session.roles,
       groups: session.groups,
       credential: session.credential,
@@ -670,6 +674,44 @@ const HANDLERS: Record<string, ModuleOperationHandler> = {
         },
         credential: mintedCredential(created),
       });
+    } catch (error) {
+      return declaredServiceFailure(error);
+    }
+  },
+
+  async createIntegrationProfile(input, context): Promise<ModuleOperationResult> {
+    const resolved = resolve(context);
+    if (isFailure(resolved)) return resolved;
+    try {
+      const value = await createIntegrationProfile(resolved.deps, resolved.session, {
+        displayName: text(input.displayName),
+      });
+      return { value };
+    } catch (error) {
+      return declaredServiceFailure(error);
+    }
+  },
+
+  async listApprovedIntegrations(_input, context): Promise<ModuleOperationResult> {
+    const resolved = resolve(context);
+    if (isFailure(resolved)) return resolved;
+    try {
+      return { value: { integrations: await listApprovedIntegrations(resolved.deps, resolved.session) } };
+    } catch (error) {
+      return declaredServiceFailure(error);
+    }
+  },
+
+  async setIntegrationIssuers(input, context): Promise<ModuleOperationResult> {
+    const resolved = resolve(context);
+    if (isFailure(resolved)) return resolved;
+    try {
+      const integrationId = text(input.integrationId);
+      await setIntegrationIssuers(resolved.deps, resolved.session, {
+        integrationId,
+        accountIds: (input.accountIds as string[]).map(id => id.toLowerCase()),
+      });
+      return { value: { integrationId } };
     } catch (error) {
       return declaredServiceFailure(error);
     }

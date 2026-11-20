@@ -30,7 +30,10 @@ metadata:
    own grants and any further credential restrictions. Check the integration roles,
    record or workflow grants, and any network, endpoint or origin restrictions against
    the required calls. A personal session's access does not establish an integration
-   key's access. Request only the scope the integration needs.
+   key's access. Request only the scope the integration needs. For self-service,
+   call \`api-keys.list-approved-integrations\` and use the approved
+   integration ID with \`api-keys.issue-credential\`. Confirm the profile covers the
+   required calls before issuing the key.
 4. Use the caller's existing language, HTTP client, configuration and secret store.
    For server-side calls, read the secret at runtime and send it over HTTPS in
    \`Authorization: Bearer <key>\`. Keep the key out of source, frontend bundles,

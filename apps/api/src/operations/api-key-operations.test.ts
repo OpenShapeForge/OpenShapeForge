@@ -240,10 +240,10 @@ afterEach(async () => {
 describe("integration catalog Operations", () => {
   test("binds exactly the handlers the compiled catalog declares", () => {
     expect(apiKeyOperationHandlerNames()).toEqual([
-      "createIntegration", "createMyPersonalKey", "disableIntegration", "getCredential",
+      "createIntegration", "createIntegrationProfile", "createMyPersonalKey", "disableIntegration", "getCredential",
       "getIntegration", "getMyPersonalKey", "getPersonalKey", "issueCredential",
-      "listCredentials", "listIntegrations", "listMyPersonalKeys", "listPersonalKeys",
-      "revokeCredential", "revokeMyPersonalKey", "revokePersonalKey", "updateIntegrationRestrictions", "updateIntegrationRoles",
+      "listApprovedIntegrations", "listCredentials", "listIntegrations", "listMyPersonalKeys", "listPersonalKeys",
+      "revokeCredential", "revokeMyPersonalKey", "revokePersonalKey", "setIntegrationIssuers", "updateIntegrationRestrictions", "updateIntegrationRoles",
     ]);
     expect([...contracts.keys()].sort()).toEqual([...apiKeyOperationHandlerNames()]);
     expect(() => apiKeyOperationHandler({ key: "api-keys.unknown", handler: "mintEverything" }))
@@ -352,7 +352,7 @@ describe("integration catalog Operations", () => {
       const issued = failure((await run("issueCredential", {
         integrationId: created.integration.integrationId, displayName: "Second key",
       }, { store, session })).result);
-      expect(issued).toMatchObject({ status: 403, code: "FORBIDDEN" });
+      expect(issued).toMatchObject({ status: 404, code: "NOT_FOUND" });
     });
 
     test("holds the privilege ceiling on the roles it would grant", async () => {

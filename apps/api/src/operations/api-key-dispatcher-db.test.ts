@@ -43,7 +43,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
-import { API_KEY_MANAGE_ROLE } from "../auth/api-key/ceiling.js";
+import { API_KEY_MANAGE_ROLE, INTEGRATION_KEY_CREATE_ROLE } from "../auth/api-key/ceiling.js";
 import {
   createIntegration,
   issueKey,
@@ -245,7 +245,9 @@ function unclassifiedV2Hop(userId = MANAGER): Record<string, string> {
 }
 
 /** The paths whose contract declares an acknowledgement. */
-const ACKNOWLEDGED = new Set(["create", "issue-credential", "revoke-credential", "disable", "update-roles"]);
+const ACKNOWLEDGED = new Set([
+  "create", "create-profile", "set-issuers", "issue-credential", "revoke-credential", "disable", "update-roles",
+]);
 
 /** One canonical Operation over its declared REST projection. */
 async function operation(
@@ -331,6 +333,7 @@ beforeAll(async () => {
 
   process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET ??= "dispatcher-suite-context-secret";
   process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER = ISSUER;
+  process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_AUDIENCE = "erp-provider";
   process.env.OPENSHAPEFORGE_API_KEY_SECRET_KEYS = `test:${randomBytes(32).toString("base64")}`;
   process.env.OPENSHAPEFORGE_KEYCLOAK_BASE_URL = realm.baseUrl;
   process.env.OPENSHAPEFORGE_KEYCLOAK_REALM = realm.realm;
@@ -1242,6 +1245,81 @@ describe("the catalog over the real dispatcher, by principal class", () => {
     // Nothing was created, and the manage-role holder still reaches it.
     const stillReaches = await operation("list", { first: 10 });
     expect(stillReaches.status).toBe(200);
+  }, TEST_TIMEOUT);
+});
+
+describe("issuing credentials for approved integration profiles", () => {
+  test("only the approved linked person can discover and issue for a role-free profile", async () => {
+    if (!booted) return;
+    const adminUserId = randomUUID();
+    const securityRoles = [API_KEY_MANAGE_ROLE, "Organization.Security.Manage", READ_ROLE];
+    await booted.adminDb.transaction().execute(async (trx) => {
+      await sql`select set_config('app.roles', 'Organization.All.ReadWrite', true)`.execute(trx);
+      await sql`
+        with identity as (
+          insert into platform.identities (issuer, subject)
+          values (${ISSUER}, ${adminUserId})
+          returning id
+        )
+        insert into platform.identity_relations
+          (identity_id, tenant_id, relation_id, status, linked_at, linked_by, roles)
+        select id, ${TENANT}, ${RELATION}, 'linked', now(), 'test',
+               array[${securityRoles[0]}, ${securityRoles[1]}, ${securityRoles[2]}]::text[]
+        from identity
+      `.execute(trx);
+    });
+    const administrator = signedHop({
+      userId: adminUserId,
+      roles: securityRoles,
+      principalKind: "person",
+    });
+    const developer = signedHop({
+      userId: MANAGER,
+      roles: [INTEGRATION_KEY_CREATE_ROLE],
+      principalKind: "person",
+    });
+    const anotherTenant = signedHop({
+      userId: MANAGER,
+      tenantId: OTHER_TENANT,
+      roles: [INTEGRATION_KEY_CREATE_ROLE],
+      principalKind: "person",
+    });
+    const serviceAccount = signedHop({
+      userId: MANAGER,
+      roles: [INTEGRATION_KEY_CREATE_ROLE],
+      principalKind: "service",
+    });
+    const profileInput = { displayName: "Contracts and relations" };
+    expect((await operation("create-profile", profileInput)).status).toBe(403);
+    const profile = await operation("create-profile", profileInput, administrator);
+    expect(profile.status).toBe(200);
+    const integrationId = profile.body.integrationId as string;
+    expect(profile.body).toEqual({ integrationId, displayName: "Contracts and relations" });
+    const credentials = await operation("list-credentials", { integrationId }, administrator);
+    expect(credentials.body.totalCount).toBe(0);
+    const key = { integrationId, displayName: "Contracts client", expiresInDays: 30 };
+
+    expect((await operation("list-approved", {}, developer)).body).toEqual({ integrations: [] });
+    expect((await operation("issue-credential", key, developer)).status).toBe(404);
+    expect((await operation("set-issuers", { integrationId, accountIds: [IDENTITY] }, developer)).status).toBe(403);
+    expect((await operation("set-issuers", { integrationId, accountIds: [PENDING_IDENTITY] }, administrator)).status).toBe(400);
+    expect((await operation("set-issuers", { integrationId, accountIds: [IDENTITY] }, administrator)).status).toBe(200);
+
+    expect((await operation("list-approved", {}, developer)).body).toEqual({ integrations: [profile.body] });
+    expect((await operation("list", {}, developer)).status).toBe(403);
+    expect((await operation("list-approved", {}, anotherTenant)).body).toEqual({ integrations: [] });
+    expect((await operation("issue-credential", key, anotherTenant)).status).toBe(404);
+    expect((await operation("issue-credential", key, serviceAccount)).status).toBe(403);
+    expect((await operation("issue-credential", { ...key, roleSubset: [READ_ROLE] }, developer)).status).toBe(403);
+    expect((await operation("update-roles", { integrationId, roles: [READ_ROLE] }, administrator)).status).toBe(400);
+    const issued = await operation("issue-credential", key, developer);
+    expect(issued.status).toBe(200);
+    expect(typeof issued.body.credential?.secret).toBe("string");
+
+    expect((await operation("set-issuers", { integrationId, accountIds: [] }, administrator)).status).toBe(200);
+    expect((await operation("list-approved", {}, developer)).body).toEqual({ integrations: [] });
+    expect((await operation("issue-credential", key, developer)).status).toBe(404);
+    expect((await operation("list-credentials", { integrationId }, administrator)).body.totalCount).toBe(1);
   }, TEST_TIMEOUT);
 });
 

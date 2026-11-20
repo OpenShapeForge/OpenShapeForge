@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import type { AuthoringWebConfig } from "./layers.js";
 import { materializeEntityInputSources } from "../entity-input-sources.js";
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
@@ -387,6 +388,7 @@ export async function generateAuthoringUiArtifacts(
   standalone: WebStandaloneOperationsInput = { catalogs: [], operations: [] },
   referentiedata: import("../core-referentiedata-artifacts.js").CoreReferentiedataSnapshot = {},
   extensionRegistry?: import("./extension-registry-types.js").ExtensionRegistry,
+  webOptions?: AuthoringWebConfig,
 ): Promise<AuthoringUiArtifact[]> {
   const entityNames = listEntityFiles(authoringDir).map((file) => file.slug);
   const compiled: CompiledAuthoringEntity[] = [];
@@ -528,7 +530,7 @@ export async function generateAuthoringUiArtifacts(
     "generated/web/web-manifest.json",
     renderWebManifest(buildWebManifest(
       compiled.map(({ name, contract }) => ({ slug: name, contract })),
-      {},
+      webOptions,
       standalone,
       referentiedata,
       extensionRegistry,

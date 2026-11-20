@@ -1318,6 +1318,21 @@ describe("authoring.config.local.yaml", () => {
     expect(loadAuthoringConfig(root)).toEqual({ layers: ["base"], plugins: ["./p.ts"] });
   });
 
+  test("loads a committed web create default and rejects invalid time zones", () => {
+    const root = makeRepo();
+    const web = { createDefaults: { timeZone: "Europe/Amsterdam" } };
+    writeConfig(root, { layers: ["base"], web }, { layers: ["extension"] });
+    expect(loadAuthoringConfig(root).web).toEqual(web);
+
+    const invalid = makeRepo();
+    writeConfig(invalid, { layers: ["base"], web: { createDefaults: { timeZone: "Europe/Not_A_Place" } } });
+    expect(() => loadAuthoringConfig(invalid)).toThrow("web.createDefaults.timeZone must be a valid IANA time zone");
+
+    const local = makeRepo();
+    writeConfig(local, { layers: ["base"] }, { web });
+    expect(() => loadAuthoringConfig(local)).toThrow('cannot declare "web"');
+  });
+
   test("loads committed REST API onboarding and trims its authored strings", () => {
     const root = makeRepo();
     mkdirSync(join(root, "base"), { recursive: true });

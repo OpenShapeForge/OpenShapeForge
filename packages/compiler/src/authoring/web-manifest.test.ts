@@ -778,6 +778,32 @@ describe("web manifest projection", () => {
     expect(projected.unset).not.toHaveProperty("defaultValue");
     for (const [index, value] of defaults.entries()) expect(projected[`field${index}`]!.defaultValue).toEqual(value);
   });
+  test("applies a host time zone only to writable single time-zone fields without an authored default", () => {
+    const timezone = { osfType: "timeZone" };
+    const fields = [
+      field("displayName"), field("timezone", timezone),
+      field("explicit", { ...timezone, defaultValue: "Europe/London" }),
+      field("readOnly", { ...timezone, readOnly: true }),
+      field("collection", { ...timezone, cardinality: "collection" }),
+    ];
+    const firstView = coreView();
+    firstView.form!.variants.create!.groups[0]!.fields = fields.map(({ key }) => key);
+    const secondView = coreView();
+    secondView.form!.variants.create!.groups[0]!.fields = ["displayName", "otherZone"];
+    const first = entity("First", "first", fields, firstView);
+    const second = entity("Second", "second", [field("displayName"), field("otherZone", timezone)], secondView);
+
+    const { entities } = buildWebManifest([first, second], { createDefaults: { timeZone: "Europe/Amsterdam" } });
+    expect(entities.First!.fields.timezone!.defaultValue).toBe("Europe/Amsterdam");
+    expect(entities.Second!.fields.otherZone!.defaultValue).toBe("Europe/Amsterdam");
+    expect(entities.First!.fields.explicit!.defaultValue).toBe("Europe/London");
+    for (const key of ["displayName", "readOnly", "collection"]) {
+      expect(entities.First!.fields[key]).not.toHaveProperty("defaultValue");
+    }
+    expect(buildWebManifest([first]).entities.First!.fields.timezone).not.toHaveProperty("defaultValue");
+    expect(fields[1]).not.toHaveProperty("defaultValue");
+  });
+
   test("projects views, supported modes and direct relationships without REST paths", () => {
     const contactView = coreView();
     contactView.list = { ...contactView.list!, title: text("Contact details", "Contactgegevens") };
@@ -1134,7 +1160,7 @@ describe("web manifest projection", () => {
         },
         graphql: { kind: "mutation", field: "recalculateDeal" },
         mcp: { name: "recalculate_deal" },
-        web: {},
+        web: { visibleWhen: { conditions: [{ field: "id", operator: "isNotEmpty" }] } },
       },
     }, {
       key: "compose",
@@ -1172,7 +1198,11 @@ describe("web manifest projection", () => {
       },
     });
     expect(projected.views.record?.operations.actions).toEqual([
-      expect.objectContaining({ id: "example.deal.recalculate", intent: "invoke" }),
+      expect.objectContaining({
+        id: "example.deal.recalculate",
+        intent: "invoke",
+        visibleWhen: { conditions: [{ field: "id", operator: "isNotEmpty" }] },
+      }),
     ]);
     expect(projected.views.collection.operations.actions).toEqual([
       expect.objectContaining({ id: "example.deal.compose", intent: "invoke" }),
@@ -2161,7 +2191,11 @@ test("board card paths preserve related entity type and collection cardinality",
   const line = entity("Line", "line", [field("productId", { osfType: "Product" })], coreView(), [{ key: "productId", fieldKey: "productId", kind: "belongsTo", target: "Product", foreignKey: "product_id" }]);
   const product = entity("Product", "product", [field("displayName")], coreView());
   owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", subtitle: ["lines.productId"], body: ["lines.productId", "lines.productId.displayName"] } };
+  owner.contract.interfaces!.web!.namedViews = { list: { kind: "collection", collectionLayout: "table", route: "/deals/list" } };
   const build = () => buildWebManifest([owner, line, product]);
+  const list = build().entities.Deal!.views.named!.list;
+  expect(list).toMatchObject({ route: "/deals/list" });
+  expect(list).not.toHaveProperty("board");
   expect(build().entities.Deal!.views.collection.board!.card.subtitle![0]).toMatchObject({ targetEntityId: "Product", cardinality: "many" });
   expect(build().entities.Deal!.views.collection.board!.card.title).toMatchObject([{ field: "displayName" }]);
   owner.contract.interfaces!.web!.collectionBoard!.card.title = ["productId", "displayName"];

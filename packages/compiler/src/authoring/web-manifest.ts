@@ -1366,8 +1366,31 @@ function projectEntity(
       }, all, providers);
       return [name, { ...projected.views.collection, ...(definition.filter ? { filter: definition.filter } : {}), id: `${entityName}.${name}`, collectionLayout: "table" as const }];
     }
+    if (definition.kind === "collection" && definition.collectionLayout === "matrix" && "source" in definition.matrix) {
+      const { read, apply, rows, measures, total, refresh = [] } = definition.matrix;
+      // The browser invokes these by id; they must be Operations a compiled entity really owns.
+      const operation = (role: string, id: string) => {
+        const [owner, key] = id.split(".");
+        const found = all.get(owner!)?.contract.pluginOperations?.find(candidate => candidate.key === key);
+        if (!found) throw new Error(`${entityName}.${name}: matrix ${role} names unknown Operation ${id}.`);
+        return found.definition.effects?.data;
+      };
+      if (operation("read", read) !== "read") throw new Error(`${entityName}.${name}: matrix read Operation ${read} must only read.`);
+      if (apply && operation("apply", apply) === "read") throw new Error(`${entityName}.${name}: matrix apply Operation ${apply} must write.`);
+      if (rows && (!fields[rows.parentField]?.supports.read || fields[rows.parentField]?.cardinality !== "one")) throw new Error(`${entityName}.${name}: matrix field ${rows.parentField} must be readable and single.`);
+      for (const entity of refresh) if (!all.has(entity)) throw new Error(`${entityName}.${name}: matrix refresh names unknown entity ${entity}.`);
+      return [name, { kind: "collection" as const, collectionLayout: "matrix" as const, matrix: {
+        source: "operation" as const, read, ...(apply ? { apply } : {}), ...(rows ? { rows } : {}),
+        measures: measures.map(measure => ({
+          key: measure.key, label: localized(measure.label, measure.key), heading: localized(measure.heading ?? measure.label, measure.key),
+          format: measure.format, align: measure.align ?? "end", editable: measure.editable ?? false,
+        })),
+        ...(total ? { total: localized(total, "Total") } : {}),
+        refresh: [...new Set([entityName, ...refresh])],
+      } }];
+    }
     if (definition.kind === "collection" && definition.collectionLayout === "matrix") {
-      const { rowField, columnField, valueField } = definition.matrix;
+      const { rowField, columnField, valueField } = definition.matrix as import("./types.js").RecordMatrixDefinition;
       for (const key of [rowField, columnField, valueField]) {
         if (!fields[key]?.supports.read || fields[key]?.cardinality !== "one") throw new Error(`${entityName}.${name}: matrix field ${key} must be readable and single.`);
       }

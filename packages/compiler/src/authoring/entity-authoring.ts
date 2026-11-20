@@ -17,6 +17,8 @@ const RESERVED_MUTATION_CONTROL_FIELD_KEYS = new Set([
   "confirmationAnswer",
 ]);
 
+/** `Entity.operation`: the canonical id of an entity-owned Operation. */
+const QUALIFIED_OPERATION_ID = /^[A-Z][A-Za-z0-9]*\.[a-z][A-Za-z0-9]*$/;
 const WEB_RENDERER_KEY = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
 
 export function assertEntityAuthoring(entity: CoreEntity, origin: string): void {
@@ -94,8 +96,18 @@ export function assertEntityAuthoring(entity: CoreEntity, origin: string): void 
         for (const field of keys) {
           if (!fieldsByKey.has(field)) throw new Error(`${origin} named Web view ${name} references unknown field ${field}.`);
         }
+      } else if (namedView.collectionLayout === "matrix" && "source" in namedView.matrix) {
+        const { read, apply, rows, measures } = namedView.matrix;
+        for (const [role, id] of [["read", read], ["apply", apply]] as const) {
+          if (id !== undefined && !QUALIFIED_OPERATION_ID.test(id)) throw new Error(`${origin} matrix ${name} ${role} must be a qualified Operation id such as Budget.table.`);
+        }
+        if (read === apply) throw new Error(`${origin} matrix ${name} requires distinct read and apply Operations.`);
+        const parent = rows ? fieldsByKey.get(rows.parentField) : undefined;
+        if (rows && (!parent || parent.cardinality === "collection")) throw new Error(`${origin} matrix ${name} requires a single field: ${rows.parentField}.`);
+        if (new Set(measures.map(measure => measure.key)).size !== measures.length) throw new Error(`${origin} matrix ${name} repeats a measure key.`);
+        if (measures.some(measure => measure.editable) && !apply) throw new Error(`${origin} matrix ${name} has an editable measure but no apply Operation.`);
       } else if (namedView.collectionLayout === "matrix") {
-        const { rowField, columnField, valueField } = namedView.matrix;
+        const { rowField, columnField, valueField } = namedView.matrix as import("./types.js").RecordMatrixDefinition;
         if (new Set([rowField, columnField, valueField]).size !== 3) throw new Error(`${origin} matrix ${name} requires distinct row, column and value fields.`);
         for (const key of [rowField, columnField, valueField]) {
           const field = fieldsByKey.get(key);

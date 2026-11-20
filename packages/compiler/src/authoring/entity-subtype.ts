@@ -162,7 +162,7 @@ function templateFieldKeys(template: string | undefined): string[] {
 /** Keys under which a string (or `key`/`name`-carrying object) names a field or relationship. */
 const REFERENCE_LIST_KEYS = new Set(["fields", "badges", "relationships", "columns", "sortFields", "filters", "filterFields", "include", "createRequires"]);
 const REFERENCE_VALUE_KEYS = new Set([
-  "relationship", "filterField", "tabLabel", "rowField", "columnField", "valueField", "field", "sourceField", "iconField",
+  "relationship", "filterField", "tabLabel", "rowField", "columnField", "valueField", "parentField", "field", "sourceField", "iconField",
   "titleField", "timestampField", "descriptionField", "relatedField", "channelField", "preferredChannelField", "through",
   "via", "inverse", "definitionField", "documentField", "groupsFrom", "displayField", "status",
 ]);

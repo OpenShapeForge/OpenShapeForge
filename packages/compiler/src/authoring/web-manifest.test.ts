@@ -1160,7 +1160,7 @@ describe("web manifest projection", () => {
         },
         graphql: { kind: "mutation", field: "recalculateDeal" },
         mcp: { name: "recalculate_deal" },
-        web: {},
+        web: { visibleWhen: { conditions: [{ field: "id", operator: "isNotEmpty" }] } },
       },
     }, {
       key: "compose",
@@ -1198,7 +1198,11 @@ describe("web manifest projection", () => {
       },
     });
     expect(projected.views.record?.operations.actions).toEqual([
-      expect.objectContaining({ id: "example.deal.recalculate", intent: "invoke" }),
+      expect.objectContaining({
+        id: "example.deal.recalculate",
+        intent: "invoke",
+        visibleWhen: { conditions: [{ field: "id", operator: "isNotEmpty" }] },
+      }),
     ]);
     expect(projected.views.collection.operations.actions).toEqual([
       expect.objectContaining({ id: "example.deal.compose", intent: "invoke" }),

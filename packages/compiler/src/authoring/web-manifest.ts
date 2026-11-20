@@ -234,6 +234,7 @@ function customOperation(
     // drop those keys before the wire.
     input: { kind: "json-schema", schema: withOperationControls(definition.input.schema, definition) },
     output: { kind: "json-schema", schema: definition.output.schema },
+    ...(source.interfaces.web?.visibleWhen ? { visibleWhen: source.interfaces.web.visibleWhen } : {}),
     ...(source.interfaces.web?.successMessage ? { successMessage: localized(source.interfaces.web.successMessage, "Action completed.") } : {}),
     ...(source.interfaces.web?.resultRenderer ? { resultRenderer: source.interfaces.web.resultRenderer } : {}),
     ...(source.interfaces.web?.form ? { form: operationForm(source.interfaces.web.form, definition.input.schema, source.id, definition.reliability.idempotency.mode === "keyed" ? [definition.reliability.idempotency.inputField] : []) } : {}),
@@ -962,6 +963,7 @@ function projectEntity(
   // Every single entity reference is an authored field, so its writability and
   // presentation are projected above; relationships add no implicit fields.
   const fields = Object.fromEntries(explicitFields);
+  assertVisibilityFields(entityName, "Web action", Object.values(customOperations), fields);
   const tree = collectionTree(contract);
   const table = compileCollectionTable(source, all);
   const authoredBoard = contract.interfaces?.web?.collectionBoard;

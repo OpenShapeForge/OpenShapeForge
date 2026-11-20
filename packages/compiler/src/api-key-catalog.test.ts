@@ -145,7 +145,7 @@ describe("shipped integration and API-key catalog", () => {
       });
     }
   });
-  test("binds every Operation to the one provisioning service under the management role", () => {
+  test("binds every integration Operation to the provisioning service and its exact role set", () => {
     const operations = compiled(apiKeyCatalog());
     expect(operations.map(({ key }) => key).sort()).toEqual([
       "api-keys.create-integration",
@@ -163,7 +163,9 @@ describe("shipped integration and API-key catalog", () => {
       expect(operation.plugin).toBe("osf-api-keys");
       // The ceiling's own role, so a transport cannot admit a caller the
       // service would then refuse — or, worse, the reverse.
-      expect(operation.auth).toEqual({ mode: "session", roles: ["Platform.ApiKeys.Manage"] });
+      const roles = ["Platform.ApiKeys.Manage"];
+      if (operation.key === "api-keys.create-integration") roles.push("Platform.ApiKeys.IntegrationCreate");
+      expect(operation.auth).toEqual({ mode: "session", roles });
       expect(operation.tenancy).toEqual({ mode: "required" });
       // Every refusal the handlers can return is declared, the unconfigured
       // deployment included: an undeclared status is a contract violation at
@@ -195,6 +197,16 @@ describe("shipped integration and API-key catalog", () => {
       expect(operation.transports.graphql.enabled).toBe(false);
       expect(operation.transports.rest.path.startsWith("/api/api-key-integrations/")).toBe(true);
     }
+  });
+
+  test("the personal creation role is exclusive to the minting Operation", () => {
+    const catalog = loadOperationCatalogs(authoringDir)
+      .find(({ document }) => document.plugin === "osf-api-keys" && document.operations.createMyPersonalKey)!.document;
+    const operations = compiled(catalog);
+    const create = operations.find(({ key }) => key === "api-keys.create-my-personal-key");
+    expect(create?.auth).toEqual({ mode: "session", roles: ["Platform.ApiKeys.Personal", "Platform.ApiKeys.PersonalCreate"] });
+    const creators = operations.filter(({ auth }) => auth.mode === "session" && auth.roles?.includes("Platform.ApiKeys.PersonalCreate"));
+    expect(creators.map(({ key }) => key)).toEqual(["api-keys.create-my-personal-key"]);
   });
 
   test("confidential output cannot enter an idempotency receipt", () => {

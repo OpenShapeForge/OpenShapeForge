@@ -4,8 +4,8 @@
 #
 # Nothing here decides anything. Every Operation calls the one provisioning
 # service (apps/api/src/auth/api-key/service.ts) and therefore the one privilege
-# ceiling (ceiling.ts): the management role, "nobody grants what they do not
-# hold", and the refusal of an API key session to manage API keys. The existing
+# ceiling (ceiling.ts): creation or management permission as applicable,
+# the caller's own role ceiling, and a verified interactive person. The existing
 # REST and GraphQL surfaces call the same functions, so this catalog is a third
 # projection of one authority rather than a second implementation.
 #
@@ -362,9 +362,7 @@ operations:
     name: { en: Add an integration, nl: Integratie toevoegen }
     description:
       en: Create an integration and its first API key. Copy the key when it appears; you cannot view it again later.
-        For implementation, read the MCP resource skill://osf/implementing-api-keys/SKILL.md.
       nl: Maak een integratie en de eerste API-sleutel aan. Kopieer de sleutel zodra deze verschijnt; je kunt hem later niet opnieuw bekijken.
-        Lees voor de implementatie de MCP-resource skill://osf/implementing-api-keys/SKILL.md.
     implementation: { type: plugin, plugin: osf-api-keys, handler: createIntegration }
     input:
       schema:
@@ -523,7 +521,7 @@ operations:
     errors:
       - { status: 400, code: VALIDATION, description: The input does not describe a valid request. }
       - { status: 401, code: UNAUTHENTICATED, description: An authenticated tenant session is required. }
-      - { status: 403, code: FORBIDDEN, description: 'The session may not manage API keys: it lacks the creation permission, asked for a role the caller does not hold, or is not a verified person.' }
+      - { status: 403, code: FORBIDDEN, description: 'The session may not create the integration: it lacks the creation permission, asked for a role the caller does not hold, or is not a verified person.' }
       - { status: 404, code: NOT_FOUND, description: The integration or credential does not exist in this organization. }
       - { status: 502, code: PROVISIONING_FAILED, description: The identity provider refused or could not complete the service account; nothing usable was handed out and the attempt is left for the reconciler. }
       - { status: 503, code: NOT_CONFIGURED, description: 'This deployment has no API key provisioning configuration, so no integration can be managed here.' }
@@ -532,9 +530,7 @@ operations:
     name: { en: Issue a credential, nl: Credential uitgeven }
     description:
       en: Issue an additional API key. Copy it when it appears; you cannot view it again later. Once the application uses the new key, you can revoke the old one.
-        For implementation, read the MCP resource skill://osf/implementing-api-keys/SKILL.md.
       nl: Geef een extra API-sleutel uit. Kopieer hem zodra hij verschijnt; je kunt hem later niet opnieuw bekijken. Zodra de applicatie de nieuwe sleutel gebruikt, kun je de oude intrekken.
-        Lees voor de implementatie de MCP-resource skill://osf/implementing-api-keys/SKILL.md.
     implementation: { type: plugin, plugin: osf-api-keys, handler: issueCredential }
     input:
       schema:

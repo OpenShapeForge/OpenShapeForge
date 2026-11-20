@@ -629,7 +629,7 @@ export async function listApprovedIntegrations(
   query: { first?: number; after?: string },
 ): Promise<{ integrations: { integrationId: string; displayName: string }[]; nextCursor: string | null }> {
   assertMayCreateIntegration(session);
-  const first = boundedFirst(query.first);
+  const first = boundedFirst(query.first ?? 25);
   return withSession(deps, session, async (trx) => {
     const result = await sql<{ integrationId: string; displayName: string }>`
       select i.id as "integrationId", i.display_name as "displayName"

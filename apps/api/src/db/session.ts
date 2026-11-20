@@ -187,7 +187,9 @@ async function applyAuthorizationSession<T>(trx: Transaction<T>): Promise<void> 
       perform set_config('app.authorization_rules',rules::text,true);
     end if;
   end $authorization$`.execute(trx).catch(error => {
-    if (error instanceof Error && error.message === "AUTHORIZATION_INTEGRATION_CREDENTIAL_INACTIVE") {
+    if (error instanceof Error &&
+        (("errno" in error && error.errno === "42501") || ("code" in error && error.code === "42501")) &&
+        error.message.includes("AUTHORIZATION_INTEGRATION_CREDENTIAL_INACTIVE")) {
       throw operationFailure({ code: "FORBIDDEN", message: "The integration credential is inactive.", retryable: false });
     }
     throw error;

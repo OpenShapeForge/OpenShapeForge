@@ -219,8 +219,8 @@ export async function resolveApiKey(
  * Deliberately fire-and-forget at the call site: a telemetry write must never
  * fail an authenticated request, and the row is not read on the hot path.
  *
- * `skip locked` is what keeps that promise now that a record action holds a
- * SHARE lock on this row for as long as its effect runs
+ * `skip locked` keeps that promise when a named record action or a managed
+ * authorization profile holds a SHARE lock through the Operation
  * (db/migrations/record-actions.ts). Without it, every request presenting a
  * key whose own long-running Operation is still in flight would park this
  * statement on that lock until the statement timeout, holding a pool

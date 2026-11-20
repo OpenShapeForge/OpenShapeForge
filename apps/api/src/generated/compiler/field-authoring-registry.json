@@ -8021,6 +8021,13 @@
                   "en": "Role",
                   "nl": "Rol"
                 }
+              },
+              {
+                "value": "integration",
+                "label": {
+                  "en": "API integration",
+                  "nl": "API-integratie"
+                }
               }
             ]
           }

@@ -16,7 +16,9 @@ security mutations also reuse their live authority check.
 The compiler derives `authorization-operations.json` from canonical Operations,
 the storage manifest and the existing tenant-assignable permission ceiling. A
 manager may replace an eligible Operation's initial audience with tenant-local
-users, groups or roles. Original audience membership is not the ceiling. OAuth
+users, groups, roles or API integrations. An integration assignment names the
+integration ID, so it applies to its current credentials after rotation.
+Original audience membership is not the ceiling. OAuth
 scopes, role groups, principal-class restrictions, record ACLs, field protection,
 workflow controls and provider restrictions continue to narrow access.
 

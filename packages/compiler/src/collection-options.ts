@@ -13,7 +13,7 @@ export function collectionOptionsDefinition(entities:Entities):PluginOperationCo
  auth:{mode:'session',anyAuthenticatedSession:true},tenancy:{mode:'required'},idempotency:{mode:'none'},effects:{data:'read',external:'none'},
  inputSchema:{type:'object',additionalProperties:false,required:['entity','field'],properties:{entity:{type:'string'},field:{type:'string'},search:{type:'string',maxLength:200},locale:{type:'string',enum:['en','nl']},first:{type:'integer',minimum:1,maximum:100},after:{type:'string',maxLength:8192},referenceEntity:{type:'string'},catalog:{type:'string',enum:['operations','fields','subjects','entities']},filter:{type:'object'}}},
  outputSchema:{type:'object',required:['items','nextCursor'],properties:{
-  items:{type:'array',items:{type:'object',required:['value','label'],properties:{value:{type:'string'},label:{type:'string'}}}},
+  items:{type:'array',items:{type:'object',required:['value','label'],properties:{value:{type:'string'},label:{type:'string'},group:{type:'object',required:['id','label'],properties:{id:{type:'string'},label:{type:'string'}}}}}},
   nextCursor:{type:['string','null']}
  }},errors:[],transports:{rest:{method:'POST',path:'/api/core/collection/options',response:{kind:'json'}},mcp:{enabled:true,name:'collection_options'},typescript:{enabled:true,functionName:'collectionOptions'},graphql:{enabled:false,reason:'Use the canonical REST or MCP Operation.'}}
 };}

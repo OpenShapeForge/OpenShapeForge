@@ -1,5 +1,6 @@
 import { securitySubjectChoices } from '../accounts/security-profiles.js';
 // SPDX-License-Identifier: BUSL-1.1
+import operationCatalog from '../generated/operations/catalog.json' with {type:'json'};
 import securityInventory from '../generated/compiler/authorization-operations.json' with {type:'json'};
 import {operationFailure} from '@openshapeforge/operations';
 import type {ModuleOperationHandler} from '../modules/contract.js';
@@ -9,6 +10,26 @@ import {fieldColumnMap} from './entity/columns.js';
 import {assertBoundFieldQueryAllowed} from './entity/field-bindings.js';
 import {moduleRealtimeResources} from '../modules/realtime-resources.js';
 import type {RuntimeModule} from '../modules/contract.js';
+
+type Locale = 'en' | 'nl';
+
+const entityOperationLabels = new Map((operationCatalog.entityOperations ?? []).map(operation => [operation.id, operation.name]));
+const standaloneOperations = new Map(operationCatalog.operations.map(operation => [operation.id, operation]));
+
+function authorizationOperationChoices(ids: readonly string[], locale: Locale) {
+  const ordinaryGroup = { id: 'entity-operations', label: locale === 'nl' ? 'Entiteitsoperaties' : 'Entity operations' };
+  const blueprintGroup = { id: 'blueprint-operations', label: locale === 'nl' ? 'Blauwdrukoperaties' : 'Blueprint operations' };
+  return ids.map(value => {
+    const labels = entityOperationLabels.get(value);
+    const operation = standaloneOperations.get(value);
+    return {
+      value,
+      label: labels?.[locale] ?? labels?.en ?? operation?.title ?? value,
+      group: operation?.plugin === 'osf-blueprints' ? blueprintGroup : ordinaryGroup,
+    };
+  }).sort((a, b) => Number(a.group === blueprintGroup) - Number(b.group === blueprintGroup)
+    || a.label.localeCompare(b.label, locale) || a.value.localeCompare(b.value));
+}
 
 function nestedString(record:unknown,path:string):string|undefined{
  let value:unknown=record;
@@ -55,10 +76,12 @@ export function nativeCollectionOptionsHandler(operation:OperationContract,modul
       return {value:await securitySubjectChoices(context,{kind:String(input.referenceEntity??''),search,first,...(typeof input.after==='string'?{after:input.after}:{}),locale:input.locale==='nl'?'nl':'en'})};
     }
     const operations = securityInventory.rows.filter(operation => operation.grantable && (!input.referenceEntity || operation.entity===input.referenceEntity));
-    const entries = input.catalog==='operations' ? operations.map(operation=>({value:operation.id,label:operation.id}))
+    const locale = input.locale === 'nl' ? 'nl' : 'en';
+    const entries = input.catalog==='operations' ? authorizationOperationChoices(operations.map(operation => operation.id), locale)
       : input.catalog==='fields' ? [...new Set(operations.flatMap(operation=>Object.keys(operation.fields)))].map(field=>({value:field,label:field}))
       : input.catalog==='entities' ? [...new Set(operations.map(operation=>operation.entity))].map(value=>({value,label:sources.find(source=>source.entity===value)?.labels?.[input.locale==='nl'?'nl':'en']??value})) : [];
-    const selected=entries.filter(entry=>`${entry.value} ${entry.label}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>a.value.localeCompare(b.value));
+    const selected=entries.filter(entry=>`${entry.value} ${entry.label}`.toLowerCase().includes(search.toLowerCase()));
+    if (input.catalog !== 'operations') selected.sort((a,b)=>a.value.localeCompare(b.value));
     const after=typeof input.after==='string'?selected.findIndex(entry=>entry.value===input.after)+1:0;
     const items=selected.slice(after,after+first);
     return {value:{items,nextCursor:selected.length>after+first?items.at(-1)!.value:null}};

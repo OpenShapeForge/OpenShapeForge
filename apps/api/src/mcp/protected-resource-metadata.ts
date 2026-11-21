@@ -201,8 +201,8 @@ export function registerProtectedResourceMetadata(app: FastifyInstance): void {
   //
   // RFC 9728 §3.1 spells the document's URL by inserting the well-known
   // segment before the resource's path, so the CANONICAL resource
-  // `https://hubble.com/zerocopter` is described at
-  // `/.well-known/oauth-protected-resource/zerocopter`.
+  // `https://app.example.test/alpha` is described at
+  // `/.well-known/oauth-protected-resource/alpha`.
   const organizationMetadata = async (
     request: FastifyRequest,
     reply: FastifyReply,

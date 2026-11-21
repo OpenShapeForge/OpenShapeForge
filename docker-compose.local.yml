@@ -125,7 +125,7 @@ services:
       # which port the caller happened to use. Pinning it keeps exactly one
       # issuer — the value of KC_HOSTNAME — no matter which listener served
       # the request, which is what the bearer verifier on the
-      # Hubble runtime and every already-issued token expect.
+      # local runtime and every already-issued token expect.
       KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "false"
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"

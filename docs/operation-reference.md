@@ -32,7 +32,7 @@ cross-tenant reader policies remain authoritative.
 
 Images are repeated in immutable versions. At the 96 KiB decoded bound, a
 100-item page can contain about 13 MiB of base64 image data; each version also
-retains its image. The current Hubble library offers one image. A large library
+retains its image. A large library
 or frequent image revisions should trigger separate asset storage and caching
 work instead of increasing these limits.
 

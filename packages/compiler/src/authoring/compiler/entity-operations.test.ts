@@ -6,7 +6,7 @@ import { buildEntityOperations } from "./entity-operations.js";
 
 function relationSource(): Parameters<typeof buildEntityOperations>[0] {
   return {
-    entity: { id: "hubble.Relation", name: "Relation" },
+    entity: { id: "example.Relation", name: "Relation" },
     crud: {
       operations: { list: true, get: true, create: true, update: true, delete: false },
     },
@@ -42,25 +42,25 @@ describe("canonical entity operations", () => {
     expect(Object.keys(operations)).toEqual(["list", "get", "create", "update"]);
     expect(operations.list).toMatchObject({
       id: "Relation.list",
-      entityId: "hubble.Relation",
+      entityId: "example.Relation",
       authorization: { action: "read", roles: ["Relations.Read"] },
       interaction: { confirmation: { mode: "none" } },
       input: {
         kind: "collection-query",
-        entityId: "hubble.Relation",
+        entityId: "example.Relation",
         filterMode: "declared-fields",
         sortMode: "declared-fields",
         pagination: { kind: "cursor", defaultLimit: 50, maxLimit: 200 },
       },
-      output: { kind: "entity-connection", entityId: "hubble.Relation" },
+      output: { kind: "entity-connection", entityId: "example.Relation" },
     });
     expect(operations.create?.input).toMatchObject({
       kind: "entity-create",
-      entityId: "hubble.Relation",
+      entityId: "example.Relation",
     });
     expect(operations.update?.input).toMatchObject({
       kind: "entity-update",
-      entityId: "hubble.Relation",
+      entityId: "example.Relation",
       identityField: "id",
     });
     expect(operations.delete).toBeUndefined();
@@ -207,7 +207,7 @@ describe("canonical entity operations", () => {
       intent: "delete",
       implementation: { type: "plugin", plugin: "example", handler: "deleteRelation" },
       target: {
-        entityId: "hubble.Relation",
+        entityId: "example.Relation",
         entityName: "Relation",
         scope: "record",
         inputField: "relationId",

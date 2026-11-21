@@ -120,7 +120,7 @@ describe("describeConnectionNeeds", () => {
       ),
     ).toBe("Requires the organization's Google connection; administrators set it up with create_connection.");
     expect(
-      describeConnectionNeeds("Hubble", { organization: false, personal: false, oauthClient: false }, TOOLS),
+      describeConnectionNeeds("Example", { organization: false, personal: false, oauthClient: false }, TOOLS),
     ).toBe("");
   });
 

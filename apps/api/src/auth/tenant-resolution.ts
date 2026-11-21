@@ -68,7 +68,7 @@ export function __resetTenantResolutionForTests(): void {
 // row provisioned for one realm can never be reached by a token from another.
 
 // The TTL, the realm parser, the membership selection and the cache key live in
-// `@openshapeforge/auth` (organization-tenant.ts) because Hubble's separately
+// `@openshapeforge/auth` (organization-tenant.ts) because a separately
 // bundled plugin runtime needs exactly the same answers and cannot import this
 // file. The cache instance below is process state and stays here.
 const organizationTenantCache = new Map<string, { tenantId: string; expiresAtMs: number }>();

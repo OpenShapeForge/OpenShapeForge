@@ -10,12 +10,11 @@ import { createApiApp } from "../roles/api.js";
 import { loadRuntimeModules } from "../modules/registry.js";
 import { generateKeyPairSync, sign } from "node:crypto";
 import { __resetSessionResolverForTests } from "../auth/identity.js";
-import { join } from 'node:path';
 import { projectLinkedProviders } from "./linked-providers.js";
 import { blockOrganizationAccount } from "./account-management.js";
 
-const url = process.env.HUBBLE_ACCOUNT_SOURCE_TEST_DATABASE_URL;
-if (!url || !new URL(url).pathname.startsWith("/hubble_sandbox_account_")) throw new Error("An isolated account proof database is required.");
+const url = process.env.OSF_ACCOUNT_SOURCE_TEST_DATABASE_URL;
+if (!url || !new URL(url).pathname.startsWith("/osf_sandbox_account_")) throw new Error("An isolated account proof database is required.");
 test("Account collections, seek paging, tenant-scoped point reads and shared Relation cardinality", async () => {
   const admin = new SQL(url!, { max: 1 });
   const appUrl = new URL(url!); appUrl.username = appUrl.password = "openshapeforge_app";
@@ -321,8 +320,9 @@ test("Account collections, seek paging, tenant-scoped point reads and shared Rel
       // Restore the browser persona to read-only: no broad business grants were required.
       await admin`update platform.identity_relations set roles=ARRAY[${ACCOUNT_READ},${'custom:' + ownRole}],updated_at=clock_timestamp()
         where identity_id=${ids[0]} and tenant_id=${own}`;
-      const root = process.env.HUBBLE_ACCOUNT_WEB_PROOF_ROOT;
-      if (root) {
+      // A host can provide its own proof runner without coupling this fixture to its web stack.
+      const runner = process.env.OSF_ACCOUNT_WEB_PROOF_RUNNER;
+      if (runner) {
         // A separate manager keeps the original read-only and denied journeys intact.
         const manager = crypto.randomUUID(); ids.push(manager);
         await admin`insert into platform.identities(id,issuer,subject,email,display_name)
@@ -347,41 +347,22 @@ test("Account collections, seek paging, tenant-scoped point reads and shared Rel
         expect(selfPromotion.statusCode, selfPromotion.body).toBe(403);
         expect(selfPromotion.json()).toHaveProperty('error.code', 'FORBIDDEN');
         const address = await app.listen({ host: '127.0.0.1', port: 0 });
-        const web = Bun.spawn([process.execPath, join(root, 'apps/product-web/src/server.ts')], {
-          cwd: root, env: { ...process.env, HOST: '127.0.0.1', PORT: '0', HUBBLE_API_URL: address,
-            HUBBLE_LOCAL_PREVIEW: '0' }, stdout: 'pipe', stderr: 'pipe',
+        const proof = Bun.spawn([process.execPath, runner], {
+          env: { ...process.env, OSF_ACCOUNT_PROOF_API_URL: address,
+            OSF_ACCOUNT_PROOF_TOKEN: token(0),
+            OSF_ACCOUNT_PROOF_DENIED_TOKEN: token(1),
+            OSF_ACCOUNT_PROOF_MANAGER_TOKEN: token(4),
+            OSF_ACCOUNT_PROOF_MANAGED_ID: ids[1],
+            OSF_ACCOUNT_PROOF_RELATION_TOKEN: token(5),
+            OSF_ACCOUNT_PROOF_RELATION_ID: relation,
+            OSF_ACCOUNT_PROOF_RELATION_ONLY_TOKEN: token(6),
+            OSF_ACCOUNT_PROOF_RECORD_ID: ids[2],
+          }, stdout: 'pipe', stderr: 'pipe',
         });
-        try {
-          const reader = web.stdout.getReader();
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          const socket = (async () => {
-            const decoder = new TextDecoder();
-            let logs = '';
-            for (;;) {
-              const chunk = await reader.read();
-              logs += decoder.decode(chunk.value, { stream: !chunk.done });
-              const port = logs.match(/listening on 127\.0\.0\.1:(\d+)/)?.[1];
-              if (port) return port;
-              if (chunk.done) throw new Error('Isolated web exited before reporting a loopback socket.');
-            }
-          })();
-          let port: string;
-          try {
-            port = await Promise.race([socket, new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new Error('Isolated web did not bind in time.')), 15_000);
-            })]);
-          } finally { clearTimeout(timer); await reader.cancel(); reader.releaseLock(); }
-          const browser = Bun.spawn([process.execPath, 'x', 'playwright', 'test', '--config', 'scripts/account-source.playwright.config.ts'], {
-            cwd: root, env: { ...process.env, HUBBLE_ACCOUNT_PROOF_WEB_URL: `http://127.0.0.1:${port}`,
-              HUBBLE_ACCOUNT_PROOF_TOKEN: token(0), HUBBLE_ACCOUNT_PROOF_DENIED_TOKEN: token(1),
-              HUBBLE_ACCOUNT_PROOF_MANAGER_TOKEN: token(4), HUBBLE_ACCOUNT_PROOF_MANAGED_ID: ids[1],
-              HUBBLE_ACCOUNT_PROOF_RELATION_TOKEN: token(5), HUBBLE_ACCOUNT_PROOF_RELATION_ID: relation,
-              HUBBLE_ACCOUNT_PROOF_RELATION_ONLY_TOKEN: token(6),
-              HUBBLE_ACCOUNT_PROOF_RECORD_ID: ids[2] }, stdout: 'pipe', stderr: 'pipe',
-          });
-          const [code, out, err] = await Promise.all([browser.exited, new Response(browser.stdout).text(), new Response(browser.stderr).text()]);
-          expect(code, out + err).toBe(0);
-        } finally { web.kill(); await web.exited; }
+        const [code, out, err] = await Promise.all([
+          proof.exited, new Response(proof.stdout).text(), new Response(proof.stderr).text(),
+        ]);
+        expect(code, out + err).toBe(0);
       }
       expect((await admin`select username,email,relation_id::text from erp.accounts where id=${historicalAccount}`)[0]).toEqual({username:'historical-only',email:'historical@example.test',relation_id:relation});
     } finally { await app.close(); }

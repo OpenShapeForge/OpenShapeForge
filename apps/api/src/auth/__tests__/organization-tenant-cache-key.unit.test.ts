@@ -32,17 +32,17 @@ describe("organizationTenantCacheKey", () => {
   });
 
   it("is stable for one pair and distinct for another", () => {
-    expect(organizationTenantCacheKey("hubble", "org-1")).toBe(
-      organizationTenantCacheKey("hubble", "org-1"),
+    expect(organizationTenantCacheKey("example", "org-1")).toBe(
+      organizationTenantCacheKey("example", "org-1"),
     );
-    expect(organizationTenantCacheKey("hubble", "org-1")).not.toBe(
-      organizationTenantCacheKey("hubble", "org-2"),
+    expect(organizationTenantCacheKey("example", "org-1")).not.toBe(
+      organizationTenantCacheKey("example", "org-2"),
     );
   });
 
   it("is text, so the file it lives in stays greppable", () => {
     const control = new RegExp(`[${NUL}-\\u001f]`);
-    expect(control.test(organizationTenantCacheKey("hubble", "org-1"))).toBe(
+    expect(control.test(organizationTenantCacheKey("example", "org-1"))).toBe(
       false,
     );
   });

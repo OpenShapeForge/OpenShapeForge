@@ -98,7 +98,7 @@ const adminToken = (overrides: Record<string, unknown> = {}) =>
     iss: CONTROL_ISSUER,
     sub: "0b2a3f1e-8a6b-4f30-9d2f-5f1c7a8e9b10",
     azp: "codex-platform",
-    preferred_username: "hubble-platform-admin",
+    preferred_username: "example-platform-admin",
     realm_access: { roles: [PLATFORM_OPERATOR_ROLE] },
     ...overrides,
   });
@@ -173,9 +173,9 @@ if (!EXTERNAL_CONTROL_REALM) describe("platform administrator MCP admission", ()
       iss: TENANT_ISSUER,
       sub: "user-zerocopter-admin",
       azp: "codex",
-      aud: ["hubble-api"],
+      aud: ["example-api"],
       organization: { "zerocopter-dev": { id: "8ba94fb8-08d3-4907-9af3-5bd1e2018f46" } },
-      resource_access: { "hubble-api": { roles: ["org_admin"] } },
+      resource_access: { "example-api": { roles: ["org_admin"] } },
       realm_access: { roles: [PLATFORM_OPERATOR_ROLE] },
     });
     const refused = await call(tenantToken);

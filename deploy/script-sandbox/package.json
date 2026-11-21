@@ -1,0 +1,15 @@
+{
+  "name": "openshapeforge-script-sandbox-image",
+  "private": true,
+  "license": "BUSL-1.1",
+  "type": "module",
+  "dependencies": {
+    "@jitl/quickjs-ffi-types": "0.32.0",
+    "@jitl/quickjs-wasmfile-debug-asyncify": "0.32.0",
+    "@jitl/quickjs-wasmfile-debug-sync": "0.32.0",
+    "@jitl/quickjs-wasmfile-release-asyncify": "0.32.0",
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
+    "quickjs-emscripten": "0.32.0",
+    "quickjs-emscripten-core": "0.32.0"
+  }
+}

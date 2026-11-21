@@ -17,7 +17,7 @@ import { newQuickJSWASMModule, type QuickJSContext, type QuickJSDeferredPromise,
 import {
   encodeFrame, FrameDecoder, parseParentMessage, ProtocolError, utf8Bytes,
   type ParentMessage, type ScriptErrorCode, type ScriptLimits, type WorkerMessage,
-} from "./protocol.ts";
+} from "./protocol.js";
 
 /**
  * Evaluated inside the isolate before any customer code. It captures the
@@ -192,7 +192,7 @@ async function onReply(message: Extract<ParentMessage, { type: "read.ok" | "read
 async function main(): Promise<void> {
   const decoder = new FrameDecoder();
   let started = false;
-  for await (const chunk of Bun.stdin.stream()) {
+  for await (const chunk of process.stdin) {
     for (const raw of decoder.push(chunk)) {
       const message = parseParentMessage(raw);
       if (!message) return fail("protocol_violation");

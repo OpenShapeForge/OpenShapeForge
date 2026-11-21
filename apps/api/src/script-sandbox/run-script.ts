@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: BUSL-1.1
 /**
- * Parent side of the script sandbox: spawns the fixed worker, brokers named
- * reads over the private pipe channel and owns deadline, cancellation, read
- * budget and process cleanup. See worker.ts for the isolate side.
+ * Parent side of the script sandbox: opens a channel to a fresh fixed worker
+ * (local subprocess fixture or container socket), brokers named reads over it
+ * and owns deadline, cancellation, read budget and cleanup. See worker.ts for
+ * the isolate side and daemon.ts for the container side.
  */
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import type { OpenWorkerChannel, WorkerChannel } from "./channel.js";
+import { openLocalWorker } from "./local-channel.js";
 import {
   ALIAS_PATTERN, DEFAULT_LIMITS, encodeFrame, FrameDecoder, parseJson, parseWorkerMessage, ProtocolError,
   serializeJson, utf8Bytes, validateLimits,
   type JsonValue, type ParentMessage, type ReadDenialCode, type ScriptErrorCode, type ScriptLimits,
-} from "./protocol.ts";
-
-const WORKER_PATH = fileURLToPath(new URL("./worker.ts", import.meta.url));
+} from "./protocol.js";
 
 export interface ScriptReadContext {
   /** Aborted when the run ends for any reason; stop work and do not rely on the result. */
@@ -47,17 +44,10 @@ export class ScriptExecutionError extends Error {
   }
 }
 
-const liveWorkers = new Set<{ kill(signal?: number | NodeJS.Signals): void }>();
-let exitHookInstalled = false;
-function track(worker: { kill(signal?: number | NodeJS.Signals): void }) {
-  if (!exitHookInstalled) {
-    exitHookInstalled = true;
-    process.on("exit", () => { for (const live of liveWorkers) { try { live.kill("SIGKILL"); } catch { /* already gone */ } } });
-  }
-  liveWorkers.add(worker);
-}
+/** Runs against the local subprocess fixture. Production code uses `createSandboxRunner` (socket-channel.ts). */
+export const runScript = (request: RunScriptRequest): Promise<JsonValue> => runScriptWith(openLocalWorker, request);
 
-export async function runScript(request: RunScriptRequest): Promise<JsonValue> {
+export async function runScriptWith(open: OpenWorkerChannel, request: RunScriptRequest): Promise<JsonValue> {
   const limits = validateLimits({ ...DEFAULT_LIMITS, ...request.limits });
   const reads = request.reads ?? {};
   if (!limits || typeof request.source !== "string" || utf8Bytes(request.source) > limits.maxSourceBytes) throw new ScriptExecutionError("invalid_request");
@@ -66,9 +56,8 @@ export async function runScript(request: RunScriptRequest): Promise<JsonValue> {
   if (input === null) throw new ScriptExecutionError("invalid_input");
   if (request.signal?.aborted) throw new ScriptExecutionError("cancelled");
 
-  // An empty directory as cwd and an empty environment: nothing ambient to read or inherit.
+  // The deadline starts here, so it also covers however long the transport takes to open.
   const deadlineAt = performance.now() + limits.deadlineMs;
-  const cwd = await mkdtemp(join(tmpdir(), "osf-script-"));
   const controller = new AbortController();
   let settled = false;
   let resolveDone!: (value: JsonValue) => void;
@@ -76,13 +65,13 @@ export async function runScript(request: RunScriptRequest): Promise<JsonValue> {
   const done = new Promise<JsonValue>((resolve, reject) => { resolveDone = resolve; rejectDone = reject; });
   done.catch(() => undefined);
 
-  let worker: ReturnType<typeof spawnWorker> | undefined;
+  let worker: WorkerChannel | undefined;
   let watchdog: ReturnType<typeof setTimeout> | undefined;
   const onAbort = () => fail("cancelled");
 
   const stop = () => {
     controller.abort();
-    try { worker?.kill("SIGKILL"); } catch { /* already gone */ }
+    worker?.kill();
   };
   function fail(code: ScriptErrorCode) {
     if (settled) return;
@@ -107,16 +96,20 @@ export async function runScript(request: RunScriptRequest): Promise<JsonValue> {
   try {
     request.signal?.addEventListener("abort", onAbort, { once: true });
     if (!executionActive()) return await done;
-    worker = spawnWorker(cwd);
-    track(worker);
     watchdog = setTimeout(() => fail("timeout"), Math.max(0, deadlineAt - performance.now()));
+    try {
+      worker = await open({ signal: controller.signal });
+    } catch {
+      fail("worker_failed"); // no transport: fail closed (a no-op when a timeout or cancel already won)
+      return await done;
+    }
+    if (settled) return await done; // ended while opening; the finally block releases the channel
 
     const activeWorker = worker;
     const write = async (message: ParentMessage): Promise<void> => {
       if (settled) return;
       try {
-        activeWorker.stdin.write(encodeFrame(message));
-        await activeWorker.stdin.flush();
+        await activeWorker.write(encodeFrame(message));
       } catch {
         fail("worker_failed");
       }
@@ -164,7 +157,7 @@ export async function runScript(request: RunScriptRequest): Promise<JsonValue> {
     const reading = (async () => {
       const decoder = new FrameDecoder();
       try {
-        for await (const chunk of activeWorker.stdout) {
+        for await (const chunk of activeWorker.output) {
           if (settled) return;
           for (const raw of decoder.push(chunk)) onMessage(raw);
         }
@@ -186,20 +179,8 @@ export async function runScript(request: RunScriptRequest): Promise<JsonValue> {
     request.signal?.removeEventListener("abort", onAbort);
     stop();
     if (worker) {
-      try { worker.stdin.end(); } catch { /* pipe already closed */ }
-      await worker.exited;
-      liveWorkers.delete(worker);
+      worker.end();
+      await worker.closed.catch(() => undefined);
     }
-    await rm(cwd, { recursive: true, force: true });
   }
-}
-
-function spawnWorker(cwd: string) {
-  return Bun.spawn([process.execPath, WORKER_PATH], {
-    cwd,
-    env: {},
-    stdin: "pipe",
-    stdout: "pipe",
-    stderr: "ignore",
-  });
 }

@@ -200,6 +200,15 @@ export type RuntimeCapabilityGrantServices<Session> = {
   list(session: Session, subject: { entity: string; id: string }): Promise<readonly RuntimeCapabilityGrantSummary[]>;
 };
 
+/** Optional pilot executor. Only structured fixture data is supported. */
+export type RuntimeScriptedCapabilitySandbox<Session> = {
+  evaluateFixture(
+    session: Session,
+    request: { source: string; input: Readonly<Record<string, unknown>> },
+    options?: { signal?: AbortSignal },
+  ): Promise<{ ok: true; value: unknown } | { ok: false; code: string }>;
+};
+
 export type RuntimeSchemaValidationResult =
   | { valid: true }
   | { valid: false; error: OperationError };
@@ -833,6 +842,7 @@ export type PluginPlatformServices = {
   /** Diagnostic journal access requires a live verified tenant session and McpInsights.Manage. */
   readonly mcpDiagnostics?: import("./diagnostics.js").RuntimeMcpDiagnosticServices<PluginSessionContext>;
   readonly readProgress?: RuntimeReadProgressServices<PluginSessionContext>;
+  readonly scriptedCapabilitySandbox?: RuntimeScriptedCapabilitySandbox<PluginSessionContext>;
   /**
    * What the host's declarative Service engine enforces (see
    * `RuntimeDeclarativeServiceCapabilities`). Published only by a runtime that

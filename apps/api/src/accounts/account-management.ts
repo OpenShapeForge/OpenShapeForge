@@ -29,7 +29,6 @@ function change(kind: 'block' | 'restore' | 'assignRole' | 'revokeRole'): Module
     const id = input.id, revision = input.revision;
     const result = await withDbSession(context.db!, session, async tx => {
       // Same lock order as existing account mutations: serialize last-admin decisions before row locks.
-      await sql`select pg_advisory_xact_lock(hashtextextended(${session.tenantId}, 7921))`.execute(tx);
       await assertCurrentAccountAuthority(context.db!, tx, session,
         kind === 'assignRole' || kind === 'revokeRole' ? IDENTITY_LINK_ADMIN_ROLE : 'Organization.Accounts.Manage');
       const rows = await sql<Member>`select i.issuer,i.subject,ir.roles,ir.access_blocked,ir.needs_role_assignment,${accountRevision} as revision

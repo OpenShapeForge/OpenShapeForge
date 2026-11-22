@@ -112,6 +112,15 @@ export function registerSessionExecutors(
       controls = inheritConnectionControls(
         parseConnectionExpectation(request.expectedConnection, session),
       );
+      if (controls.pinnedProviderRead) {
+        throw new HttpError(403, "PINNED_READ_REFUSED", "A pinned read cannot dispatch another Service.");
+      }
+      if (request.pinnedProviderRead) {
+        if (!controls.expectedConnection || !/^sha256:[0-9a-f]{64}$/.test(request.pinnedProviderRead.executionFingerprint)) {
+          throw new HttpError(403, "PINNED_READ_REFUSED", "A pinned read requires an approved execution graph and connection.");
+        }
+        controls = { ...controls, pinnedProviderRead: Object.freeze({ ...request.pinnedProviderRead }) };
+      }
     } catch (error) {
       return runtimeOperationResult(failed(error));
     }

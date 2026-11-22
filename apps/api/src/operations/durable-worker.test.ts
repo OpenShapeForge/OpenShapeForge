@@ -6,17 +6,17 @@ import { createDurableWorkerBroker } from "./durable-worker.js";
 
 const identity = { tenantId: "11111111-1111-4111-8111-111111111111", clientId: "org-worker", clientSecret: "never-print-this" };
 const reference = { workId: "command-1", attempt: 1, workerId: "worker-1" };
-function fixture(mode: "none" | "keyed" | "natural" = "keyed") {
+function fixture(mode: "none" | "keyed" | "natural" = "keyed", operationId = "Note.create") {
   let work: RuntimeResolvedOperationWork | undefined = {
     tenantId: identity.tenantId, serviceIdentityId: identity.clientId,
-    operation: { id: "Note.create", input: { value: "requested" }, idempotencyKey: "stable-key" },
+    operation: { id: operationId, input: { value: "requested" }, idempotencyKey: "stable-key" },
     dispatch: { tracked: true },
   };
   let deny = false, uncertain = false, pinFails = false;
   let wrongTenant = false, wrongClient = false, now = 1000;
   let pinCalls = 0;
   const calls: Array<{ url: string; method: string; body: unknown; redirect: unknown; key: string | null }> = [];
-  const definition = { id: "Note.create", intent: "Note.create", effects: { data: "write", external: "none" },
+  const definition = { id: operationId, intent: operationId, effects: { data: "write", external: "none" },
     reliability: { idempotency: { mode } } } as RuntimeOperationDefinition;
   const broker = createDurableWorkerBroker({
     identities: [identity], apiUrl: "http://127.0.0.1:3121", tokenUrl: "http://127.0.0.1:8181/token",
@@ -124,6 +124,21 @@ test("keyed retries preserve the same key; no lease/challenge/confirmation is fa
   expect(request.operation.idempotencyKey).toBe("stable-key");
   expect(request.operation.input).toEqual({ value: "requested" });
   expect(await f.broker.execute(request)).toMatchObject({ error: { code: "OPERATION_TEMPORARILY_UNAVAILABLE", retryable: true } });
+});
+
+test("only the durable source page command fills in its missing explicit receipt key", async () => {
+  const page = fixture("natural", "source-sync.apply-page");
+  page.setWork({ ...page.work(), operation: { ...page.work().operation, idempotencyKey: "a".repeat(220) } });
+  const first = await page.broker.authorize(reference);
+  const retry = await page.broker.authorize({ ...reference, attempt: 2 });
+  expect(first.operation.input?.effectKey).toMatch(/^sha256:[0-9a-f]{64}$/);
+  expect(retry.operation.input).toEqual(first.operation.input);
+  expect(page.work().operation.input).toEqual({ value: "requested" });
+
+  const authored = fixture("natural", "source-sync.apply-page");
+  authored.setWork({ ...authored.work(), operation: { ...authored.work().operation, input: { effectKey: "explicit" } } });
+  expect((await authored.broker.authorize(reference)).operation.input?.effectKey).toBe("explicit");
+  expect((await fixture("natural").broker.authorize(reference)).operation.input?.effectKey).toBeUndefined();
 });
 
 test("an authored Operation delivery key is preserved independently of the durable visit key", async () => {

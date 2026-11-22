@@ -4,6 +4,12 @@
 
 ### Added
 
+- Add optional `scriptedCapabilitySandbox.evaluateReadOnly` for explicitly
+  named reads. Installed modules authorize each binding for the current actor
+  and tenant and verify its live read-only effects. The runtime validates the
+  alias list, rechecks the verified session on each callback and enforces JSON
+  limits and cancellation. The SDK exports `RuntimeScriptedCapabilityBinding`,
+  `RuntimeScriptedCapabilityRead` and `RuntimeScriptedCapabilityResult`.
 - **Shared handler helpers** that plugins had each written by hand:
   `moduleOperationError` and `moduleOperationSuccess` build the module
   Operation result envelopes; `rawQuery` and `queryRows` build and run one raw

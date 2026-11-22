@@ -5,6 +5,7 @@
  * undefined answer.
  */
 import { withDbSession } from "../db/session.js";
+import { pinnedReadRefused, providerReadExecutionFingerprint } from "./pinned-provider-read.js";
 import { delegatedConnectionRow, connectionGrantFingerprint } from "../modules/connection-use-grants.js";
 import { observeDelegatedProviderFailure, revalidateConnectionDelegation, isDelegatedConnection } from "./connection-delegation.js";
 import { ownedByActingRelation } from "../db/acting-relation.js";
@@ -173,6 +174,13 @@ export async function runDerivedBinding(
         `The ${execution.operationEntity} references a missing ${execution.providerEntity}.`,
       );
     }
+    const pinnedRead = scope.controls?.pinnedProviderRead;
+    if (pinnedRead) {
+      const service = scope.internalDerivedDefinition?.row;
+      if (!service || providerReadExecutionFingerprint(pinnedRead, {
+        service, binding, capability: operationRow, adapter: providerRow,
+      }) !== pinnedRead.executionFingerprint) throw pinnedReadRefused();
+    }
     let connectionRows = captured
       ? captured.connectionRows
       : normalizeConnectionValueRows(
@@ -264,6 +272,7 @@ export async function runDerivedBinding(
         operationRow,
         providerRow: providerForExecution,
         connectionValues,
+        ...(pinnedRead ? { pinnedRead } : {}),
         serviceInputs: { ...args, ...accumulated },
         // The platform-owned native provider: run the generated
         // operation in-process through the same executor an
@@ -272,6 +281,7 @@ export async function runDerivedBinding(
         native: nativeBindingInvoker(
           { db, session, tables, operations, moduleSession, modulePlatform },
           stepIdempotencyKey,
+          signal,
         ),
         secretScope,
         providerDefinitions:

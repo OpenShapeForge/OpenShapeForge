@@ -159,6 +159,7 @@ export type RuntimeDeclarativeServiceConnectionExpectation =
  * however the property's presence might suggest otherwise.
  */
 export type RuntimeDeclarativeServiceCapabilities = {
+  readonly pinnedProviderRead?: true;
   /**
    * The `appliesTo` scopes this runtime enforces, each at every credential
    * boundary of every provider call of the invocation. A scope absent here is

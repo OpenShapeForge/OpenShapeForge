@@ -724,6 +724,7 @@ describe("an expected Connection through the declarative Service engine", () => 
           platform.registerOperationProviders([syncModule]);
           expect(platform.services.declarativeServiceCapabilities).toEqual({
             expectedConnection: ["every-provider-call"],
+            pinnedProviderRead: true,
           });
           served = [];
           await platform.withActiveOperationSession(session, async (live) => {

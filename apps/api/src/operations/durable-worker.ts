@@ -88,8 +88,16 @@ function canonicalOperation(work: RuntimeResolvedOperationWork, definition: Runt
   } catch {
     throw new DurableAuthorityError("OPERATION_INPUT_INVALID", "De automatische stap heeft geen geldige idempotentiesleutel.");
   }
+  // The trusted worker owns this persisted command key. A generic HTTP or
+  // MCP idempotency key does not opt a natural Operation into page receipts.
+  const sourcePage = definition.id === "source-sync.apply-page";
+  if (sourcePage && !Object.hasOwn(input, "effectKey")) {
+    input.effectKey = idempotencyKey.length <= 200
+      ? idempotencyKey
+      : `sha256:${createHash("sha256").update(idempotencyKey).digest("hex")}`;
+  }
   return { operation: { id: definition.id, intent: definition.intent },
-    ...(work.operation.input || field !== undefined ? { input } : {}), idempotencyKey };
+    ...(work.operation.input || field !== undefined || sourcePage ? { input } : {}), idempotencyKey };
 }
 
 export type DurableWorkerBrokerOptions = {

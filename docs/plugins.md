@@ -234,6 +234,18 @@ write first persists a running receipt; if its outcome is lost, core returns
 Schema, authorization, version, lease, and confirmation refusals that happen
 before authored effects leave no receipt, so corrected input may reuse the key.
 
+A naturally idempotent Operation may still offer the same receipt as an
+optional input of its own, for an importer that cannot observe whether a
+committed call reached it. `source-sync.apply-page` does: its `effectKey` is
+hashed together with the source authority and administration the page names, so
+tenant, actor, Operation, source and page all bind the stored result, and
+ordinary keyless callers keep the unchanged contract. Such an Operation takes
+the receipt inside its database transaction. The Workflow worker uses its
+persisted command key by default. Direct callers can supply `effectKey`. Its effects must be database-only, so
+the receipt and the writes still share one transaction, and it re-checks the
+caller's current read authority on the records it would disclose before
+replaying a stored result.
+
 ### Derived-tool execution bindings
 
 A plugin that projects stored rows as MCP tools through its temporary

@@ -17,17 +17,28 @@
  * administration identifier alone, so a renamed administration remains one
  * administration with one cursor. A call that does not name it leaves the
  * stored name exactly as it was.
+ *
+ * The atomic page also accepts an optional effectKey: the import step's own
+ * name for one page's effect, for a caller that can lose the response of a
+ * page that did commit (operations/execution-receipts.ts).
  */
+import { createHash } from "node:crypto";
 import { operationFailure } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
+import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import type { DB } from "../generated/db/types.js";
 import type { ModuleOperationHandler } from "../modules/contract.js";
-import { getGeneratedCrudTables, requireEntityOperation } from "./entity/catalog.js";
+import {
+  assertEntityOperationAuthorization,
+  getGeneratedCrudTables,
+  requireEntityOperation,
+} from "./entity/catalog.js";
 import { createGeneratedEntity, deleteGeneratedEntity, updateGeneratedEntity } from "./entity/mutations.js";
 import { getEntityOperationContracts } from "./entity/runtime.js";
 import type { GeneratedCrudTable } from "./entity/types.js";
+import { executeKeyedOperation } from "./execution-receipts.js";
 import type { OperationContract } from "./runtime.js";
 
 /** The plugin name the source-sync Operations are authored under; matches the compiler's. */
@@ -35,6 +46,17 @@ export const SOURCE_SYNC_PLUGIN = "osf-source-sync";
 
 const MAX_RECORDS = 1000;
 const REFERENCE_SUFFIX = "ExternalId";
+/** As the authored `effectKey` bounds it; validated here for direct callers too. */
+const MAX_EFFECT_KEY_LENGTH = 200;
+/**
+ * What a stored page receipt was recorded under. The receipt framework refuses
+ * a replay whose contract fingerprint differs, so anything that changes what a
+ * page writes or what it returns has to raise this version instead of handing
+ * an old result back under new semantics.
+ */
+const PAGE_RECEIPT_CONTRACT = `sha256:${createHash("sha256")
+  .update("openshapeforge:source-sync-apply-page-receipt-contract:v1")
+  .digest("hex")}`;
 type Rec = Record<string, unknown>;
 /**
  * One source administration as a call names it. `administration` is the
@@ -77,7 +99,7 @@ function sourceOf(input: Rec): Source {
   return source;
 }
 
-function requireSession(context: Parameters<ModuleOperationHandler>[1]): { db: OpenShapeForgeDatabase; session: DbSessionInput } {
+function requireSession(context: Parameters<ModuleOperationHandler>[1]): { db: OpenShapeForgeDatabase; session: TrustedSessionContext } {
   const { db, session } = context;
   if (!db) throw operationFailure({ code: "DATABASE_NOT_CONFIGURED", message: "The database is unavailable.", retryable: true });
   if (!session?.tenantId) throw operationFailure({ code: "UNAUTHENTICATED", message: "An authenticated tenant session is required." });
@@ -294,6 +316,51 @@ const removeBySource: ModuleOperationHandler = async (input, context) => {
   return { value: { removed }, status: 200 };
 };
 
+/**
+ * The receipt key as core stores it: the integration's own effectKey bound to
+ * the source authority and administration it was issued for. Tenant, actor and
+ * Operation come from the receipt framework's own identity, so the same key
+ * under another administration — or from another tenant or actor — names a
+ * different effect and can never replay this one. The composition is hashed
+ * because authority, administration and key are all free text and the stored
+ * key has a fixed budget; the raw values never reach the database.
+ */
+function pageEffectKey(effectKey: unknown, source: Source): string {
+  if (typeof effectKey !== "string" || effectKey.trim() === "" ||
+      effectKey.length > MAX_EFFECT_KEY_LENGTH * 2 || [...effectKey].length > MAX_EFFECT_KEY_LENGTH) {
+    throw badInput(`effectKey must be a non-empty string of at most ${MAX_EFFECT_KEY_LENGTH} characters.`);
+  }
+  return createHash("sha256")
+    .update("openshapeforge:source-sync-page-effect-key:v1\0")
+    .update(JSON.stringify([source.authority, source.administration, effectKey]))
+    .digest("hex");
+}
+
+/**
+ * The page the key is a receipt for, as the caller submitted it: the source the
+ * call owns and its batches unchanged, so batch order and every record stay
+ * part of the request the receipt framework fingerprints. The key itself is not
+ * in it — it names the request, it is not part of it.
+ */
+function pageReceiptInput(input: Rec, source: Source): Rec {
+  const page: Rec = {
+    sourceAuthority: source.authority,
+    sourceAdministration: source.administration,
+    batches: input.batches,
+  };
+  if (source.administrationName !== undefined) page.sourceAdministrationName = source.administrationName;
+  return page;
+}
+
+/** A stored page result is only replayable as the page output it was recorded as. */
+function decodePageReceipt(stored: unknown): { batches: Rec[] } {
+  const batches: unknown = isRecord(stored) ? stored.batches : undefined;
+  if (!Array.isArray(batches) || !batches.every((batch) => isRecord(batch))) {
+    throw new Error("A stored source page receipt does not hold page batches.");
+  }
+  return { batches: batches as Rec[] };
+}
+
 /** Ordered related batches form one page: no partial write can advance its watermark. */
 const applySourcePage: ModuleOperationHandler = async (input, context) => {
   const { db, session } = requireSession(context);
@@ -324,7 +391,7 @@ const applySourcePage: ModuleOperationHandler = async (input, context) => {
   if (new Set(batches.map((batch) => batch.source.table.name)).size !== batches.length) {
     throw badInput("Each entity may occur only once in a source page.");
   }
-  const results = await withDbSession(db, session, async (trx) => {
+  const applyBatches = () => withDbSession(db, session, async (trx) => {
     // Canonical lock order prevents opposite dependency orders from deadlocking.
     for (const batch of [...batches].sort((a, b) => a.source.table.name.localeCompare(b.source.table.name))) {
       await lockSource(trx, session, batch.source);
@@ -351,7 +418,37 @@ const applySourcePage: ModuleOperationHandler = async (input, context) => {
     }
     return results;
   });
-  return { value: { batches: results }, status: 200 };
+
+  if (input.effectKey === undefined) {
+    return { value: { batches: await applyBatches() }, status: 200 };
+  }
+  // Every batch of a page carries the one source the call named, so the first
+  // batch's source IS the page's authority and administration.
+  const source = batches[0]!.source;
+  // The receipt shares this page's transaction: `withDbSession` above rejoins
+  // the one the receipt framework opens, so the batches and the stored result
+  // commit together or not at all, and a rolled-back page leaves no receipt to
+  // resume from. A concurrent duplicate is refused on the receipt's own
+  // transaction lock before it can reach a source lock, so two submissions of
+  // one key never both write.
+  const value = await executeKeyedOperation(db, session, {
+    operation: { id: "source-sync.apply-page", intent: "invoke" },
+    idempotencyKey: pageEffectKey(input.effectKey, source),
+    input: pageReceiptInput(input, source),
+    contractFingerprint: PAGE_RECEIPT_CONTRACT,
+    externalWrite: false,
+    execute: async () => ({ batches: await applyBatches() }),
+    encode: (result) => result,
+    authorizeStoredResult: async () => {
+      // The first attempt uses the write checks in the batch handlers. A
+      // stored result requires the read authority the caller holds now.
+      for (const batch of batches) {
+        assertEntityOperationAuthorization(batch.source.table, "list", session);
+      }
+    },
+    decode: decodePageReceipt,
+  });
+  return { value, status: 200 };
 };
 
 const HANDLERS: Record<string, ModuleOperationHandler> = { upsertBySource, sourceWatermark, removeBySource, applySourcePage };

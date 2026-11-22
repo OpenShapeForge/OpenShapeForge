@@ -37,6 +37,8 @@ export type KeyedOperationExecutionOptions<T> = {
   externalWrite: boolean;
   /** Current record/provider authorization, re-evaluated before every replay. */
   authorizeReplay?(trx: Transaction<DB>): Promise<void>;
+  /** Optional additional read permission that only applies to a stored result. */
+  authorizeStoredResult?(trx: Transaction<DB>): Promise<void>;
   /**
    * Called at the last core boundary before authored effects begin. For an
    * external write, invoking it makes an unconfirmed exception permanently
@@ -245,16 +247,17 @@ async function existingOutcome<T>(
   trx: Transaction<DB>,
   identity: ReceiptIdentity,
   row: ReceiptRow,
-  decode: (value: unknown) => T,
+  options: Pick<KeyedOperationExecutionOptions<T>, "decode" | "authorizeStoredResult">,
 ): Promise<T> {
   assertSameRequest(row, identity);
   if (row.state === "completed") {
+    await options.authorizeStoredResult?.(trx);
     if (row.response === null) throw unavailable();
     try {
       const stored = row.response as { version?: unknown; result?: unknown };
       if (!stored || typeof stored !== "object" || stored.version !== RECEIPT_VERSION ||
         !Object.hasOwn(stored, "result")) throw new Error("invalid receipt version");
-      return decode(stored.result);
+      return options.decode(stored.result);
     } catch {
       throw unavailable();
     }
@@ -403,7 +406,7 @@ export async function executeKeyedOperation<T>(
         throw inProgress(new Date(Date.now() + LOCAL_IN_FLIGHT_RETRY_MS).toISOString());
       }
       const existing = await readReceipt(trx, identity);
-      if (existing) return existingOutcome(trx, identity, existing, options.decode);
+      if (existing) return existingOutcome(trx, identity, existing, options);
       await insertRunning(trx, identity, false);
       const value = await options.execute(() => undefined);
       await complete(trx, identity, value, options.encode);
@@ -418,7 +421,7 @@ export async function executeKeyedOperation<T>(
     }
     const existing = await readReceipt(trx, identity);
     if (existing) {
-      return { kind: "replay" as const, value: await existingOutcome(trx, identity, existing, options.decode) };
+      return { kind: "replay" as const, value: await existingOutcome(trx, identity, existing, options) };
     }
     await insertRunning(trx, identity, true);
     return { kind: "execute" as const };

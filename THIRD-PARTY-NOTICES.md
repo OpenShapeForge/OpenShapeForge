@@ -4,13 +4,13 @@ OpenShapeForge is distributed under the Business Source License 1.1 (see [LICENS
 
 These packages are **not** relicensed under OpenShapeForge's license — each remains under the terms stated here. Their permissive licenses permit inclusion in a project distributed under any license, including a source-available one.
 
-Regenerate with `bun run notices`. 525 packages.
+Regenerate with `bun run notices`. 532 packages.
 
 ## License summary
 
 | License | Packages |
 | --- | --- |
-| MIT | 403 |
+| MIT | 410 |
 | Apache-2.0 | 59 |
 | ISC | 31 |
 | BSD-3-Clause | 16 |
@@ -233,6 +233,26 @@ Regenerate with `bun run notices`. 525 packages.
 
 ### @isaacs/nonrecursive-glob-match@1.0.3
 - License: **BlueOak-1.0.0**
+
+### @jitl/quickjs-ffi-types@0.32.0
+- License: **MIT** — https://github.com/justjake/quickjs-emscripten
+- Author: Jake Teton-Landis
+
+### @jitl/quickjs-wasmfile-debug-asyncify@0.32.0
+- License: **MIT** — https://github.com/justjake/quickjs-emscripten
+- Author: Jake Teton-Landis
+
+### @jitl/quickjs-wasmfile-debug-sync@0.32.0
+- License: **MIT** — https://github.com/justjake/quickjs-emscripten
+- Author: Jake Teton-Landis
+
+### @jitl/quickjs-wasmfile-release-asyncify@0.32.0
+- License: **MIT** — https://github.com/justjake/quickjs-emscripten
+- Author: Jake Teton-Landis
+
+### @jitl/quickjs-wasmfile-release-sync@0.32.0
+- License: **MIT** — https://github.com/justjake/quickjs-emscripten
+- Author: Jake Teton-Landis
 
 ### @jridgewell/gen-mapping@0.3.13
 - License: **MIT** — https://github.com/jridgewell/sourcemaps/tree/main/packages/gen-mapping
@@ -1615,6 +1635,14 @@ Regenerate with `bun run notices`. 525 packages.
 ### quick-format-unescaped@4.0.4
 - License: **MIT** — https://github.com/davidmarkclements/quick-format#readme
 - Author: David Mark Clements
+
+### quickjs-emscripten@0.32.0
+- License: **MIT** — https://github.com/justjake/quickjs-emscripten
+- Author: Jake Teton-Landis
+
+### quickjs-emscripten-core@0.32.0
+- License: **MIT** — https://github.com/justjake/quickjs-emscripten
+- Author: Jake Teton-Landis
 
 ### range-parser@1.3.0
 - License: **MIT** — jshttp/range-parser
@@ -3021,6 +3049,86 @@ No contributor can revoke this license.
 without any warranty or condition, and no contributor
 will be liable to anyone for any damages related to this
 software or this license, under any kind of legal claim.***
+```
+</details>
+
+<details><summary>@jitl/quickjs-ffi-types@0.32.0, quickjs-emscripten@0.32.0, quickjs-emscripten-core@0.32.0</summary>
+
+```
+The MIT License
+
+quickjs-emscripten copyright (c) 2019-2024 Jake Teton-Landis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+</details>
+
+<details><summary>@jitl/quickjs-wasmfile-debug-asyncify@0.32.0, @jitl/quickjs-wasmfile-debug-sync@0.32.0, @jitl/quickjs-wasmfile-release-asyncify@0.32.0, @jitl/quickjs-wasmfile-release-sync@0.32.0</summary>
+
+```
+quickjs-emscripten:
+The MIT License
+
+quickjs-emscripten copyright (c) 2019-2024 Jake Teton-Landis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+quickjs:
+QuickJS Javascript Engine
+
+Copyright (c) 2017-2021 Fabrice Bellard
+Copyright (c) 2017-2021 Charlie Gordon
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ```
 </details>
 

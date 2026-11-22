@@ -175,6 +175,7 @@ jobs:
           TEST_REDIS_URL: redis://127.0.0.1:6399
         run: >-
           cd apps/api && bun test src/config src/roles src/control/__tests__ src/control/tenant-setting-defaults.test.ts
+          src/script-sandbox
           src/graphql/generated-authz.test.ts
           src/auth/organization-service-identity-bearer.test.ts
           src/auth/organization-service-identities.test.ts

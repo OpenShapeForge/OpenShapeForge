@@ -1767,16 +1767,21 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
       arguments: { query: "import a notebook body", limit: 20 },
     });
     expect(searched.isError).not.toBe(true);
-    // The Operation matching every word first; Operations "notebook" names
-    // follow it. All of them compact summaries this session may use.
+    // The first page carries the best match's input and a bounded number
+    // of other inputs. Full output contracts still require an exact lookup.
     const hits = (searched.structuredContent as { operations: Record<string, unknown>[] }).operations;
-    expect(hits[0]).toMatchObject({ operation: { id: "notebook.import", intent: "invoke" } });
+    expect(hits[0]).toMatchObject({
+      operation: { id: "notebook.import", intent: "invoke" },
+      inputSchema: { required: ["notebookId", "body", "idempotencyKey"] },
+    });
+    expect(hits.filter((hit) => "inputSchema" in hit).length).toBeLessThanOrEqual(3);
     for (const hit of hits) {
-      expect(hit).not.toHaveProperty("inputSchema");
       expect(hit).not.toHaveProperty("outputSchema");
       const id = (hit.operation as { id: string }).id;
       const available = await client.callTool({ name: "osf_search_operations", arguments: { operationId: id } });
-      expect((available.structuredContent as { operations: unknown[] }).operations).toHaveLength(1);
+      const { operations: contracts } = available.structuredContent as { operations: Record<string, unknown>[] };
+      expect(contracts).toHaveLength(1);
+      if ("inputSchema" in hit) expect(hit.inputSchema).toEqual(contracts[0]?.inputSchema);
     }
     const contract = await client.callTool({
       name: "osf_search_operations",
@@ -1861,8 +1866,8 @@ test("MCP searchable projection bounds tools/list while search, generic execute,
       // named action and declares no roles at all
       // (`anyAuthenticatedSession`), so every authenticated session sees it
       // offered and holds it on exactly the records whose ACL names it.
-      const hiddenKeys = (hidden.structuredContent as { operations: { key: string }[] })
-        .operations.map((operation) => operation.key);
+      const hiddenKeys = (hidden.structuredContent as { operations: { operation: { id: string } }[] })
+        .operations.map((hit) => hit.operation.id);
       expect(hiddenKeys).not.toContain("notebook.import");
       expect(hiddenKeys.every((key) => key === "Notebook.deliver")).toBe(true);
       const deniedGeneric = await deniedClient.callTool({

@@ -31,7 +31,7 @@ const page = () => ({
   operations: [{ operation: { id: "Deal.create", intent: "create" }, available: true }],
 });
 
-/** The output schema the compiler declares for an entity list (generate-mcp.ts), which every list result must satisfy. */
+/** The canonical page and offer envelopes, allowing a projected record inside each result. */
 const listOutputSchema = {
   type: "object",
   additionalProperties: false,
@@ -85,7 +85,7 @@ describe("a list page for a model", () => {
     expect(JSON.stringify(view).length).toBeLessThan(JSON.stringify(payload).length / 2);
   });
 
-  test("still satisfies the output schema its Operation declares", () => {
+  test("keeps the canonical page and offer envelopes when record fields are projected", () => {
     const validate = new Ajv({ strict: false }).compile(listOutputSchema);
     expect(validate(page())).toBe(true);
     expect(validate(modelRecordPage(page()))).toBe(true);
@@ -143,6 +143,21 @@ describe("a schema and a summary for a model", () => {
       type: "object",
       properties: { status: { type: "string", enum: ["open", "lost"], description: "Lifecycle status." } },
       required: ["status"],
+    });
+  });
+
+  test("preserves property and definition names and object-valued validation keywords", () => {
+    const literal = { title: "literal", "x-osf-value": "required" };
+    const schema = {
+      type: "object",
+      properties: { title: { title: "Title", type: "string" }, payload: { const: literal } },
+      required: ["title"],
+      $defs: { title: { title: "Title", type: "string" } },
+    };
+    expect(modelSchema<unknown>(schema)).toEqual({
+      ...schema,
+      properties: { title: { type: "string" }, payload: { const: literal } },
+      $defs: { title: { type: "string" } },
     });
   });
 

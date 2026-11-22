@@ -147,7 +147,13 @@ function auditSessionSettings(audit: AuditContext) {
 
 /** Refresh transaction-local policy state for the active audit operation. */
 async function applyAuthorizationSession<T>(trx: Transaction<T>): Promise<void> {
-  await sql`select app.apply_session_authorization()`.execute(trx).catch(error => {
+  await sql`do $authorization$ begin
+    -- Bootstrap and metadata-only sessions can run before policy is installed.
+    -- Once policy exists, a missing helper must still fail closed.
+    if to_regprocedure('app.authorization_rules_for_actor()') is not null then
+      perform app.apply_session_authorization();
+    end if;
+  end $authorization$`.execute(trx).catch(error => {
     if (error instanceof Error &&
         (("errno" in error && error.errno === "42501") || ("code" in error && error.code === "42501")) &&
         error.message.includes("AUTHORIZATION_INTEGRATION_CREDENTIAL_INACTIVE")) {

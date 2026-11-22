@@ -93,7 +93,22 @@ function presentationComponents(value: unknown): string[] {
 const MINTING = ["api-keys.create-integration", "api-keys.issue-credential"];
 
 /** The Operations that mutate the identity provider's realm. */
-const REALM_WRITERS = new Set(["api-keys.create-integration", "api-keys.update-integration-roles"]);
+const REALM_WRITERS = new Set([
+  "api-keys.create-integration",
+  "api-keys.create-integration-profile",
+  "api-keys.update-integration-roles",
+]);
+
+const ISSUER_OPERATIONS = new Set([
+  "api-keys.create-integration",
+  "api-keys.issue-credential",
+  "api-keys.list-approved-integrations",
+]);
+
+const PROFILE_ADMIN_OPERATIONS = new Set([
+  "api-keys.create-integration-profile",
+  "api-keys.update-integration-issuers",
+]);
 
 describe("shipped integration and API-key catalog", () => {
   test("projects role lists as collections of text, including nullable credential subsets", () => {
@@ -149,13 +164,16 @@ describe("shipped integration and API-key catalog", () => {
     const operations = compiled(apiKeyCatalog());
     expect(operations.map(({ key }) => key).sort()).toEqual([
       "api-keys.create-integration",
+      "api-keys.create-integration-profile",
       "api-keys.disable-integration",
       "api-keys.get-credential",
       "api-keys.get-integration",
       "api-keys.issue-credential",
+      "api-keys.list-approved-integrations",
       "api-keys.list-credentials",
       "api-keys.list-integrations",
       "api-keys.revoke-credential",
+      "api-keys.update-integration-issuers",
       "api-keys.update-integration-restrictions",
       "api-keys.update-integration-roles",
     ]);
@@ -164,8 +182,11 @@ describe("shipped integration and API-key catalog", () => {
       // The ceiling's own role, so a transport cannot admit a caller the
       // service would then refuse — or, worse, the reverse.
       const roles = ["Platform.ApiKeys.Manage"];
-      if (operation.key === "api-keys.create-integration") roles.push("Platform.ApiKeys.IntegrationCreate");
-      expect(operation.auth).toEqual({ mode: "session", roles });
+      if (ISSUER_OPERATIONS.has(operation.key)) roles.push("Platform.ApiKeys.IntegrationCreate");
+      const auth = PROFILE_ADMIN_OPERATIONS.has(operation.key)
+        ? { mode: "session" as const, roles: ["Organization.Security.Manage"], roleGroups: [roles] }
+        : { mode: "session" as const, roles };
+      expect(operation.auth).toEqual(auth);
       expect(operation.tenancy).toEqual({ mode: "required" });
       // Every refusal the handlers can return is declared, the unconfigured
       // deployment included: an undeclared status is a contract violation at
@@ -189,8 +210,7 @@ describe("shipped integration and API-key catalog", () => {
             "503 NOT_CONFIGURED",
           ],
       );
-      // Creating an integration and changing its roles are the only paths
-      // that reach outward.
+      // Provisioning and changing roles are the only paths that reach outward.
       expect(operation.effects.external).toBe(REALM_WRITERS.has(operation.key) ? "write" : "none");
       // MCP uses the shared private-output interaction for confidential fields.
       expect(operation.transports.mcp.enabled).toBe(true);

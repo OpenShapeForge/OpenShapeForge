@@ -131,6 +131,7 @@ export function registerApiKeyRestRoutes(
     return {
       tenantId: resolved.tenantId,
       userId: resolved.userId,
+      ...(resolved.issuer ? { issuer: resolved.issuer } : {}),
       roles: resolved.roles,
       groups: resolved.groups,
       credential: resolved.credential,

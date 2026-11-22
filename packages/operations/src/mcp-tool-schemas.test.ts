@@ -71,5 +71,7 @@ test("generic execution accepts durable references and rejects malformed or unde
     { kind: 1, ref: "run-1" }, { kind: "workflow", ref: 1 }, { kind: "workflow", ref: "run-1", extra: true }]) {
     expect(validate({ ...envelope, execution })).toBe(false);
   }
+  expect(validate({ ...envelope, references: { relationId: "Example relationship" } })).toBe(true);
+  expect(validate({ ...envelope, references: { relationId: 123 } })).toBe(false);
   expect(validate({ ...envelope, unknown: true })).toBe(false);
 });

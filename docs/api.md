@@ -1159,6 +1159,21 @@ service account": an entity that declares a record action for integrations
 excludes `application` from its generic routes by default, so a broad role on a
 key no longer reaches the collection behind the per-record grant.
 
+### Self-service integration profiles
+
+Administrators with organization security and key management access set up profiles
+through the canonical REST or MCP Operations. Use `api-keys.create-integration-profile`,
+configure the integration's Operation and record grants, then approve linked accounts
+with `api-keys.update-integration-issuers`. Profiles start with no keys or service
+account roles. Use the security and record-grant interfaces to configure access.
+
+A verified person with integration key creation access uses
+`api-keys.list-approved-integrations` and issues a key for the selected profile with
+`api-keys.issue-credential`. Issuance requires account approval for every person,
+including key managers. Issuing a key leaves the person's session permissions
+intact. Removing an approval blocks further issuance. Revoke existing credentials
+separately when they should stop working.
+
 ### Personal API keys
 
 An integration key (above) is the ORGANIZATION's credential for an external

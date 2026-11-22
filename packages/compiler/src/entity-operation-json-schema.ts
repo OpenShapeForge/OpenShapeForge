@@ -465,6 +465,7 @@ export const entityReferenceLabelsInputSchema: JsonObject = {
 
 export const entityReferenceLabelsSchema: JsonObject = {
   type: "object",
+  "x-osf-i18n": { title: { en: "Reference labels", nl: "Referentielabels" } },
   description: "Display labels of readable reference targets, keyed by the source record field.",
   additionalProperties: { type: "string" },
 };

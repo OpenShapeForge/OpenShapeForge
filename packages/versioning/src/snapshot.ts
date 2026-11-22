@@ -5,6 +5,7 @@
  * No database, no session; callers pass the parsed JSON.
  */
 import { createHash } from "node:crypto";
+import type { PluginPlatformServices, PluginSessionContext } from "@openshapeforge/plugin-runtime";
 
 export type SnapshotRow = Readonly<Record<string, unknown>>;
 export type SnapshotNode = {
@@ -16,7 +17,26 @@ export type PublishedSnapshot = {
   readonly schemaVersion: 1;
   readonly entity: string;
   readonly head: SnapshotNode;
+  readonly dependencies?: SnapshotRow;
 };
+
+type SnapshotDependencyResolver = (context: {
+  platform: PluginPlatformServices;
+  session: PluginSessionContext;
+  source: SnapshotRow;
+}) => Promise<SnapshotRow | undefined>;
+
+const dependencyResolvers = new Map<string, SnapshotDependencyResolver>();
+
+/** Runtime registration by the entity's owning module, at module load. */
+export function registerSnapshotDependencies(entity: string, resolve: SnapshotDependencyResolver): void {
+  if (dependencyResolvers.has(entity)) throw new Error(`Snapshot dependencies already registered for ${entity}.`);
+  dependencyResolvers.set(entity, resolve);
+}
+
+export function snapshotDependencies(entity: string, context: Parameters<SnapshotDependencyResolver>[0]) {
+  return dependencyResolvers.get(entity)?.(context);
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -39,7 +59,13 @@ export function parseSnapshot(value: unknown): PublishedSnapshot {
   if (!isRecord(snapshot) || snapshot.schemaVersion !== 1 || typeof snapshot.entity !== "string") {
     throw new Error("Snapshot must be a schemaVersion 1 published snapshot.");
   }
-  return { schemaVersion: 1, entity: snapshot.entity, head: parseNode(snapshot.head, "head") };
+  if (snapshot.dependencies !== undefined && !isRecord(snapshot.dependencies)) {
+    throw new Error("Snapshot dependencies must be an object.");
+  }
+  return {
+    schemaVersion: 1, entity: snapshot.entity, head: parseNode(snapshot.head, "head"),
+    ...(snapshot.dependencies ? { dependencies: snapshot.dependencies } : {}),
+  };
 }
 
 /** Direct children stored under one table name, in stored order. */

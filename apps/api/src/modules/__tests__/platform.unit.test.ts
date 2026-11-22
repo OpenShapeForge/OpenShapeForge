@@ -441,6 +441,7 @@ describe("runtime module platform session authority", () => {
         expect(declarativeSession).toBe(active);
         expect(advertised).toEqual({
           expectedConnection: ["every-provider-call"],
+          pinnedProviderRead: true,
         });
       });
       await expect(runtime.services.operations.get(retained, definition.id))
@@ -512,6 +513,7 @@ describe("runtime module platform session authority", () => {
     );
     expect(runtime.services.declarativeServiceCapabilities).toEqual({
       expectedConnection: ["every-provider-call"],
+      pinnedProviderRead: true,
     });
   });
 

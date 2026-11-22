@@ -3,6 +3,7 @@ import { diagnosticServices } from "../mcp/diagnostics/services.js";
 import { observeDiagnosticOperation } from "../mcp/diagnostics/observer.js";
 /** Core-owned services made available to reviewed runtime modules. */
 import { createConnectionUseGrantServices } from "./connection-use-grants.js";
+import { pinnedReadRefused, publishedProviderReadFingerprint } from "../mcp/pinned-provider-read.js";
 import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
 import { inheritAuthorizationProfileAccess } from '../auth/authorization-profile-decision.js';
 import { resolveAuthorizationProfileAccess } from "../auth/authorization-profile-session.js";
@@ -32,6 +33,7 @@ import type {
   RuntimeOperationProvider,
   RuntimeOperationRequest,
   RuntimeHostOperationRequest,
+  RuntimeDeclarativeServiceDefinition, RuntimeProviderReadTarget,
 } from "@openshapeforge/plugin-runtime";
 import { nativeMcpToolProblem } from "@openshapeforge/plugin-runtime";
 import {
@@ -549,7 +551,15 @@ export class ModulePlatformRuntime {
     });
     const scriptedCapabilitySandbox = createScriptedCapabilitySandbox((session) => this.#acceptsScopedSession(session));
     this.services = {
-      ...(scriptedCapabilitySandbox ? { scriptedCapabilitySandbox } : {}),
+      ...(scriptedCapabilitySandbox ? {
+        scriptedCapabilitySandbox,
+        providerReadGraph: {
+          fingerprint: (session: TrustedSessionContext, definition: RuntimeDeclarativeServiceDefinition, target: RuntimeProviderReadTarget) => {
+            if (!this.#acceptsScopedSession(session)) throw pinnedReadRefused();
+            return publishedProviderReadFingerprint(this.#db, session, definition, target);
+          },
+        },
+      } : {}),
       mcpDiagnostics: diagnosticServices((session) => this.#acceptsScopedSession(session)),
       readProgress: {
         report: (session, snapshot) => this.#acceptsScopedSession(session)

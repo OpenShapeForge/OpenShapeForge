@@ -540,11 +540,16 @@ export type RuntimeConnectionUseGrantServices<Session> = {
 };
 
 /** A host-approved binding for one non-paginated REST GET. */
-export type RuntimePinnedProviderRead = {
+export type RuntimeProviderReadTarget = {
   adapterKey: string;
   capabilityKey: string;
   origin: string;
   pathname: string;
+};
+
+export type RuntimePinnedProviderRead = RuntimeProviderReadTarget & {
+  /** Digest returned by the host when the script revision is published. */
+  executionFingerprint: string;
 };
 
 export type RuntimeDeclarativeServiceRequest = {
@@ -905,6 +910,11 @@ export type PluginPlatformServices = {
   readonly mcpDiagnostics?: import("./diagnostics.js").RuntimeMcpDiagnosticServices<PluginSessionContext>;
   readonly readProgress?: RuntimeReadProgressServices<PluginSessionContext>;
   readonly scriptedCapabilitySandbox?: RuntimeScriptedCapabilitySandbox<PluginSessionContext>;
+  /** Reads one authorized Service execution graph without opening credentials or invoking it. */
+  readonly providerReadGraph?: {
+    fingerprint(session: PluginSessionContext, definition: RuntimeDeclarativeServiceDefinition,
+      target: RuntimeProviderReadTarget): Promise<string>;
+  };
   /**
    * What the host's declarative Service engine enforces (see
    * `RuntimeDeclarativeServiceCapabilities`). Published only by a runtime that

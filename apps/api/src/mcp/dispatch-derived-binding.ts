@@ -5,6 +5,7 @@
  * undefined answer.
  */
 import { withDbSession } from "../db/session.js";
+import { pinnedReadRefused, providerReadExecutionFingerprint } from "./pinned-provider-read.js";
 import { delegatedConnectionRow, connectionGrantFingerprint } from "../modules/connection-use-grants.js";
 import { observeDelegatedProviderFailure, revalidateConnectionDelegation, isDelegatedConnection } from "./connection-delegation.js";
 import { ownedByActingRelation } from "../db/acting-relation.js";
@@ -175,12 +176,10 @@ export async function runDerivedBinding(
     }
     const pinnedRead = scope.controls?.pinnedProviderRead;
     if (pinnedRead) {
-      const operation = operationRow.operation as JsonRecord | undefined;
-      if (providerRow.key !== pinnedRead.adapterKey || providerRow.transport !== "rest" ||
-          operationRow.key !== pinnedRead.capabilityKey || operationRow.kind !== "query" ||
-          operation?.method !== "GET") {
-        throw new HttpError(403, "PINNED_READ_REFUSED", "The binding does not match the approved provider read.");
-      }
+      const service = scope.internalDerivedDefinition?.row;
+      if (!service || providerReadExecutionFingerprint(pinnedRead, {
+        service, binding, capability: operationRow, adapter: providerRow,
+      }) !== pinnedRead.executionFingerprint) throw pinnedReadRefused();
     }
     let connectionRows = captured
       ? captured.connectionRows

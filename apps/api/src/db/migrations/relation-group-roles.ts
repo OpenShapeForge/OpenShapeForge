@@ -23,7 +23,6 @@ export async function applyRelationGroupRolesMigration(db: OpenShapeForgeDatabas
       old_group uuid;
       new_group uuid;
       selected_tenant uuid;
-      affects_access boolean;
       allowed boolean := app.bypass_rls() or ${sql.lit(IDENTITY_LINK_ADMIN_ROLE)} = any(
         string_to_array(coalesce(current_setting('app.roles', true), ''), ','));
     begin
@@ -46,21 +45,23 @@ export async function applyRelationGroupRolesMigration(db: OpenShapeForgeDatabas
           return new;
         end if;
       end if;
+      -- A caller may already hold a membership or group row. Never wait for
+      -- the tenant authority lock from a row trigger: a transaction holding it
+      -- can itself need that row. Roll back this change with a retryable conflict.
+      if not pg_try_advisory_xact_lock(hashtextextended(selected_tenant::text, 7921)) then
+        raise exception 'Organization access changed concurrently; retry this transaction'
+          using errcode = '40001';
+      end if;
       -- Serialize membership and grant changes for each group, in stable order.
       perform id from erp.relation_groups
         where tenant_id = selected_tenant and (id = old_group or id = new_group)
         order by id for update;
-      affects_access := tg_table_name = 'relation_group_roles' or exists (
+      if not allowed and (tg_table_name = 'relation_group_roles' or exists (
         select 1 from platform.relation_group_roles
         where tenant_id = selected_tenant and (relation_group_id = old_group or relation_group_id = new_group)
-      );
-      if not allowed and affects_access then
+      )) then
         raise exception 'Only an organization administrator may modify groups or memberships that grant access'
           using errcode = '42501';
-      end if;
-      -- Commit access changes in the same order as live account authority checks.
-      if affects_access then
-        perform pg_advisory_xact_lock(hashtextextended(selected_tenant::text, 7921));
       end if;
       if tg_op = 'DELETE' then return old; end if;
       return new;

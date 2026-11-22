@@ -2,7 +2,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
-import { sql } from "kysely";
+import { sql, type Transaction } from "kysely";
+import type { DB } from "../generated/db/types.js";
 import {
   createDatabaseRuntime,
   type DatabaseRuntime,
@@ -254,13 +255,47 @@ test("a live authority check waits for a group-derived grant to be withdrawn", a
   await Promise.race([removed.promise, withdraw]);
   const result = check().then(() => null, (error: unknown) => error);
   try {
-    const pending = Symbol("pending");
-    expect(await Promise.race([result, Bun.sleep(200).then(() => pending)])).toBe(pending);
+    const deadline = Date.now() + 2_000;
+    let waiting = false;
+    while (!waiting && Date.now() < deadline) {
+      const locks = await sql<{ waiting: boolean }>`select exists (
+        select 1 from pg_locks where locktype = 'advisory' and not granted
+          and database = (select oid from pg_database where datname = current_database())
+      ) as waiting`.execute(privileged.db);
+      waiting = locks.rows[0]?.waiting === true;
+      if (!waiting) await Bun.sleep(10);
+    }
+    expect(waiting).toBe(true);
   } finally {
     commit.resolve();
     await withdraw;
   }
   expect(await result).toMatchObject({ status: 403, code: "FORBIDDEN" });
+}, TEST_TIMEOUT);
+
+test("a group write reports a retryable conflict when the live authority transaction already holds the tenant lock", async () => {
+  const requiredRole = "integration_admin";
+  const administrator = { ...session, roles: ["Organization.All.ReadWrite"], scope: "tenant" as const };
+  const actor = { ...session, issuer: identity.issuer, credential: "bearer", roles: [requiredRole] } satisfies TrustedSessionContext;
+  const removeGrant = (tx: Transaction<DB>) => sql`
+    delete from platform.relation_group_roles where tenant_id=${tenantId}::uuid
+      and relation_group_id=${activeGroupId}::uuid and role=${requiredRole}
+  `.execute(tx);
+  await withDbSession(restricted.db, administrator, (tx) => sql`
+    insert into platform.relation_group_roles (tenant_id, relation_group_id, role)
+    values (${tenantId}::uuid, ${activeGroupId}::uuid, ${requiredRole})
+  `.execute(tx));
+  await withDbSession(restricted.db, actor, async (tx) => {
+    await assertCurrentAccountAuthority(restricted.db, tx, actor, requiredRole);
+    await expect(restricted.db.transaction().execute(async (other) => {
+      await sql`select set_config('app.tenant_id', ${tenantId}, true),
+        set_config('app.roles', 'Organization.All.ReadWrite', true)`.execute(other);
+      await removeGrant(other);
+    })).rejects.toMatchObject({ errno: "40001" });
+  });
+  expect(await resolveGroupRoles(restricted.db, actor, [activeGroupId])).toEqual([requiredRole]);
+  await withDbSession(restricted.db, administrator, removeGrant);
+  expect(await resolveGroupRoles(restricted.db, actor, [activeGroupId])).toEqual([]);
 }, TEST_TIMEOUT);
 
 test("direct exceptions preserve other roles and cannot remove the last direct administrator", async () => {

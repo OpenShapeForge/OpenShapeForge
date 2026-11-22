@@ -22,7 +22,7 @@ export async function assertCurrentAccountAuthority(
   session: TrustedSessionContext & { tenantId: string; userId: string },
   requiredRole: string,
 ): Promise<void> {
-  await sql`select pg_advisory_xact_lock(hashtextextended(${session.tenantId}, 7921))`.execute(tx);
+  await sql`select pg_advisory_xact_lock(hashtextextended(${session.tenantId}::uuid::text, 7921))`.execute(tx);
   if (session.credential === 'bearer' && session.principalKind === 'service') return; // Verified service token.
   if (session.credential === 'api-key') return; // Verified, intersected service credential.
   // A personal key acts as a person, so it gets the person's check: the

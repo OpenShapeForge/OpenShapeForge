@@ -36,7 +36,9 @@ const fullPage = await run({
   source: "async function run() { return await host.read('provider.page', null); }",
   input: null,
   reads: { "provider.page": () => journal },
-  limits: { memoryBytes: 64 * 1024 * 1024, maxReadResultBytes: 1024 * 1024,
+  // The budgets of a brokered page run; the deadline covers a cold worker in
+  // the container plus the chunked transfer in both directions.
+  limits: { deadlineMs: 12_000, memoryBytes: 32 * 1024 * 1024, maxReadResultBytes: 1024 * 1024,
     maxResultBytes: 1024 * 1024, maxTransferBytes: 3 * 1024 * 1024 },
 });
 expect(JSON.stringify(fullPage) === JSON.stringify(journal), "whole journal page is transferred through the isolated container");

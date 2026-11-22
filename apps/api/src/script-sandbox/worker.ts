@@ -208,17 +208,18 @@ async function onReply(message: ReplyMessage): Promise<void> {
 
   if (message.type === "read.part") {
     const bytes = utf8Bytes(message.value);
-    // A chunk outside the negotiated frame size means the stream itself is not
-    // trustworthy, so the run ends rather than the page being read short.
-    if (bytes === 0 || bytes > exec.limits.maxChunkBytes) {
-      exec.transfers.get(message.id)?.drop();
-      return fail("protocol_violation");
-    }
     // Still arriving: the guest's promise stays pending and sees no fragment.
     const transfer = exec.transfers.get(message.id) ?? new ChunkedPayload(exec.limits.maxReadResultBytes, exec.limits.maxChunkBytes);
     exec.transfers.set(message.id, transfer);
-    if (!transfer.add(message.value) || exec.received + bytes > exec.limits.maxTransferBytes) {
-      return settleRead(exec, message.id, deferred, null);
+    // The parent bounds a payload whole before it sends any of it. A chunk past
+    // the frame size, the per-read cap or the run aggregate therefore means the
+    // stream itself is not trustworthy: the run ends rather than this process
+    // buffering on, or the rest of the stream being read as another payload.
+    if (bytes === 0 || bytes > exec.limits.maxChunkBytes
+      || exec.received + bytes > exec.limits.maxTransferBytes || !transfer.add(message.value)) {
+      transfer.drop();
+      exec.transfers.delete(message.id);
+      return fail("protocol_violation");
     }
     exec.received += bytes;
     return;

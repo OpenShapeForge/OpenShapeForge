@@ -176,6 +176,14 @@ describe("script sandbox", () => {
 });
 
 describe("chunked transfers", () => {
+  test("preserves a byte-order marker inside JSON on a chunk boundary", async () => {
+    const value = "a".repeat(1023) + "\uFEFF" + "payload";
+    expect(await run("async function run() { return await host.read('page', null); }", {
+      limits: { maxChunkBytes: 1024 },
+      reads: { page: () => value },
+    })).toBe(value);
+  });
+
   const rows = (count: number) => Array.from({ length: count }, (_, index) => ({
     id: `row-${index}`, label: "a reasonably descriptive journal line", amount: index + 0.5,
   }));
@@ -188,7 +196,7 @@ describe("chunked transfers", () => {
       "async function run() { const p = await host.read('page', null); return { seen: p.rows.length, echo: p.rows }; }",
       {
         limits: {
-          deadlineMs: 20_000, maxChunkBytes: 4 * 1024,
+          deadlineMs: 20_000, memoryBytes: 32 * 1024 * 1024, maxChunkBytes: 4 * 1024,
           maxReadResultBytes: bytes, maxResultBytes: 2 * bytes, maxTransferBytes: 4 * bytes,
         },
         reads: { page: () => page },
@@ -204,7 +212,7 @@ describe("chunked transfers", () => {
     const result = await run(
       `async function run() {
         const out = [];
-        for (const n of [1, 2]) {
+        for (let attempt = 0; attempt < 2; attempt++) {
           try { out.push((await host.read('page', null)).rows.length); } catch (e) { out.push(e.message); }
         }
         return out;

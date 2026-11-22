@@ -135,6 +135,7 @@ export class ProtocolError extends Error {
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder("utf-8", { fatal: true });
+const payloadDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 export function encodeFrame(message: ParentMessage | WorkerMessage): Uint8Array {
   const payload = encoder.encode(JSON.stringify(message));
@@ -234,7 +235,7 @@ export function splitTextByBytes(text: string, maxBytes: number): string[] {
       end = offset + 1;
       while (end < bytes.byteLength && (bytes[end]! & 0xc0) === 0x80) end++;
     }
-    parts.push(decoder.decode(bytes.subarray(offset, end)));
+    parts.push(payloadDecoder.decode(bytes.subarray(offset, end)));
     offset = end;
   }
   return parts;
@@ -275,7 +276,7 @@ export class ChunkedPayload {
     return text;
   }
 
-  /** Releases the buffer; held after any refusal so no run keeps chunks alive. */
+  /** Releases the buffer; called on any refusal so no run keeps chunks alive. */
   drop(): void {
     this.parts = [];
     this.bytes = 0;

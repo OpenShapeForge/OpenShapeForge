@@ -48,8 +48,12 @@ const MAX_PAGE_BYTES = 1024 * 1024;
 const BROKERED_LIMITS: Partial<ScriptLimits> = Object.freeze({
   // A page read crosses the network at the broker before this run sees it.
   deadlineMs: 12_000,
-  // A megabyte of JSON becomes a far larger object graph inside the isolate.
-  memoryBytes: 64 * 1024 * 1024,
+  // A megabyte of JSON becomes a far larger object graph inside the isolate, so
+  // this is twice the default. It stays far below the ceiling on purpose: the
+  // sandbox container's memory is shared by every concurrent run (see
+  // deploy/script-sandbox/README.md), so a page run must not be able to claim
+  // a share that a handful of them together exhausts.
+  memoryBytes: 32 * 1024 * 1024,
   maxReadResultBytes: MAX_PAGE_BYTES,
   maxResultBytes: MAX_PAGE_BYTES,
   maxTransferBytes: 3 * MAX_PAGE_BYTES,

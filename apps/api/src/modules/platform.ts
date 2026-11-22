@@ -2,6 +2,8 @@
 import { diagnosticServices } from "../mcp/diagnostics/services.js";
 import { observeDiagnosticOperation } from "../mcp/diagnostics/observer.js";
 /** Core-owned services made available to reviewed runtime modules. */
+import { HttpError } from "../rest/http-error.js";
+import { assertCurrentAccountAuthority } from "../accounts/account-current-authority.js";
 import { createConnectionUseGrantServices } from "./connection-use-grants.js";
 import { pinnedReadRefused, publishedProviderReadFingerprint } from "../mcp/pinned-provider-read.js";
 import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
@@ -33,7 +35,6 @@ import type {
   RuntimeOperationProvider,
   RuntimeOperationRequest,
   RuntimeHostOperationRequest,
-  RuntimeDeclarativeServiceDefinition, RuntimeProviderReadTarget,
 } from "@openshapeforge/plugin-runtime";
 import { nativeMcpToolProblem } from "@openshapeforge/plugin-runtime";
 import {
@@ -550,16 +551,22 @@ export class ModulePlatformRuntime {
       },
     });
     const scriptedCapabilitySandbox = createScriptedCapabilitySandbox((session) => this.#acceptsScopedSession(session));
+    const providerReadGraph: ModulePlatformServices["providerReadGraph"] = {
+      fingerprint: async (session, { definition, target, connectionId, sampleInput }) => {
+        if (!this.#acceptsScopedSession(session)) throw pinnedReadRefused();
+        await this.services.records.assertAccess(session, { entityName: "Connection", id: connectionId, intent: "get" });
+        return publishedProviderReadFingerprint(this.#db, session, definition, target, connectionId, sampleInput);
+      },
+    };
     this.services = {
-      ...(scriptedCapabilitySandbox ? {
-        scriptedCapabilitySandbox,
-        providerReadGraph: {
-          fingerprint: (session: TrustedSessionContext, definition: RuntimeDeclarativeServiceDefinition, target: RuntimeProviderReadTarget) => {
-            if (!this.#acceptsScopedSession(session)) throw pinnedReadRefused();
-            return publishedProviderReadFingerprint(this.#db, session, definition, target);
-          },
-        },
-      } : {}),
+      ...(scriptedCapabilitySandbox ? { scriptedCapabilitySandbox, providerReadGraph } : {}),
+      assertLiveTenantRole: async (session, requiredRole) => {
+        if (!this.#acceptsScopedSession(session) || !session.tenantId || !session.userId ||
+            !session.roles?.includes(requiredRole)) throw new HttpError(403, "FORBIDDEN", "Tenant role required.");
+        const trx = this.#activeTransaction(session, "Live tenant role");
+        if (!trx) throw new HttpError(403, "FORBIDDEN", "An active tenant transaction is required.");
+        await assertCurrentAccountAuthority(this.#db, trx, { ...session, tenantId: session.tenantId, userId: session.userId }, requiredRole);
+      },
       mcpDiagnostics: diagnosticServices((session) => this.#acceptsScopedSession(session)),
       readProgress: {
         report: (session, snapshot) => this.#acceptsScopedSession(session)

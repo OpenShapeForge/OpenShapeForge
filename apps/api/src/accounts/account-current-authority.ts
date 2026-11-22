@@ -11,8 +11,8 @@ import { resolveCustomRolePermissions } from './custom-roles.js';
 import { HttpError } from '../rest/http-error.js';
 
 /**
- * Recheck mutable person grants after the tenant mutation lock, within its
- * transaction. A role removed while the command was waiting must not be
+ * Take the tenant mutation lock and recheck mutable person grants within the
+ * write transaction. A role removed while the command was waiting must not be
  * resurrected by the already-resolved HTTP session. Verified issuer grants
  * are kept separate from mutable organization grants.
  */
@@ -22,6 +22,7 @@ export async function assertCurrentAccountAuthority(
   session: TrustedSessionContext & { tenantId: string; userId: string },
   requiredRole: string,
 ): Promise<void> {
+  await sql`select pg_advisory_xact_lock(hashtextextended(${session.tenantId}, 7921))`.execute(tx);
   if (session.credential === 'bearer' && session.principalKind === 'service') return; // Verified service token.
   if (session.credential === 'api-key') return; // Verified, intersected service credential.
   // A personal key acts as a person, so it gets the person's check: the

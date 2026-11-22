@@ -69,6 +69,7 @@ import type {
   RuntimeWebhookSecretServices,
   RuntimeInboundEndpointServices,
   RuntimeReadProgressServices,
+  RuntimeScriptedCapabilitySandbox,
   RuntimeWorkerContextContract,
   RuntimeWorkerContract,
   RuntimeWorkerHandle,
@@ -296,6 +297,7 @@ export type ModulePlatformServices = {
   /** Present only once an enforcing declarative engine is registered. */
   readonly declarativeServiceCapabilities?: RuntimeDeclarativeServiceCapabilities;
   readonly readProgress?: RuntimeReadProgressServices<TrustedSessionContext>;
+  readonly scriptedCapabilitySandbox?: RuntimeScriptedCapabilitySandbox<TrustedSessionContext>;
   readonly webhookSecrets?: RuntimeWebhookSecretServices<TrustedSessionContext>;
   readonly inboundEndpoints?: RuntimeInboundEndpointServices<TrustedSessionContext>;
   readonly records: RuntimeRecordAccessServices<TrustedSessionContext>;

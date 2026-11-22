@@ -77,6 +77,7 @@ import { PrincipalRuntime } from "./principals.js";
 import { createWebhookSecretServices } from "./webhook-secrets.js";
 import { createInboundEndpointServices } from "./inbound-endpoints.js";
 import { inboundEndpointWriter, findInboundConnectionEndpoint, findInboundRegistration, insertInboundEndpointIfAbsent, revokeInboundConnectionEndpoint } from "./inbound-store.js";
+import { createScriptedCapabilitySandbox } from "./scripted-capability-sandbox.js";
 import { ReadProgressRuntime, type ReadProgressDefinition } from "./read-progress.js";
 import type { RuntimeReadProgress } from "@openshapeforge/plugin-runtime";
 import {
@@ -546,7 +547,9 @@ export class ModulePlatformRuntime {
         );
       },
     });
+    const scriptedCapabilitySandbox = createScriptedCapabilitySandbox((session) => this.#acceptsScopedSession(session));
     this.services = {
+      ...(scriptedCapabilitySandbox ? { scriptedCapabilitySandbox } : {}),
       mcpDiagnostics: diagnosticServices((session) => this.#acceptsScopedSession(session)),
       readProgress: {
         report: (session, snapshot) => this.#acceptsScopedSession(session)

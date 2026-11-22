@@ -19,9 +19,11 @@ import type { DirectCallScope } from "./tool-dispatch.js";
 export function nativeBindingInvoker(
   scope: Pick<DirectCallScope, "db" | "session" | "tables" | "operations" | "moduleSession" | "modulePlatform">,
   stepIdempotencyKey: string | undefined,
+  signal?: AbortSignal,
 ): (operationKey: string, inputs: Record<string, unknown>) => Promise<Record<string, unknown>> {
   const { db, session, tables, operations, moduleSession, modulePlatform } = scope;
   return async (operationKey, inputs) => {
+    signal?.throwIfAborted();
     const nativeTool = resolveNativeCrudTool(
       operationKey,
       inputs,
@@ -59,6 +61,7 @@ export function nativeBindingInvoker(
         db,
         session: moduleSession,
         transport: "mcp",
+        ...(signal ? { signal } : {}),
         ...(modulePlatform
           ? { platform: modulePlatform.services }
           : {}),

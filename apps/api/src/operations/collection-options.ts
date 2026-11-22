@@ -24,7 +24,7 @@ function authorizationOperationChoices(ids: readonly string[], locale: Locale) {
     const operation = standaloneOperations.get(value);
     return {
       value,
-      label: labels?.[locale] ?? labels?.en ?? operation?.title ?? value,
+      label: (typeof labels === 'string' ? labels : labels?.[locale] ?? labels?.en) ?? operation?.title ?? value,
       group: operation?.plugin === 'osf-blueprints' ? blueprintGroup : ordinaryGroup,
     };
   }).sort((a, b) => Number(a.group === blueprintGroup) - Number(b.group === blueprintGroup)

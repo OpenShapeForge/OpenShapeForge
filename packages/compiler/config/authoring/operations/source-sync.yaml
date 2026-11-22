@@ -104,7 +104,15 @@ operations:
         Applies ordered entity batches in one transaction, up to 10000 records total. References created in earlier
         batches are available to later ones. Any failed write rolls back every batch and leaves the watermark unchanged.
         Entity permissions, validation and events are identical to ordinary entity writes. A supplied
-        sourceAdministrationName is written to every upserted record across the batches.
+        sourceAdministrationName is written to every upserted record across the batches. An import step that
+        can lose the response of a committed page — a restarted job, a dropped connection — may name its own
+        effectKey and resume with it: the page then commits a durable receipt in the same transaction as its
+        writes, and a repeat of the same key and page returns that committed result instead of writing again.
+      nl: >-
+        Verwerkt geordende entiteitbatches in één transactie. Een importstap die het antwoord van een
+        vastgelegde pagina kan kwijtraken, geeft een eigen effectKey mee en hervat daarmee: de pagina legt dan
+        in dezelfde transactie een verwerkingsbewijs vast en een herhaling van dezelfde sleutel en pagina geeft dat
+        vastgelegde resultaat terug in plaats van opnieuw te schrijven.
     implementation:
       type: plugin
       plugin: osf-source-sync
@@ -118,6 +126,17 @@ operations:
           sourceAuthority: { type: string, minLength: 1, maxLength: 200 }
           sourceAdministration: { type: string, minLength: 1, maxLength: 200 }
           sourceAdministrationName: *sourceAdministrationNameInput
+          effectKey:
+            description: >-
+              The import step's own name for this page's effect, so a page whose response was lost can be
+              resumed without writing twice. It is scoped to the calling tenant and actor and bound to this
+              source authority and administration: the same key under another administration, tenant or actor
+              is a different effect. The key covers the page exactly as submitted, batch order included.
+              A different page under the same key is refused. The Workflow worker uses its persisted command key
+              when no explicit effectKey is supplied.
+            type: string
+            minLength: 1
+            maxLength: 200
           batches:
             type: array
             minItems: 1
@@ -141,9 +160,28 @@ operations:
     tenancy: { mode: required }
     effects: { data: write, external: none }
     reliability:
+      # Natural, not idempotency-key: the page is matched on source identity, so
+      # an ordinary caller needs no key. effectKey is an optional receipt for a
+      # caller that cannot observe whether its page committed, never a required
+      # control, and core keeps it out of the platform-wide keyed contract.
       idempotency: { mode: natural }
     confirmation: { mode: none }
-    errors: *sourceSyncErrors
+    errors:
+      - status: 400
+        code: BAD_USER_INPUT
+        description: The entity, a record or a reference is malformed, unknown or ambiguous.
+      - status: 403
+        code: FORBIDDEN
+        description: The caller lacks the target entity's role for this change, or for the receipt it asks back.
+      - status: 409
+        code: IDEMPOTENCY_KEY_REUSED
+        description: This effectKey was used for a different page of the same source.
+      - status: 409
+        code: OPERATION_IN_PROGRESS
+        description: The same effectKey is being applied right now; retry when it has finished.
+      - status: 503
+        code: IDEMPOTENCY_RECEIPT_UNAVAILABLE
+        description: The page receipt could not be read or written; the page was not applied.
   watermark:
     id: source-sync.watermark
     name:

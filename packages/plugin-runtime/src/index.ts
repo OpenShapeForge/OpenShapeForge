@@ -200,6 +200,67 @@ export type RuntimeCapabilityGrantServices<Session> = {
   list(session: Session, subject: { entity: string; id: string }): Promise<readonly RuntimeCapabilityGrantSummary[]>;
 };
 
+/**
+ * One read-only host callback the caller exposes to a single run. `args` is the
+ * JSON the script passed; the result must be JSON the host can bound. The
+ * signal is aborted as soon as the run ends for any reason.
+ */
+export type RuntimeScriptedCapabilityRead = (
+  args: unknown,
+  context: { readonly signal: AbortSignal },
+) => Promise<unknown> | unknown;
+
+/**
+ * One approved binding of a run: the alias the script calls as
+ * `host.read(alias, args)` and the read it reaches. The alias must start with a
+ * lowercase letter and continue with letters, digits, `_`, `.` or `-`
+ * (64 characters at most); the host refuses the whole request otherwise.
+ */
+export type RuntimeScriptedCapabilityBinding = {
+  readonly alias: string;
+  readonly read: RuntimeScriptedCapabilityRead;
+};
+
+export type RuntimeScriptedCapabilityResult =
+  | { ok: true; value: unknown }
+  | { ok: false; code: string };
+
+/** Optional pilot executor for fixtures and explicitly brokered reads. */
+export type RuntimeScriptedCapabilitySandbox<Session> = {
+  evaluateFixture(
+    session: Session,
+    request: { source: string; input: Readonly<Record<string, unknown>> },
+    options?: { signal?: AbortSignal },
+  ): Promise<RuntimeScriptedCapabilityResult>;
+  /**
+   * Runs the script with brokered read-only bindings instead of fixture data
+   * alone. Only a trusted installed module may call this, and only inside its
+   * own verified invocation session: the host does NOT resolve binding names,
+   * check who may use them, or inspect the effect metadata of what they read.
+   * The caller owns that policy and must pass only names it has resolved for
+   * this actor and tenant and whose live effects it has verified read-only.
+   *
+   * What the host does enforce: `bindings` must be a non-empty, bounded list of
+   * uniquely named, well-formed aliases, and nothing outside it is callable;
+   * every callback runs only for the session passed here, which is verified
+   * again before each call, so a detached or re-scoped session reaches no
+   * binding even mid-run; arguments and results cross as bounded JSON; the
+   * run's cancellation reaches each callback through its signal; and a refused
+   * or failed read reaches the script as a fixed code with no host detail.
+   *
+   * Absent on a host without this bridge; callers must fail closed.
+   */
+  evaluateReadOnly?(
+    session: Session,
+    request: {
+      source: string;
+      input: Readonly<Record<string, unknown>>;
+      bindings: readonly RuntimeScriptedCapabilityBinding[];
+    },
+    options?: { signal?: AbortSignal },
+  ): Promise<RuntimeScriptedCapabilityResult>;
+};
+
 export type RuntimeSchemaValidationResult =
   | { valid: true }
   | { valid: false; error: OperationError };
@@ -833,6 +894,7 @@ export type PluginPlatformServices = {
   /** Diagnostic journal access requires a live verified tenant session and McpInsights.Manage. */
   readonly mcpDiagnostics?: import("./diagnostics.js").RuntimeMcpDiagnosticServices<PluginSessionContext>;
   readonly readProgress?: RuntimeReadProgressServices<PluginSessionContext>;
+  readonly scriptedCapabilitySandbox?: RuntimeScriptedCapabilitySandbox<PluginSessionContext>;
   /**
    * What the host's declarative Service engine enforces (see
    * `RuntimeDeclarativeServiceCapabilities`). Published only by a runtime that

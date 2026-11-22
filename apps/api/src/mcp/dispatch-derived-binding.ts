@@ -272,6 +272,7 @@ export async function runDerivedBinding(
         native: nativeBindingInvoker(
           { db, session, tables, operations, moduleSession, modulePlatform },
           stepIdempotencyKey,
+          signal,
         ),
         secretScope,
         providerDefinitions:

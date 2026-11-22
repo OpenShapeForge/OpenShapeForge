@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import type { WebCollectionTable } from '@openshapeforge/interface-web';
-import type { ProjectableEntity } from './web-manifest.js';
+import type { ProjectableEntity } from './web-value-path.js';
 type Schema = Record<string, any>;
 
 export function bindingField(schema: Schema, expression: string): Schema {

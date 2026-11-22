@@ -2,7 +2,7 @@ import { bindingField, compileReadBindings, compileTableTotals } from './read-bi
 // SPDX-License-Identifier: BUSL-1.1
 import type { WebCollectionTable, WebCollectionTableValue, WebValuePath } from '@openshapeforge/interface-web';
 import type { CollectionTableValueDefinition } from './types/authoring.js';
-import { compileWebValuePath, type ProjectableEntity } from './web-manifest.js';
+import { compileWebValuePath, type ProjectableEntity } from './web-value-path.js';
 
 /** Compile data selection once. Consumers render typed values; they never interpret authored paths. */
 export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyMap<string, ProjectableEntity>): WebCollectionTable | undefined {

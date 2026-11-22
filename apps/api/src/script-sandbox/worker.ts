@@ -11,11 +11,17 @@
  * deadline; the parent separately owns deadline, cancellation and the read
  * budget and kills this process regardless of what happens in here.
  *
+ * A read result or data result larger than one safe frame crosses as bounded
+ * chunks. The worker buffers an inbound payload under the per-read cap and a
+ * run-wide aggregate, and resolves the guest's promise only once the declared
+ * size matches what arrived: an oversized or interrupted page is refused whole,
+ * so the guest never sees a page silently short of records.
+ *
  * Guest-controlled text never leaves: failures are reported as fixed codes.
  */
 import { newQuickJSWASMModule, type QuickJSContext, type QuickJSDeferredPromise, type QuickJSHandle, type QuickJSRuntime } from "quickjs-emscripten";
 import {
-  encodeFrame, FrameDecoder, parseParentMessage, ProtocolError, utf8Bytes,
+  ChunkedPayload, encodeFrame, FrameDecoder, parseParentMessage, ProtocolError, splitTextByBytes, utf8Bytes,
   type ParentMessage, type ScriptErrorCode, type ScriptLimits, type WorkerMessage,
 } from "./protocol.js";
 
@@ -86,6 +92,10 @@ interface Execution {
   vm: QuickJSContext;
   limits: ScriptLimits;
   pending: Map<number, QuickJSDeferredPromise>;
+  /** Chunks buffered for a read still arriving; at most one per pending read. */
+  transfers: Map<number, ChunkedPayload>;
+  /** Bytes of every read result accepted so far, against `maxTransferBytes`. */
+  received: number;
   nextId: number;
   outcome: { ok: boolean; value: string } | null;
 }
@@ -117,7 +127,9 @@ async function start(message: Extract<ParentMessage, { type: "run" }>): Promise<
   const vm = runtime.newContext({
     intrinsics: { BaseObjects: true, Eval: true, StringNormalize: true, RegExp: true, JSON: true, MapSet: true, TypedArrays: true, Promise: true },
   });
-  const exec: Execution = { runtime, vm, limits, pending: new Map(), nextId: 0, outcome: null };
+  const exec: Execution = {
+    runtime, vm, limits, pending: new Map(), transfers: new Map(), received: 0, nextId: 0, outcome: null,
+  };
   execution = exec;
 
   const guestFailure = (): ScriptErrorCode => (state.timedOut ? "timeout" : "script_error");
@@ -126,6 +138,10 @@ async function start(message: Extract<ParentMessage, { type: "run" }>): Promise<
     const alias = vm.getString(aliasHandle);
     const args = vm.getString(argsHandle);
     if (utf8Bytes(args) > limits.maxReadArgsBytes || alias.length > 64) return rejectedWith(vm, "invalid_read");
+    // The parent fails the run past its read budget, but it only learns of a
+    // read once the frame arrives. Bounding what is in flight here keeps a guest
+    // that fires reads in a loop from growing this process's memory meanwhile.
+    if (exec.pending.size >= limits.maxReads) return rejectedWith(vm, "invalid_read");
     const id = ++exec.nextId;
     const deferred = vm.newPromise();
     exec.pending.set(id, deferred);
@@ -144,8 +160,19 @@ async function start(message: Extract<ParentMessage, { type: "run" }>): Promise<
     }
     const outcome = exec.outcome;
     if (!outcome) return;
-    if (outcome.ok) await send({ type: "result", value: outcome.value });
-    else await send({ type: "failed", code: outcome.value as ScriptErrorCode });
+    if (!outcome.ok) {
+      await send({ type: "failed", code: outcome.value as ScriptErrorCode });
+      return exitAfterFlush(0);
+    }
+    // The isolate bounded the result in code units; this is the byte check the
+    // wire budget is actually stated in. Over it, nothing is sent at all.
+    const bytes = utf8Bytes(outcome.value);
+    if (bytes > limits.maxResultBytes) return fail("result_too_large");
+    if (bytes <= limits.maxChunkBytes) await send({ type: "result", value: outcome.value });
+    else {
+      for (const part of splitTextByBytes(outcome.value, limits.maxChunkBytes)) await send({ type: "result.part", value: part });
+      await send({ type: "result.end", bytes });
+    }
     await exitAfterFlush(0);
   };
   pumpRef = pump;
@@ -172,20 +199,60 @@ async function start(message: Extract<ParentMessage, { type: "run" }>): Promise<
   await pump();
 }
 
-async function onReply(message: Extract<ParentMessage, { type: "read.ok" | "read.denied" }>): Promise<void> {
+type ReplyMessage = Extract<ParentMessage, { type: "read.ok" | "read.part" | "read.end" | "read.denied" }>;
+
+async function onReply(message: ReplyMessage): Promise<void> {
   const exec = execution;
   const deferred = exec?.pending.get(message.id);
   if (!exec || !deferred) return fail("protocol_violation");
-  exec.pending.delete(message.id);
-  if (message.type === "read.ok" && utf8Bytes(message.value) <= exec.limits.maxReadResultBytes) {
-    const value = exec.vm.newString(message.value);
-    deferred.resolve(value);
-    value.dispose();
-  } else {
-    const reason = exec.vm.newString(message.type === "read.denied" ? message.code : "read_failed");
-    deferred.reject(reason);
-    reason.dispose();
+
+  if (message.type === "read.part") {
+    const bytes = utf8Bytes(message.value);
+    // A chunk outside the negotiated frame size means the stream itself is not
+    // trustworthy, so the run ends rather than the page being read short.
+    if (bytes === 0 || bytes > exec.limits.maxChunkBytes) {
+      exec.transfers.get(message.id)?.drop();
+      return fail("protocol_violation");
+    }
+    // Still arriving: the guest's promise stays pending and sees no fragment.
+    const transfer = exec.transfers.get(message.id) ?? new ChunkedPayload(exec.limits.maxReadResultBytes, exec.limits.maxChunkBytes);
+    exec.transfers.set(message.id, transfer);
+    if (!transfer.add(message.value) || exec.received + bytes > exec.limits.maxTransferBytes) {
+      return settleRead(exec, message.id, deferred, null);
+    }
+    exec.received += bytes;
+    return;
   }
+
+  const transfer = exec.transfers.get(message.id);
+  if (message.type === "read.end") {
+    return settleRead(exec, message.id, deferred, transfer?.finish(message.bytes) ?? null);
+  }
+  // A single-frame reply or a denial ends any buffer this read had opened, so a
+  // transfer the parent abandoned cannot be mixed with what follows.
+  transfer?.drop();
+  if (message.type === "read.denied") return settleRead(exec, message.id, deferred, null, message.code);
+  const bytes = utf8Bytes(message.value);
+  const accepted = bytes <= exec.limits.maxReadResultBytes && exec.received + bytes <= exec.limits.maxTransferBytes;
+  if (accepted) exec.received += bytes;
+  return settleRead(exec, message.id, deferred, accepted ? message.value : null);
+}
+
+/** Resolves or rejects one read, releasing its buffer whatever the outcome. */
+async function settleRead(
+  exec: Execution,
+  id: number,
+  deferred: QuickJSDeferredPromise,
+  value: string | null,
+  code = "read_failed",
+): Promise<void> {
+  exec.pending.delete(id);
+  exec.transfers.get(id)?.drop();
+  exec.transfers.delete(id);
+  const handle = exec.vm.newString(value ?? code);
+  if (value === null) deferred.reject(handle);
+  else deferred.resolve(handle);
+  handle.dispose();
   await pumpRef?.();
 }
 

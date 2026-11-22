@@ -14,6 +14,14 @@
  * alias list, no binding outside it, re-verification of the session before each
  * callback, bounded JSON in both directions, cancellation propagation and
  * refusals reduced to a fixed code.
+ *
+ * A brokered read serves a whole source page, which does not fit the single
+ * frame a fixture read uses. For that path only, this bridge raises the read,
+ * result, transfer and memory budgets to the page budgets below and lets the
+ * sandbox move the page and the data result as bounded chunks. A page over
+ * budget is refused whole: the script receives the fixed denial code and no
+ * records, so a caller cannot mistake a refusal for a short final page and
+ * advance its cursor. Fixture evaluation keeps the default budgets untouched.
  */
 import type {
   RuntimeScriptedCapabilityBinding,
@@ -21,7 +29,7 @@ import type {
   RuntimeScriptedCapabilitySandbox,
 } from "@openshapeforge/plugin-runtime";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import { ALIAS_PATTERN, parseJson, serializeJson, DEFAULT_LIMITS, type JsonValue } from "../script-sandbox/protocol.js";
+import { ALIAS_PATTERN, parseJson, serializeJson, DEFAULT_LIMITS, type JsonValue, type ScriptLimits } from "../script-sandbox/protocol.js";
 import { ScriptExecutionError, type ScriptRead } from "../script-sandbox/run-script.js";
 import { createSandboxRunner } from "../script-sandbox/socket-channel.js";
 
@@ -29,6 +37,23 @@ const TENANT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 /** An explicit, reviewable ceiling on how many names one run may reach at all. */
 const MAX_BINDINGS = DEFAULT_LIMITS.maxReads;
+
+/**
+ * Budgets of a brokered run. One page and the data result computed from it may
+ * each reach `MAX_PAGE_BYTES`; `maxTransferBytes` is what bounds the run as a
+ * whole, so a script cannot reach the page cap once per read. The chunk size
+ * stays the default: it only decides how the bytes are framed.
+ */
+const MAX_PAGE_BYTES = 1024 * 1024;
+const BROKERED_LIMITS: Partial<ScriptLimits> = Object.freeze({
+  // A page read crosses the network at the broker before this run sees it.
+  deadlineMs: 12_000,
+  // A megabyte of JSON becomes a far larger object graph inside the isolate.
+  memoryBytes: 64 * 1024 * 1024,
+  maxReadResultBytes: MAX_PAGE_BYTES,
+  maxResultBytes: MAX_PAGE_BYTES,
+  maxTransferBytes: 3 * MAX_PAGE_BYTES,
+});
 
 /** Carries no detail: the script only ever learns the fixed denial code. */
 class BrokeredReadRefused extends Error {
@@ -70,7 +95,7 @@ export function createScriptedCapabilitySandbox(
     if (request.bindings !== undefined && !reads) return { ok: false, code: "invalid_request" };
     try {
       const value = await evaluate({
-        ...(reads ? { limits: { deadlineMs: 12_000 } } : {}),
+        ...(reads ? { limits: BROKERED_LIMITS } : {}),
         source: request.source,
         input,
         ...(reads ? { reads } : {}),
@@ -118,8 +143,10 @@ function brokeredReads(
       // started reaches no binding, however long the script holds the run open.
       context.signal.throwIfAborted();
       if (!verified(session)) throw new BrokeredReadRefused();
-      const text = serializeJson(await read(args, { signal: context.signal }), DEFAULT_LIMITS.maxReadResultBytes);
-      const parsed = text === null ? null : parseJson(text, DEFAULT_LIMITS.maxReadResultBytes);
+      // Bounded whole, at the page budget: a page beyond it is refused here, not
+      // trimmed, and the sandbox transfers whatever is accepted in full.
+      const text = serializeJson(await read(args, { signal: context.signal }), MAX_PAGE_BYTES);
+      const parsed = text === null ? null : parseJson(text, MAX_PAGE_BYTES);
       if (!parsed?.ok) throw new BrokeredReadRefused();
       return parsed.value;
     };

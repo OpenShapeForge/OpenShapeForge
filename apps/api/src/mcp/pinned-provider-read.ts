@@ -94,7 +94,7 @@ export async function publishedProviderReadFingerprint(
       (!isAuthorizedInternalDerivedRow(entry, service, roles) &&
         derivedToolsFromRows(entry, [service], new Set(), roles).length !== 1)) throw pinnedReadRefused();
 
-  assertSchemaValid(inputSchemaFromStoredFields(service[entry.inputFieldsField], session.locale ?? "en"), sampleInput, "arguments");
+  assertSchemaValid(inputSchemaFromStoredFields(service[entry.inputFieldsField]), sampleInput, "arguments");
   const [binding] = orderedBindingRecords([serializeRow(bindingTable, graph.binding)]);
   if (!binding || !bindingSelected(binding, sampleInput)) throw pinnedReadRefused();
   const capability = serializeRow(capabilityTable, graph.capability);

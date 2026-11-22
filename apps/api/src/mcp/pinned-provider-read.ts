@@ -9,8 +9,9 @@ import { getGeneratedCrudTables } from "../operations/entity/catalog.js";
 import { HttpError } from "../rest/http-error.js";
 import { catalogDerivedTools, entityForTable, type GeneratedTable } from "./catalog.js";
 import { fieldNameForColumn, serializeRow, stableSnapshotJson } from "./catalog-rows.js";
-import { derivedToolsFromRows, isAuthorizedInternalDerivedRow, sessionInAudience } from "./derived-tools.js";
-import { composeBindingRequest, orderedBindingRecords } from "./declarative-execution.js";
+import { derivedToolsFromRows, inputSchemaFromStoredFields, isAuthorizedInternalDerivedRow, sessionInAudience } from "./derived-tools.js";
+import { bindingSelected, composeBindingRequest, orderedBindingRecords } from "./declarative-execution.js";
+import { assertSchemaValid } from "./tool-schema.js";
 import { normalizeConnectionValueRows } from "./session-connections.js";
 
 type GraphRow = Record<string, unknown>;
@@ -93,16 +94,18 @@ export async function publishedProviderReadFingerprint(
       (!isAuthorizedInternalDerivedRow(entry, service, roles) &&
         derivedToolsFromRows(entry, [service], new Set(), roles).length !== 1)) throw pinnedReadRefused();
 
+  assertSchemaValid(inputSchemaFromStoredFields(service[entry.inputFieldsField], session.locale ?? "en"), sampleInput, "arguments");
   const [binding] = orderedBindingRecords([serializeRow(bindingTable, graph.binding)]);
+  if (!binding || !bindingSelected(binding, sampleInput)) throw pinnedReadRefused();
   const capability = serializeRow(capabilityTable, graph.capability);
   const adapter = serializeRow(adapterTable, graph.adapter);
-  const fingerprint = providerReadExecutionFingerprint(target, { service, binding: binding!, capability, adapter });
+  const fingerprint = providerReadExecutionFingerprint(target, { service, binding, capability, adapter });
   const [connection] = normalizeConnectionValueRows([serializeRow(connectionTable, graph.connection)], execution.connectionValuesField);
   const values = connection?.[execution.connectionValuesField];
   if (!values || typeof values !== "object" || Array.isArray(values)) throw pinnedReadRefused();
   const definitionField = entityForTable(execution.connectionTable)?.elicitOnCreate?.definitionsField;
   const preview = await composeBindingRequest({
-    mode: "describe", binding: binding!, operationRow: capability, providerRow: adapter,
+    mode: "describe", binding, operationRow: capability, providerRow: adapter,
     connectionValues: values as GraphRow, serviceInputs: sampleInput, secretScope: "",
     ...(definitionField ? { providerDefinitions: adapter[definitionField] } : {}),
     fetchImpl: Object.assign(async () => { throw pinnedReadRefused(); }, {

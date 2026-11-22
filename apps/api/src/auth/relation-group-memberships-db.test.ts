@@ -10,6 +10,8 @@ import {
 import { runMigrationChain } from "../db/migration-chain.js";
 import { APP_ROLE } from "../db/migrations/app-role.js";
 import { withDbSession } from "../db/session.js";
+import { assertCurrentAccountAuthority } from "../accounts/account-current-authority.js";
+import type { TrustedSessionContext } from "./trusted-context.js";
 import { resolveGroupRoles } from "./group-roles.js";
 import { resolveRelationGroupMembershipIds } from "./relation-group-memberships.js";
 
@@ -229,6 +231,37 @@ test("core group role operations enforce administrator and tenant boundaries", a
   await revokeGroupRole({id:assigned.value.id,relationGroupId:activeGroupId},context);
   expect(await resolveGroupRoles(restricted.db,session,[activeGroupId])).toEqual([]);
 },TEST_TIMEOUT);
+
+test("a live authority check waits for a group-derived grant to be withdrawn", async () => {
+  const requiredRole = "Finance.Budget.ReadWrite";
+  const administrator = { ...session, roles: ["Organization.All.ReadWrite"], scope: "tenant" as const };
+  const actor = { ...session, issuer: identity.issuer, credential: "bearer", roles: [requiredRole] } satisfies TrustedSessionContext;
+  await withDbSession(restricted.db, administrator, (tx) => sql`
+    insert into platform.relation_group_roles (tenant_id, relation_group_id, role)
+    values (${tenantId}::uuid, ${activeGroupId}::uuid, ${requiredRole})
+  `.execute(tx));
+  const check = () => withDbSession(restricted.db, actor, (tx) =>
+    assertCurrentAccountAuthority(restricted.db, tx, actor, requiredRole));
+  await expect(check()).resolves.toBeUndefined();
+  const removed = Promise.withResolvers<void>();
+  const commit = Promise.withResolvers<void>();
+  const withdraw = withDbSession(restricted.db, administrator, async (tx) => {
+    await sql`delete from platform.relation_group_roles where tenant_id=${tenantId}::uuid
+      and relation_group_id=${activeGroupId}::uuid and role=${requiredRole}`.execute(tx);
+    removed.resolve();
+    await commit.promise;
+  });
+  await Promise.race([removed.promise, withdraw]);
+  const result = check().then(() => null, (error: unknown) => error);
+  try {
+    const pending = Symbol("pending");
+    expect(await Promise.race([result, Bun.sleep(200).then(() => pending)])).toBe(pending);
+  } finally {
+    commit.resolve();
+    await withdraw;
+  }
+  expect(await result).toMatchObject({ status: 403, code: "FORBIDDEN" });
+}, TEST_TIMEOUT);
 
 test("direct exceptions preserve other roles and cannot remove the last direct administrator", async () => {
   const {setMembershipRoles,mutateMembershipRole}=await import('./identity-link-admin.js');

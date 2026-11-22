@@ -70,6 +70,7 @@ export function createScriptedCapabilitySandbox(
     if (request.bindings !== undefined && !reads) return { ok: false, code: "invalid_request" };
     try {
       const value = await evaluate({
+        ...(reads ? { limits: { deadlineMs: 12_000 } } : {}),
         source: request.source,
         input,
         ...(reads ? { reads } : {}),

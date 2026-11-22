@@ -566,6 +566,55 @@ describe("executeBinding", () => {
     return { calls, impl };
   };
 
+  it("admits a pinned GET only to the approved origin and division", async () => {
+    const { calls, impl } = fetchSpy();
+    const input = {
+      binding: {},
+      providerRow,
+      connectionValues,
+      operationRow: { kind: "query", operation: { method: "GET", pathTemplate: "/1955/journal" } },
+      serviceInputs: {},
+      secretScope: "erp.providers",
+      keyring: KEYRING,
+      fetchImpl: impl,
+      pinnedRead: { origin: "https://acme.example.com", pathname: "/1955/journal" },
+    };
+    await executeBinding(input);
+    expect(calls.map(call => call.url)).toEqual(["https://acme.example.com/1955/journal"]);
+    for (const operation of [
+      { method: "GET", pathTemplate: "/1956/journal" },
+      { method: "POST", pathTemplate: "/1955/journal" },
+    ]) {
+      await expect(executeBinding({ ...input, operationRow: { kind: "query", operation } }))
+        .rejects.toMatchObject({ code: "PINNED_READ_REFUSED" });
+    }
+    await expect(executeBinding({
+      ...input,
+      pinnedRead: { ...input.pinnedRead, origin: "https://elsewhere.example.com" },
+    })).rejects.toMatchObject({ code: "PINNED_READ_REFUSED" });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("does not follow a redirect from a pinned read", async () => {
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      requested.push(String(input));
+      return new Response(null, { status: 307, headers: { location: "/1956/journal" } });
+    }) as typeof fetch;
+    await expect(executeBinding({
+      binding: {},
+      providerRow,
+      connectionValues,
+      operationRow: { kind: "query", operation: { method: "GET", pathTemplate: "/1955/journal" } },
+      serviceInputs: {},
+      secretScope: "erp.providers",
+      keyring: KEYRING,
+      fetchImpl,
+      pinnedRead: { origin: "https://acme.example.com", pathname: "/1955/journal" },
+    })).rejects.toMatchObject({ code: "EGRESS_DENIED" });
+    expect(requested).toEqual(["https://acme.example.com/1955/journal"]);
+  });
+
   it("does not dispatch when cancelled before declarative execution", async () => {
     const controller = new AbortController();
     controller.abort();

@@ -162,6 +162,7 @@ const ENFORCED_EXPECTATION_SCOPES = ["every-provider-call"] as const;
 export const DECLARATIVE_CONNECTION_CAPABILITIES: RuntimeDeclarativeServiceCapabilities =
   Object.freeze({
     expectedConnection: Object.freeze([...ENFORCED_EXPECTATION_SCOPES]),
+    pinnedProviderRead: true,
   });
 
 /**
@@ -180,11 +181,10 @@ export function parseDeclarativeConnectionCapabilities(
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     throw new Error("A declarative Service engine must carry its capabilities.");
   }
-  const keys = Object.keys(raw as Record<string, unknown>);
-  const scopes = (raw as { expectedConnection?: unknown }).expectedConnection;
+  const { expectedConnection: scopes, pinnedProviderRead, ...unknownCapabilities } = raw as Record<string, unknown>;
   if (
-    keys.length !== 1 ||
-    keys[0] !== "expectedConnection" ||
+    Object.keys(unknownCapabilities).length !== 0 ||
+    (pinnedProviderRead !== undefined && pinnedProviderRead !== true) ||
     !Array.isArray(scopes) ||
     new Set(scopes).size !== scopes.length ||
     !scopes.every((scope) =>
@@ -196,7 +196,10 @@ export function parseDeclarativeConnectionCapabilities(
         `this core enforces (${ENFORCED_EXPECTATION_SCOPES.join(", ")}).`,
     );
   }
-  return Object.freeze({ expectedConnection: Object.freeze([...scopes]) });
+  return Object.freeze({
+    expectedConnection: Object.freeze([...scopes]),
+    ...(pinnedProviderRead ? { pinnedProviderRead } : {}),
+  });
 }
 
 export const EXPECTED_CONNECTION_UNAVAILABLE_CODE = "EXPECTED_CONNECTION_UNAVAILABLE";
@@ -499,6 +502,7 @@ export function createConnectionUseRecorder(
  * arguments do not reach. An interceptor can set, read or drop neither.
  */
 export type ConnectionControls = {
+  pinnedProviderRead?: import("@openshapeforge/plugin-runtime").RuntimePinnedProviderRead;
   /** Refuse unless every provider call uses exactly this Connection. */
   expectedConnection?: ConnectionExpectation;
   /** Collects the Connection(s) the provider calls actually used. */

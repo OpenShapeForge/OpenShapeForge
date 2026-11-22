@@ -539,7 +539,17 @@ export type RuntimeConnectionUseGrantServices<Session> = {
   }[]>;
 };
 
+/** A host-approved binding for one non-paginated REST GET. */
+export type RuntimePinnedProviderRead = {
+  adapterKey: string;
+  capabilityKey: string;
+  origin: string;
+  pathname: string;
+};
+
 export type RuntimeDeclarativeServiceRequest = {
+  /** Internal execution constraint. An expected Connection is required with it. */
+  pinnedProviderRead?: RuntimePinnedProviderRead;
   definition: RuntimeDeclarativeServiceDefinition;
   /** Owner-issued authority, verified against the originating canonical Operation. */
   connectionGrantId?: string;

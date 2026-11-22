@@ -21,14 +21,14 @@ import type {
   RuntimeScriptedCapabilitySandbox,
 } from "@openshapeforge/plugin-runtime";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import { ALIAS_PATTERN, parseJson, serializeJson, DEFAULT_LIMITS, LIMIT_CEILINGS, type JsonValue } from "../script-sandbox/protocol.js";
+import { ALIAS_PATTERN, parseJson, serializeJson, DEFAULT_LIMITS, type JsonValue } from "../script-sandbox/protocol.js";
 import { ScriptExecutionError, type ScriptRead } from "../script-sandbox/run-script.js";
 import { createSandboxRunner } from "../script-sandbox/socket-channel.js";
 
 const TENANT_ID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 /** An explicit, reviewable ceiling on how many names one run may reach at all. */
-const MAX_BINDINGS = LIMIT_CEILINGS.maxReads;
+const MAX_BINDINGS = DEFAULT_LIMITS.maxReads;
 
 /** Carries no detail: the script only ever learns the fixed denial code. */
 class BrokeredReadRefused extends Error {

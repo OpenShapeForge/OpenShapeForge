@@ -156,6 +156,10 @@ export async function derivedToolCall(
           // outage, so it does not surface in `unavailable`.
           bindingSelected(binding, args as Record<string, unknown>),
         );
+        if (controls?.pinnedProviderRead &&
+            (selectedBindings.length !== 1 || selectedBindings[0]?.optional === true)) {
+          throw new HttpError(403, "PINNED_READ_REFUSED", "A pinned read requires one mandatory binding.");
+        }
         // Which bindings this handle stands for. Two selection modes,
         // two meanings: `all-authorized` hands out one handle per
         // (binding, provider) and the caller composes the union — a

@@ -147,7 +147,7 @@ export async function fetchWithAllowedRedirects(
     if (response.status < 300 || response.status >= 400) return response;
     if (redirectPolicy === "deny") {
       void response.body?.cancel().catch(() => {});
-      throw new HttpError(403, "EGRESS_DENIED", "The OAuth endpoint returned a redirect, which is not followed.");
+      throw new HttpError(403, "EGRESS_DENIED", "The endpoint returned a redirect, which is not followed.");
     }
     const location = response.headers.get("location");
     if (!location) return response;
@@ -1115,6 +1115,7 @@ export type ExecuteBindingInput = {
   idempotencyKey?: string;
   keyring?: SecretKeyring | undefined;
   fetchImpl?: typeof fetch;
+  pinnedRead?: Pick<import("@openshapeforge/plugin-runtime").RuntimePinnedProviderRead, "origin" | "pathname">;
   egress?: ModuleEgressDispatch | undefined;
   signal?: AbortSignal;
   /** AAD scope the values were encrypted under (the elicitation source table). */
@@ -1859,6 +1860,9 @@ export async function executeBinding(
 ): Promise<JsonRecord> {
   const paging = allPagesPlan(input.operationRow.pagination, input.operationRow.kind,
     input.providerRow.transport, (input.operationRow.operation as JsonRecord | undefined)?.method);
+  if (input.pinnedRead && (paging || input.providerRow.transport !== "rest" || input.operationRow.kind !== "query")) {
+    throw new HttpError(403, "PINNED_READ_REFUSED", "A pinned read must be one REST query.");
+  }
   if (paging) input = { ...input, signal: boundedAbortSignal(input.signal, 120_000) };
   input.signal?.throwIfAborted();
   const { binding, operationRow, providerRow } = input;
@@ -1910,6 +1914,10 @@ export async function executeBinding(
   const xmlResponse = responseFormat(operationRow) === "xml";
   const xmlArrays = xmlArrayPaths(operationRow.responseMapping);
   const fetchPage = async (pageUrl: URL) => {
+    if (input.pinnedRead && (request.method !== "GET" || request.body !== undefined ||
+        pageUrl.origin !== input.pinnedRead.origin || pageUrl.pathname !== input.pinnedRead.pathname)) {
+      throw new HttpError(403, "PINNED_READ_REFUSED", "The request does not match the approved provider read.");
+    }
     const requestSignal = boundedAbortSignal(input.signal, REQUEST_TIMEOUT_MS);
     let response: Response;
     let text: string;
@@ -1926,6 +1934,7 @@ export async function executeBinding(
         fetchImpl,
         egressInvocation.dispatch,
         protocolPolicy,
+        input.pinnedRead ? "deny" : "follow",
       );
       requestSignal.throwIfAborted();
     } catch (error) {

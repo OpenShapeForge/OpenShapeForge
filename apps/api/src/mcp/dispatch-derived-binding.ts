@@ -173,6 +173,15 @@ export async function runDerivedBinding(
         `The ${execution.operationEntity} references a missing ${execution.providerEntity}.`,
       );
     }
+    const pinnedRead = scope.controls?.pinnedProviderRead;
+    if (pinnedRead) {
+      const operation = operationRow.operation as JsonRecord | undefined;
+      if (providerRow.key !== pinnedRead.adapterKey || providerRow.transport !== "rest" ||
+          operationRow.key !== pinnedRead.capabilityKey || operationRow.kind !== "query" ||
+          operation?.method !== "GET") {
+        throw new HttpError(403, "PINNED_READ_REFUSED", "The binding does not match the approved provider read.");
+      }
+    }
     let connectionRows = captured
       ? captured.connectionRows
       : normalizeConnectionValueRows(
@@ -264,6 +273,7 @@ export async function runDerivedBinding(
         operationRow,
         providerRow: providerForExecution,
         connectionValues,
+        ...(pinnedRead ? { pinnedRead } : {}),
         serviceInputs: { ...args, ...accumulated },
         // The platform-owned native provider: run the generated
         // operation in-process through the same executor an

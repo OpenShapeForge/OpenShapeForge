@@ -993,6 +993,7 @@ describe("what this core advertises that it enforces", () => {
   it("advertises exactly the scopes its own parser admits", () => {
     expect(DECLARATIVE_CONNECTION_CAPABILITIES).toEqual({
       expectedConnection: ["every-provider-call"],
+      pinnedProviderRead: true,
     });
     // Not a list that happens to agree today: every advertised scope must be
     // one an invocation may actually set, and a scope that is not advertised
@@ -1062,6 +1063,7 @@ describe("what this core advertises that it enforces", () => {
     }).toThrow();
     expect(DECLARATIVE_CONNECTION_CAPABILITIES).toEqual({
       expectedConnection: ["every-provider-call"],
+      pinnedProviderRead: true,
     });
   });
 
@@ -1069,7 +1071,7 @@ describe("what this core advertises that it enforces", () => {
     const accepted = parseDeclarativeConnectionCapabilities(
       DECLARATIVE_CONNECTION_CAPABILITIES,
     );
-    expect(accepted).toEqual({ expectedConnection: ["every-provider-call"] });
+    expect(accepted).toEqual({ expectedConnection: ["every-provider-call"], pinnedProviderRead: true });
     // A detached frozen copy: the registration result cannot be reached back
     // through the object the caller handed over.
     const claim = { expectedConnection: ["every-provider-call"] };

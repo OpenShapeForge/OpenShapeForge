@@ -112,6 +112,12 @@ export function registerSessionExecutors(
       controls = inheritConnectionControls(
         parseConnectionExpectation(request.expectedConnection, session),
       );
+      if (request.pinnedProviderRead) {
+        if (!controls.expectedConnection) {
+          throw new HttpError(403, "PINNED_READ_REFUSED", "A pinned read requires an expected connection.");
+        }
+        controls = { ...controls, pinnedProviderRead: Object.freeze({ ...request.pinnedProviderRead }) };
+      }
     } catch (error) {
       return runtimeOperationResult(failed(error));
     }

@@ -382,7 +382,7 @@ export async function mutateMembershipRole(
     throw new HttpError(403, "FORBIDDEN", "Role assignment requires an organization administrator.");
   }
   const state = await withDbSession(db, session, async (trx) => {
-    await sql`select pg_advisory_xact_lock(hashtextextended(${session.tenantId}, 7921))`.execute(trx);
+    await sql`select pg_advisory_xact_lock(hashtextextended(${session.tenantId}::uuid::text, 7921))`.execute(trx);
     const locked = await sql<{ roles: string[] }>`select roles from platform.identity_relations
       where tenant_id = ${session.tenantId}::uuid and identity_id = ${identityId}::uuid
         and status = 'linked' for update`.execute(trx);

@@ -167,3 +167,29 @@ jobs:
           provenance: mode=max
           sbom: true
           cache-from: type=gha
+
+  script-sandbox:
+    name: Verify and publish the script sandbox image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify the isolated runner
+        run: bash deploy/script-sandbox/verify.sh
+      - name: Log in to GHCR
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the verified runner from this revision
+        if: env.PUBLISH == 'true'
+        run: |
+          image="ghcr.io/openshapeforge/openshapeforge-script-sandbox:sha-${GITHUB_SHA}"
+          docker tag openshapeforge-script-sandbox:verify "$image"
+          docker push "$image"

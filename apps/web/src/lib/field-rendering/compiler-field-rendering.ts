@@ -4,8 +4,8 @@
  * a given field based on a three-tier priority:
  *
  * 1. Explicit override (`field.render.component`)
- * 2. Semantic type mapping (e.g. "bsn" -> BsnDisplay, "email" -> Input)
- * 3. Base field value/cardinality default (e.g. "string" -> Input, "boolean" -> Switch)
+ * 2. Semantic type mapping (for example, email uses FieldEmail)
+ * 3. Base field value/cardinality default (for example, string uses FieldSingleLine)
  *
  * Resolves both input components (for edit mode) and display components
  * (for read-only mode). Also resolves field-level validation rules from
@@ -65,6 +65,18 @@ export type ResolvedFieldRender = {
   source: "explicit" | "osfType" | "fieldType" | "fallback";
 };
 
+// FieldDefinition values stored before the catalogue changed still carry these
+// names. The YAML compiler continues to require the canonical catalogue.
+const STORED_COMPONENT_NAMES: Readonly<Record<string, string>> = {
+  Input: "FieldSingleLine",
+  InputMultiline: "FieldMultiline",
+  NumberInput: "FieldIntegerDecimal",
+  ReferenceSelect: "FieldSingleRelatedRecord",
+  Switch: "FieldBoolean",
+  DatePicker: "FieldDate",
+  JsonFieldEditor: "FieldCodeStructuredJson",
+};
+
 const COMPONENT_ALIASES: Record<string, string> = {
   // This host's own controls for the design system's fields it draws as a
   // plain textarea or number box; the Battery host draws the fields themselves.
@@ -79,13 +91,22 @@ function getOsfTypeKey(field: RendererAwareField) {
     : undefined;
 }
 
-export function normalizeFieldComponentName(component?: string) {
+export function canonicalFieldComponentName(component?: string) {
   if (!component || component.trim().length === 0) {
     return undefined;
   }
 
   const normalized = component.trim();
-  return COMPONENT_ALIASES[normalized] ?? normalized;
+  return Object.hasOwn(STORED_COMPONENT_NAMES, normalized)
+    ? STORED_COMPONENT_NAMES[normalized]
+    : normalized;
+}
+
+export function normalizeFieldComponentName(component?: string) {
+  const canonical = canonicalFieldComponentName(component);
+  return canonical && Object.hasOwn(COMPONENT_ALIASES, canonical)
+    ? COMPONENT_ALIASES[canonical]
+    : canonical;
 }
 
 export function getCompilerOsfTypeDefinition(

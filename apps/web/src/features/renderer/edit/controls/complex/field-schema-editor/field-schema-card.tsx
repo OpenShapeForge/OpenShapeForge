@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 "use client";
 import { fieldValueType } from "@/lib/field-contract/field-v2";
+import { canonicalFieldComponentName } from "@/lib/field-rendering/compiler-field-rendering";
 
 import { ChevronDown, ChevronUp, Copy, Trash2 } from "lucide-react";
 import { useEffect, useRef } from "react";
@@ -266,7 +267,7 @@ function getFieldSchemaTypeLabel(field: Field, lang: FieldSchemaEditorLang) {
 }
 
 function getFieldSchemaInputLabel(field: Field, lang: FieldSchemaEditorLang) {
-  const component = field.render?.component;
+  const component = canonicalFieldComponentName(field.render?.component);
   const labels: Record<string, { nl: string; en: string }> = {
     FieldSingleLine: { nl: "Invoerveld", en: "Input" },
     FieldMultiline: { nl: "Tekstgebied", en: "Textarea" },
@@ -277,6 +278,7 @@ function getFieldSchemaInputLabel(field: Field, lang: FieldSchemaEditorLang) {
     FieldBoolean: { nl: "Schakelaar", en: "Switch" },
     Checkbox: { nl: "Checkbox", en: "Checkbox" },
     FieldDate: { nl: "Datumkiezer", en: "Date picker" },
+    FieldCodeStructuredJson: { nl: "JSON", en: "JSON" },
     FileUpload: { nl: "Bestandsupload", en: "File upload" },
   };
 

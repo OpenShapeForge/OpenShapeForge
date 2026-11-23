@@ -78,7 +78,9 @@ export async function verifyOwnedDeleteDatabase(db: OpenShapeForgeDatabase, plan
       (((t.tgtype & 8) <> 0 and ns.nspname || '.' || rel.relname = any(${postgresArrayLiteral(targetNames)}::text[]))
         or ((t.tgtype & 16) <> 0 and ns.nspname || '.' || rel.relname = any(${postgresArrayLiteral(updateNames)}::text[])))
   `.execute(db);
-  const known = new Set(["platform.audit_business_row", "platform.track_field_value_since",
+  // The search index trigger runs after the row and only removes or rewrites
+  // that row's own index entry; it cannot refuse or change the delete.
+  const known = new Set(["platform.audit_business_row", "platform.track_field_value_since", "platform.search_entry",
     "app.guard_document_block_write", "app.guard_authorization_resource"]);
   const matchesGuard = (trigger: typeof triggers.rows[number], guard: OwnedDeletePlan["guards"][number]) =>
     (trigger.trigger_type & 3) === 3 && trigger.table_name === guard.table && trigger.trigger_name === guard.trigger &&

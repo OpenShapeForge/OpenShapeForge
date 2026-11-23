@@ -259,6 +259,27 @@ tables:
         columns: [tenant_id, entity_type, record_id, field_key]
         unique: true
 
+  # What application search matches on, one row per record of an entity that
+  # search reads: the record's searchable text, lower-cased. Rows are written
+  # only by the trigger db/migrations/search-index.ts installs on the entity's
+  # table, in the writer's transaction. A row grants nothing: a match is only
+  # a candidate, read again through the entity's own list predicate.
+  - schema: platform
+    name: search_entries
+    tenantScoped: true
+    domainInternal: true
+    generatedCrudEligible: false
+    columns:
+      - { name: id, type: uuid, primaryKey: true, default: gen_random_uuid() }
+      - { name: tenant_id, type: uuid, required: true }
+      - { name: entity, type: text, required: true }
+      - { name: record_id, type: uuid, required: true }
+      - { name: text_norm, type: text, required: true }
+    indexes:
+      - name: search_entries_record_idx
+        columns: [tenant_id, entity, record_id]
+        unique: true
+
   # Tenant-defined fields of extensible entities (docs/authoring.md,
   # "Extensible entities"). One table for every extensible entity; a
   # definition is append-only: a change writes a new version and moves

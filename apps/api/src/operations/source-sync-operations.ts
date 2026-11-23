@@ -437,17 +437,15 @@ const applySourcePage: ModuleOperationHandler = async (input, context) => {
     input: pageReceiptInput(input, source),
     contractFingerprint: PAGE_RECEIPT_CONTRACT,
     externalWrite: false,
-    // Handing a stored result back is a read of these entities, so it needs the
-    // read authority the caller holds now — the roles it had when the page was
-    // written do not survive in the receipt. The writes of a first attempt keep
-    // their own create/update/delete checks inside the batch handlers.
-    authorizeReplay: async () => {
+    execute: async () => ({ batches: await applyBatches() }),
+    encode: (result) => result,
+    authorizeStoredResult: async () => {
+      // The first attempt uses the write checks in the batch handlers. A
+      // stored result requires the read authority the caller holds now.
       for (const batch of batches) {
         assertEntityOperationAuthorization(batch.source.table, "list", session);
       }
     },
-    execute: async () => ({ batches: await applyBatches() }),
-    encode: (result) => result,
     decode: decodePageReceipt,
   });
   return { value, status: 200 };

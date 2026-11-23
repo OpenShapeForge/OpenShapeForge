@@ -2,7 +2,7 @@
 // Runs the real worker subprocess (QuickJS/WebAssembly) over live stdin/stdout IPC.
 // Inputs are inert: the tests check that defensive limits fire, not how to defeat them.
 import { describe, expect, test } from "bun:test";
-import { encodeFrame, FrameDecoder, MAX_FRAME_BYTES, ProtocolError } from "./protocol.js";
+import { ChunkedPayload, encodeFrame, FrameDecoder, MAX_FRAME_BYTES, ProtocolError, splitTextByBytes } from "./protocol.js";
 import { runScript, ScriptExecutionError, SCRIPT_SANDBOX_ISOLATION, type JsonValue } from "./index.js";
 
 async function codeOf(promise: Promise<unknown>): Promise<{ code: string; message: string }> {
@@ -175,12 +175,117 @@ describe("script sandbox", () => {
   });
 });
 
+describe("chunked transfers", () => {
+  test("preserves a byte-order marker inside JSON on a chunk boundary", async () => {
+    const value = "a".repeat(1023) + "\uFEFF" + "payload";
+    expect(await run("async function run() { return await host.read('page', null); }", {
+      limits: { maxChunkBytes: 1024 },
+      reads: { page: () => value },
+    })).toBe(value);
+  });
+
+  const rows = (count: number) => Array.from({ length: count }, (_, index) => ({
+    id: `row-${index}`, label: "a reasonably descriptive journal line", amount: index + 0.5,
+  }));
+
+  test("carries a read result and a data result larger than one chunk", async () => {
+    const page = { rows: rows(2_000) };
+    const bytes = Buffer.byteLength(JSON.stringify(page), "utf8");
+    expect(bytes).toBeGreaterThan(8 * 1024);
+    const result = await run(
+      "async function run() { const p = await host.read('page', null); return { seen: p.rows.length, echo: p.rows }; }",
+      {
+        limits: {
+          deadlineMs: 20_000, memoryBytes: 32 * 1024 * 1024, maxChunkBytes: 4 * 1024,
+          maxReadResultBytes: bytes, maxResultBytes: 2 * bytes, maxTransferBytes: 4 * bytes,
+        },
+        reads: { page: () => page },
+      },
+    );
+    // Both directions needed many chunks; every record survives the round trip.
+    expect(result).toEqual({ seen: 2_000, echo: page.rows });
+  }, 30_000);
+
+  test("refuses a read over the run aggregate without serving part of it", async () => {
+    const page = { rows: rows(400) };
+    const bytes = Buffer.byteLength(JSON.stringify(page), "utf8");
+    const result = await run(
+      `async function run() {
+        const out = [];
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try { out.push((await host.read('page', null)).rows.length); } catch (e) { out.push(e.message); }
+        }
+        return out;
+      }`,
+      {
+        // Room for one page and the small result, not for two pages.
+        limits: {
+          deadlineMs: 20_000, maxChunkBytes: 4 * 1024,
+          maxReadResultBytes: bytes, maxResultBytes: 1024, maxTransferBytes: bytes + 1024,
+        },
+        reads: { page: () => page },
+      },
+    );
+    expect(result).toEqual([400, "read_failed"]);
+  }, 30_000);
+
+  test("refuses a data result over the run aggregate", async () => {
+    const failure = await codeOf(run(
+      "function run() { return { rows: new Array(4000).fill('a reasonably long filler value') }; }",
+      { limits: { deadlineMs: 20_000, maxChunkBytes: 4 * 1024, maxResultBytes: 512 * 1024, maxTransferBytes: 16 * 1024 } },
+    ));
+    expect(failure.code).toBe("result_too_large");
+  }, 30_000);
+
+  test("splits text on code-point boundaries and reassembles it exactly", () => {
+    const text = `${"€".repeat(1_000)}${"a".repeat(1_000)}`;
+    const parts = splitTextByBytes(text, 1024);
+    expect(parts.length).toBeGreaterThan(1);
+    for (const part of parts) expect(Buffer.byteLength(part, "utf8")).toBeLessThanOrEqual(1024);
+    expect(parts.join("")).toBe(text);
+    // Byte lengths add up, which is what the receiver verifies the total against.
+    expect(parts.reduce((total, part) => total + Buffer.byteLength(part, "utf8"), 0))
+      .toBe(Buffer.byteLength(text, "utf8"));
+  });
+
+  test("hands on nothing when a transfer is oversized, over-chunked or short", () => {
+    const oversizedChunk = new ChunkedPayload(1024, 8);
+    expect(oversizedChunk.add("123456789")).toBe(false);
+    expect(oversizedChunk.size).toBe(0);
+
+    const overCap = new ChunkedPayload(8, 8);
+    expect(overCap.add("12345678")).toBe(true);
+    expect(overCap.add("1")).toBe(false);
+    // The refused payload is released whole: no prefix remains readable.
+    expect(overCap.size).toBe(0);
+    expect(overCap.finish(8)).toBeNull();
+
+    const interrupted = new ChunkedPayload(1024, 8);
+    expect(interrupted.add("12345678")).toBe(true);
+    // A declared total the chunks do not add up to yields nothing, not a prefix.
+    expect(interrupted.finish(16)).toBeNull();
+
+    const whole = new ChunkedPayload(1024, 8);
+    whole.add("1234");
+    whole.add("5678");
+    expect(whole.finish(8)).toBe("12345678");
+  });
+});
+
 describe("framing", () => {
   test("round-trips frames split across chunks", () => {
     const frame = encodeFrame({ type: "result", value: "1" });
     const decoder = new FrameDecoder();
     expect(decoder.push(frame.subarray(0, 3))).toEqual([]);
     expect(decoder.push(frame.subarray(3))).toEqual([{ type: "result", value: "1" }]);
+  });
+
+  test("reads frames whose header and payload arrive one byte at a time", () => {
+    const frames = [encodeFrame({ type: "result.part", value: "ab" }), encodeFrame({ type: "result.end", bytes: 2 })];
+    const decoder = new FrameDecoder();
+    const seen: unknown[] = [];
+    for (const frame of frames) for (const byte of frame) seen.push(...decoder.push(new Uint8Array([byte])));
+    expect(seen).toEqual([{ type: "result.part", value: "ab" }, { type: "result.end", bytes: 2 }]);
   });
 
   test("rejects an oversized length header before buffering the payload", () => {

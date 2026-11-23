@@ -4,6 +4,10 @@
 // brokered read crosses the actual protocol rather than a stub. Tests that must
 // prove a refusal happens BEFORE the run start no daemon at all: the refusal
 // code then distinguishes a guard from a transport failure.
+//
+// The page tests use synthetic journal data invented here. They are sized to
+// cross the single-frame budget in both directions, so a whole-page transfer is
+// exercised end to end rather than asserted from the limits alone.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -193,6 +197,130 @@ describe("scripted capability bridge: refusals before the run", () => {
       })).toEqual({ ok: false, code: "invalid_request" });
     }
   });
+});
+
+/**
+ * A synthetic journal page in the shape the pilot's broker returns. Values are
+ * invented locally: no credential, tenant name or external identifier appears.
+ */
+const journalPage = (rows: number) => ({
+  since: "2026-11-01T00:00:00Z",
+  next: "2026-11-02T00:00:00Z",
+  rows: Array.from({ length: rows }, (_, index) => ({
+    id: `GLT-${String(index).padStart(6, "0")}`,
+    journal: index % 2 === 0 ? "70" : "90",
+    entryNumber: 480_000 + index,
+    date: "2026-11-01",
+    glAccount: String(4000 + (index % 40)),
+    glAccountDescription: "Operating expenses, cost centre Amsterdam",
+    description: `Invoice line ${index} for period 11 of 2026`,
+    costCentre: `CC-${100 + (index % 12)}`,
+    amountDc: Number(((index % 997) + 0.37).toFixed(2)),
+    currency: "EUR",
+    vatCode: index % 3 === 0 ? "VH" : "VL",
+    relation: `REL-${1000 + (index % 250)}`,
+    modified: "2026-11-01T09:12:33.000Z",
+  })),
+});
+
+const jsonBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value), "utf8");
+
+/** The pilot's own script: one page in, the whole page projected back out. */
+const PROJECT_WHOLE_PAGE = `async function run(i) {
+  const page = await host.read("exact.journal", { since: i.since });
+  const postings = [], lines = [];
+  for (const row of page.rows) {
+    postings.push({ ref: row.id, entry: row.entryNumber, account: row.glAccount, amount: row.amountDc, date: row.date });
+    lines.push({ ref: row.id, description: row.description, vat: row.vatCode, relation: row.relation, centre: row.costCentre });
+  }
+  return { postings, lines, cursor: page.next, count: page.rows.length };
+}`;
+
+describe("scripted capability bridge: whole-page transfer", () => {
+  test("carries a 1000-row page in and the whole data result back out", async () => {
+    await start();
+    const page = journalPage(1000);
+    // The premise of this test: neither direction fits the single-frame budget.
+    expect(jsonBytes(page)).toBeGreaterThan(128 * 1024);
+    const seen: unknown[] = [];
+    const sandbox = sandboxOf(() => true);
+
+    const result = await sandbox.evaluateReadOnly!(sessionOf(PILOT_TENANT), {
+      source: PROJECT_WHOLE_PAGE,
+      input: { since: page.since },
+      bindings: [{ alias: "exact.journal", read: args => { seen.push(args); return page; } }],
+    });
+
+    expect(seen).toEqual([{ since: page.since }]);
+    if (!result.ok) throw new Error(`the run was refused: ${result.code}`);
+    const value = result.value as { postings: unknown[]; lines: unknown[]; cursor: string; count: number };
+    expect(jsonBytes(value)).toBeGreaterThan(128 * 1024);
+    // Every record arrives, in order, unaltered: a transfer must not trim a page.
+    expect(value.count).toBe(1000);
+    expect(value.postings).toHaveLength(1000);
+    expect(value.lines).toHaveLength(1000);
+    expect(value.postings[0]).toEqual({
+      ref: page.rows[0]!.id, entry: page.rows[0]!.entryNumber, account: page.rows[0]!.glAccount,
+      amount: page.rows[0]!.amountDc, date: page.rows[0]!.date,
+    });
+    expect(value.lines[999]).toEqual({
+      ref: page.rows[999]!.id, description: page.rows[999]!.description, vat: page.rows[999]!.vatCode,
+      relation: page.rows[999]!.relation, centre: page.rows[999]!.costCentre,
+    });
+    // The cursor the caller may persist comes from the page that fully arrived.
+    expect(value.cursor).toBe(page.next);
+  }, 60_000);
+
+  test("refuses a page over the transfer budget whole, with no records and no cursor", async () => {
+    await start();
+    // Beyond the brokered page budget: the only safe answer is the denial code.
+    const page = journalPage(8_000);
+    expect(jsonBytes(page)).toBeGreaterThan(1024 * 1024);
+    let calls = 0;
+    const sandbox = sandboxOf(() => true);
+
+    const result = await sandbox.evaluateReadOnly!(sessionOf(PILOT_TENANT), {
+      source: `async function run(i) {
+        try {
+          const page = await host.read("exact.journal", { since: i.since });
+          return { rows: page.rows.length, cursor: page.next };
+        } catch (error) { return { denied: error.message, rows: 0, cursor: null }; }
+      }`,
+      input: { since: page.since },
+      bindings: [{ alias: "exact.journal", read: () => { calls += 1; return page; } }],
+    });
+
+    // The read was reached, so this is a refusal of the data, not of the alias.
+    expect(calls).toBe(1);
+    // No partial page and no next cursor: a caller cannot advance past records
+    // it never received.
+    expect(result).toEqual({ ok: true, value: { denied: "read_failed", rows: 0, cursor: null } });
+  }, 60_000);
+
+  test("keeps concurrent page transfers separate", async () => {
+    await start();
+    const pages = [journalPage(400), journalPage(600), journalPage(800)];
+    const sandbox = sandboxOf(() => true);
+
+    const results = await Promise.all(pages.map(page => sandbox.evaluateReadOnly!(sessionOf(PILOT_TENANT), {
+      source: PROJECT_WHOLE_PAGE,
+      input: { since: page.since },
+      bindings: [{ alias: "exact.journal", read: () => page }],
+    })));
+
+    const values = results.map(result => {
+      if (!result.ok) throw new Error(`the run was refused: ${result.code}`);
+      return result.value as { postings: { ref: string }[]; count: number };
+    });
+
+    // Each run reassembles its own page: no chunk of one reaches another.
+    expect(values.map(value => value.count)).toEqual([400, 600, 800]);
+    for (const [index, value] of values.entries()) {
+      expect(value.postings).toHaveLength(pages[index]!.rows.length);
+      expect(value.postings[0]!.ref).toBe(pages[index]!.rows[0]!.id);
+      expect(value.postings.at(-1)!.ref).toBe(pages[index]!.rows.at(-1)!.id);
+    }
+  }, 90_000);
 });
 
 describe("scripted capability bridge: session detached mid-run", () => {

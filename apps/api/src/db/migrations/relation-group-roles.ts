@@ -45,6 +45,13 @@ export async function applyRelationGroupRolesMigration(db: OpenShapeForgeDatabas
           return new;
         end if;
       end if;
+      -- A caller may already hold a membership or group row. Never wait for
+      -- the tenant authority lock from a row trigger: a transaction holding it
+      -- can itself need that row. Roll back this change with a retryable conflict.
+      if not pg_try_advisory_xact_lock(hashtextextended(selected_tenant::text, 7921)) then
+        raise exception 'Organization access changed concurrently; retry this transaction'
+          using errcode = '40001';
+      end if;
       -- Serialize membership and grant changes for each group, in stable order.
       perform id from erp.relation_groups
         where tenant_id = selected_tenant and (id = old_group or id = new_group)

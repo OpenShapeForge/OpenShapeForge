@@ -8,7 +8,7 @@ import { IDENTITY_LINK_ADMIN_ROLE } from './organization-roles.js';
 export async function protectDirectAdministrator(
   trx: Transaction<DB>, tenantId: string, identityId: string, nextRoles: readonly string[],
 ): Promise<void> {
-  await sql`select pg_advisory_xact_lock(hashtextextended(${tenantId}, 7921))`.execute(trx);
+  await sql`select pg_advisory_xact_lock(hashtextextended(${tenantId}::uuid::text, 7921))`.execute(trx);
   const result = await sql<{ identity_id: string; roles: string[] }>`select identity_id, roles
     from platform.identity_relations where tenant_id = ${tenantId}::uuid and status = 'linked' and not access_blocked
       and ('org_admin' = any(roles) or ${IDENTITY_LINK_ADMIN_ROLE} = any(roles))`.execute(trx);

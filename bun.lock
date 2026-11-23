@@ -168,7 +168,7 @@
     },
     "packages/auth": {
       "name": "@openshapeforge/auth",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "jose": "^6.2.1",
       },
@@ -184,7 +184,7 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.2.74",
+      "version": "0.2.78",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },
@@ -206,7 +206,7 @@
     },
     "packages/documents": {
       "name": "@openshapeforge/documents",
-      "version": "0.2.35",
+      "version": "0.2.36",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "@openshapeforge/versioning": "workspace:*",
@@ -281,7 +281,7 @@
     },
     "packages/plugin-runtime": {
       "name": "@openshapeforge/plugin-runtime",
-      "version": "0.1.44",
+      "version": "0.1.45",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "fastify": "^5.8.2",
@@ -317,7 +317,7 @@
     },
     "packages/versioning": {
       "name": "@openshapeforge/versioning",
-      "version": "0.1.29",
+      "version": "0.1.30",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
       },

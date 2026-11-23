@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { operationFailure } from "@openshapeforge/operations";
 import type { ModuleOperationContext, ModuleOperationHandler, RuntimeModule, RuntimeVersioningBinding, RuntimeVersioningOwnedChild } from "@openshapeforge/plugin-runtime";
 import { publishFollowers, type PublishedVersionRow } from "./followers.js";
-import { fingerprintSnapshot } from "./snapshot.js";
+import { fingerprintSnapshot, snapshotDependencies } from "./snapshot.js";
 
 type RawQuery = { sql: string; parameters: readonly unknown[]; query: { kind: "RawNode"; sqlFragments: readonly string[]; parameters: readonly unknown[] }; queryId: { queryId: string } };
 type Executor = { executeQuery<T>(query: RawQuery): Promise<{ rows: readonly T[] }> };
@@ -127,7 +127,8 @@ function publish(sourceEntity: string, versionEntity: string): ModuleOperationHa
       const service = context.platform?.schemas.extensions;
       if (extensible && !service) fail("OPERATION_UNAVAILABLE", `${sourceEntity} carries tenant fields this host cannot snapshot.`);
       const extension = extensible ? await service!.snapshot(transaction, session, sourceEntity, source) : undefined;
-      const snapshot = { schemaVersion: 1 as const, entity: sourceEntity, head: {
+      const dependencies = await snapshotDependencies(sourceEntity, { platform: context.platform!, session, source: tree.row });
+      const snapshot = { schemaVersion: 1 as const, entity: sourceEntity, ...(dependencies ? { dependencies } : {}), head: {
         ...tree, row: content(tree.row, PUBLICATION), ...(extension ? { extensions: extension.extensions, extensionDefinitions: extension.extensionDefinitions } : {}),
       } };
       const { canonical, contentHash } = fingerprintSnapshot(snapshot);

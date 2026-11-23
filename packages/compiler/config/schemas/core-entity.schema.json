@@ -1950,6 +1950,16 @@
             }
           }
         },
+        "emptyLabel": {
+          "$ref": "#/$defs/localizedText",
+          "description": "Text the cell shows instead of the empty mark when the value resolves to nothing (null, absent or an empty string), for example 'Indefinite' for an open end date.",
+          "x-osf-i18n": {
+            "title": {
+              "en": "Text when empty",
+              "nl": "Tekst bij leeg"
+            }
+          }
+        },
         "binding": {
           "type": "string",
           "minLength": 1,
@@ -2273,12 +2283,59 @@
         "totals": {
           "type": "object",
           "additionalProperties": false,
-          "description": "A footer that states the matching population and one aggregate total per currency, computed by a collection read Operation over the whole authorized matching set. Currencies are never added together.",
+          "description": "A footer computed by a collection read Operation over the whole authorized matching set. Either the money shape (count, label, note: the matching population and one aggregate total per currency; currencies are never added together) or `parts`: numbers the Operation answers, each drawn as the number and its label.",
           "required": [
             "entity",
-            "operation",
-            "count",
-            "label"
+            "operation"
+          ],
+          "oneOf": [
+            {
+              "required": [
+                "count",
+                "label"
+              ],
+              "not": {
+                "required": [
+                  "parts"
+                ]
+              },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Money totals",
+                  "nl": "Geldtotalen"
+                }
+              }
+            },
+            {
+              "required": [
+                "parts"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "count"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "label"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "note"
+                    ]
+                  }
+                ]
+              },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Numeric parts",
+                  "nl": "Numerieke delen"
+                }
+              }
+            }
           ],
           "properties": {
             "entity": {
@@ -2325,6 +2382,64 @@
                 "title": {
                   "en": "Note",
                   "nl": "Notitie"
+                }
+              }
+            },
+            "parts": {
+              "type": "array",
+              "minItems": 1,
+              "description": "Numbers of the Operation's output, in order, each drawn as the localized number followed by its label and joined by a middle dot.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "label"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z][a-zA-Z0-9]*$",
+                    "description": "A numeric property of the Operation's output.",
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Output field",
+                        "nl": "Uitvoerveld"
+                      }
+                    }
+                  },
+                  "label": {
+                    "$ref": "#/$defs/localizedText",
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Label",
+                        "nl": "Label"
+                      }
+                    }
+                  },
+                  "decimalPlaces": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 6,
+                    "x-osf-i18n": {
+                      "title": {
+                        "en": "Decimal places",
+                        "nl": "Decimalen"
+                      }
+                    }
+                  }
+                },
+                "x-osf-i18n": {
+                  "title": {
+                    "en": "Part",
+                    "nl": "Deel"
+                  }
+                }
+              },
+              "x-osf-i18n": {
+                "title": {
+                  "en": "Parts",
+                  "nl": "Delen"
                 }
               }
             }
@@ -2868,6 +2983,7 @@
                   "title": { "oneOf": [{ "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title path", "nl": "Titelpad" } } }, { "type": "array", "minItems": 1, "x-osf-i18n": { "title": { "en": "Title paths", "nl": "Titelpaden" } }, "items": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Title path", "nl": "Titelpad" } } } }], "x-osf-i18n": { "title": { "en": "Title paths", "nl": "Titelpaden" } } },
                   "timestamp": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Timestamp path", "nl": "Tijdstippad" } } },
                   "indicator": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "x-osf-i18n": { "title": { "en": "Indicator field", "nl": "Indicatorveld" } } },
+                  "avatar": { "$ref": "#/$defs/fieldKey", "x-osf-choice": "field", "description": "A single reference field of the board's entity whose record the card draws as a person's avatar: its image, or its initials.", "x-osf-i18n": { "title": { "en": "Avatar field", "nl": "Avatarveld" } } },
                   "amount": { "type": "object", "additionalProperties": false, "required": ["value", "currency"], "properties": {
                     "value": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Amount field path", "nl": "Bedragveldpad" } } },
                     "currency": { "type": "string", "minLength": 1, "x-osf-i18n": { "title": { "en": "Currency field path", "nl": "Valutaveldpad" } } }

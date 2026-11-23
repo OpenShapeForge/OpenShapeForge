@@ -14,7 +14,7 @@ const relationTable: GeneratedCrudTable = {
   columns: [
     { name: "display_name", sourceField: "displayName", type: "text", required: true, primaryKey: false, generated: null },
     { name: "relation_type", sourceField: "relationType", type: "text", required: true, primaryKey: false, generated: null },
-    { name: "hubble_demo_segment", sourceField: "hubbleDemoSegment", type: "text", required: false, primaryKey: false, generated: null },
+    { name: "demo_segment", sourceField: "demoSegment", type: "text", required: false, primaryKey: false, generated: null },
   ],
   source: { authoringEntityName: "Relation", computedFields: [{ field: "labels", resolver: "labelRules" }] },
 };
@@ -28,10 +28,10 @@ const rules: LabelRuleRow[] = [{
   expression: {
     kind: "rule",
     operator: "in",
-    left: { kind: "path", path: "hubbleDemoSegment" },
+    left: { kind: "path", path: "demoSegment" },
     right: { kind: "literal", value: ["banking", "fintech", "insurance"] },
   },
-  description_template: "{{displayName}} werkt in {{hubbleDemoSegment}}.",
+  description_template: "{{displayName}} werkt in {{demoSegment}}.",
   priority: 80,
 }, {
   id: "rule-person",
@@ -53,7 +53,7 @@ describe("computed label rules", () => {
     expect(evaluateLabelRules(relationTable, rules, {
       display_name: "Polderbank N.V.",
       relation_type: "organization",
-      hubble_demo_segment: "banking",
+      demo_segment: "banking",
     })).toEqual({
       asMap: { financialSector: true, contactPerson: false },
       items: [{
@@ -71,7 +71,7 @@ describe("computed label rules", () => {
     const result = evaluateLabelRules(relationTable, rules, {
       display_name: "Robin de Vries",
       relation_type: "person",
-      hubble_demo_segment: "retail",
+      demo_segment: "retail",
     });
     expect(result.asMap).toEqual({ financialSector: false, contactPerson: true });
     expect(result.items.map(({ label }) => label)).toEqual(["Contactpersoon"]);
@@ -94,6 +94,6 @@ test("an unclosed description placeholder is left as text in linear time", () =>
 
 test("a bound description never reinterprets tokens inside the resolved value", () => {
   const rule = { ...rules[0]!, description_template: "Call {{displayName}}", description_bound: true };
-  const result = evaluateLabelRules(relationTable, [rule], { display_name: "secret", hubble_demo_segment: "banking" });
+  const result = evaluateLabelRules(relationTable, [rule], { display_name: "secret", demo_segment: "banking" });
   expect(result.items[0]?.description).toBe("Call {{displayName}}");
 });

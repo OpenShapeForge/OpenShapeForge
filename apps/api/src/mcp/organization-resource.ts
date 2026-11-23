@@ -20,8 +20,8 @@
  * who is a member of several organizations holds one token that is valid for
  * every one of them and the server has to trust a scope to pick; with one
  * resource per organization the token is only good on the path it names, so
- * a Zerocopter credential presented to Hubble's endpoint is refused before
- * any tenant is resolved — by accident or otherwise. The checks themselves
+ * the server refuses a credential presented to another organization's endpoint
+ * before resolving a tenant. The checks themselves
  * live in auth/organization-binding.ts.
  *
  * Only the path vocabulary lives here so both the metadata module and the
@@ -34,7 +34,7 @@ export const MCP_MOUNT_PATH = "/api/mcp";
  * Root path segments that can never be an organization alias.
  *
  * The canonical resource is now the FIRST path segment of the deployment's
- * domain (`https://hubble.com/zerocopter`), which puts organizations in the
+ * domain (`https://app.example.test/alpha`), which puts organizations in the
  * same namespace as the server's own surfaces. A Keycloak Organization may be
  * called anything its administrator likes, so the collision is settled here
  * rather than by route ordering: a request for one of these names is never
@@ -94,7 +94,7 @@ export function isOrganizationAlias(value: unknown): value is string {
  * The CANONICAL path of an organization's resource: the alias itself, at the
  * root of the deployment's domain.
  *
- *   https://hubble.com/zerocopter
+ *   https://app.example.test/alpha
  *
  * Short on purpose. This string is not decoration: it is the RFC 8707
  * `resource` a client asks Keycloak for, the value an audience mapper writes
@@ -182,7 +182,7 @@ export function organizationResourceScope(alias: string): string {
  * one, the request is treated as exhaustive and the new client is left with
  * `basic` plus exactly what it asked for. Measured on 26.5:
  *
- *   registration without `scope` -> default: acr basic email hubble-mcp-claims
+ *   registration without `scope` -> default: acr basic email host-mcp-claims
  *                                            organization profile roles web-origins
  *   registration with any `scope` -> default: basic
  *
@@ -190,7 +190,7 @@ export function organizationResourceScope(alias: string): string {
  * it authorizes successfully and then holds a token with no audience and no
  * roles — a 401 at the MCP endpoint after a login that looked like it worked.
  *
- * Deployment-specific by nature (Hubble's is `hubble-mcp-claims`), so it is
+ * Deployment-specific by nature (for example, `host-mcp-claims`), so it is
  * configuration rather than a constant, and the same value belongs on the
  * realm's client-registration allow-list — see organization-scopes.ts.
  */

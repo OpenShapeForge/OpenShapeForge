@@ -4,7 +4,7 @@
  * of one registry read — the pure half of the organization → tenant path.
  *
  * Two very different bundles need this answer: the runtime's own session
- * resolver (`apps/api/src/auth/identity.ts`) and Hubble's plugin runtime, which
+ * resolver (`apps/api/src/auth/identity.ts`) and a host's plugin runtime, which
  * is bundled separately and cannot import that resolver (measured: importing it
  * pulls 411 extra modules, Kysely and the bearer verifier among them, into a
  * bundle of 744). What they share is not the read — one speaks Kysely, the

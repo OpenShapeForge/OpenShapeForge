@@ -7,7 +7,7 @@ describe("parseOrganizations", () => {
     const organizations = parseOrganizations({
       organization: {
         "zerocopter-dev": { id: "7d0a0a1e-1c6e-4a0e-9d3c-3a3b6b2d1f10" },
-        "hubble-isolation-dev": {},
+        "example-isolation-dev": {},
       },
     });
     expect(organizations).toEqual({
@@ -17,7 +17,7 @@ describe("parseOrganizations", () => {
         roles: [],
         clientRoles: {},
       },
-      "hubble-isolation-dev": { id: null, groups: [], roles: [], clientRoles: {} },
+      "example-isolation-dev": { id: null, groups: [], roles: [], clientRoles: {} },
     });
   });
 

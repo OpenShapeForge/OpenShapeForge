@@ -233,7 +233,7 @@ describe("first-class plugin operations", () => {
     key: "list",
     id: "Relation.list",
     errors: [],
-      entityId: "hubble.Relation",
+      entityId: "example.Relation",
     entityName: "Relation",
     name: "List Relation",
     description: "List Relation",
@@ -243,19 +243,19 @@ describe("first-class plugin operations", () => {
       intent: "list",
       input: {
         kind: "collection-query",
-        entityId: "hubble.Relation",
+        entityId: "example.Relation",
         filterMode: "declared-fields",
         sortMode: "declared-fields",
         pagination: { kind: "cursor", defaultLimit: 50, maxLimit: 200 },
       },
-      output: { kind: "entity-connection", entityId: "hubble.Relation" },
+      output: { kind: "entity-connection", entityId: "example.Relation" },
       authorization: { action: "read", roles: ["Relations.Read"] },
       interaction: { confirmation: { mode: "none" } },
     };
     const entities = [{
       contract: {
         entity: {
-          id: "hubble.Relation",
+          id: "example.Relation",
           name: "Relation",
           title: "Relation",
         },
@@ -287,13 +287,13 @@ describe("first-class plugin operations", () => {
       key: "remove",
       id: "Relation.remove",
       errors: [],
-      entityId: "hubble.Relation",
+      entityId: "example.Relation",
       entityName: "Relation",
       name: "Delete relation",
       description: "Deletes a relation through its owning module.",
       implementation: { type: "plugin", plugin: "example", handler: "deleteRelation" },
       target: {
-        entityId: "hubble.Relation",
+        entityId: "example.Relation",
         entityName: "Relation",
         scope: "record",
         inputField: "relationId",
@@ -343,7 +343,7 @@ describe("first-class plugin operations", () => {
     };
     const entities = [{
       contract: {
-        entity: { id: "hubble.Relation", name: "Relation", title: "Relation" },
+        entity: { id: "example.Relation", name: "Relation", title: "Relation" },
         model: { fields: [], relationships: [] },
         storage: { columns: [] },
         entityOperations: { delete: entityOperation },
@@ -388,14 +388,14 @@ describe("first-class plugin operations", () => {
       id: operation.key,
       key: "create",
       intent: "create",
-      entityId: "hubble.Relation",
+      entityId: "example.Relation",
       entityName: "Relation",
       interaction: { confirmation: { mode: "none" } },
     } as CompiledEntityOperation;
 
     const entities = [{
       contract: {
-        entity: { id: "hubble.Relation", name: "Relation", title: "Relation" },
+        entity: { id: "example.Relation", name: "Relation", title: "Relation" },
         model: { fields: [], relationships: [] },
         storage: { columns: [] },
         entityOperations: { create: entityOperation },

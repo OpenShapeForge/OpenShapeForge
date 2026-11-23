@@ -11,7 +11,7 @@ public class LocalAccountAuthenticatorTest {
     @Test public void onlyLoopbackHttpOriginsAreAccepted() {
         for (String uri : new String[] { AUTH, CALLBACK, "http://127.0.0.1:8181", "http://[::1]:8181", "http://localhost" })
             assertTrue(uri, LocalAccountAuthenticator.localUri(uri));
-        for (String uri : new String[] { "https://develop.example", "https://hubble.localhost.example", "https://localhost@evil.example", "https://evil@localhost", "file://localhost", "not a url" })
+        for (String uri : new String[] { "https://develop.example", "https://app.localhost.example", "https://localhost@evil.example", "https://evil@localhost", "file://localhost", "not a url" })
             assertFalse(uri, LocalAccountAuthenticator.localUri(uri));
         assertFalse(LocalAccountAuthenticator.localUri(null));
     }

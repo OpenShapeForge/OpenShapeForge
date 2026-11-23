@@ -21,11 +21,10 @@ private metadata through chat/context updates or diagnostic payloads. A trusted
 MCP host still handles the private traffic; this is separation from model
 context, not encryption against that host.
 
-The shared Battery `PrivateOperation` view is composed by Hubble into its
-existing MCP App resource. It reuses the shared masked result/copy renderer,
+A host can compose the shared Battery `PrivateOperation` view into its
+MCP App resource. The view reuses the shared masked result/copy renderer,
 retains the values only in the mounted result, and discards them on close or a
-new handoff. Other hosts must compose this renderer into their app resource to
-support this interaction. A client without MCP App support is refused before
+new handoff. A client without MCP App support is refused before
 execution; there is no fallback to a model-visible secret or bearer link.
 
 This first implementation supports explicit object properties and homogeneous

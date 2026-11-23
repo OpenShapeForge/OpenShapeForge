@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Requires generated runtime artifacts: standalone `bun run generate`, or
-// Hubble `bun run runtime:prepare` and tests from its prepared runtime tree.
+// run the tests from a host tree with its composed runtime artifacts.
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";

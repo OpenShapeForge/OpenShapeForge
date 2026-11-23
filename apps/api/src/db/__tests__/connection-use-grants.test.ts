@@ -29,8 +29,8 @@ describe('owner-issued connection use grants', () => {
       // Reapplying the complete chain must preserve grants and helper dependencies.
       await runtime.db.connection().execute(conn=>runMigrationChain(conn));
     } finally {await runtime.close();}
-    // Standalone core has no host-owned Integration entity. Hubble's generated
-    // schema does; use its real table and policy when composed with that host.
+    // Use an existing composed Integration schema when present. The standalone
+    // schema needs the fixture table and policy below.
     const exists=(await db`select to_regclass('integration.connections') as name`)[0].name;
     if(!exists) await db.unsafe(`create schema integration;
       create table integration.adapters(id uuid primary key,tenant_id uuid,key text,name text,description text,transport text);

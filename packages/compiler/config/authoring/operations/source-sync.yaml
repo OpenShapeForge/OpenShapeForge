@@ -72,7 +72,7 @@ operations:
           skipped:
             type: integer
             minimum: 0
-            description: Records Hubble already holds at a newer sourceVersion (a replayed older page); left as they are.
+            description: Records the target system already holds at a newer sourceVersion (a replayed older page); left as they are.
           highestSourceVersion: { type: [string, "null"] }
     auth:
       mode: session
@@ -246,7 +246,7 @@ operations:
       en: >-
         Deletes the records of one entity, source system and administration whose externalId is listed (up to 1000,
         as externalIds or as records naming their entity),
-        through the entity's ordinary delete and its deletion guards. An externalId Hubble does not hold is already
+        through the entity's ordinary delete and its deletion guards. An externalId the target system does not hold is already
         gone and counts as done. All or nothing.
       nl: >-
         Verwijdert de records van één entiteit, bronsysteem en administratie met de opgegeven externalIds, via de gewone

@@ -22,7 +22,7 @@ import { randomBytes, randomUUID } from "node:crypto";
  * Where the suite REACHES Keycloak: the plain-http listener of the compose
  * stack, which needs no CA trust. That is not necessarily the issuer the realm
  * mints — a deployment that pins `KC_HOSTNAME` to a public https name (the
- * host repo does: `https://auth.hubble.localhost`) reports that name in every
+ * host repo does: `https://auth.example.test`) reports that name in every
  * token's `iss` no matter which port a caller used. Verifying against a URL
  * that was only ever the way in would then reject every token, so the issuer
  * is read from the realm's own discovery document instead of assumed.

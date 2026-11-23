@@ -55,8 +55,8 @@ describe("systemSessionForAdministrator", () => {
   const admin = {
     subject: SUBJECT,
     issuer: ISSUER,
-    username: "hubble-platform-admin",
-    name: "Hubble Platform admin",
+    username: "example-platform-admin",
+    name: "Example Platform admin",
     email: null,
     authorizedParty: CODEX,
     expiresAtMs: null,
@@ -65,7 +65,7 @@ describe("systemSessionForAdministrator", () => {
   it("elevates to the bypass role with an issuer-qualified actor and a platform-mcp reason", () => {
     const session = systemSessionForAdministrator(admin, "control.publish-catalog-entry service/record-finding");
     expect(session.roles).toEqual([SYSTEM_BYPASS_ROLE]);
-    expect(session.actorSubject).toBe(`${ISSUER}#${SUBJECT} (hubble-platform-admin)`);
+    expect(session.actorSubject).toBe(`${ISSUER}#${SUBJECT} (example-platform-admin)`);
     expect(session.reason).toBe("platform-mcp: control.publish-catalog-entry service/record-finding");
     expect(session.tenantId).toBeUndefined();
   });

@@ -32,6 +32,9 @@ import { executeTransition, transitionBinding, type TransitionBinding } from "./
 import { getGeneratedCrudTables } from "./catalog.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
+if (decodeURIComponent(new URL(ADMIN_URL).pathname).toLowerCase().endsWith("_dev")) {
+  throw new Error("admin URL must not point at an application database");
+}
 const SECRET = "transitions-actor-relation-test-secret";
 /** The realm this deployment trusts: what a trusted-context session's identity is issued by. */
 // Use the actual authored realm so its invited member role is declared.
@@ -49,7 +52,6 @@ const previousIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
 
 function scratchUrl(role?: { username: string; password: string }): string {
   const url = new URL(ADMIN_URL);
-  if (url.pathname === "/openshapeforge_dev" || url.pathname === "/hubble_dev") throw new Error("admin URL must not point at an application database");
   if (role) { url.username = role.username; url.password = role.password; }
   url.pathname = `/${scratchName}`;
   return url.toString();

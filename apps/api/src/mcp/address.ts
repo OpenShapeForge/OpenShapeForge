@@ -3,7 +3,7 @@
  * What a request to a short address is asking for, and the two things it is
  * never allowed to be.
  *
- * `https://hubble.com/zerocopter` is one URL serving two protocols: a person
+ * `https://app.example.test/alpha` is one URL serving two protocols: a person
  * opens it in a browser and gets the app; an MCP client posts JSON-RPC to it
  * and gets the MCP server. Deciding between them is not a heuristic and must
  * not become one — HTTP already has the field for it, and using anything else

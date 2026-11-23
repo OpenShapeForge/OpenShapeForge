@@ -14,9 +14,9 @@ const NOW = Date.parse("2026-09-05T10:00:00.000Z");
 const administrator: PlatformAdministrator = {
   subject: "0b2a3f1e-8a6b-4f30-9d2f-5f1c7a8e9b10",
   issuer: "http://localhost:8181/realms/openshapeforge-control",
-  username: "hubble-platform-admin",
-  name: "Hubble Platform admin",
-  email: "hubble-platform-admin@example.com",
+  username: "example-platform-admin",
+  name: "Example Platform admin",
+  email: "example-platform-admin@example.com",
   authorizedParty: "codex-platform",
   expiresAtMs: NOW + 12 * 60_000,
 };
@@ -48,7 +48,7 @@ describe("buildPlatformSessionInfo", () => {
     expect(info.accessTokenExpiresIn).toBe("in 12 minutes");
     expect(info.sessionEndsAfterInactivity).toBe("14 days");
     expect(info.summary).toBe(
-      "You are Hubble Platform admin, a platform operator of this deployment, signed in via Codex. " +
+      "You are Example Platform admin, a platform operator of this deployment, signed in via Codex. " +
         "You act for every tenant — there are 3 tenants — and for none in particular. " +
         "Your session stays signed in for 14 days after your last activity; this access token refreshes automatically. " +
         "You can use 9 tools and 1 resource.",

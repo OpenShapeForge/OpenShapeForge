@@ -168,7 +168,7 @@
     },
     "packages/auth": {
       "name": "@openshapeforge/auth",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "jose": "^6.2.1",
       },
@@ -184,7 +184,7 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.2.77",
+      "version": "0.2.78",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },

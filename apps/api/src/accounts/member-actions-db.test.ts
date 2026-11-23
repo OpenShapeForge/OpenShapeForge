@@ -9,9 +9,9 @@ import { inviteMember, listMemberAudit, requestMemberPasswordReset, requestMembe
 import { listInvitationRelations } from './invitation-relations.js';
 import { blockOrganizationAccount } from './account-management.js';
 
-const url=process.env.HUBBLE_ACCESS_TEST_DATABASE_URL;
-if(!url || !new URL(url).pathname.startsWith('/hubble_sandbox_'))
-  throw new Error('HUBBLE_ACCESS_TEST_DATABASE_URL must name an isolated hubble_sandbox_ database.');
+const url=process.env.OSF_ACCESS_TEST_DATABASE_URL;
+if(!url || !new URL(url).pathname.startsWith('/osf_sandbox_'))
+  throw new Error('OSF_ACCESS_TEST_DATABASE_URL must name an isolated osf_sandbox_ database.');
 
 test('member directory and recovery isolate tenants and address only the registered identity',async()=>{
   const admin=new SQL(url!,{max:1});

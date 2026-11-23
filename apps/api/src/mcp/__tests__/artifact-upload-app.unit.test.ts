@@ -23,10 +23,10 @@ describe("artifact upload MCP App", () => {
 
   it("embeds only the single-use URL in the no-App browser fallback", () => {
     const html = renderArtifactUploadPage(
-      "https://hubble.localhost/api/artifact-upload/token-value",
+      "https://app.example.test/api/artifact-upload/token-value",
     );
     expect(html).toContain(
-      "https://hubble.localhost/api/artifact-upload/token-value",
+      "https://app.example.test/api/artifact-upload/token-value",
     );
     expect(html).toContain("application/octet-stream");
     expect(html).toContain("artifactId");
@@ -38,14 +38,14 @@ describe("artifact upload MCP App", () => {
       "referrer-policy": "no-referrer",
     });
     const html = renderArtifactUploadPage(
-      "https://hubble.localhost/api/artifact-upload/token-value",
+      "https://app.example.test/api/artifact-upload/token-value",
       "bm9uY2U=",
     );
     expect(html).toContain('<script nonce="bm9uY2U=">');
-    const policy = artifactUploadPagePolicy("https://hubble.localhost", "bm9uY2U=");
+    const policy = artifactUploadPagePolicy("https://app.example.test", "bm9uY2U=");
     expect(policy).toContain("default-src 'none'");
     expect(policy).toContain("script-src 'nonce-bm9uY2U='");
-    expect(policy).toContain("connect-src 'self' https://hubble.localhost");
+    expect(policy).toContain("connect-src 'self' https://app.example.test");
     expect(policy).toContain("frame-ancestors 'none'");
     expect(policy).not.toContain("token-value");
   });

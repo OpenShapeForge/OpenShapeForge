@@ -57,6 +57,10 @@ import { applyPublicColorPaletteMigration } from './migrations/color-palette.js'
  *      status vocabulary and per-status shape of the core outbox), blueprints
  *      (checks, compound provenance reference, policies, the SECURITY
  *      DEFINER read function and its ownership transfer).
+ *   3g. search index          — the entries application search finds its
+ *      candidates in: a trigger per searched entity table, built from the
+ *      manifest and rebuilt only when what it indexes changed
+ *      (migrations/search-index.ts).
  *   4.  grants                — sweep DML grants over ALL now-existing tables
  *      and sequences so newly-generated entities are covered automatically,
  *      re-apply the `app` schema USAGE/EXECUTE grants that step 0a had to
@@ -106,6 +110,7 @@ import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/bl
 import { applyMcpTasksMigration } from "./migrations/mcp-tasks.js";
 import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
 import { applyAuditHistory } from "./migrations/audit-history.js";
+import { applySearchIndex } from "./migrations/search-index.js";
 import { applyJobsMigration } from "./migrations/jobs.js";
 import { applyInboundMigration, applyInboundGrants } from "./migrations/inbound.js";
 import { applyRecordActionsMigration } from "./migrations/record-actions.js";
@@ -217,6 +222,8 @@ export async function runMigrationChain(
   await applyInboundMigration(db);
   await applyBlueprintsMigration(db);
   await applyAuditHistory(db);
+  // After every table exists; before the grant sweep narrows who writes the entries.
+  await applySearchIndex(db);
   // Sweep table/sequence grants now that every table exists (idempotent).
   await applyAppRoleGrants(db);
   await applyBlueprintsGrants(db);

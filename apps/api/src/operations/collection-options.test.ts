@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import {expect,test} from 'bun:test';
-import {nativeCollectionOptionsHandler} from './collection-options.js';
+import {authorizationOperationChoices,nativeCollectionOptionsHandler} from './collection-options.js';
 const source={entity:'History',list:'History.list',fields:{actor:{type:'string',many:false},tags:{type:'string',many:true}}};
 const op={key:'collection.options',plugin:'core',auth:{mode:'session'},tenancy:{mode:'required'},effects:{data:'read'},implementation:{type:'collection-options',sources:[source]}};
 const definition={id:'History.list',intent:'list',input:{kind:'json-schema',schema:{properties:{filter:{}}}}};
@@ -59,4 +59,23 @@ test('security managers choose ceiling entities without a target read grant',asy
  const result=await handler(input,{session:{tenantId:'tenant',roles:['Organization.Security.Manage']},platform} as any);
  expect(result).toEqual({value:{items:[{value:target,label:'Beheerdoel'}],nextCursor:null}});
  await expect(handler(input,{session:{tenantId:'tenant',roles:[]},platform} as any)).rejects.toMatchObject({operationError:{code:'FORBIDDEN'}});
+});
+
+test('authorization choices use string and localized operation labels and keep blueprint actions separate', () => {
+  const catalog = {
+    entityLabels: new Map<string, string | { en: string; nl: string }>([
+      ['RelationGroup.create', 'Create relation group'],
+      ['RelationGroup.list', { en: 'List relation groups', nl: 'Relatiegroepen tonen' }],
+    ]),
+    standaloneOperations: new Map([
+      ['osf-blueprints.RelationGroup.list', { plugin: 'osf-blueprints', title: 'Browse blueprints' }],
+    ]),
+  };
+  const ids = ['osf-blueprints.RelationGroup.list', 'RelationGroup.list', 'RelationGroup.create'];
+  expect(authorizationOperationChoices(ids, 'nl', catalog)).toEqual([
+    { value: 'RelationGroup.create', label: 'Create relation group', group: { id: 'entity-operations', label: 'Entiteitsoperaties' } },
+    { value: 'RelationGroup.list', label: 'Relatiegroepen tonen', group: { id: 'entity-operations', label: 'Entiteitsoperaties' } },
+    { value: 'osf-blueprints.RelationGroup.list', label: 'Browse blueprints', group: { id: 'blueprint-operations', label: 'Blauwdrukoperaties' } },
+  ]);
+  expect(authorizationOperationChoices(ids, 'en', catalog)[1]?.label).toBe('List relation groups');
 });

@@ -31,7 +31,7 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn package -B -DskipTests
 
-FROM quay.io/keycloak/keycloak:26.7.3@sha256:29be7252db0a106f1cd2ac17b9a56ff2668073da645638a38b9fc67deeb2d6c4
+FROM quay.io/keycloak/keycloak:26.8.2-3@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
 # Two separate jars on purpose: the OSF SPI is first-party code built above; the
 # Apple provider is a verified third-party release. Neither is repackaged into
 # the other, so each can be upgraded, audited and removed on its own.

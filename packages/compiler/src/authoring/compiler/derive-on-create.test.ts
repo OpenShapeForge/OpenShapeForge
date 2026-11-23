@@ -11,7 +11,7 @@ function field(key: string, overrides: Partial<CompiledField> = {}): CompiledFie
     cardinality: "single",
     required: true,
     label: { en: key },
-    render: { component: "Input" },
+    render: { component: "FieldSingleLine" },
     ...overrides,
   };
 }

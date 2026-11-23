@@ -346,21 +346,21 @@ interfaces:
     fields:
       encumbranceKind:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: ENCUMBRANCEKIND
             clearable: false
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 5000
       validFrom:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       validTo:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

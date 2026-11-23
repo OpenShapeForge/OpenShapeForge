@@ -223,13 +223,13 @@ interfaces:
     fields:
       answer:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 4000
       explanation:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 4000

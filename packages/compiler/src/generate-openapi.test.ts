@@ -57,7 +57,7 @@ function field(
     cardinality: "single",
     required: false,
     label: { en: key },
-    render: { component: "Input" },
+    render: { component: "FieldSingleLine" },
     ...rest,
   };
 }
@@ -90,7 +90,7 @@ const contract = {
         // A compiled field names its group in options; the model compiler folded the select's render prop into it.
         options: { type: "referentiedata", referentieGroep: "RELATIONTYPE" },
         render: {
-          component: "ReferenceSelect",
+          component: "FieldSingleRelatedRecord",
           props: { referentieGroep: "RELATIONTYPE" },
         },
       }),

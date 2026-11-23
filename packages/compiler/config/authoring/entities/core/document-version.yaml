@@ -443,6 +443,13 @@ interfaces:
   graphql: {}
   mcp: {}
   web:
+    fields:
+      # Shown as a read-only value in forms too: the file is written by materialising the document.
+      storageLocation:
+        render:
+          component: FieldSingleLine
+          props:
+            readOnly: true
     views:
       collection:
         route: /document-versions

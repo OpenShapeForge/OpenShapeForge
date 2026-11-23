@@ -24,7 +24,7 @@ function fixture(): string {
     mkdirSync(join(dir, path, ".."), { recursive: true });
     writeFileSync(join(dir, path), JSON.stringify(value));
   };
-  write("catalogs/components.yaml", { defaults: { string: { label: { en: "Text", nl: "Tekst" }, component: "Input" } }, components: {} });
+  write("catalogs/components.yaml", { defaults: { string: { label: { en: "Text", nl: "Tekst" }, component: "FieldSingleLine" } }, components: {} });
   write("catalogs/transforms.yaml", { transforms: {} });
   write("catalogs/osf-types.yaml", { types: {
     shortText: { kind: "scalar", baseType: "string", validation: { maxLength: 80 }, label: { en: "Text" } },

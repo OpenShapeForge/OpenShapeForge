@@ -278,7 +278,7 @@ interfaces:
     fields:
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: MONITORLOGSTATUS
             clearable: false

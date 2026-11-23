@@ -418,19 +418,19 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 5000
       severity:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: ALERTSEVERITY
             clearable: false
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: ALERTSTATUS
             clearable: false
@@ -444,5 +444,5 @@ interfaces:
           props: {}
       dueDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

@@ -169,7 +169,7 @@ export const LEGAL_ENTITY_FORM_DEFINITION: RendererFormDefinition = {
         storageClass: "core",
       },
       render: {
-        component: "ReferenceSelect",
+        component: "FieldSingleRelatedRecord",
         props: {
           referentieGroep: "RECHTSVORM",
           clearable: true,

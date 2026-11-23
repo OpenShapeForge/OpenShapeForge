@@ -743,7 +743,7 @@ describe("resolveAuthoringLayers", () => {
     for (const redefinition of [
       { baseType: "integer" },
       { validation: { pattern: ".*" } },
-      { render: { input: "Input", display: "TextDisplay" } },
+      { render: { input: "FieldSingleLine", display: "FieldSingleLine" } },
       { label: { en: "Currency", nl: "Valuta" } },
     ]) {
       writeYaml(root, "overlay/catalogs/osf-types.yaml", catalog({ currencyCode: redefinition }));

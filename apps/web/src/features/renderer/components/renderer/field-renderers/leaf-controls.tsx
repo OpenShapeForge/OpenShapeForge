@@ -96,7 +96,8 @@ export function renderLeafFieldControl({
   }
 
   if (
-    component === "ReferenceSelect" ||
+    component === "FieldSingleRelatedRecord" ||
+    component === "FieldMultipleRelatedRecords" ||
     component === "Select" ||
     component === "ListSelect"
   ) {
@@ -166,7 +167,8 @@ export function renderLeafFieldControl({
   }
 
   if (
-    component === "Switch" ||
+    component === "FieldBoolean" ||
+    component === "FieldNullableBoolean" ||
     component === "Checkbox" ||
     fieldValueType(field) === "boolean"
   ) {

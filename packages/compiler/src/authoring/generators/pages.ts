@@ -685,7 +685,7 @@ function buildRelationshipPresentationFields(
         label,
         baseType: "string",
         cardinality: "single",
-        render: { component: "TextDisplay" },
+        render: { component: "FieldSingleLine" },
       });
       continue;
     }
@@ -1533,7 +1533,7 @@ function buildFormFieldConfig(
       cardinality: "single",
       label: { en: key, nl: key },
       required: false,
-      render: { component: "Input" },
+      render: { component: "FieldSingleLine" },
     };
   }
 
@@ -1607,7 +1607,7 @@ function buildDetailFieldConfig(
       label: profileField.label ?? { en: profileFieldKey, nl: profileFieldKey },
       baseType: graphQlFieldTypeToFormValueType(profileField.type),
       cardinality: graphQlFieldTypeIsCollection(profileField.type) ? "collection" : "single",
-      render: renderOverride ?? profileField.render ?? { component: "TextDisplay" },
+      render: renderOverride ?? profileField.render ?? { component: "FieldSingleLine" },
       validation: profileField.validation as Record<string, unknown> | undefined,
       options: resolveFieldOptionsForClient(profileField.options),
     });
@@ -1618,7 +1618,7 @@ function buildDetailFieldConfig(
     label: { en: normalizedKey, nl: normalizedKey },
     baseType: "string",
     cardinality: "single",
-    render: renderOverride ?? { component: "TextDisplay" },
+    render: renderOverride ?? { component: "FieldSingleLine" },
   });
 }
 
@@ -1659,7 +1659,7 @@ function buildProfileFieldConfig(
     cardinality: graphQlFieldTypeIsCollection(field.type) ? "collection" : "single",
     label: field.label ?? { en: field.name, nl: field.name },
     required: field.type.endsWith("!"),
-    render: field.render ?? { component: "Input" },
+    render: field.render ?? { component: "FieldSingleLine" },
     validation: field.validation as Record<string, unknown> | undefined,
     options: resolveFieldOptionsForClient(field.options),
   };

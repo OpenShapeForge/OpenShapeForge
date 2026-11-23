@@ -351,39 +351,39 @@ interfaces:
     fields:
       type:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: COMMUNICATIONTYPE
             clearable: false
       scope:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: COMMUNICATIONPREFERENCESCOPE
             clearable: false
       channel:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: COMMUNICATIONCHANNEL
             clearable: false
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: COMMUNICATIONPREFERENCESTATUS
             clearable: false
       validFrom:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       validUntil:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       notes:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 2000

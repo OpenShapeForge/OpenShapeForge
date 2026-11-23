@@ -293,9 +293,9 @@ interfaces:
     fields:
       validFrom:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       validTo:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

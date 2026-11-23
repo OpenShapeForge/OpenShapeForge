@@ -178,13 +178,13 @@ interfaces:
     fields:
       objectType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEOBJECTTYPE
             clearable: false
       note:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 2000

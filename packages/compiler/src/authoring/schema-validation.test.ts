@@ -499,7 +499,7 @@ describe("coreEntity properties the compiler implements", () => {
     // reads render and fieldDisplayMode; the schema used to admit only the key.
     const document = webViews([{ id: "main", fields: [
       "idempotencyKey",
-      { key: "idempotencyKey", render: "TextDisplay" },
+      { key: "idempotencyKey", render: "FieldSingleLine" },
       { key: "idempotencyKey", render: { component: "FieldMoney", props: { decimalPlaces: 0, scale: "millions" } } },
       { key: "idempotencyKey", fieldDisplayMode: "hidden" },
     ] }]);

@@ -44,7 +44,8 @@ export function projectField(
   const presentation = presentations[`${parent}.${field.key}`.split(".").slice(1).join(".")]?.render
     ?? (field.options?.presentation === "tiles"
       ? { component: "ChoiceTiles", ...(field.render.props ? { props: structuredClone(field.render.props) } : {}) }
-      : field.render.props && Object.keys(field.render.props).length ? structuredClone(field.render) : undefined);
+      // The field's component always reaches the renderer, authored props or not.
+      : field.render?.component ? structuredClone(field.render) : undefined);
   if (field.options?.presentation && field.options.type !== "static") {
     throw new Error(`${parent}.${field.key}: options.presentation "${field.options.presentation}" requires static options.`);
   }

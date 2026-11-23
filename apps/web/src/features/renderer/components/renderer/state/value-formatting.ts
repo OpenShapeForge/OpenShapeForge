@@ -6,7 +6,7 @@ import { isFieldCollection, fieldValueType } from "@/lib/field-contract/field-v2
 export function formatRendererValue(field: Field, value: unknown) {
   const component = field.render?.component;
 
-  if (component === "DatePicker" && typeof value === "string") {
+  if (component === "FieldDate" && typeof value === "string") {
     return value.slice(0, 10);
   }
 
@@ -28,7 +28,7 @@ export function formatRendererValue(field: Field, value: unknown) {
 export function coerceRendererValue(field: Field, rawValue: unknown) {
   const component = field.render?.component;
 
-  if (component === "Switch" || component === "Toggle") {
+  if (component === "FieldBoolean" || component === "FieldNullableBoolean" || component === "Toggle") {
     return rawValue === "true" || rawValue === true;
   }
 
@@ -46,7 +46,7 @@ export function coerceRendererValue(field: Field, rawValue: unknown) {
   }
 
   if (
-    component === "NumberInput" ||
+    component === "FieldIntegerDecimal" || component === "FieldPercentage" || component === "FieldDuration" ||
     (!isFieldCollection(field) &&
       (fieldValueType(field) === "integer" || fieldValueType(field) === "number"))
   ) {

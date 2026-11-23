@@ -322,15 +322,15 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 1000
       validFrom:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       validTo:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

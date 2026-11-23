@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { buildViews } from "./views.js";
 
-test("rejects DateTimePicker in a view field override", () => {
+test("rejects an undeclared component in a view field override", () => {
   const entity = {
     description: "Test entity",
     ui: {
@@ -15,9 +15,9 @@ test("rejects DateTimePicker in a view field override", () => {
       },
     },
   };
-  const catalog = { defaults: {}, viewDefaults: {}, components: {} };
+  const catalog = { defaults: {}, viewDefaults: {}, components: { FieldDateAndTime: { kind: "field", description: "Date and time.", props: [] } } };
 
   expect(() => buildViews(entity as never, [], catalog as never)).toThrow(
-    "startsAt: presentation component DateTimePicker is obsolete; use FieldDateAndTime.",
+    "startsAt: unknown presentation component DateTimePicker.",
   );
 });

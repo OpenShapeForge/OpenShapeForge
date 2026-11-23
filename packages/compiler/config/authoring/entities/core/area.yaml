@@ -296,5 +296,5 @@ interfaces:
     fields:
       measuredAt:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

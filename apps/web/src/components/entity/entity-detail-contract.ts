@@ -144,13 +144,16 @@ type DetailRendererDefinitionOptions = {
 
 function inferRendererFieldValueType(field: DetailFieldConfig | undefined): NonNullable<Field["baseType"]> {
   switch (field?.render?.component) {
-    case "DatePicker":
+    case "FieldDate":
       return "date";
     case "FieldDateAndTime":
       return "datetime";
-    case "NumberInput":
+    case "FieldIntegerDecimal":
+    case "FieldPercentage":
+    case "FieldDuration":
       return "number";
-    case "Switch":
+    case "FieldBoolean":
+    case "FieldNullableBoolean":
     case "Checkbox":
       return "boolean";
     default:

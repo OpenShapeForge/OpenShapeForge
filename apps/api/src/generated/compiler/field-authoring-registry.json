@@ -138,7 +138,7 @@
       },
       "baseType": "string",
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldSingleLine",
         "input": "IconPicker"
       },
       "validation": {
@@ -313,7 +313,7 @@
         ]
       },
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldSingleLine",
         "input": "ListSelect"
       }
     },
@@ -350,7 +350,7 @@
         ]
       },
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldSingleLine",
         "input": "ListSelect"
       }
     },
@@ -387,7 +387,7 @@
         ]
       },
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldSingleLine",
         "input": "ListSelect"
       }
     },
@@ -398,8 +398,8 @@
       },
       "baseType": "string",
       "render": {
-        "display": "TextDisplay",
-        "input": "Textarea"
+        "display": "FieldMultiline",
+        "input": "FieldMultiline"
       },
       "props": {
         "rows": 4
@@ -434,8 +434,8 @@
         "maxLength": 254
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldEmail",
+        "input": "FieldEmail"
       },
       "classification": {
         "sensitivity": "pii",
@@ -478,8 +478,8 @@
         "maxLength": 34
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldSingleLine",
+        "input": "FieldSingleLine"
       },
       "classification": {
         "sensitivity": "confidential",
@@ -511,8 +511,8 @@
         "maxLength": 2000
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldUrl",
+        "input": "FieldUrl"
       }
     },
     "webUrl": {
@@ -527,8 +527,8 @@
         "maxLength": 2000
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldSingleLine",
+        "input": "FieldSingleLine"
       }
     },
     "mailtoLink": {
@@ -543,8 +543,8 @@
         "maxLength": 2000
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldSingleLine",
+        "input": "FieldSingleLine"
       },
       "classification": {
         "sensitivity": "pii",
@@ -563,8 +563,8 @@
         "maxLength": 200
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldSingleLine",
+        "input": "FieldSingleLine"
       },
       "classification": {
         "sensitivity": "pii",
@@ -583,8 +583,8 @@
         "maxLength": 500
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldSingleLine",
+        "input": "FieldSingleLine"
       },
       "classification": {
         "sensitivity": "pii",
@@ -603,8 +603,8 @@
         "maxLength": 2000
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldSingleLine",
+        "input": "FieldSingleLine"
       },
       "classification": {
         "sensitivity": "pii",
@@ -623,8 +623,8 @@
         "maxLength": 2000
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldSingleLine",
+        "input": "FieldSingleLine"
       }
     },
     "identityAssuranceLevel": {
@@ -639,10 +639,11 @@
       "baseType": "string",
       "icon": "ShieldCheck",
       "render": {
-        "display": "TextDisplay",
-        "input": "ReferenceSelect"
+        "display": "FieldSingleLine",
+        "input": "FieldSingleRelatedRecord"
       },
       "props": {
+        "searchable": false,
         "clearable": false
       },
       "options": {
@@ -701,8 +702,8 @@
       "baseType": "string",
       "icon": "List",
       "render": {
-        "display": "TextDisplay",
-        "input": "ReferenceSelect"
+        "display": "FieldSingleLine",
+        "input": "FieldSingleRelatedRecord"
       },
       "props": {
         "clearable": false
@@ -716,7 +717,7 @@
       "baseType": "string",
       "icon": "File",
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldSingleLine",
         "input": "FileUpload"
       },
       "props": {
@@ -832,8 +833,8 @@
         "pattern": "^[0-9]{4}\\s?[A-Z]{2}$"
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldSingleLine",
+        "input": "FieldSingleLine"
       }
     },
     "money": {
@@ -866,8 +867,8 @@
         "maxLength": 64
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldIdentifierCode",
+        "input": "FieldIdentifierCode"
       }
     },
     "percentage": {
@@ -878,8 +879,8 @@
       "baseType": "number",
       "icon": "Percent",
       "render": {
-        "display": "TextDisplay",
-        "input": "NumberInput"
+        "display": "FieldPercentage",
+        "input": "FieldPercentage"
       },
       "props": {
         "unit": "%",
@@ -905,7 +906,7 @@
       },
       "icon": "Ruler",
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldMeasurement",
         "input": "FieldMeasurement"
       },
       "children": [
@@ -1001,8 +1002,8 @@
         "min": 0
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "NumberInput"
+        "display": "FieldDuration",
+        "input": "FieldDuration"
       },
       "props": {
         "unit": "s"
@@ -1010,11 +1011,11 @@
     },
     "numericRange": {
       "props": {
-        "minimumLabel": {
+        "minLabel": {
           "en": "From",
           "nl": "Van"
         },
-        "maximumLabel": {
+        "maxLabel": {
           "en": "To",
           "nl": "Tot"
         }
@@ -1034,7 +1035,7 @@
       "baseType": "object",
       "icon": "ArrowLeftRight",
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldNumericRange",
         "input": "FieldNumericRange"
       },
       "children": [
@@ -1072,8 +1073,8 @@
         "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$"
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldTime",
+        "input": "FieldTime"
       }
     },
     "dateRange": {
@@ -1102,7 +1103,7 @@
       "baseType": "object",
       "icon": "CalendarRange",
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldDateRange",
         "input": "FieldDateRange"
       },
       "children": [
@@ -1132,7 +1133,7 @@
           "en": "Period type",
           "nl": "Soort periode"
         },
-        "valueLabel": {
+        "periodLabel": {
           "en": "Period value",
           "nl": "Periode"
         },
@@ -1170,8 +1171,8 @@
         "maxLength": 8
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldPeriod",
+        "input": "FieldPeriod"
       }
     },
     "recurrence": {
@@ -1266,7 +1267,7 @@
       "baseType": "object",
       "icon": "Repeat",
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldSingleLine",
         "input": "FieldRecurrence"
       },
       "children": [
@@ -1433,8 +1434,8 @@
         "max": 5
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "NumberInput"
+        "display": "FieldSingleLine",
+        "input": "FieldIntegerDecimal"
       }
     },
     "coordinates": {
@@ -1446,7 +1447,7 @@
       "baseType": "object",
       "icon": "MapPin",
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldSingleLine",
         "input": "MapPicker"
       },
       "children": [
@@ -1494,8 +1495,8 @@
         "maxLength": 64
       },
       "render": {
-        "display": "TextDisplay",
-        "input": "Input"
+        "display": "FieldTimezone",
+        "input": "FieldTimezone"
       }
     },
     "condition": {
@@ -1506,7 +1507,7 @@
       },
       "icon": "GitBranch",
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldSingleLine",
         "input": "ConditionBuilder"
       },
       "props": {
@@ -1522,7 +1523,7 @@
       "icon": "Tags",
       "render": {
         "display": "BadgeList",
-        "input": "JsonFieldEditor"
+        "input": "FieldCodeStructuredJson"
       }
     },
     "variableTemplate": {
@@ -1533,7 +1534,7 @@
       },
       "icon": "Braces",
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldSingleLine",
         "input": "VariableTemplateInput"
       }
     },
@@ -1548,8 +1549,8 @@
       },
       "icon": "Variable",
       "render": {
-        "display": "TextDisplay",
-        "input": "JsonFieldEditor"
+        "display": "FieldSingleLine",
+        "input": "FieldCodeStructuredJson"
       }
     },
     "fieldDefinition": {
@@ -1597,7 +1598,7 @@
         }
       },
       "render": {
-        "display": "TextDisplay",
+        "display": "FieldSingleLine",
         "input": "FieldKeyValuePairs"
       }
     },

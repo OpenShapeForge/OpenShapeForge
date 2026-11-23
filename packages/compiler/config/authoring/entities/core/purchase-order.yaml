@@ -383,21 +383,21 @@ interfaces:
     fields:
       purchaseOrderStatus:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: PURCHASEORDERSTATUS
             clearable: false
       issueDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       expectedDeliveryDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 1000

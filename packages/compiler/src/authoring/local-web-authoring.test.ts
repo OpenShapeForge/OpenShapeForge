@@ -33,10 +33,10 @@ test('local component choices include the active host catalogue overrides',async
   for(const key of keys)delete process.env[key];
   mkdirSync(join(root,'host/catalogs'),{recursive:true});
   writeFileSync(join(root,'authoring.config.yaml'),Bun.YAML.stringify({layers:[resolve(import.meta.dir,'../../config/authoring'),'host']}));
-  writeFileSync(join(root,'host/catalogs/components.yaml'),'components:\n  Input:\n    description: Host input description\n  HostField:\n    kind: field\n    description: Host supplied field\n');
+  writeFileSync(join(root,'host/catalogs/components.yaml'),'components:\n  IconPicker:\n    kind: field\n    description: Host input description\n    props: [layout, labelWidth]\n  HostField:\n    kind: field\n    description: Host supplied field\n');
   const result=await collectLocalWebAuthoring(root,[],'host/entities');
   expect(result.components).toContainEqual({name:'HostField',description:'Host supplied field'});
-  expect(result.components).toContainEqual({name:'Input',description:'Host input description'});
+  expect(result.components).toContainEqual({name:'IconPicker',description:'Host input description'});
  }finally{
   for(const key of keys){if(original[key]===undefined)delete process.env[key];else process.env[key]=original[key];}
   rmSync(root,{recursive:true,force:true});

@@ -295,14 +295,14 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
       installedAt:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       replacedAt:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

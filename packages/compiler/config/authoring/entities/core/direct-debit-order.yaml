@@ -325,17 +325,17 @@ interfaces:
     fields:
       executionDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       sequenceType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: SEPASEQUENCETYPE
             clearable: false
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: DIRECTDEBITORDERSTATUS
             clearable: false

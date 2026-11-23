@@ -279,7 +279,7 @@ interfaces:
           props: {}
       summary:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 5000

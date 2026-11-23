@@ -12,6 +12,6 @@ export function fieldAllowsVariableTokenInput(
     !isFieldCollection(field) &&
     field.render?.props?.variableTokens !== false &&
     field.render?.props?.type !== "password" &&
-    (component === "Input" || component === "InputMultiline")
+    (component === "FieldSingleLine" || component === "FieldMultiline" || component === "InputMultiline")
   );
 }

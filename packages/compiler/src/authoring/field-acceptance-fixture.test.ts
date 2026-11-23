@@ -407,7 +407,7 @@ describe("the 48-field acceptance fixture", () => {
       props: { currency: "EUR", decimalPlaces: 2, scale: "units" },
     });
     expect(field("completion").render).toMatchObject({
-      component: "NumberInput",
+      component: "FieldPercentage",
       props: { unit: "%", decimalPlaces: 2 },
     });
     expect(columns.get("amount")?.type).toBe("numeric");

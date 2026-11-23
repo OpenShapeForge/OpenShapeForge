@@ -13,6 +13,7 @@ import { __resetSessionResolverForTests } from "../auth/identity.js";
 import { projectLinkedProviders } from "./linked-providers.js";
 import { blockOrganizationAccount } from "./account-management.js";
 
+const WEB_PROOF_TIMEOUT_MS = 60_000;
 const url = process.env.OSF_ACCOUNT_SOURCE_TEST_DATABASE_URL;
 if (!url || !new URL(url).pathname.startsWith("/osf_sandbox_account_")) throw new Error("An isolated account proof database is required.");
 test("Account collections, seek paging, tenant-scoped point reads and shared Relation cardinality", async () => {
@@ -347,7 +348,10 @@ test("Account collections, seek paging, tenant-scoped point reads and shared Rel
         expect(selfPromotion.statusCode, selfPromotion.body).toBe(403);
         expect(selfPromotion.json()).toHaveProperty('error.code', 'FORBIDDEN');
         const address = await app.listen({ host: '127.0.0.1', port: 0 });
+        const proofDeadline = AbortSignal.timeout(WEB_PROOF_TIMEOUT_MS);
         const proof = Bun.spawn([process.execPath, runner], {
+          signal: proofDeadline,
+          killSignal: 'SIGKILL',
           env: { ...process.env, OSF_ACCOUNT_PROOF_API_URL: address,
             OSF_ACCOUNT_PROOF_TOKEN: token(0),
             OSF_ACCOUNT_PROOF_DENIED_TOKEN: token(1),
@@ -362,6 +366,9 @@ test("Account collections, seek paging, tenant-scoped point reads and shared Rel
         const [code, out, err] = await Promise.all([
           proof.exited, new Response(proof.stdout).text(), new Response(proof.stderr).text(),
         ]);
+        if (proofDeadline.aborted) {
+          throw new Error(`The account web proof runner exceeded ${WEB_PROOF_TIMEOUT_MS / 1000} seconds`);
+        }
         expect(code, out + err).toBe(0);
       }
       expect((await admin`select username,email,relation_id::text from erp.accounts where id=${historicalAccount}`)[0]).toEqual({username:'historical-only',email:'historical@example.test',relation_id:relation});

@@ -298,15 +298,15 @@ interfaces:
     fields:
       regionLevel:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: ADMINREGIONLEVEL
             clearable: false
       validFrom:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       validTo:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

@@ -138,7 +138,7 @@ export function ConnectorFieldControl({
       );
     }
 
-    if (component === "Switch") {
+    if (component === "FieldBoolean" || component === "FieldNullableBoolean") {
       return (
         <Switch
           id={controlId}
@@ -149,7 +149,7 @@ export function ConnectorFieldControl({
       );
     }
 
-    if (component === "NumberInput") {
+    if (component === "FieldIntegerDecimal" || component === "FieldPercentage" || component === "FieldDuration") {
       return (
         <NumberInput
           id={controlId}
@@ -167,7 +167,7 @@ export function ConnectorFieldControl({
       );
     }
 
-    if (component === "JsonFieldEditor") {
+    if (component === "FieldCodeStructuredJson") {
       // Object-valued configuration is rare and always opaque to this form —
       // the contract declares `object` precisely when the shape belongs to the
       // remote system. A textarea over JSON is honest about that; the API

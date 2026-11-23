@@ -31,7 +31,7 @@ function field(
     cardinality: "single",
     required: false,
     label: text(key),
-    render: { component: "Input" },
+    render: { component: "FieldSingleLine" },
     ...overrides,
   };
 }
@@ -2243,7 +2243,7 @@ test("board scope names a single field on the grouping entity", () => {
   expect(build().entities.Stage!.fields.probability?.unit).toBe("points");
   delete probability.unit;
   expect(build().entities.Stage!.fields.probability?.unit).toBe("points");
-  probability.render = { component: "Input" };
+  probability.render = { component: "FieldSingleLine" };
   expect(build().entities.Stage!.fields.probability?.unit).toBeUndefined();
   probability.unit = "%";
   owner.contract.interfaces!.web!.collectionBoard!.groupSummary = "missing";

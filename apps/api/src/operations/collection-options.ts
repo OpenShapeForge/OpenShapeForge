@@ -12,22 +12,31 @@ import {moduleRealtimeResources} from '../modules/realtime-resources.js';
 import type {RuntimeModule} from '../modules/contract.js';
 
 type Locale = 'en' | 'nl';
+type OperationLabel = string | Partial<Record<Locale, string>>;
+type StandaloneOperationLabel = { title: string; plugin: string };
 
 const entityOperationLabels = new Map((operationCatalog.entityOperations ?? []).map(operation => [operation.id, operation.name]));
-const standaloneOperations = new Map(operationCatalog.operations.map(operation => [operation.id, operation]));
+const standaloneOperations = new Map((operationCatalog.operations ?? []).map(operation => [operation.id, operation]));
 
-function authorizationOperationChoices(ids: readonly string[], locale: Locale) {
+export function authorizationOperationChoices(
+  ids: readonly string[], locale: Locale,
+  catalog: {
+    entityLabels: ReadonlyMap<string, OperationLabel>;
+    standaloneOperations: ReadonlyMap<string, StandaloneOperationLabel>;
+  } = { entityLabels: entityOperationLabels, standaloneOperations },
+) {
   const ordinaryGroup = { id: 'entity-operations', label: locale === 'nl' ? 'Entiteitsoperaties' : 'Entity operations' };
   const blueprintGroup = { id: 'blueprint-operations', label: locale === 'nl' ? 'Blauwdrukoperaties' : 'Blueprint operations' };
   return ids.map(value => {
-    const labels = entityOperationLabels.get(value);
-    const operation = standaloneOperations.get(value);
+    const labels = catalog.entityLabels.get(value);
+    const label = typeof labels === 'string' ? labels : labels?.[locale] ?? labels?.en;
+    const operation = catalog.standaloneOperations.get(value);
     return {
       value,
-      label: labels?.[locale] ?? labels?.en ?? operation?.title ?? value,
+      label: label ?? operation?.title ?? value,
       group: operation?.plugin === 'osf-blueprints' ? blueprintGroup : ordinaryGroup,
     };
-  }).sort((a, b) => Number(a.group === blueprintGroup) - Number(b.group === blueprintGroup)
+  }).sort((a, b) => Number(a.group.id === blueprintGroup.id) - Number(b.group.id === blueprintGroup.id)
     || a.label.localeCompare(b.label, locale) || a.value.localeCompare(b.value));
 }
 

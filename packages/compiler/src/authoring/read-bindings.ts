@@ -41,7 +41,8 @@ export function compileReadBindings(source: ProjectableEntity, all: ReadonlyMap<
  * A table footer's totals read: a canonical collection read that takes the
  * list's matching filter and answers one amount per currency, the population
  * and how many records have no known amount. Currencies are never added
- * together, so the contract carries them apart.
+ * together, so the contract carries them apart. With `parts` the read answers
+ * plain numbers instead, each a numeric property of its output.
  */
 export function compileTableTotals(source: ProjectableEntity, all: ReadonlyMap<string, ProjectableEntity>): WebCollectionTable['totals'] {
   const totals = source.contract.interfaces?.web?.collectionTable?.totals;
@@ -52,10 +53,23 @@ export function compileTableTotals(source: ProjectableEntity, all: ReadonlyMap<s
   const input = operation.input.schema as Schema, output = operation.output.schema as Schema;
   const item = output.properties?.totals?.items;
   const states = output.properties?.status?.enum;
+  const local = (text: { en?: string; nl?: string }) => ({ en: text.en ?? text.nl ?? '', nl: text.nl ?? text.en ?? '' });
+  if (totals.parts) {
+    // A numeric footer names the read's own output numbers; the read still takes the list's filter.
+    if (input.properties?.filter?.type !== 'object' || (input.required ?? []).length ||
+        !Array.isArray(states) || !['available', 'unavailable', 'failed'].every(state => states.includes(state))) throw new Error('totals: parts require an optional filter input and a status output.');
+    const keys = new Set<string>();
+    for (const part of totals.parts) {
+      const type = output.properties?.[part.path]?.type;
+      if (part.path === 'status' || ![type].flat().some(item => item === 'number' || item === 'integer')) throw new Error(`totals: part ${part.path} must name a numeric property of the Operation output.`);
+      if (keys.has(part.path)) throw new Error(`totals: duplicate part ${part.path}.`);
+      keys.add(part.path);
+    }
+    return { entityId: totals.entity, operation, parts: totals.parts.map(part => ({ path: part.path, label: local(part.label), ...(part.decimalPlaces !== undefined ? { decimalPlaces: part.decimalPlaces } : {}) })) } as WebCollectionTable['totals'];
+  }
   if (input.properties?.filter?.type !== 'object' || (input.required ?? []).length ||
       output.properties?.totals?.type !== 'array' || item?.properties?.currencyCode?.type !== 'string' || item?.properties?.amount?.type !== 'number' ||
       output.properties?.count?.type !== 'integer' || output.properties?.excluded?.type !== 'integer' ||
       !Array.isArray(states) || !['available', 'unavailable', 'failed'].every(state => states.includes(state))) throw new Error('totals: requires an optional filter input and status, count, excluded and per-currency { currencyCode, amount } totals output.');
-  const local = (text: { en?: string; nl?: string }) => ({ en: text.en ?? text.nl ?? '', nl: text.nl ?? text.en ?? '' });
-  return { entityId: totals.entity, operation, count: local(totals.count), label: local(totals.label), ...(totals.note ? { note: local(totals.note) } : {}) } as WebCollectionTable['totals'];
+  return { entityId: totals.entity, operation, count: local(totals.count!), label: local(totals.label!), ...(totals.note ? { note: local(totals.note) } : {}) } as WebCollectionTable['totals'];
 }

@@ -273,7 +273,11 @@ export type WebCollectionTableValue = {
   select?: "one";
   when?: { path: WebValuePath; equals: string | number | boolean };
   defaultValue?: string | number;
+  /** Text the cell shows when the value resolves to null, absent or an empty string, instead of the empty mark. */
+  emptyLabel?: LocalizedText;
 };
+export type WebCollectionMoneyTotals = { entityId: string; operation: WebCustomOperationRef; count: LocalizedText; label: LocalizedText; note?: LocalizedText };
+export type WebCollectionPartsTotals = { entityId: string; operation: WebCustomOperationRef; parts: Array<{ path: string; label: LocalizedText; decimalPlaces?: number }> };
 export type WebCollectionTable = {
   bindings?: Record<string, { entityId: string; operation: WebCustomOperationRef; schema: Readonly<Record<string, unknown>>; refreshOn?: string[]; parameters?: Record<string, string | number | boolean> }>;
   navigation?: Array<{ route: string; label: LocalizedText }>;
@@ -326,11 +330,12 @@ export type WebCollectionTable = {
   columns: Array<{ key: string; label: LocalizedText; values: WebCollectionTableValue[]; membershipValues?: WebCollectionTableValue[] }>;
   summary?: { field: string; labels?: Record<string, LocalizedText> };
   /**
-   * Footer: the read is executed with `{ filter }` (the list's matching filter) and answers
+   * Footer: the read is executed with `{ filter }` (the list's matching filter). The money shape answers
    * `{ status, count, totals: [{ currencyCode, amount }], excluded }`. Currencies are never added together;
-   * `excluded` counts records whose amount is not known, which are never zero.
+   * `excluded` counts records whose amount is not known, which are never zero. The `parts` shape answers
+   * `{ status, ...numbers }`; each part draws its output number, localized, followed by its label.
    */
-  totals?: { entityId: string; operation: WebCustomOperationRef; count: LocalizedText; label: LocalizedText; note?: LocalizedText };
+  totals?: WebCollectionMoneyTotals | WebCollectionPartsTotals;
 };
 
 export type WebCollectionView = {
@@ -343,7 +348,7 @@ export type WebCollectionView = {
    * group heading; without `count` the renderer counts the children.
    */
   tree?: { children: string; parent?: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
-  board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: WebValuePath; currency: WebValuePath }; card: { title: WebValuePath[]; timestamp?: WebValuePath; indicator?: string; subtitle?: WebValuePath[]; amount?: { value: WebValuePath; currency: WebValuePath }; body: WebValuePath[] } };
+  board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: WebValuePath; currency: WebValuePath }; card: { title: WebValuePath[]; timestamp?: WebValuePath; indicator?: string; avatar?: WebValuePath; subtitle?: WebValuePath[]; amount?: { value: WebValuePath; currency: WebValuePath }; body: WebValuePath[] } };
   presentation?: WebTimelinePresentation;
   id: string;
   kind: "collection";

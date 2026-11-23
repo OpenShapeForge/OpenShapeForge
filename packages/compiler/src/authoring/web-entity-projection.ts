@@ -439,6 +439,13 @@ export function projectEntity(
     if (authoredBoard.card.indicator && (!indicator?.computed || !("kind" in indicator.computed) || indicator.computed.kind !== "temporalThreshold")) {
       throw new Error(`${entityName}: board indicator must reference a temporal threshold field.`);
     }
+    // The avatar is the record a single reference names, read like any other card path.
+    const avatarKey = authoredBoard.card.avatar;
+    const avatarReference = avatarKey ? contract.model.relationships.find(item => item.fieldKey === avatarKey && item.kind === "belongsTo" && !item.provider) : undefined;
+    const avatar = avatarReference && fields[avatarKey!]?.cardinality === "one" ? valuePath(avatarKey!) : undefined;
+    if (avatarKey && (!avatar || avatar.field || avatar.cardinality !== "one" || avatar.targetEntityId !== avatarReference!.target)) {
+      throw new Error(`${entityName}: board card avatar must name a single reference field.`);
+    }
     const money = (amountExpression: string, currencyExpression: string, persisted: boolean) => {
       const amount = valuePath(amountExpression);
       const currency = valuePath(currencyExpression);
@@ -473,7 +480,7 @@ export function projectEntity(
     };
     const cardAmount = authoredBoard.card.amount && money(authoredBoard.card.amount.value, authoredBoard.card.amount.currency, false);
     const aggregate = authoredBoard.aggregate && money(authoredBoard.aggregate.sum, authoredBoard.aggregate.currency, true);
-    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), ...(authoredBoard.groupSummary ? { groupSummary: authoredBoard.groupSummary } : {}), ...(aggregate ? { aggregate: { sum: aggregate.amount, currency: aggregate.currency } } : {}), card: { title, ...(timestamp ? { timestamp } : {}), ...(indicator ? { indicator: indicator.key } : {}), ...(authoredBoard.card.subtitle ? { subtitle: authoredBoard.card.subtitle.map(valuePath) } : {}), ...(cardAmount ? { amount: { value: cardAmount.amount, currency: cardAmount.currency } } : {}), body: (authoredBoard.card.body ?? []).map(valuePath) } };
+    board = { groupBy: authoredBoard.groupBy, ...(authoredBoard.scopeBy ? { scopeBy: authoredBoard.scopeBy } : {}), ...(authoredBoard.groupSummary ? { groupSummary: authoredBoard.groupSummary } : {}), ...(aggregate ? { aggregate: { sum: aggregate.amount, currency: aggregate.currency } } : {}), card: { title, ...(timestamp ? { timestamp } : {}), ...(indicator ? { indicator: indicator.key } : {}), ...(avatar ? { avatar } : {}), ...(authoredBoard.card.subtitle ? { subtitle: authoredBoard.card.subtitle.map(valuePath) } : {}), ...(cardAmount ? { amount: { value: cardAmount.amount, currency: cardAmount.currency } } : {}), body: (authoredBoard.card.body ?? []).map(valuePath) } };
   }
   for (const groups of [authoredCreateGroups, updateGroups]) assertVisibilityFields(entityName, "form group", groups, fields);
 

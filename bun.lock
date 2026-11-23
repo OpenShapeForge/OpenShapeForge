@@ -184,7 +184,7 @@
     },
     "packages/compiler": {
       "name": "@openshapeforge/compiler",
-      "version": "0.2.79",
+      "version": "0.2.80",
       "bin": {
         "openshapeforge-compiler": "./src/index.ts",
       },
@@ -231,7 +231,7 @@
     },
     "packages/interface-web": {
       "name": "@openshapeforge/interface-web",
-      "version": "0.2.37",
+      "version": "0.2.38",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
       },

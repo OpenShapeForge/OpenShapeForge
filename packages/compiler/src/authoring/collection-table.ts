@@ -22,6 +22,7 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
     const field = source.contract.model.fields.find(field => field.key === authored.groupBy);
     if (!field || field.cardinality === 'collection' || field.baseType === 'object') throw new Error(`${name}: table groupBy must name a scalar field or reference.`);
   }
+  if (authored.summary && authored.totals) throw new Error(`${name}: a table footer is either summary or totals, not both.`);
   if (authored.summary && !source.contract.model.fields.some(field => field.key === authored.summary!.field && field.cardinality !== 'collection')) throw new Error(`${name}: table summary must name a scalar field.`);
   const path = (owner: ProjectableEntity, expression: string, select: 'one' | undefined): WebValuePath => {
     const result = compileWebValuePath(owner, all, expression);
@@ -39,8 +40,9 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
       if (input.format === 'money') {
         if (!input.currency || ![schema.type].flat().includes('number') || bindingField(binding.schema, input.currency).type !== 'string') throw new Error(`${name}: bound money needs a numeric amount and typed currency.`);
       }
-      return { binding: input.binding, boundPath: input.path.split('.'), schema, ...(input.currency ? { boundCurrency: input.currency.split('.') } : {}), ...(input.format ? { format: input.format } : {}) };
+      return { binding: input.binding, boundPath: input.path.split('.'), schema, ...(input.currency ? { boundCurrency: input.currency.split('.') } : {}), ...(input.format ? { format: input.format } : {}), ...(input.emptyLabel ? { emptyLabel: local(input.emptyLabel) } : {}) };
     }
+    if (input.emptyLabel && !input.path) throw new Error(`${name}: emptyLabel requires a value path.`);
     const result = input.path ? path(owner, input.path, input.select) : undefined;
     const currency = input.currency ? path(owner, input.currency, input.select) : undefined;
     if (input.format === 'money' && (!result?.field || !currency?.field || result.targetEntityId !== currency.targetEntityId || JSON.stringify(result.path) !== JSON.stringify(currency.path))) throw new Error(`${name}: money requires amount and currency on the same related record.`);
@@ -53,7 +55,7 @@ export function compileCollectionTable(source: ProjectableEntity, all: ReadonlyM
       const field = all.get(result.targetEntityId)?.contract.model.fields.find(field => field.key === result.field);
       if (!field || !['number', 'integer'].includes(field.baseType)) throw new Error(`${name}: ${input.format} requires a numeric field.`);
     }
-    return { ...input, ...(input.text ? { text: local(input.text) } : {}), ...(result ? { path: result } : {}), ...(currency ? { currency } : {}), ...(input.when ? { when: { path: path(owner, input.when.path, input.select), equals: input.when.equals } } : {}) } as WebCollectionTableValue;
+    return { ...input, ...(input.text ? { text: local(input.text) } : {}), ...(input.emptyLabel ? { emptyLabel: local(input.emptyLabel) } : {}), ...(result ? { path: result } : {}), ...(currency ? { currency } : {}), ...(input.when ? { when: { path: path(owner, input.when.path, input.select), equals: input.when.equals } } : {}) } as WebCollectionTableValue;
   };
   const local = (text: { en?: string; nl?: string }) => ({ en: text.en ?? text.nl ?? "", nl: text.nl ?? text.en ?? "" });
   if (authored.membershipDescription && !through) throw new Error(`${name}: membershipDescription requires explicit tree.through.`);

@@ -10,7 +10,9 @@
  *   use's own type, cardinality and requiredness;
  * - texts take the design system's slot names (emptyText -> empty, ...);
  * - frontLabelWidth (pixels) becomes labelWidth on Figma's 128/256/384 steps;
- * - props that only styled the old fields are dropped.
+ * - props that only styled the old fields are dropped;
+ * - a ReferenceSelect over anything but referentiedata keeps its closed select
+ *   as FieldSingleRelatedRecord with `searchable: false`.
  *
  * Edits are made on the source text by node range, so comments, quoting and
  * layout of everything else stay as they are. Running it again changes
@@ -168,6 +170,35 @@ function rewriteProps(source: string, props: YAMLMap, component: string, edits: 
   }
 }
 
+/** Referentiedata is read as related records; any other ReferenceSelect was a closed select. */
+function closedList(owner: YAMLMap, props: unknown): boolean {
+  const options = owner.get("options");
+  if (isMap(options) && (options as YAMLMap).get("type") === "referentiedata") return false;
+  if (isMap(props) && (props as YAMLMap).has("referentieGroep")) return false;
+  return !(isMap(props) && (props as YAMLMap).has("searchable"));
+}
+
+/** Adds `searchable: false` to a props map, or a props map holding it next to `anchor` in `owner`. */
+function addSearchable(source: string, owner: YAMLMap, props: unknown, anchor: string, edits: Edit[]) {
+  if (isMap(props)) {
+    const map = props as YAMLMap, first = map.items[0] as Pair | undefined;
+    const [start] = (map as YAMLMap & { range: [number, number] }).range;
+    if (map.flow) { edits.push({ start: start + 1, end: start + 1, text: map.items.length ? " searchable: false," : " searchable: false " }); return; }
+    const keyStart = (first!.key as Node).range![0];
+    const lineStart = source.lastIndexOf("\n", keyStart - 1) + 1;
+    edits.push({ start: lineStart, end: lineStart, text: `${source.slice(lineStart, keyStart)}searchable: false\n` });
+    return;
+  }
+  const pair = owner.items.find((item) => isPair(item) && isScalar(item.key) && item.key.value === anchor) as Pair;
+  const end = (pair.value as Node).range![1];
+  if (owner.flow) { edits.push({ start: end, end, text: ", props: { searchable: false }" }); return; }
+  const keyStart = (pair.key as Node).range![0];
+  const indent = source.slice(source.lastIndexOf("\n", keyStart - 1) + 1, keyStart);
+  const lineEnd = source.indexOf("\n", end);
+  const at = lineEnd === -1 ? source.length : lineEnd;
+  edits.push({ start: at, end: at, text: `\n${indent}props:\n${indent}  searchable: false` });
+}
+
 /** Rewrites one component name scalar and the props it takes. */
 function rewriteUse(source: string, node: Node, props: unknown, context: Context, edits: Edit[], file: string) {
   if (!isScalar(node) || typeof node.value !== "string") return;
@@ -193,12 +224,17 @@ function visit(source: string, node: unknown, edits: Edit[], file: string, path:
     const context = contextOf(map, typeKey);
     const component = renderMap.get("component", true) as Node | undefined;
     if (component) rewriteUse(source, component, renderMap.get("props", true), context, edits, file);
+    if (isScalar(component) && component.value === "ReferenceSelect" && closedList(map, renderMap.get("props", true)))
+      addSearchable(source, renderMap, renderMap.get("props", true), "component", edits);
     // An osf type names its input and display; its props apply to both.
     for (const role of ["input", "display"] as const) {
       const named = renderMap.get(role, true) as Node | undefined;
       if (named) rewriteUse(source, named, undefined, context, edits, file);
     }
     const typeProps = map.get("props", true);
+    const input = renderMap.get("input", true);
+    if (!component && isScalar(input) && input.value === "ReferenceSelect" && closedList(map, typeProps))
+      addSearchable(source, map, typeProps, "render", edits);
     if (!component && isMap(typeProps)) {
       const input = renderMap.get("input");
       rewriteProps(source, typeProps as YAMLMap, typeof input === "string" ? target(input, context) ?? input : "", edits, file);
@@ -207,7 +243,10 @@ function visit(source: string, node: unknown, edits: Edit[], file: string, path:
     // A catalog default, its `required` variant, or a field that names its component directly.
     const variant = key === "required" && path.length >= 3 && path[path.length - 3] === "defaults";
     const context = variant ? { ...contextOf(map, path[path.length - 2]), required: true } : contextOf(map, typeKey);
-    rewriteUse(source, map.get("component", true) as Node, map.get("props", true), context, edits, file);
+    const named = map.get("component", true) as Node;
+    rewriteUse(source, named, map.get("props", true), context, edits, file);
+    if (isScalar(named) && named.value === "ReferenceSelect" && closedList(map, map.get("props", true)))
+      addSearchable(source, map, map.get("props", true), "component", edits);
   }
   for (const pair of map.items) {
     if (!isPair(pair)) continue;

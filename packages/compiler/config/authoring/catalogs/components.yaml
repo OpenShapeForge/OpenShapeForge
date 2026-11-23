@@ -144,7 +144,7 @@ fields:
   FieldSignature:
     texts: [downloadLabel, signedByLabel, evidenceLabel, immutableLabel, signerLabel, requestLabel, clear, pendingLabel, signedLabel, expiredLabel, declinedLabel, uploadTitle, uploadDescription, uploadHint, chooseLabel, retry]
   FieldSingleChoice: {}
-  FieldSingleLine: { texts: [placeholder], props: [requirementPlacement, maxLength] }
+  FieldSingleLine: { texts: [placeholder], props: [requirementPlacement, maxLength, readOnly] }
   FieldSingleRelatedRecord: { texts: [placeholder, clear, noResults, retry, loading], props: [referentieGroep, clearable, searchable] }
   FieldStatus: { props: [presentation] }
   FieldSystemMetadata: { texts: [loading, retry, propertyLabel, valueLabel] }

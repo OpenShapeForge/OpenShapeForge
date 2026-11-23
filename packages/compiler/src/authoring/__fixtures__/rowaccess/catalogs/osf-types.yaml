@@ -164,6 +164,7 @@ types:
       display: FieldSingleLine
       input: FieldSingleRelatedRecord
     props:
+      searchable: false
       clearable: false
     options:
       type: static

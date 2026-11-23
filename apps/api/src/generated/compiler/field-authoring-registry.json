@@ -643,6 +643,7 @@
         "input": "FieldSingleRelatedRecord"
       },
       "props": {
+        "searchable": false,
         "clearable": false
       },
       "options": {
@@ -705,6 +706,7 @@
         "input": "FieldSingleRelatedRecord"
       },
       "props": {
+        "searchable": false,
         "clearable": false
       }
     },

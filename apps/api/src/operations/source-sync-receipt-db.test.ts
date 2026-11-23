@@ -35,6 +35,9 @@ import { sourceSyncOperationHandler } from "./source-sync-operations.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL
   ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";
+if (decodeURIComponent(new URL(ADMIN_URL).pathname).toLowerCase().endsWith("_dev")) {
+  throw new Error("admin URL must not point at an application database");
+}
 const TEST_TIMEOUT = 120_000;
 const scratchName = `source_sync_receipt_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
 const FINANCE = ["Finance.All.Read", "Finance.All.ReadWrite"];
@@ -44,9 +47,6 @@ let admin: SQL, privileged: DatabaseRuntime, restricted: DatabaseRuntime;
 
 function scratchUrl(role?: { username: string; password: string }): string {
   const url = new URL(ADMIN_URL);
-  if (url.pathname === "/openshapeforge_dev" || url.pathname === "/hubble_dev") {
-    throw new Error("admin URL must not point at an application database");
-  }
   if (role) { url.username = role.username; url.password = role.password; }
   url.pathname = `/${scratchName}`;
   return url.toString();

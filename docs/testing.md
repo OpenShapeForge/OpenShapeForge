@@ -202,6 +202,32 @@ the scratch database when you are done (`drop database … with (force)`) —
 abandoned ones accumulate on the compose Postgres and are indistinguishable
 from live ones to the next person.
 
+## Optional account web proof
+
+The account directory integration fixture accepts a migrated, disposable database
+through `OSF_ACCOUNT_SOURCE_TEST_DATABASE_URL`. Its database name must start with
+`osf_sandbox_account_`. The fixture runs its API assertions without a browser.
+Set `OSF_ACCOUNT_WEB_PROOF_RUNNER` to a trusted host script to add browser checks.
+The fixture invokes the script with Bun against a temporary loopback API.
+
+The script receives these environment variables:
+
+| Variable | Fixture value |
+| --- | --- |
+| `OSF_ACCOUNT_PROOF_API_URL` | Loopback API address |
+| `OSF_ACCOUNT_PROOF_TOKEN` | Account directory reader token |
+| `OSF_ACCOUNT_PROOF_DENIED_TOKEN` | Token for a user denied directory access |
+| `OSF_ACCOUNT_PROOF_MANAGER_TOKEN` | Account manager token |
+| `OSF_ACCOUNT_PROOF_MANAGED_ID` | Account used for management checks |
+| `OSF_ACCOUNT_PROOF_RELATION_TOKEN` | Token with directory and Relation read access |
+| `OSF_ACCOUNT_PROOF_RELATION_ID` | Relation visible to the Relation reader |
+| `OSF_ACCOUNT_PROOF_RELATION_ONLY_TOKEN` | Token with Relation read access |
+| `OSF_ACCOUNT_PROOF_RECORD_ID` | Account used for record checks |
+
+The runner must exit with status zero on success and clean up its browser and
+other child processes. The fixture kills the runner after 60 seconds. Keep the
+temporary bearer tokens out of logs and artifacts.
+
 ## HTML report
 
 `bun run test:e2e:report` (`scripts/render-e2e-report.ts`) runs the suite

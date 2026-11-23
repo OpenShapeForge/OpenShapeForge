@@ -1116,7 +1116,7 @@ What the loader does with it (`authoring/entity-subtype.ts`):
   `model`, `storage`, GraphQL type, REST/MCP schemas, web fields, columns,
   groups, context and inherited placements. In inherited boards, hidden title,
   subtitle and body parts are removed, as are affected timestamps, indicators,
-  amounts and aggregates. The board is removed if its grouping field or every
+  avatars, amounts and aggregates. The board is removed if its grouping field or every
   title part is hidden. Reads never return it and a write
   naming it is refused. The base keeps it. A hidden required column must have
   a server-owned value (the scope, a `defaultValue`, `defaultTemplate`,
@@ -1832,6 +1832,7 @@ interfaces:
             subtitle: [dealProducts.productId]
             amount: { value: quoteId.amountBase, currency: quoteId.currencyCode }
             timestamp: updatedAt
+            avatar: ownerRelationId
 ```
 
 `scopeBy` is optional and names a persisted, filterable single string or
@@ -1853,7 +1854,12 @@ displayed together in authored order. A renderer omits empty and unreadable
 parts and supplies an unavailable label if no part is readable; it must never
 substitute an identifier. `subtitle` is an optional list
 of typed paths displayed directly beneath the card title; `body` remains
-available for other card fields.
+available for other card fields. `avatar` optionally names a single reference
+field of the board's entity; the card reads that record like any other card path
+(batched, through the target's authorized list) and draws it as a person: its
+`avatar` image when it has one, otherwise the initials of its display name, which
+is also the avatar's accessible name. An empty or unreadable reference draws no
+avatar.
 
 `amount` pairs a single numeric field with a currency string from the same
 record and relationship path. `timestamp` is a single datetime path. The

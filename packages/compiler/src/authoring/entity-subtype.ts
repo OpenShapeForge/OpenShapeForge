@@ -188,7 +188,7 @@ function findExplicitHiddenReference(value: unknown, hidden: ReadonlySet<string>
       const card = isPlainObject(child.card) ? child.card : {};
       const amount = isPlainObject(card.amount) ? card.amount : {};
       const aggregate = isPlainObject(child.aggregate) ? child.aggregate : {};
-      const paths = [child.groupBy, ...(Array.isArray(card.title) ? card.title : [card.title]), ...(Array.isArray(card.subtitle) ? card.subtitle : []), ...(Array.isArray(card.body) ? card.body : []), card.timestamp, card.indicator, amount.value, amount.currency, aggregate.sum, aggregate.currency];
+      const paths = [child.groupBy, ...(Array.isArray(card.title) ? card.title : [card.title]), ...(Array.isArray(card.subtitle) ? card.subtitle : []), ...(Array.isArray(card.body) ? card.body : []), card.timestamp, card.indicator, card.avatar, amount.value, amount.currency, aggregate.sum, aggregate.currency];
       const leaked = paths.find(item => typeof item === "string" && hidden.has(item.split(".")[0]!));
       if (leaked) return `${childPath} (${String(leaked)})`;
     }
@@ -302,6 +302,7 @@ function pruneInheritedInterfaces(interfaces: Record<string, unknown>, hidden: R
           }
           if (hiddenPath(card.timestamp)) delete nextCard.timestamp;
           if (hiddenPath(nextCard.indicator)) delete nextCard.indicator;
+          if (hiddenPath(nextCard.avatar)) delete nextCard.avatar;
           if (isPlainObject(card.amount) && (hiddenPath(card.amount.value) || hiddenPath(card.amount.currency))) delete nextCard.amount;
           const nextBoard: Record<string, unknown> = { ...board, card: nextCard };
           if (isPlainObject(board.aggregate) && (hiddenPath(board.aggregate.sum) || hiddenPath(board.aggregate.currency))) delete nextBoard.aggregate;

@@ -2220,6 +2220,21 @@ test("board card paths preserve related entity type and collection cardinality",
   expect(build).toThrow("board grouping requires a single relationship or choice field");
 });
 
+test("a board card avatar names a single reference and compiles to its record path", () => {
+  const owner = entity("Deal", "deal", [field("displayName"), field("productId", { osfType: "Product" }), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } })], coreView(), [{ key: "lines", kind: "hasMany", target: "Line", foreignKey: "deal_id" }, { key: "productId", fieldKey: "productId", kind: "belongsTo", target: "Product", foreignKey: "product_id" }]);
+  const line = entity("Line", "line", [field("productId", { osfType: "Product" })], coreView(), [{ key: "productId", fieldKey: "productId", kind: "belongsTo", target: "Product", foreignKey: "product_id" }]);
+  const product = entity("Product", "product", [field("displayName")], coreView());
+  owner.contract.interfaces!.web!.collectionBoard = { groupBy: "stage", card: { title: "displayName", avatar: "productId" } };
+  const build = () => buildWebManifest([owner, line, product]);
+  expect(build().entities.Deal!.views.collection.board!.card.avatar).toEqual({ path: [{ entityId: "Deal", relationshipId: "Deal.productId" }], targetEntityId: "Product", osfType: "Product", cardinality: "one" });
+  for (const avatar of ["displayName", "lines", "missing"]) {
+    owner.contract.interfaces!.web!.collectionBoard!.card.avatar = avatar;
+    expect(build).toThrow("board card avatar must name a single reference field");
+  }
+  delete owner.contract.interfaces!.web!.collectionBoard!.card.avatar;
+  expect(build().entities.Deal!.views.collection.board!.card).not.toHaveProperty("avatar");
+});
+
 test("board card relationship paths allow four hops and reject five", () => {
   const owner = entity("Root", "root", [field("name"), field("stage", { options: { type: "static", items: [{ value: "open", label: text("Open") }] } })], coreView(), [{ key: "next", kind: "hasMany", target: "Node1", foreignKey: "root_id" }]);
   const nodes = Array.from({ length: 5 }, (_, i) => entity(`Node${i + 1}`, `node${i + 1}`, [field("name")], coreView(), i < 4 ? [{ key: "next", kind: "hasMany", target: `Node${i + 2}`, foreignKey: "parent_id" }] : []));

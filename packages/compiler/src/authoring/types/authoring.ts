@@ -554,6 +554,8 @@ export type CollectionTableValueDefinition = {
   select?: "one";
   when?: { path: string; equals: string | number | boolean };
   defaultValue?: string | number;
+  /** Text the cell shows when the value resolves to nothing, instead of the empty mark. */
+  emptyLabel?: LocalizedText;
 };
 /** Binding-backed record panel body: the same tabs -> groups -> fields shape as a record view layout, resolved against the binding schema. */
 /**
@@ -621,8 +623,14 @@ export type CollectionTableDefinition = {
   ungrouped?: LocalizedText;
   columns: Array<{ key: string; label: LocalizedText; values: CollectionTableValueDefinition[]; membershipValues?: CollectionTableValueDefinition[] }>;
   summary?: { field: string; labels?: Record<string, LocalizedText> };
-  /** Footer: the matching population and one total per currency from a collection read over the whole authorized set. */
-  totals?: { entity: string; operation: string; count: LocalizedText; label: LocalizedText; note?: LocalizedText };
+  /**
+   * Footer from a collection read over the whole authorized set: the matching population and one total
+   * per currency, or `parts`, numbers of the read's output each drawn with its label. A tree table's footer
+   * is either this or `summary`, never both.
+   */
+  totals?:
+    | { entity: string; operation: string; count: LocalizedText; label: LocalizedText; note?: LocalizedText; parts?: never }
+    | { entity: string; operation: string; parts: Array<{ path: string; label: LocalizedText; decimalPlaces?: number }>; count?: never; label?: never; note?: never };
 };
 
 export interface EntityWebViewDefinition {
@@ -640,7 +648,7 @@ export interface EntityWebViewDefinition {
     table?: CollectionTableDefinition;
     tree?: { children: string; parent?: string; label?: string; count?: string; through?: { record: string; orderBy?: string } };
     /** Optional grouped board presentation of this same collection. */
-    board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: string; currency: string }; card: { title: string | string[]; timestamp?: string; indicator?: string; subtitle?: string[]; amount?: { value: string; currency: string }; body?: string[] } };
+    board?: { groupBy: string; scopeBy?: string; groupSummary?: string; aggregate?: { sum: string; currency: string }; card: { title: string | string[]; timestamp?: string; indicator?: string; avatar?: string; subtitle?: string[]; amount?: { value: string; currency: string }; body?: string[] } };
     /** Opaque host renderer-registry key; omission uses the generic collection renderer. */
     renderer?: string;
     route: string | LocalizedText;

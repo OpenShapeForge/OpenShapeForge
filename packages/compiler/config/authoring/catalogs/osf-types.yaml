@@ -337,7 +337,6 @@ types:
       display: FieldSingleLine
       input: FieldSingleRelatedRecord
     props:
-      searchable: false
       clearable: false
 
   fileStorageLocation:

@@ -445,33 +445,33 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 5000
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: MAINTENANCEORDERSTATUS
             clearable: false
       issueDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       plannedStartDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       plannedEndDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       actualStartDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       actualEndDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

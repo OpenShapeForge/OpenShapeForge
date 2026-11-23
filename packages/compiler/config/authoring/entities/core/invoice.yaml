@@ -587,27 +587,27 @@ interfaces:
     fields:
       invoiceKind:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: INVOICEKIND
             clearable: false
       invoiceStatus:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: INVOICESTATUS
             clearable: false
       issueDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       dueDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       dispatchChannel:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: INVOICEDISPATCHCHANNEL
             clearable: true

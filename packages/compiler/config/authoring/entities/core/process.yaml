@@ -354,25 +354,25 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 4000
       processType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: PROCESSTYPE
             clearable: false
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: PROCESSSTATUS
             clearable: false
       priority:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEPRIORITY
             clearable: true
@@ -390,7 +390,7 @@ interfaces:
           props: {}
       completionApprovalComment:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 2000
@@ -400,7 +400,7 @@ interfaces:
           props: {}
       note:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 4000

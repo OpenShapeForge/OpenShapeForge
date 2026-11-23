@@ -35,7 +35,7 @@ const field = (
     cardinality: "single",
     required: false,
     label: { en: overrides.key },
-    render: { component: "Input" },
+    render: { component: "FieldSingleLine" },
     ...overrides,
   }) as CompiledField;
 

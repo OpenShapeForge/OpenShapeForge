@@ -289,31 +289,31 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 5
             maxLength: 8000
       caseFileType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEFILETYPE
             clearable: false
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEFILESTATUS
             clearable: false
       confidentiality:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEFILECONFIDENTIALITY
             clearable: true
       archiveStatus:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEFILEARCHIVESTATUS
             clearable: true
@@ -331,11 +331,11 @@ interfaces:
           props: {}
       retentionUntil:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       aiSummary:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 6
             maxLength: 8000

@@ -221,7 +221,7 @@ interfaces:
     fields:
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASESTATUS
             clearable: false
@@ -235,19 +235,19 @@ interfaces:
           props: {}
       actorType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEACTORTYPE
             clearable: true
       source:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASESTATUSEVENTSOURCE
             clearable: true
       note:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 4000

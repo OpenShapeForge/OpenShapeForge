@@ -31,11 +31,11 @@ test("identity-bearing v3 storage entities have no implicit CRUD; v2 and identit
 
 test("presentation-only Web fields do not expose standalone Web operations", () => {
   const internal = entity("Internal", [{ key: "title", osfType: "string" }]);
-  internal.interfaces = { web: { fields: { title: { render: { component: "Input" } } } } };
+  internal.interfaces = { web: { fields: { title: { render: { component: "FieldSingleLine" } } } } };
   expect(() => createAuthoringValidator().validate(internal, "internal.yaml")).not.toThrow();
   expect(() => assertEntityAuthoring(internal, "internal.yaml")).not.toThrow();
   expect(webOperationActions(internal)).toBeUndefined();
-  internal.interfaces.web!.fields!.missing = { render: { component: "Input" } };
+  internal.interfaces.web!.fields!.missing = { render: { component: "FieldSingleLine" } };
   expect(() => assertEntityAuthoring(internal, "internal.yaml")).toThrow("missing");
 });
 

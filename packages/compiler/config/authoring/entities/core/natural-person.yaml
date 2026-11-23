@@ -429,17 +429,17 @@ interfaces:
     fields:
       dateOfBirth:
         render:
-          component: DatePicker
+          component: FieldDate
           props:
             maxDate: today
       dateOfDeath:
         render:
-          component: DatePicker
+          component: FieldDate
           props:
             maxDate: today
       gender:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: GENDER
             clearable: true

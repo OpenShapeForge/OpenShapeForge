@@ -414,27 +414,27 @@ interfaces:
     fields:
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: BILLINGRUNITEMSTATUS
             clearable: false
       mode:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: BILLINGRUNMODE
             clearable: false
       periodStart:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       periodEnd:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       failureMessage:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 2000

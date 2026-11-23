@@ -243,13 +243,13 @@ interfaces:
     fields:
       milestoneType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: MILESTONETYPE
             clearable: false
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: MILESTONESTATUS
             clearable: false
@@ -275,7 +275,7 @@ interfaces:
           props: {}
       note:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 2000

@@ -311,7 +311,7 @@ interfaces:
     fields:
       side:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: LEDGERSIDE
             clearable: false

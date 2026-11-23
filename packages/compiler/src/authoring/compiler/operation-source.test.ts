@@ -173,8 +173,8 @@ test("operations-backed entity reference compiles to display-only relationship w
       entity: { ...relationEntityId, module: "core", title: "Relation", labels: { en: "Relations", nl: "Relaties" }, domains: [], filterField: "displayName" },
       storage: { table: "relation", columns: [{ field: "id", column: "id", type: "text", nullable: false, storageClass: "core" }, { field: "displayName", column: "display_name", type: "text", nullable: true, storageClass: "core" }] },
       model: { fields: [
-        { key: "id", baseType: "string", osfType: "string", cardinality: "single", required: true, label: { en: "ID", nl: "ID" }, render: { component: "Input" } },
-        { key: "displayName", baseType: "string", osfType: "string", cardinality: "single", required: false, label: { en: "Name", nl: "Naam" }, render: { component: "Input" } },
+        { key: "id", baseType: "string", osfType: "string", cardinality: "single", required: true, label: { en: "ID", nl: "ID" }, render: { component: "FieldSingleLine" } },
+        { key: "displayName", baseType: "string", osfType: "string", cardinality: "single", required: false, label: { en: "Name", nl: "Naam" }, render: { component: "FieldSingleLine" } },
       ], relationships: [] },
       crud: relationCrud,
       entityOperations: buildEntityOperations({ entity: relationEntityId, crud: relationCrud, authorization: relationAuthorization }),

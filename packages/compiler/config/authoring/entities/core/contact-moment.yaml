@@ -344,19 +344,19 @@ interfaces:
     fields:
       channel:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: COMMUNICATIONCHANNEL
             clearable: false
       direction:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: COMMUNICATIONDIRECTION
             clearable: true
       content:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 6
             maxLength: 10000

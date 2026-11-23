@@ -62,20 +62,46 @@ export type FieldRelationship = FieldDefinitionRelationship;
 export type FieldRuntimeMetadata = FieldDefinitionRuntimeMetadata;
 export type FieldWorkflowInspector = FieldDefinitionWorkflowInspector;
 
+/** One Figma property of a design-system field, as the design system's Figma manifest declares it. */
+export interface FigmaFieldProp {
+  /** The property's name in Figma ("Label width"); the key it is listed under is its name in YAML. */
+  figma: string;
+  type: string;
+  default?: unknown;
+  /** The values of a VARIANT property. */
+  options?: string[];
+}
+
 export interface ComponentDefinition {
-  kind: "view" | "field" | "relationship" | "custom";
+  /** `extension`: a name a plugin owns and declares in its own catalog. */
+  kind: "view" | "field" | "relationship" | "custom" | "extension";
   description: string;
+  /** Authorable props: Figma properties of a design-system field, then behaviour and data settings. */
   props: string[];
+  /** Authorable texts, under the design system's slot names. */
+  texts?: string[];
+  /** Set for a design-system field: its Figma component and properties. */
+  figma?: { name: string; node: string; props: Record<string, FigmaFieldProp> };
+}
+
+export interface ComponentDefault {
+  label?: LocalizedText;
+  component: string;
+  readOnly?: boolean;
+  props?: Record<string, unknown>;
+  /** The component for a field that must have a value, where the default component is for one that may be absent. */
+  required?: { component: string; props?: Record<string, unknown> };
 }
 
 export interface ComponentCatalog {
   schemaVersion: number;
   kind: "componentCatalog";
-  defaults: Record<
-    string,
-    { label?: LocalizedText; component: string; readOnly?: boolean; props?: Record<string, unknown> }
-  >;
+  defaults: Record<string, ComponentDefault>;
   viewDefaults: Record<string, { component: string }>;
+  /** Texts every design-system field takes (authored catalog only; folded into `components` on load). */
+  fieldTexts?: string[];
+  /** Non-Figma texts and props per design-system field (authored catalog only; folded into `components` on load). */
+  fields?: Record<string, { texts?: string[]; props?: string[] }>;
   components: Record<string, ComponentDefinition>;
 }
 

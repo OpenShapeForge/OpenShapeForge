@@ -410,23 +410,23 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 2000
       startDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       endDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       nextProlongationDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       endProlongationDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

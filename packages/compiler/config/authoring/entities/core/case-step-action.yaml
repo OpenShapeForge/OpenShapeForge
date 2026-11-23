@@ -205,28 +205,28 @@ interfaces:
     fields:
       kind:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASESTEPACTIONKIND
             clearable: false
       startMode:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASESTEPACTIONSTARTMODE
             clearable: false
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASESTEPACTIONSTATUS
             clearable: false
       taskTemplate:
         render:
-          component: JsonFieldEditor
+          component: FieldCodeStructuredJson
       result:
         render:
-          component: JsonFieldEditor
+          component: FieldCodeStructuredJson
       failureDetails:
         render:
-          component: JsonFieldEditor
+          component: FieldCodeStructuredJson

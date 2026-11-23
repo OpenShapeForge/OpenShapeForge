@@ -585,61 +585,61 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 6
             maxLength: 10000
       category:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASECATEGORY
             clearable: true
       caseType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASETYPE
             clearable: false
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASESTATUS
             clearable: false
       routingStatus:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEROUTINGSTATUS
             clearable: true
       priority:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEPRIORITY
             clearable: true
       originChannel:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEORIGINCHANNEL
             clearable: true
       confidentiality:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASECONFIDENTIALITY
             clearable: true
       waitingReason:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEWAITINGREASON
             clearable: true
       breachState:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEBREACHSTATE
             clearable: true
@@ -685,13 +685,13 @@ interfaces:
           props: {}
       resultDetails:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 4000
       aiSummary:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 6
             maxLength: 8000

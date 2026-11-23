@@ -305,7 +305,7 @@ interfaces:
           props: {}
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: VATRETURNSTATUS
             clearable: false

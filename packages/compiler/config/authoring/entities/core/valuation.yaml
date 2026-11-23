@@ -313,17 +313,17 @@ interfaces:
     fields:
       valuationKind:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: VALUATIONKIND
             clearable: false
       valuedAt:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       notes:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 5000

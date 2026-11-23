@@ -62,7 +62,7 @@ export function buildBasicFieldSchemaFields(
         en: "Value between 0 and 1.",
       },
       render: {
-        component: "NumberInput",
+        component: "FieldIntegerDecimal",
         props: { min: 0, max: 1 },
       },
     },
@@ -71,14 +71,14 @@ export function buildBasicFieldSchemaFields(
       osfType: "boolean",
       dataPath: "field.readOnly",
       label: { nl: "Alleen-lezen", en: "Read only" },
-      render: { component: "Switch" },
+      render: { component: "FieldBoolean" },
     },
     {
       key: "schemaAudit",
       osfType: "boolean",
       dataPath: "field.audit",
       label: { nl: "Audit", en: "Audit" },
-      render: { component: "Switch" },
+      render: { component: "FieldBoolean" },
     },
     {
       key: "schemaUnit",
@@ -101,7 +101,7 @@ export function buildBasicFieldSchemaFields(
         nl: "Waarde wordt per taal opgeslagen ({nl, en, fr}); de actieve taal wordt bewerkt.",
         en: "Value is stored per language ({nl, en, fr}); the active language is edited.",
       },
-      render: { component: "Switch" },
+      render: { component: "FieldBoolean" },
     },
     {
       key: "schemaDescription",

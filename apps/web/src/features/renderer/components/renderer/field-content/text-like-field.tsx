@@ -51,7 +51,7 @@ export function renderTextLikeField(
     onBlur,
   } as const;
 
-  if (component === "NumberInput") {
+  if (component === "FieldIntegerDecimal" || component === "FieldPercentage" || component === "FieldDuration") {
     return (
       <NumberInput
         {...commonProps}
@@ -73,7 +73,7 @@ export function renderTextLikeField(
     );
   }
 
-  if (component === "DatePicker") {
+  if (component === "FieldDate") {
     return (
       <DatePicker
         {...commonProps}
@@ -142,7 +142,7 @@ export function renderTextLikeField(
   }
 
   if (
-    component === "JsonFieldEditor" ||
+    component === "FieldCodeStructuredJson" ||
     fieldValueType(field) === "object" ||
     isFieldCollection(field)
   ) {

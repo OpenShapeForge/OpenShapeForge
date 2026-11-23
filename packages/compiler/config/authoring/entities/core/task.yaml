@@ -615,25 +615,25 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 5
             maxLength: 5000
       type:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: TAAKTYPE
             clearable: false
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: TAAKSTATUS
             clearable: false
       priority:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: TAAKPRIORITEIT
             clearable: true
@@ -654,10 +654,10 @@ interfaces:
           props: {}
       outcome:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 2000
       openUrl:
         render:
-          component: Input
+          component: FieldSingleLine

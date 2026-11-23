@@ -49,7 +49,7 @@ import {
   resolveViewGroups,
   type ResolvedViewGroup,
 } from "../view-groups.js";
-import { assertCurrentPresentationComponent } from "./model.js";
+import { assertDeclaredComponent } from "./model.js";
 
 export function buildViews(
   coreEntity: LoadedArtifacts["coreEntity"],
@@ -124,8 +124,8 @@ function compileFields(
     return {
       key: f.key,
       ...(hasRender ? { renderOverride: typeof f.render === "string"
-        ? vr(catalog, f.render, f.key)
-        : { ...vr(catalog, f.render!.component, f.key), ...(f.render!.props ? { props: structuredClone(f.render!.props) } : {}) } } : {}),
+        ? fieldRender(catalog, f.render, f.key)
+        : { ...fieldRender(catalog, f.render!.component, f.key), ...(f.render!.props ? { props: structuredClone(f.render!.props) } : {}) } } : {}),
       ...(displayMode ? { fieldDisplayMode: displayMode } : {}),
     };
   });
@@ -146,11 +146,15 @@ function compileRelationshipUsage(
   };
 }
 
-function vr(catalog: ComponentCatalog, element: string, owner = element): CompiledViewRender {
+function vr(catalog: ComponentCatalog, element: string): CompiledViewRender {
   const def = catalog.viewDefaults[element];
-  const componentName = def?.component ?? element;
-  assertCurrentPresentationComponent(componentName, owner);
-  return { component: componentName };
+  return { component: def?.component ?? element };
+}
+
+/** A view's override of a field's component names a component the catalog declares. */
+function fieldRender(catalog: ComponentCatalog, component: string, owner: string): CompiledViewRender {
+  assertDeclaredComponent(catalog, component, owner);
+  return { component };
 }
 
 function compileActions(

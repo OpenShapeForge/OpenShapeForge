@@ -462,25 +462,25 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 2000
       stepType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: PROCESSSTEPTYPE
             clearable: false
       executionStyle:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASESTEPEXECUTIONSTYLE
             clearable: false
       completionMode:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASESTEPCOMPLETIONMODE
             clearable: false
@@ -491,57 +491,57 @@ interfaces:
             valueMode: selectId
       conditionExpression:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 2
             maxLength: 1000
       actions.action.key:
         render:
-          component: Input
+          component: FieldSingleLine
       actions.action.sequenceNumber:
         render:
-          component: NumberInput
+          component: FieldIntegerDecimal
       actions.action.kind:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASESTEPACTIONKIND
             clearable: false
       actions.action.required:
         render:
-          component: Switch
+          component: FieldNullableBoolean
       actions.action.startMode:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASESTEPACTIONSTARTMODE
             clearable: false
       actions.action.taskTemplate.title:
         render:
-          component: Input
+          component: FieldSingleLine
       actions.action.taskTemplate.description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
       actions.action.taskTemplate.type:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: TAAKTYPE
             clearable: true
       actions.action.taskTemplate.priority:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: TAAKPRIORITEIT
             clearable: true
       actions.action.taskTemplate.isBlocking:
         render:
-          component: Switch
+          component: FieldNullableBoolean
       actions.action.taskTemplate.dueOffsetHours:
         render:
-          component: NumberInput
+          component: FieldIntegerDecimal
       actions.action.taskTemplate.defaultWorkQueueId:
         render:
           component: OptionVariablePicker
@@ -550,7 +550,7 @@ interfaces:
             clearable: true
       actions.action.taskTemplate.assignedRole:
         render:
-          component: Input
+          component: FieldSingleLine
       actions.action.taskTemplate.assignmentMetadata:
         render:
-          component: JsonFieldEditor
+          component: FieldCodeStructuredJson

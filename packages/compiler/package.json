@@ -29,6 +29,7 @@
   ],
   "scripts": {
     "generate": "bun src/index.ts",
+    "figma:fields": "bun scripts/figma-fields.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test"
   },

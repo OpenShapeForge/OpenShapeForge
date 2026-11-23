@@ -312,17 +312,17 @@ interfaces:
     fields:
       kind:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: PRICEADJUSTMENTKIND
             clearable: false
       effectiveDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 1000

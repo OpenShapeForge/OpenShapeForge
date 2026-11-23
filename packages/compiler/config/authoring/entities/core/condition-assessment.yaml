@@ -306,13 +306,13 @@ interfaces:
           props: {}
       scoreScale:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: ASSESSMENTSCALE
             clearable: true
       notes:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 5000

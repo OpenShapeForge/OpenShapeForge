@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { BASE_ENTITY_FILENAME, applyBaseEntityToCore, loadBaseEntity } from "./base-entity.js";
 import { assertEntityAuthoring } from "./entity-authoring.js";
+import { loadComponentCatalog } from "./component-catalog.js";
 import { deriveEntityOsfTypes, deriveProviderOsfTypes, normalizeEntityFields } from "./entity-fields.js";
 import { loadOperationCatalogs } from "./operation-catalog.js";
 import {
@@ -99,9 +100,7 @@ export function loadFieldCompilationCatalogs(authoringDir: string): {
   osfTypes: Record<string, OsfTypeDefinition>;
 } {
   return {
-    componentCatalog: loadYaml<ComponentCatalog>(
-      join(authoringDir, "catalogs", "components.yaml"),
-    ),
+    componentCatalog: loadComponentCatalog(authoringDir),
     osfTypes: loadOsfTypes(authoringDir),
   };
 }
@@ -369,8 +368,7 @@ export function loadEntity(
   const transformCatalog = loadYaml<TransformCatalog>(catalogPath);
 
   // Component catalog
-  const componentPath = join(authoringDir, "catalogs", "components.yaml");
-  const componentCatalog = loadYaml<ComponentCatalog>(componentPath);
+  const componentCatalog = loadComponentCatalog(authoringDir);
 
   // App shell (optional)
   const shellPath = join(authoringDir, "menu.yaml");

@@ -337,25 +337,25 @@ interfaces:
     fields:
       signedDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       firstUsedDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       lastUsedDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: MANDATESTATUS
             clearable: false
       sequenceType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: SEPASEQUENCETYPE
             clearable: false

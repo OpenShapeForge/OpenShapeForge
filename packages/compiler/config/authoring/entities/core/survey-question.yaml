@@ -262,25 +262,25 @@ interfaces:
     fields:
       questionKind:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: SURVEYQUESTIONKIND
             clearable: true
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 4000
       subject:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: SURVEYQUESTIONSUBJECT
             clearable: true
       origin:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: SURVEYQUESTIONORIGIN
             clearable: true

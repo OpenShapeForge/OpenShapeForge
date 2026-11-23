@@ -317,11 +317,11 @@ interfaces:
     fields:
       postingDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: LEDGERPOSTINGSTATUS
             clearable: false

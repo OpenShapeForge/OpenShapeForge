@@ -24,8 +24,8 @@ const componentCatalog: ComponentCatalog = {
   schemaVersion: 1,
   kind: "componentCatalog",
   defaults: {
-    string: { component: "Input" },
-    number: { component: "NumberInput" },
+    string: { component: "FieldSingleLine" },
+    number: { component: "FieldIntegerDecimal" },
     boolean: { component: "Checkbox" },
     object: { component: "ObjectEditor" },
     collection: { component: "CollectionEditor" },
@@ -59,7 +59,7 @@ function field(overrides: Partial<CompiledField> & Pick<CompiledField, "key">): 
     cardinality: "single",
     required: false,
     label: { en: key },
-    render: { component: "Input" },
+    render: { component: "FieldSingleLine" },
     ...rest,
   };
 }
@@ -195,7 +195,7 @@ describe("compiled field JSON Schema projection", () => {
         relationship: { kind: "belongsTo", entity: "StatusDefinition" },
         hints: { aiInstructions: "Choose the closest status." },
         options: { type: "referentiedata", referentieGroep: "STATUS" },
-        render: { component: "ReferenceSelect", props: { referentieGroep: "STATUS" } },
+        render: { component: "FieldSingleRelatedRecord", props: { referentieGroep: "STATUS" } },
       }),
       {
         STATUS: [
@@ -217,7 +217,7 @@ describe("compiled field JSON Schema projection", () => {
       default: "active",
       "x-osf-i18n": { title: { en: "status" }, description: { en: "Lifecycle status." }, enum: { active: { en: "Active", nl: "Actief" }, closed: { en: "Closed", nl: "Gesloten" } } },
       "x-osf-type": "string",
-      "x-osf-presentation": {component:"ReferenceSelect",props:{referentieGroep:"STATUS"}},
+      "x-osf-presentation": {component:"FieldSingleRelatedRecord",props:{referentieGroep:"STATUS"}},
     });
   });
 
@@ -291,7 +291,7 @@ describe("compiled field JSON Schema projection", () => {
     expect(schema.items).toEqual({
       allOf: [
         { type: "string", maxLength: 8, enum: ["primary", "backup"], "x-osf-type": "string" },
-        { type: "string", title: "Code", description: "Code", "x-osf-i18n": { title: { en: "Code" } }, "x-osf-type": "string", "x-osf-presentation": {component:"Input"} },
+        { type: "string", title: "Code", description: "Code", "x-osf-i18n": { title: { en: "Code" } }, "x-osf-type": "string", "x-osf-presentation": {component:"FieldSingleLine"} },
       ],
       "x-osf-type": "string",
     });
@@ -420,7 +420,7 @@ describe("compiled field JSON Schema projection", () => {
     const properties = schema.properties as Record<string, Record<string, unknown>>;
 
     expect(properties.definition?.$ref).toBe("#/$defs/fieldDefinition");
-    expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition", "x-osf-presentation": {component:"Input"} });
+    expect(properties.definitions?.items).toEqual({ $ref: "#/$defs/fieldDefinition", "x-osf-type": "fieldDefinition", "x-osf-presentation": {component:"FieldSingleLine"} });
     expect(Object.keys(schema.$defs as object).filter((key) => key === "fieldDefinition")).toHaveLength(1);
     expect(() => new Ajv2020.default({ strict: false }).compile(schema)).not.toThrow();
   });
@@ -572,23 +572,23 @@ describe("compiled field JSON Schema projection", () => {
       { key: "details", osfType: "object", children: [{ key: "amount", osfType: "amount" }] },
       { key: "rows", osfType: "object", cardinality: "collection", item: { key: "row", osfType: "boolean" } },
       { key: "total", osfType: "money", readOnly: true },
-      { key: "override", osfType: "money", render: { component: "NumberInput", props: { step: 5 } } },
+      { key: "override", osfType: "money", render: { component: "FieldIntegerDecimal", props: { step: 5 } } },
     ]);
     const originalDefinitions = structuredClone(definitions);
     const originalTypes = structuredClone(osfTypes);
     const compiled = createFieldSchemaCompiler({ componentCatalog, osfTypes }).compile(definitions);
 
     expect(compiled.map((field) => field.render)).toEqual([
-      { component: "NumberInput" },
-      { component: "NumberInput" },
+      { component: "FieldIntegerDecimal" },
+      { component: "FieldIntegerDecimal" },
       { component: "CollectionEditor" },
-      { component: "NumberInput" },
+      { component: "FieldIntegerDecimal" },
       { component: "ObjectEditor" },
       { component: "CollectionEditor" },
       { component: "MoneyDisplay", props: { currency: "EUR" } },
-      { component: "NumberInput", props: { currency: "EUR", step: 5 } },
+      { component: "FieldIntegerDecimal", props: { currency: "EUR", step: 5 } },
     ]);
-    expect(compiled[4]?.children?.[0]?.render).toEqual({ component: "NumberInput" });
+    expect(compiled[4]?.children?.[0]?.render).toEqual({ component: "FieldIntegerDecimal" });
     expect(compiled[5]?.item?.render).toEqual({ component: "Checkbox" });
     expect(compiled[6]?.readOnly).toBe(true);
     expect(definitions).toEqual(originalDefinitions);

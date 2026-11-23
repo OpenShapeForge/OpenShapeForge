@@ -344,13 +344,13 @@ interfaces:
     fields:
       accountType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: LEDGERACCOUNTTYPE
             clearable: false
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 2000

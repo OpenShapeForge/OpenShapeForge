@@ -5,10 +5,10 @@ import { materializeEntityInputSources, resolveEntityInputSources } from "./enti
 
 const fields: CompiledField[] = [{
   key: "title", osfType: "string", baseType: "string", cardinality: "single", required: true,
-  label: { en: "Title" }, render: { component: "Input" }, validation: { minLength: 1, maxLength: 80 },
+  label: { en: "Title" }, render: { component: "FieldSingleLine" }, validation: { minLength: 1, maxLength: 80 },
 }, {
   key: "serverValue", osfType: "string", baseType: "string", cardinality: "single", required: false,
-  label: { en: "Server" }, render: { component: "Input" }, writtenBy: ["example.server"],
+  label: { en: "Server" }, render: { component: "FieldSingleLine" }, writtenBy: ["example.server"],
 }];
 const contract = { entity: { name: "Example" }, model: { fields, relationships: [] }, storage: { columns: [] } } as unknown as CompiledEntityContract;
 const input = { type: "object", properties: {

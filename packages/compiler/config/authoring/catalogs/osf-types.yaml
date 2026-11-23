@@ -7,7 +7,7 @@ types:
     label: { en: Icon, nl: Icoon }
     baseType: string
     render:
-      display: TextDisplay
+      display: FieldSingleLine
       input: IconPicker
     validation:
       pattern: "^[a-z][a-z0-9\\-]{0,63}$"
@@ -103,7 +103,7 @@ types:
             en: Outline
             nl: Omlijning
     render:
-      display: TextDisplay
+      display: FieldSingleLine
       input: ListSelect
 
   labelOutputType:
@@ -125,7 +125,7 @@ types:
             en: String
             nl: Tekst
     render:
-      display: TextDisplay
+      display: FieldSingleLine
       input: ListSelect
 
   labelValidity:
@@ -147,15 +147,15 @@ types:
             en: Conditional
             nl: Voorwaardelijk
     render:
-      display: TextDisplay
+      display: FieldSingleLine
       input: ListSelect
 
   multilineText:
     label: { en: Multiline text, nl: Meerregelige tekst }
     baseType: string
     render:
-      display: TextDisplay
-      input: Textarea
+      display: FieldMultiline
+      input: FieldMultiline
     props:
       rows: 4
 
@@ -175,8 +175,8 @@ types:
       pattern: "^[^@]+@[^@]+\\.[^@]+$"
       maxLength: 254
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldEmail
+      input: FieldEmail
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -205,8 +205,8 @@ types:
       minLength: 15
       maxLength: 34
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
     classification:
       sensitivity: confidential
       category: financieel
@@ -227,8 +227,8 @@ types:
       pattern: "^https?://"
       maxLength: 2000
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldUrl
+      input: FieldUrl
 
   webUrl:
     label: { en: Web URL, nl: Web-URL }
@@ -238,8 +238,8 @@ types:
       pattern: "^https?://"
       maxLength: 2000
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
 
   mailtoLink:
     label: { en: Email link, nl: E-maillink }
@@ -249,8 +249,8 @@ types:
       pattern: "^mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+(?:\\?.*)?$"
       maxLength: 2000
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -263,8 +263,8 @@ types:
       pattern: "^tel:\\+?[0-9][0-9\\s\\-().]{5,30}$"
       maxLength: 200
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -277,8 +277,8 @@ types:
       pattern: "^sms:\\+?[0-9][0-9\\s\\-().]{5,30}(?:\\?.*)?$"
       maxLength: 500
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -291,8 +291,8 @@ types:
       pattern: "^(?:https://wa\\.me/\\+?[0-9]{7,15}(?:\\?.*)?|https://api\\.whatsapp\\.com/send\\?phone=\\+?[0-9]{7,15}(?:&.*)?|whatsapp://send\\?phone=\\+?[0-9]{7,15}(?:&.*)?)$"
       maxLength: 2000
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -305,8 +305,8 @@ types:
       pattern: "^(?:https?|mailto|tel|sms|whatsapp|openshapeforge|geo|maps):"
       maxLength: 2000
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
 
   identityAssuranceLevel:
     label: { en: Identity assurance level, nl: Identificatieniveau }
@@ -314,8 +314,8 @@ types:
     baseType: string
     icon: ShieldCheck
     render:
-      display: TextDisplay
-      input: ReferenceSelect
+      display: FieldSingleLine
+      input: FieldSingleRelatedRecord
     props:
       clearable: false
     options:
@@ -333,8 +333,8 @@ types:
     baseType: string
     icon: List
     render:
-      display: TextDisplay
-      input: ReferenceSelect
+      display: FieldSingleLine
+      input: FieldSingleRelatedRecord
     props:
       clearable: false
 
@@ -343,7 +343,7 @@ types:
     baseType: string
     icon: File
     render:
-      display: TextDisplay
+      display: FieldSingleLine
       input: FileUpload
     props:
       fileNameField: fileName
@@ -396,8 +396,8 @@ types:
     validation:
       pattern: "^[0-9]{4}\\s?[A-Z]{2}$"
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
 
   # `baseType: number` is the LOGICAL type: scalar-projection stores a
   # PostgreSQL numeric and returns exact decimal text, so no amount passes
@@ -432,8 +432,8 @@ types:
       minLength: 1
       maxLength: 64
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldIdentifierCode
+      input: FieldIdentifierCode
 
   # A rate expressed in percent, and its own type on purpose: an arbitrary
   # number must not be able to fill it and it must not fill an arbitrary
@@ -444,8 +444,8 @@ types:
     baseType: number
     icon: Percent
     render:
-      display: TextDisplay
-      input: NumberInput
+      display: FieldPercentage
+      input: FieldPercentage
     props:
       unit: "%"
       decimalPlaces: 2
@@ -465,7 +465,7 @@ types:
     indexProjection: { number: value, text: unit }
     icon: Ruler
     render:
-      display: TextDisplay
+      display: FieldMeasurement
       input: FieldMeasurement
     children:
       - key: value
@@ -499,15 +499,15 @@ types:
     validation:
       min: 0
     render:
-      display: TextDisplay
-      input: NumberInput
+      display: FieldDuration
+      input: FieldDuration
     props:
       unit: s
 
   # A span is one value, not two fields that happen to sit next to each other.
   # The same ordering invariant runs at every canonical write boundary.
   numericRange:
-    props: {"minimumLabel": {"en": "From", "nl": "Van"}, "maximumLabel": {"en": "To", "nl": "Tot"}}
+    props: {"minLabel": {"en": "From", "nl": "Van"}, "maxLabel": {"en": "To", "nl": "Tot"}}
     schema:
       x-osf-ordered-fields: { lower: from, upper: to, kind: numeric }
     kind: object
@@ -515,7 +515,7 @@ types:
     baseType: object
     icon: ArrowLeftRight
     render:
-      display: TextDisplay
+      display: FieldNumericRange
       input: FieldNumericRange
     children:
       - key: from
@@ -537,8 +537,8 @@ types:
     validation:
       pattern: "^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$"
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldTime
+      input: FieldTime
 
   # As numericRange, over valid, ordered calendar dates.
   dateRange:
@@ -550,7 +550,7 @@ types:
     baseType: object
     icon: CalendarRange
     render:
-      display: TextDisplay
+      display: FieldDateRange
       input: FieldDateRange
     children:
       - key: from
@@ -566,7 +566,7 @@ types:
   # 2026-W42. Distinct from FiscalPeriod, which is a record with its own
   # lifecycle: a reporting label is not a bookkeeping period.
   calendarPeriod:
-    props: {"typeLabel": {"en": "Period type", "nl": "Soort periode"}, "valueLabel": {"en": "Period value", "nl": "Periode"}, "kindLabels": {"month": {"en": "Month", "nl": "Maand"}, "quarter": {"en": "Quarter", "nl": "Kwartaal"}, "year": {"en": "Year", "nl": "Jaar"}, "halfYear": {"en": "Half-year", "nl": "Halfjaar"}, "week": {"en": "Week", "nl": "Week"}}}
+    props: {"typeLabel": {"en": "Period type", "nl": "Soort periode"}, "periodLabel": {"en": "Period value", "nl": "Periode"}, "kindLabels": {"month": {"en": "Month", "nl": "Maand"}, "quarter": {"en": "Quarter", "nl": "Kwartaal"}, "year": {"en": "Year", "nl": "Jaar"}, "halfYear": {"en": "Half-year", "nl": "Halfjaar"}, "week": {"en": "Week", "nl": "Week"}}}
     label: { en: Calendar period, nl: Kalenderperiode }
     baseType: string
     icon: CalendarDays
@@ -574,8 +574,8 @@ types:
       pattern: "^[0-9]{4}(-(Q[1-4]|H[12]|0[1-9]|1[0-2]|W(0[1-9]|[1-4][0-9]|5[0-3])))?$"
       maxLength: 8
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldPeriod
+      input: FieldPeriod
 
   # A bounded declarative schedule, so storing one needs no text grammar and no
   # parser. It is a VALUE contract: nothing in OSF expands a recurrence into
@@ -600,7 +600,7 @@ types:
     baseType: object
     icon: Repeat
     render:
-      display: TextDisplay
+      display: FieldSingleLine
       input: FieldRecurrence
     children:
       - key: frequency
@@ -663,8 +663,8 @@ types:
       min: 1
       max: 5
     render:
-      display: TextDisplay
-      input: NumberInput
+      display: FieldSingleLine
+      input: FieldIntegerDecimal
 
   # A point on earth, with the bounds latitude and longitude really have.
   coordinates:
@@ -673,7 +673,7 @@ types:
     baseType: object
     icon: MapPin
     render:
-      display: TextDisplay
+      display: FieldSingleLine
       input: MapPicker
     children:
       - key: latitude
@@ -700,15 +700,15 @@ types:
       pattern: "^(UTC|[A-Za-z_]+\\/[A-Za-z0-9_\\+\\-]+(\\/[A-Za-z0-9_\\+\\-]+)?)$"
       maxLength: 64
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldTimezone
+      input: FieldTimezone
 
   condition:
     baseType: object
     label: { en: Condition, nl: Conditie }
     icon: GitBranch
     render:
-      display: TextDisplay
+      display: FieldSingleLine
       input: ConditionBuilder
     props:
       mode: free
@@ -719,14 +719,14 @@ types:
     icon: Tags
     render:
       display: BadgeList
-      input: JsonFieldEditor
+      input: FieldCodeStructuredJson
 
   variableTemplate:
     baseType: string
     label: { en: Variable template, nl: Variabele-template }
     icon: Braces
     render:
-      display: TextDisplay
+      display: FieldSingleLine
       input: VariableTemplateInput
 
   # A value whose type comes from a stored FieldDefinition beside it rather
@@ -741,8 +741,8 @@ types:
     label: { en: Typed value, nl: Getypeerde waarde }
     icon: Variable
     render:
-      display: TextDisplay
-      input: JsonFieldEditor
+      display: FieldSingleLine
+      input: FieldCodeStructuredJson
 
   # A stored FieldDefinition is the authored field contract itself: its value
   # schema is the field-definition authoring schema, bundled by the compiler.
@@ -767,4 +767,4 @@ types:
         maxLength: 160
         not: { enum: [constructor, prototype, __proto__] }
       additionalProperties: { type: string, maxLength: 8000 }
-    render: { display: TextDisplay, input: FieldKeyValuePairs }
+    render: { display: FieldSingleLine, input: FieldKeyValuePairs }

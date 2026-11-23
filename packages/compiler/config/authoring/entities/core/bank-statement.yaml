@@ -304,5 +304,5 @@ interfaces:
     fields:
       statementDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

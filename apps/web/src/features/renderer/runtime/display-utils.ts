@@ -41,11 +41,11 @@ export function formatRendererDisplayValue(
 ): string {
   const component = field
     ? resolveFieldDisplayRender({ ...field, readOnly: true }).component
-    : "TextDisplay";
+    : "FieldSingleLine";
 
   if (value == null || value === "") return "-";
 
-  if (component === "ReferenceSelect" && typeof value === "string") {
+  if ((component === "FieldSingleRelatedRecord" || component === "FieldMultipleRelatedRecords") && typeof value === "string") {
     const items = field ? resolveRendererReferenceItems(field) : [];
     const option = items.find((item) => item.value === value);
     if (option) {
@@ -59,7 +59,7 @@ export function formatRendererDisplayValue(
     return formatBsn(value);
   }
 
-  if (component === "DatePicker" && typeof value === "string") {
+  if (component === "FieldDate" && typeof value === "string") {
     const date = new Date(value);
     if (!Number.isNaN(date.getTime())) {
       return date.toLocaleDateString(lang === "nl" ? "nl-NL" : "en-US");

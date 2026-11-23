@@ -1221,9 +1221,16 @@ Catalog files under `catalogs/` merge across authoring layers automatically
   bound value cannot lose the unit it was measured in.
   [field-acceptance-fixture.md](field-acceptance-fixture.md) walks the whole
   catalogue of field value contracts, one authored field per entry.
-- **`components.yaml`** — the render-component catalog: default component per
-  base type (string → `Input`, boolean → `Switch`, …), view defaults, and
-  component definitions with their allowed props.
+- **`components.yaml`** — render defaults per base type and view, plus
+  definitions for components outside the Figma field catalogue. The compiler
+  reads field names and visual props from
+  `packages/compiler/config/design-system/figma-fields.json`. Use `fieldTexts`
+  for shared text slots and `fields.<component>` for its additional settings
+  and text slots. For example, strings default to `FieldSingleLine`, and
+  `defaults.boolean.required` selects `FieldBoolean` for required booleans
+  while nullable booleans use `FieldNullableBoolean`. Existing YAML can be
+  updated with `packages/compiler/scripts/migrate-figma-catalog.ts` from the
+  source checkout.
 - **`transforms.yaml`** — named mapping transforms (`enumMap`, `cast`,
   `fallbackChain`) used by entity mappings.
 - **`retention-policies.yaml`** — named retention policies entities/fields

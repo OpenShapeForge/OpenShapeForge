@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { fieldValueType } from "@/lib/field-contract/field-v2";
+import { canonicalFieldComponentName } from "@/lib/field-rendering/compiler-field-rendering";
 import type { Field as CompilerField } from "../../../../../generated/compiler/field-contract";
 import { isFieldCollection } from "../../../../../lib/field-contract/field-v2";
 import {
@@ -78,5 +79,5 @@ export function getRenderableFieldNodeKey(
 }
 
 export function usesInlineJsonEditor(field: CompilerField) {
-  return field.render?.component === "FieldCodeStructuredJson";
+  return canonicalFieldComponentName(field.render?.component) === "FieldCodeStructuredJson";
 }

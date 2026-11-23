@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
-import { resolveFieldInputRender } from "./compiler-field-rendering";
+import { canonicalFieldComponentName, resolveFieldDisplayRender, resolveFieldInputRender } from "./compiler-field-rendering";
 
 describe("default field controls resolve through the one type axis", () => {
   test("an integer connector configuration field gets the number control, not a text box", () => {
@@ -22,4 +22,26 @@ describe("default field controls resolve through the one type axis", () => {
     // No osfType at all: nothing to resolve, the generic input.
     expect(resolveFieldInputRender({ key: "free" })).toEqual({ component: "FieldSingleLine", source: "fallback" });
   });
+});
+
+
+test("persisted field control names resolve to the controls already stored for the tenant", () => {
+  const cases = [
+    ["Input", "FieldSingleLine"],
+    ["InputMultiline", "InputMultiline"],
+    ["NumberInput", "FieldIntegerDecimal"],
+    ["ReferenceSelect", "FieldSingleRelatedRecord"],
+    ["Switch", "FieldBoolean"],
+    ["DatePicker", "FieldDate"],
+    ["JsonFieldEditor", "FieldCodeStructuredJson"],
+  ] as const;
+
+  for (const [component, expected] of cases) {
+    const props = { testSetting: true };
+    const field = { render: { component, props } };
+    expect(resolveFieldInputRender(field)).toEqual({ component: expected, props, source: "explicit" });
+    expect(resolveFieldDisplayRender(field)).toEqual({ component: expected, props, source: "explicit" });
+  }
+  expect(canonicalFieldComponentName("InputMultiline")).toBe("FieldMultiline");
+  expect(canonicalFieldComponentName("CustomControl")).toBe("CustomControl");
 });

@@ -6,6 +6,7 @@ import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection.js";
 import { withDbSession } from "../../db/session.js";
 import { applyAppHelpersMigration } from "../../db/migrations/app-helpers.js";
+import { applySearchIndex } from "../../db/migrations/search-index.js";
 import { auditContext, runWithAuditContext, withAuditContext } from "../../platform/audit-context.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { labelSourceOperation, readLabelPages, type LabelPage, type LabelSource } from "./label-search.js";
@@ -43,6 +44,8 @@ function databaseUrl(app = false) {
 }
 
 const previous = new Map<string, GeneratedCrudTable | undefined>();
+let indexed: Awaited<ReturnType<typeof applySearchIndex>> | undefined;
+const installIndex = () => applySearchIndex(privileged!.db, [first, second], [first, second].map(table => ({ entity: table.source!.authoringEntityName!, field: "name", descriptionField: "description" })));
 beforeAll(async () => {
   databaseUrl(); admin = new SQL(adminUrl, { max: 1 });
   const roles = await admin`select rolsuper, rolbypassrls from pg_roles where rolname = 'openshapeforge_app'`;
@@ -71,6 +74,12 @@ beforeAll(async () => {
       (gen_random_uuid(),${tenant}::uuid,${otherUser}::uuid,'Needle of another member','plain','s'),
       (gen_random_uuid(),${foreignTenant}::uuid,${user}::uuid,'Needle of another tenant','plain','s')`.execute(privileged.db);
   }
+  // The search index, installed over rows that already exist: the entries are built from them.
+  await sql`create table platform.search_entries (id uuid primary key default gen_random_uuid(), tenant_id uuid not null, entity text not null, record_id uuid not null, text_norm text not null);
+    create unique index search_entries_record_idx on platform.search_entries(tenant_id, entity, record_id);
+    alter table platform.search_entries enable row level security; alter table platform.search_entries force row level security;
+    create policy tenant on platform.search_entries using (tenant_id=app.current_tenant()); grant select on platform.search_entries to openshapeforge_app`.execute(privileged.db);
+  indexed = await installIndex();
 }, 30000);
 afterAll(async () => {
   for (const [name, table] of previous) { if (table) generatedCrudTables.set(name, table); else generatedCrudTables.delete(name); }
@@ -81,7 +90,7 @@ afterAll(async () => {
 
 const filterFor = (query: string) => ({ or: [{ name: { contains: query } }, { description: { contains: query } }] });
 const sourcesFor = (query: string, tables = [first, second]): LabelSource[] =>
-  tables.map(table => ({ key: table.name, table, filter: filterFor(query), labelField: "name" }));
+  tables.map(table => ({ key: table.name, table, filter: filterFor(query), labelField: "name", match: { fields: ["name", "description"], text: query } }));
 
 /** One page of an entity's own list Operation, reduced the way search reduces it. */
 async function listed(actor: typeof session, table: GeneratedCrudTable, query: string, limit: number, cursor?: string): Promise<LabelPage | "refused"> {
@@ -102,7 +111,7 @@ const combined = (actor: typeof session, sources: LabelSource[], limit: number, 
     () => withDbSession(restricted!.db, actor, trx => readLabelPages(trx, actor, sources, limit))));
 
 test("each branch equals that entity's own list page, for hits, more than a page, and no hits", async () => {
-  for (const [query, limit] of [["needle", 5], ["needle", 50], ["NEEDLE", 3], ["shared", 5], ["absent", 5]] as const) {
+  for (const [query, limit] of [["needle", 5], ["needle", 50], ["NEEDLE", 3], ["shared", 5], ["absent", 5], ["e", 5], ["%", 5], ["_", 5], ["\\", 5]] as const) {
     const pages = await combined(session, sourcesFor(query), limit);
     for (const table of [first, second]) {
       const own = await listed(session, table, query, limit);
@@ -220,4 +229,62 @@ test("application search answers the same through one statement, however many so
     expect(two.statements).toBeLessThan(perSource.statements);
     if (process.env.LABEL_SEARCH_REPORT) console.log(`statements: per source (2 sources) ${perSource.statements}, combined (1 source) ${one.statements}, combined (2 sources) ${two.statements}`);
   } finally { await counted.close(); }
+});
+
+test("the index is installed once, names the candidates, and follows every write", async () => {
+  expect(indexed).toEqual({ installed: true, entities: 2, rebuilt: [first, second].map(table => table.source!.authoringEntityName!) });
+  // Unchanged configuration: nothing is rebuilt, no table is locked again.
+  expect((await installIndex()).rebuilt).toEqual([]);
+  const target = sql.id(first.schema, first.table), entity = first.source!.authoringEntityName!;
+  const labels = async (query: string) => (await combined(session, sourcesFor(query, [first]), 50))!.get(first.name)?.items.map(item => item.label).sort() ?? [];
+  const own = async (query: string) => { const page = await listed(session, first, query, 50); if (page === "refused") throw new Error("refused"); return page.items.map(item => item.label).sort(); };
+  // The read goes through the index: a record without an entry is not a candidate.
+  const hidden = (await sql<{ id: string }>`delete from platform.search_entries where entity=${entity} and text_norm like 'needle 7%' returning record_id::text as id`.execute(privileged!.db)).rows;
+  expect(hidden).toHaveLength(1);
+  expect(await labels("needle 7")).toEqual([]);
+  // Any write to the record puts its entry back.
+  await sql`update ${target} set name='Thimble 7' where id=${hidden[0]!.id}::uuid`.execute(privileged!.db);
+  expect(await labels("thimble")).toEqual(["Thimble 7"]);
+  expect(await labels("needle 7")).toEqual([]);
+  const id = randomUUID();
+  await sql`insert into ${target}(id,tenant_id,viewer,name,description,secret) values (${id}::uuid,${tenant}::uuid,${user}::uuid,'Fresh','a 100%_match','zebra')`.execute(privileged!.db);
+  expect(await labels("100%_m")).toEqual(["Fresh"]);
+  // A classified value is never indexed.
+  expect((await sql`select 1 from platform.search_entries where text_norm like '%zebra%'`.execute(privileged!.db)).rows).toHaveLength(0);
+  await sql`delete from ${target} where id=${id}::uuid`.execute(privileged!.db);
+  expect(await labels("100%_m")).toEqual([]);
+  expect((await sql`select 1 from platform.search_entries where record_id=${id}::uuid`.execute(privileged!.db)).rows).toHaveLength(0);
+  await sql`update ${target} set name='Needle 7' where id=${hidden[0]!.id}::uuid`.execute(privileged!.db);
+  expect(await labels("needle")).toEqual(await own("needle"));
+});
+
+test("an entry is a candidate only: rows the session may not see are never returned, and never hide the ones it may", async () => {
+  const target = sql.id(first.schema, first.table);
+  // Far more matches of another member and another tenant than candidates are read at once.
+  await sql`insert into ${target}(id,tenant_id,viewer,name,description,secret) select gen_random_uuid(),${tenant}::uuid,${otherUser}::uuid,'Crowd '||n,'plain','s' from generate_series(1,200) n`.execute(privileged!.db);
+  await sql`insert into ${target}(id,tenant_id,viewer,name,description,secret) select gen_random_uuid(),${foreignTenant}::uuid,${user}::uuid,'Crowd abroad '||n,'plain','s' from generate_series(1,50) n`.execute(privileged!.db);
+  await sql`insert into ${target}(id,tenant_id,viewer,name,description,secret) select gen_random_uuid(),${tenant}::uuid,${user}::uuid,'Crowd mine '||n,'plain','s' from generate_series(1,7) n`.execute(privileged!.db);
+  for (const limit of [3, 5, 50]) {
+    const page = (await combined(session, sourcesFor("crowd", [first]), limit))!.get(first.name);
+    const own = await listed(session, first, "crowd", limit);
+    if (own === "refused") throw new Error("The list Operation refused an authorized read.");
+    expect(page).toEqual(own);
+    expect(page!.items.every(item => item.label.startsWith("Crowd mine"))).toBe(true);
+    expect(page!.items).toHaveLength(Math.min(limit, 7));
+  }
+});
+
+test("a match the index does not cover exactly is read from the entity itself", async () => {
+  const entity = first.source!.authoringEntityName!;
+  const removed = (await sql<{ id: string }>`delete from platform.search_entries where entity=${entity} and text_norm like 'needle 3%' returning record_id::text as id`.execute(privileged!.db)).rows;
+  try {
+    // Only the name: the index holds name and description together, so it is not used and the row is found.
+    const byName: LabelSource = { key: first.name, table: first, filter: { or: [{ name: { contains: "needle 3" } }] }, labelField: "name", match: { fields: ["name"], text: "needle 3" } };
+    expect((await combined(session, [byName], 5))!.get(first.name)!.items.map(item => item.label)).toEqual(["Needle 3"]);
+    // No declared match at all: the same.
+    expect((await combined(session, [{ key: byName.key, table: byName.table, filter: byName.filter, labelField: byName.labelField }], 5))!.get(first.name)!.items.map(item => item.label)).toEqual(["Needle 3"]);
+  } finally {
+    await sql`update ${sql.id(first.schema, first.table)} set description=description||'' where id=${removed[0]!.id}::uuid`.execute(privileged!.db);
+    await sql`insert into platform.search_entries(tenant_id,entity,record_id,text_norm) select tenant_id,${entity},id,lower(coalesce(name,'')||E'\n'||coalesce(description,'')) from ${sql.id(first.schema, first.table)} where id=${removed[0]!.id}::uuid on conflict do nothing`.execute(privileged!.db);
+  }
 });

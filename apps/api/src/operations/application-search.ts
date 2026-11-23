@@ -48,7 +48,9 @@ export function nativeApplicationSearchHandler(operation:OperationContract):Modu
         readable(field)&&(!columns||columns.get(field)?.type==='text'||(exactId&&columns.get(field)?.type==='uuid')));
       if(!fields.length)return [];
       const predicates=fields.map(field=>({[field]:columns?.get(field)?.type==='uuid'?{eq:query}:{contains:query}}));
-      return [{source,field:source.field,table,predicates}];
+      // Every predicate is a text match on the query: the search index may name the candidates.
+      const contains=!exactId&&fields.every(field=>columns?.get(field)?.type==='text')?fields:undefined;
+      return [{source,field:source.field,table,predicates,contains}];
     });
     // The first page of every persisted source is one statement in one
     // transaction: each branch is that entity's own list read, under its own
@@ -59,7 +61,8 @@ export function nativeApplicationSearchHandler(operation:OperationContract):Modu
     const combined=audit&&!input.after&&typeof (platform as {db?:{withSession?:unknown}}).db?.withSession==='function'?plans.filter(plan=>plan.table&&labelSearchable(plan.table)):[];
     let pages:Map<string,LabelPage>|undefined;
     if(combined.length){
-      const labelSources:LabelSource[]=combined.map(plan=>({key:plan.source.entity,table:plan.table!,filter:{or:plan.predicates},labelField:plan.field}));
+      const labelSources:LabelSource[]=combined.map(plan=>({key:plan.source.entity,table:plan.table!,filter:{or:plan.predicates},labelField:plan.field,
+        ...(plan.contains?{match:{fields:plan.contains,text:query}}:{})}));
       const readOperations=[...new Set([...(audit!.readOperations??[]),...labelSources.map(entry=>labelSourceOperation(entry.table))])];
       try{
         pages=await runWithAuditContext({...audit!,readOperations},()=>platform.db.withSession(session,trx=>readLabelPages(trx,session,labelSources,first)));

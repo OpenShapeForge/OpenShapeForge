@@ -535,13 +535,6 @@ export function runtimeStaticOperationRegistrations(
       execute: async (session, request, options): Promise<RuntimeOperationExecutionResult> => {
         options?.signal?.throwIfAborted();
         const input = { ...(request.input ?? {}) };
-        // Workflow workers already send their persisted command key on every
-        // attempt. Use it as the optional source-page effect key so existing
-        // import graphs can recover the same receipt without a graph edit.
-        if (entry.operation.key === "source-sync.apply-page" &&
-            request.idempotencyKey !== undefined && input.effectKey === undefined) {
-          input.effectKey = request.idempotencyKey;
-        }
         if (entry.operation.idempotency.mode === "idempotency-key") {
           const field = entry.operation.idempotency.inputField!;
           const key = request.idempotencyKey ?? (typeof input[field] === "string" ? input[field] as string : undefined);

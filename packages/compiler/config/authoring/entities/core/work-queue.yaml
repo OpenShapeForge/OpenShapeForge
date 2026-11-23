@@ -324,31 +324,31 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 4000
       queueType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: WORKQUEUETYPE
             clearable: false
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: WORKQUEUESTATUS
             clearable: false
       assignmentStrategy:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: WORKQUEUESTRATEGY
             clearable: false
       defaultPriority:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: CASEPRIORITY
             clearable: true

@@ -8,37 +8,37 @@ defaults:
     label:
       nl: Tekst
       en: Text
-    component: Input
+    component: FieldSingleLine
   integer:
     label:
       nl: Geheel getal
       en: Integer
-    component: NumberInput
+    component: FieldIntegerDecimal
   number:
     label:
       nl: Getal
       en: Number
-    component: NumberInput
+    component: FieldIntegerDecimal
   boolean:
     label:
       nl: Ja/nee
       en: Yes/no
-    component: Switch
+    component: FieldNullableBoolean
   object:
     label:
       nl: JSON-object
       en: JSON object
-    component: JsonFieldEditor
+    component: FieldCodeStructuredJson
   collection:
     label:
       nl: JSON-lijst
       en: JSON array
-    component: JsonFieldEditor
+    component: FieldCodeStructuredJson
   date:
     label:
       nl: Datum
       en: Date
-    component: DatePicker
+    component: FieldDate
   datetime:
     label:
       nl: Datum en tijd
@@ -162,73 +162,25 @@ components:
 
   # ── Field-level components ──
 
-  Input:
+  EntityReferenceSelect:
     kind: field
-    description: Standard single-line text input.
-    props:
-      - placeholder
-      - maxLength
+    description: Picks a record of the referenced entity.
+    props: [layout, labelWidth]
 
-  TextDisplay:
+  EntityReferenceDisplay:
     kind: field
-    description: Read-only text display.
-    props: []
+    description: Shows the referenced record.
+    props: [layout, labelWidth]
+
+  ChoiceTiles:
+    kind: field
+    description: Static options shown as tiles.
+    props: [layout, labelWidth]
 
   FieldDefinitionView:
     kind: field
     description: Read-only display for single field definitions and field-definition lists.
     props: []
-
-  NumberInput:
-    kind: field
-    description: Numeric input with optional min/max and unit display.
-    props:
-      - min
-      - max
-      - unit
-      - currency
-
-  Switch:
-    kind: field
-    description: Boolean toggle switch.
-    props: []
-
-  ReferenceSelect:
-    kind: field
-    description: Dropdown select for referentiedata values.
-    props:
-      - referentieGroep
-      - clearable
-      - searchable
-
-  DatePicker:
-    kind: field
-    description: Date picker.
-    props:
-      - minDate
-      - maxDate
-
-  FieldDateAndTime:
-    kind: field
-    description: Battery FieldDateAndTime field.
-    props:
-      - layout
-      - timezone
-      - showTimezoneSelector
-
-  Textarea:
-    kind: field
-    description: Multi-line text input.
-    props:
-      - placeholder
-      - maxLength
-      - rows
-
-  JsonFieldEditor:
-    kind: field
-    description: JSON editor for structured object and array values.
-    props:
-      - rows
 
   ConditionBuilder:
     kind: field
@@ -246,13 +198,6 @@ components:
       - defaultCenter
       - geocodeProvider
 
-  AddressAutocomplete:
-    kind: field
-    description: Address lookup with autocomplete via BAG or other provider.
-    props:
-      - provider
-      - country
-
   FileUpload:
     kind: field
     description: File upload with drag and drop.
@@ -261,47 +206,7 @@ components:
       - maxSizeMb
       - multiple
 
-  MarkdownText:
-    kind: field
-    description: Rich text editor for formatted content.
-    props:
-      - toolbar
-      - maxLength
-
-  FieldMoney:
-    kind: field
-    description: Currency-aware numeric input with formatting.
-    props:
-      - currency
-
-  AreaInput:
-    kind: field
-    description: Area input with m² formatting.
-    props:
-      - unit
-
-  RelationPicker:
-    kind: field
-    description: Search and pick a relation from the system.
-    props:
-      - entityType
-      - displayField
-      - searchFields
-
-  UnitPicker:
-    kind: field
-    description: Search and pick a unit/eenheid from the system.
-    props:
-      - displayField
-      - searchFields
-
   # ── Custom view components ──
-  BsnDisplay:
-    kind: field
-    description: Formatted BSN display with XXX.XX.XXX pattern.
-    props:
-      - value
-
   WoonsituatiePanel:
     kind: custom
     description: Custom panel showing living situation details for a person.

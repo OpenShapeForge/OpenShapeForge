@@ -18,7 +18,7 @@ function field(
     cardinality: "single",
     required: false,
     label: { en: key },
-    render: { component: "Input" },
+    render: { component: "FieldSingleLine" },
     ...overrides,
   };
 }

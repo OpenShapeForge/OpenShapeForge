@@ -227,13 +227,13 @@ interfaces:
     fields:
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: TENANTSTATUS
             clearable: false
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 500

@@ -329,23 +329,23 @@ interfaces:
     fields:
       valueDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       direction:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: LEDGERSIDE
             clearable: false
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 1000
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: BANKSTATEMENTLINESTATUS
             clearable: false

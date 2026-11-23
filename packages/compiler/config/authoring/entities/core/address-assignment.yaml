@@ -287,15 +287,15 @@ interfaces:
     fields:
       startDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       endDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       notes:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 2000

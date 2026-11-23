@@ -268,15 +268,15 @@ function getFieldSchemaTypeLabel(field: Field, lang: FieldSchemaEditorLang) {
 function getFieldSchemaInputLabel(field: Field, lang: FieldSchemaEditorLang) {
   const component = field.render?.component;
   const labels: Record<string, { nl: string; en: string }> = {
-    Input: { nl: "Invoerveld", en: "Input" },
-    InputMultiline: { nl: "Tekstgebied", en: "Textarea" },
-    NumberInput: { nl: "Getalveld", en: "Number input" },
+    FieldSingleLine: { nl: "Invoerveld", en: "Input" },
+    FieldMultiline: { nl: "Tekstgebied", en: "Textarea" },
+    FieldIntegerDecimal: { nl: "Getalveld", en: "Number input" },
     Select: { nl: "Dropdown", en: "Dropdown" },
     ListSelect: { nl: "Zoekbare keuzelijst", en: "Searchable list" },
-    ReferenceSelect: { nl: "Referentieselectie", en: "Reference select" },
-    Switch: { nl: "Schakelaar", en: "Switch" },
+    FieldSingleRelatedRecord: { nl: "Referentieselectie", en: "Reference select" },
+    FieldBoolean: { nl: "Schakelaar", en: "Switch" },
     Checkbox: { nl: "Checkbox", en: "Checkbox" },
-    DatePicker: { nl: "Datumkiezer", en: "Date picker" },
+    FieldDate: { nl: "Datumkiezer", en: "Date picker" },
     FileUpload: { nl: "Bestandsupload", en: "File upload" },
   };
 

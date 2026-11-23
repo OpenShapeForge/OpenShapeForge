@@ -289,7 +289,7 @@ interfaces:
     fields:
       legalForm:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: LEGALFORM
             clearable: true

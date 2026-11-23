@@ -11,8 +11,8 @@ types:
       pattern: "^[^@]+@[^@]+\\.[^@]+$"
       maxLength: 254
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldEmail
+      input: FieldEmail
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -25,8 +25,8 @@ types:
     validation:
       pattern: "^\\+?[0-9\\s\\-()]{7,20}$"
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -40,8 +40,8 @@ types:
       minLength: 15
       maxLength: 34
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
     classification:
       sensitivity: confidential
       category: financieel
@@ -62,8 +62,8 @@ types:
       pattern: "^https?://"
       maxLength: 2000
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldUrl
+      input: FieldUrl
 
   webUrl:
     label: { en: Web URL, nl: Web-URL }
@@ -73,8 +73,8 @@ types:
       pattern: "^https?://"
       maxLength: 2000
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
 
   mailtoLink:
     label: { en: Email link, nl: E-maillink }
@@ -84,8 +84,8 @@ types:
       pattern: "^mailto:[^\\s@]+@[^\\s@]+\\.[^\\s@]+(?:\\?.*)?$"
       maxLength: 2000
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -98,8 +98,8 @@ types:
       pattern: "^tel:\\+?[0-9][0-9\\s\\-().]{5,30}$"
       maxLength: 200
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -112,8 +112,8 @@ types:
       pattern: "^sms:\\+?[0-9][0-9\\s\\-().]{5,30}(?:\\?.*)?$"
       maxLength: 500
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -126,8 +126,8 @@ types:
       pattern: "^(?:https://wa\\.me/\\+?[0-9]{7,15}(?:\\?.*)?|https://api\\.whatsapp\\.com/send\\?phone=\\+?[0-9]{7,15}(?:&.*)?|whatsapp://send\\?phone=\\+?[0-9]{7,15}(?:&.*)?)$"
       maxLength: 2000
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
     classification:
       sensitivity: pii
       category: contactgegevens
@@ -140,8 +140,8 @@ types:
       pattern: "^(?:https?|mailto|tel|sms|whatsapp|openshapeforge|geo|maps):"
       maxLength: 2000
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
 
   conversationId:
     label: { en: Conversation ID, nl: Conversatie-ID }
@@ -152,8 +152,8 @@ types:
       remoteUrl: /api/runtime/lookups?osfType=conversationId
       searchParam: search
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
 
   identityAssuranceLevel:
     label: { en: Identity assurance level, nl: Identificatieniveau }
@@ -161,9 +161,10 @@ types:
     baseType: string
     icon: ShieldCheck
     render:
-      display: TextDisplay
-      input: ReferenceSelect
+      display: FieldSingleLine
+      input: FieldSingleRelatedRecord
     props:
+      searchable: false
       clearable: false
     options:
       type: static
@@ -182,8 +183,8 @@ types:
     validation:
       pattern: "^[0-9]{4}\\s?[A-Z]{2}$"
     render:
-      display: TextDisplay
-      input: Input
+      display: FieldSingleLine
+      input: FieldSingleLine
 
   money:
     label: { en: Currency amount, nl: Geldbedrag }
@@ -200,7 +201,7 @@ types:
     label: { en: Condition, nl: Conditie }
     icon: GitBranch
     render:
-      display: TextDisplay
+      display: FieldSingleLine
       input: ConditionBuilder
     props:
       mode: free
@@ -210,7 +211,7 @@ types:
     label: { en: Variable template, nl: Variabele-template }
     icon: Braces
     render:
-      display: TextDisplay
+      display: FieldSingleLine
       input: VariableTemplateInput
 
   fieldDefinition:
@@ -220,7 +221,7 @@ types:
     icon: ListChecks
     render:
       display: FieldDefinitionView
-      input: JsonFieldEditor
+      input: FieldCodeStructuredJson
 
   # Test fixture: an object type with an index projection (a tenant field may
   # use it) and one without (excluded from tenant fields by rule).

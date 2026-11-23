@@ -231,7 +231,7 @@ interfaces:
           props: {}
       message:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 1000

@@ -4,7 +4,7 @@ import { buildBlueprint } from "./blueprint.js";
 import type { CoreEntity, CompiledField, CompiledColumn } from "../types.js";
 
 const entity = { entity: "Template", blueprint: { fields: ["name"] }, filterField: "name" } as CoreEntity;
-const field: CompiledField = { key: "name", osfType: "string", baseType: "string", cardinality: "single", required: true, label: { en: "Name" }, render: { component: "Input" } };
+const field: CompiledField = { key: "name", osfType: "string", baseType: "string", cardinality: "single", required: true, label: { en: "Name" }, render: { component: "FieldSingleLine" } };
 const column: CompiledColumn = { field: "name", column: "name", type: "text", nullable: false, storageClass: "core" };
 describe("blueprint safe content", () => {
   test("opt-in carries stable core operation IDs", () => {

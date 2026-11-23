@@ -330,27 +330,27 @@ interfaces:
     fields:
       roleType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: PROCESSROLE
             clearable: false
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: ROLEASSIGNMENTSTATUS
             clearable: true
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 2000
       startDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       endDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

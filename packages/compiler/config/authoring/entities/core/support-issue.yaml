@@ -415,25 +415,25 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 6
             maxLength: 5000
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: SUPPORTSTATUS
             clearable: false
       priority:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: SUPPORTPRIORITEIT
             clearable: true
       category:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: SUPPORTCATEGORIE
             clearable: true
@@ -447,25 +447,25 @@ interfaces:
           props: {}
       triageSummary:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 1000
       triageSentiment:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: TRIAGESENTIMENT
             clearable: true
       triageUrgency:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: TRIAGEURGENTIE
             clearable: true
       triageAnalysis:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 6
             maxLength: 5000

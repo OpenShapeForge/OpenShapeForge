@@ -247,29 +247,29 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 4000
       assessmentScale:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: ASSESSMENTSCALE
             clearable: true
       responseDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       responseStatus:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: RESULTRESPONSE
             clearable: true
       assessmentExplanation:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 4000

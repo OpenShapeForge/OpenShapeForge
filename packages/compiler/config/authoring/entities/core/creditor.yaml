@@ -450,27 +450,27 @@ interfaces:
     fields:
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: ROLEASSIGNMENTSTATUS
             clearable: true
       paymentTerms:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: PAYMENTTERMS
             clearable: true
       startDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       endDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 2000

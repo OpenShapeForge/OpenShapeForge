@@ -239,15 +239,15 @@ interfaces:
     fields:
       linkType:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: AGREEMENTLINKTYPE
             clearable: false
       validFrom:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       validTo:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

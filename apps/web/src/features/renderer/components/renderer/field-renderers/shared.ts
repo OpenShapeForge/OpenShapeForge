@@ -78,5 +78,5 @@ export function getRenderableFieldNodeKey(
 }
 
 export function usesInlineJsonEditor(field: CompilerField) {
-  return field.render?.component === "JsonFieldEditor";
+  return field.render?.component === "FieldCodeStructuredJson";
 }

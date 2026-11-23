@@ -260,19 +260,19 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 4000
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: SLAPOLICYSTATUS
             clearable: false
       targetEntity:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: SLAPOLICYTARGETENTITY
             clearable: false

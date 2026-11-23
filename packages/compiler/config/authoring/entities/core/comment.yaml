@@ -241,13 +241,13 @@ interfaces:
     fields:
       body:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 5
             maxLength: 5000
       source:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: COMMENTBRON
             clearable: false

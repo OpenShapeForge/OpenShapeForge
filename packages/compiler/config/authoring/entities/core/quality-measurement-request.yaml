@@ -273,19 +273,19 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 4000
       measurementKind:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: QUALITYMEASUREMENTKIND
             clearable: true
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: QUALITYMEASUREMENTSTATUS
             clearable: false

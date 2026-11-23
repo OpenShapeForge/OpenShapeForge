@@ -19,6 +19,8 @@ import type {
   Field,
   FieldOptions,
   ComponentCatalog,
+  ComponentDefinition,
+  FigmaFieldProp,
   CompiledField,
   CompiledRender,
   OsfTypeDefinition,
@@ -46,7 +48,7 @@ export function resolveModelFields(
       ...(bounds ? { cardinalityBounds: bounds } : {}),
       required: field.required === true || required,
       label: field.label ?? semType?.label ?? { en: field.key, nl: field.key },
-      render: resolveRender(field, componentCatalog, semType),
+      render: resolveRender(required && !field.required ? { ...field, required: true } : field, componentCatalog, semType),
       osfType: field.osfType,
     };
     if (field.authoring) compiled.authoring = structuredClone(field.authoring);
@@ -149,37 +151,73 @@ export function resolveRender(
   semType?: OsfTypeDefinition
 ): CompiledRender {
   const defaultKey = fieldCardinality(field) === "collection" ? "collection" : field.baseType;
-  const defaultEntry = catalog.defaults[defaultKey] ?? catalog.defaults[field.baseType];
+  const typeDefault = catalog.defaults[defaultKey] ?? catalog.defaults[field.baseType] ?? catalog.defaults.string;
+  // A type whose value may be absent names the component for a value that must be there.
+  const defaultEntry = field.required && typeDefault?.required ? typeDefault.required : typeDefault;
   const component = field.render?.component
     ?? (field.options?.type === "static" && field.options.presentation === "tiles" ? "ChoiceTiles" : undefined)
     ?? (field.readOnly ? semType?.render?.display : semType?.render?.input)
     ?? (semType?.kind === "entityId" ? (field.readOnly ? "EntityReferenceDisplay" : "EntityReferenceSelect") : undefined)
-    ?? defaultEntry?.component ?? "Input";
-  assertCurrentPresentationComponent(component, field.key);
-  const declared = catalog.components[component];
-  if (component.startsWith("Field") && !declared && Object.keys(catalog.components).length) throw new Error(`${field.key}: unknown presentation component ${component}.`);
+    ?? defaultEntry?.component
+    // A catalog without defaults (a unit test's) gives the design system's text field.
+    ?? "FieldSingleLine";
+  const declared = assertDeclaredComponent(catalog, component, field.key);
   // Currency also carries canonical numeric value context; changing the renderer must not erase it.
-  const shellProp = (key: string) => ["layout", "labelBand", "inputTone", "viewSurface", "spacing", "frontLabelWidth", "viewSizing"].includes(key);
   const contextProp = (key: string, value: unknown) => key === "currency" && (field.baseType === "number" || field.baseType === "integer") && typeof value === "string";
-  const layer = (props: Record<string, unknown> | undefined, owner: string | undefined) =>
-    declared && owner !== component
-      ? Object.fromEntries(Object.entries(props ?? {}).filter(([key, value]) => declared.props.includes(key) || shellProp(key) || contextProp(key, value)))
-      : props;
+  const authorable = (key: string, value: unknown) => !declared || declaredProp(declared, key) || contextProp(key, value);
+  // What a default or the field's type sets applies where the chosen component takes it.
+  const layer = (props: Record<string, unknown> | undefined) =>
+    Object.fromEntries(Object.entries(props ?? {}).filter(([key, value]) => authorable(key, value)));
   const props = {
-    ...layer(defaultEntry?.props, defaultEntry?.component),
-    ...layer(semType?.props, field.readOnly ? semType?.render?.display : semType?.render?.input),
+    ...layer(defaultEntry?.props),
+    ...layer(semType?.props),
     ...field.render?.props,
   };
-  if (declared && (component.startsWith("Field") || component === "ChoiceTiles")) {
-    const unsupported = Object.keys(props).filter(key => !declared.props.includes(key) && !shellProp(key) && !contextProp(key, props[key]));
-    if (unsupported.length) throw new Error(`${field.key}: ${component} does not declare presentation props ${unsupported.join(", ")}.`);
-  }
+  if (declared && (declared.kind === "field" || declared.kind === "extension")) assertPresentationProps(catalog, declared, component, props, field.key, contextProp);
   return { component, ...(Object.keys(props).length ? {props: structuredClone(props)} : {}) };
 
 }
 
-export function assertCurrentPresentationComponent(component: string, owner: string): void {
-  if (component === "DateTimePicker") {
-    throw new Error(`${owner}: presentation component DateTimePicker is obsolete; use FieldDateAndTime.`);
+const declaredProp = (declared: ComponentDefinition, key: string) => declared.props.includes(key) || Boolean(declared.texts?.includes(key));
+
+/**
+ * Every presentation component YAML names is in the catalog: a design-system
+ * field under its Figma name, a hand-written component or a plugin's declared
+ * extension. A catalog without components (a unit test's) checks nothing.
+ */
+export function assertDeclaredComponent(catalog: ComponentCatalog, component: string, owner: string): ComponentDefinition | undefined {
+  const declared = catalog.components[component];
+  if (!declared && Object.keys(catalog.components).length) throw new Error(`${owner}: unknown presentation component ${component}.`);
+  return declared;
+}
+
+/** The layout and label width every field frame takes, as Figma declares them on its fields. */
+function frameProps(catalog: ComponentCatalog): Record<string, FigmaFieldProp> {
+  for (const definition of Object.values(catalog.components)) {
+    const props = definition.figma?.props;
+    if (props?.layout && props.labelWidth) return { layout: props.layout, labelWidth: props.labelWidth };
+  }
+  return {};
+}
+
+function assertPresentationProps(
+  catalog: ComponentCatalog,
+  declared: ComponentDefinition,
+  component: string,
+  props: Record<string, unknown>,
+  owner: string,
+  contextProp: (key: string, value: unknown) => boolean,
+): void {
+  if ("state" in props && declared.figma?.props.state) throw new Error(`${owner}: ${component} takes no state; the renderer derives Figma's state at run time.`);
+  const unsupported = Object.keys(props).filter(key => !declaredProp(declared, key) && !contextProp(key, props[key]));
+  if (unsupported.length) throw new Error(`${owner}: ${component} does not declare presentation props ${unsupported.join(", ")}.`);
+  const figma = { ...frameProps(catalog), ...declared.figma?.props };
+  for (const [key, value] of Object.entries(props)) {
+    const prop = figma[key];
+    if (!prop || !declared.props.includes(key)) continue;
+    if (prop.type === "VARIANT" && prop.options && !(typeof value === "string" && prop.options.includes(value))) {
+      throw new Error(`${owner}: ${component} ${key} is one of ${prop.options.map(option => JSON.stringify(option)).join(", ")}, not ${JSON.stringify(value)}.`);
+    }
+    if (prop.type === "BOOLEAN" && typeof value !== "boolean") throw new Error(`${owner}: ${component} ${key} is true or false, not ${JSON.stringify(value)}.`);
   }
 }

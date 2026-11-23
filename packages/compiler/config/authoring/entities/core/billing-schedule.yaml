@@ -330,21 +330,21 @@ interfaces:
     fields:
       period:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: BILLINGPERIOD
             clearable: false
       invoiceMode:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: BILLINGAMOUNTTYPE
             clearable: false
       nextProlongationDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       endProlongationDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

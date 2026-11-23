@@ -291,11 +291,11 @@ interfaces:
     fields:
       executionDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: PAYMENTORDERSTATUS
             clearable: false

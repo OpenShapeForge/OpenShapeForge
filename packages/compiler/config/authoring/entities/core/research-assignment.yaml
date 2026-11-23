@@ -263,25 +263,25 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 4000
       assignmentKind:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: RESEARCHASSIGNMENTKIND
             clearable: true
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: RESEARCHSTATUS
             clearable: false
       channel:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: COMMUNICATIONCHANNEL
             clearable: true

@@ -284,15 +284,15 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 1000
       targetDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       achievedAt:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

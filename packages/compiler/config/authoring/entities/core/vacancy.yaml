@@ -331,21 +331,21 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 6
             maxLength: 5000
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: VACANCYSTATUS
             clearable: false
       openedAt:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       closedAt:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

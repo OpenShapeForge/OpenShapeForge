@@ -331,21 +331,21 @@ interfaces:
     fields:
       status:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: EMPLOYMENTSTATUS
             clearable: false
       hireDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       terminationDate:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 2000

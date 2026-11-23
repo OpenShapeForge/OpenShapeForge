@@ -5,12 +5,16 @@ import type {
   Field,
   OsfTypeDefinition,
 } from "../types.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
+import { composeComponentCatalog, loadComponentCatalog } from "../component-catalog.js";
 import { resolveModelFields, resolveRender } from "./model.js";
 
 const catalog: ComponentCatalog = {
   schemaVersion: 1,
   kind: "componentCatalog",
-  defaults: { string: { component: "Input" } },
+  defaults: { string: { component: "FieldSingleLine" } },
   viewDefaults: {},
   components: {},
 };
@@ -36,13 +40,13 @@ describe("choice resolution", () => {
 
   test("the select component's render prop is the same referentiedata group, folded into options", () => {
     const [folded, agreeing] = resolveModelFields([
-      { key: "status", osfType: "referenceDataCode", render: { component: "ReferenceSelect", props: { referentieGroep: "STATUS" } } },
-      { key: "kind", osfType: "referenceDataCode", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "ReferenceSelect", props: { referentieGroep: "KIND" } } },
+      { key: "status", osfType: "referenceDataCode", render: { component: "FieldSingleRelatedRecord", props: { referentieGroep: "STATUS" } } },
+      { key: "kind", osfType: "referenceDataCode", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "FieldSingleRelatedRecord", props: { referentieGroep: "KIND" } } },
     ], catalog, osfTypes);
     expect(folded!.options).toEqual({ type: "referentiedata", referentieGroep: "STATUS" });
     expect(agreeing!.options).toEqual({ type: "referentiedata", referentieGroep: "KIND" });
     expect(() => resolveModelFields([
-      { key: "kind", osfType: "referenceDataCode", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "ReferenceSelect", props: { referentieGroep: "OTHER" } } },
+      { key: "kind", osfType: "referenceDataCode", options: { type: "referentiedata", referentieGroep: "KIND" }, render: { component: "FieldSingleRelatedRecord", props: { referentieGroep: "OTHER" } } },
     ], catalog, osfTypes)).toThrow("kind: render.props.referentieGroep OTHER contradicts options.referentieGroep KIND.");
   });
 });
@@ -82,7 +86,7 @@ describe("semantic renderer mapping", () => {
       referenceDataCode: {
         label: { en: "Reference value", nl: "Referentiewaarde" },
         baseType: "string",
-        render: { display: "TextDisplay", input: "ReferenceSelect" },
+        render: { display: "FieldSingleLine", input: "FieldSingleRelatedRecord" },
         props: { clearable: false },
       },
     };
@@ -94,7 +98,7 @@ describe("semantic renderer mapping", () => {
 
     expect(resolveModelFields(fields, catalog, osfTypes)[0]).toMatchObject({
       key: "status",
-      render: { component: "ReferenceSelect", props: { clearable: false } },
+      render: { component: "FieldSingleRelatedRecord", props: { clearable: false } },
       options: { type: "referentiedata", referentieGroep: "DOCUMENTVERSIONSTATUS" },
     });
   });
@@ -104,7 +108,7 @@ describe("semantic renderer mapping", () => {
       fileStorageLocation: {
         label: { en: "File", nl: "Bestand" },
         baseType: "string",
-        render: { display: "TextDisplay", input: "FileUpload" },
+        render: { display: "FieldSingleLine", input: "FileUpload" },
         props: {
           fileNameField: "fileName",
           mimeTypeField: "mimeType",
@@ -118,7 +122,7 @@ describe("semantic renderer mapping", () => {
       osfType: "fileStorageLocation",
       readOnly: true,
     }], catalog, osfTypes)[0]?.render).toEqual({
-      component: "TextDisplay",
+      component: "FieldSingleLine",
       props: {
         fileNameField: "fileName",
         mimeTypeField: "mimeType",
@@ -151,23 +155,70 @@ test("model compilation retains the canonical field authoring profile",()=>{
 });
 
 test("YAML presentation defaults compose with semantic and field options without losing false",()=>{
- const configured={...catalog,defaults:{string:{component:"Input",props:{layout:"above",emailAction:true}}}};
- const semantic={label:{en:"E-mail"},baseType:"string",render:{display:"TextDisplay",input:"Input"},props:{layout:"front",emailAction:false}} as OsfTypeDefinition;
+ const configured={...catalog,defaults:{string:{component:"FieldSingleLine",props:{layout:"front",emailAction:true}}}};
+ const semantic={label:{en:"E-mail"},baseType:"string",render:{display:"FieldSingleLine",input:"FieldSingleLine"},props:{layout:"front",emailAction:false}} as OsfTypeDefinition;
  const field={key:"email",osfType:"email",baseType:"string",render:{component:"FieldEmail",props:{layout:"none"}}} as Field;
  const projected=resolveRender(field,configured,semantic);
  expect(projected).toEqual({component:"FieldEmail",props:{layout:"none",emailAction:false}});
  const {render:_,...withoutRender}=field;
  expect(resolveRender(withoutRender,configured,semantic).props).toEqual({layout:"front",emailAction:false});
- expect(configured.defaults.string.props.layout).toBe("above");
+ expect(configured.defaults.string.props.layout).toBe("front");
 });
 
-test("rejects the obsolete DateTimePicker presentation component", () => {
- const configured={
-  ...catalog,
-  defaults:{...catalog.defaults,datetime:{component:"DateTimePicker"}},
-  components:{...catalog.components,DateTimePicker:{kind:"field" as const,description:"Obsolete datetime field.",props:[]}},
- };
- const field={key:"startsAt",osfType:"datetime",baseType:"datetime"} as Field;
- expect(()=>resolveRender(field,configured)).toThrow("startsAt: presentation component DateTimePicker is obsolete; use FieldDateAndTime.");
- expect(()=>resolveRender({...field,render:{component:"DateTimePicker"}},catalog)).toThrow("startsAt: presentation component DateTimePicker is obsolete; use FieldDateAndTime.");
+describe("the component catalog", () => {
+ const real=loadComponentCatalog(join(import.meta.dir,"..","..","..","config","authoring"));
+ const text={key:"name",osfType:"string",baseType:"string"} as Field;
+
+ test("a field takes the design system's field under its Figma name, with front as the Figma default", () => {
+  expect(resolveRender(text,real)).toEqual({component:"FieldSingleLine"});
+  expect(real.components.FieldSingleLine!.props).toEqual(expect.arrayContaining(["layout","labelWidth"]));
+  expect(real.components.FieldSingleLine!.figma!.props.layout!.default).toBe("front");
+ });
+
+ test("rejects a name the catalog does not declare, the old names included", () => {
+  for (const name of ["Input","TextDisplay","ReferenceSelect","Switch","DateTimePicker","FieldRating","FieldMultipleFiles"]) {
+   expect(()=>resolveRender({...text,render:{component:name}},real)).toThrow(`name: unknown presentation component ${name}.`);
+  }
+ });
+
+ test("rejects a dropped styling prop", () => {
+  for (const prop of ["labelBand","inputTone","viewSurface","spacing","viewSizing","frontLabelWidth"]) {
+   expect(()=>resolveRender({...text,render:{component:"FieldSingleLine",props:{[prop]:"x"}}},real)).toThrow(`name: FieldSingleLine does not declare presentation props ${prop}.`);
+  }
+ });
+
+ test("takes Figma's layout and label width values and nothing else", () => {
+  expect(resolveRender({...text,render:{component:"FieldSingleLine",props:{layout:"above",labelWidth:"256"}}},real).props).toEqual({layout:"above",labelWidth:"256"});
+  expect(()=>resolveRender({...text,render:{component:"FieldSingleLine",props:{labelWidth:200}}},real)).toThrow('name: FieldSingleLine labelWidth is one of "128", "256", "384", not 200.');
+  expect(()=>resolveRender({...text,render:{component:"IconPicker",props:{layout:"left"}}},real)).toThrow('name: IconPicker layout is one of "above", "front", "none", not "left".');
+ });
+
+ test("never takes Figma's run-time state", () => {
+  expect(()=>resolveRender({...text,render:{component:"FieldSingleLine",props:{state:"error"}}},real)).toThrow("name: FieldSingleLine takes no state; the renderer derives Figma's state at run time.");
+ });
+
+ test("a boolean that must have a value takes the two-state field", () => {
+  const flag={key:"active",osfType:"boolean",baseType:"boolean"} as Field;
+  expect(resolveRender(flag,real).component).toBe("FieldNullableBoolean");
+  expect(resolveRender({...flag,required:true},real)).toEqual({component:"FieldBoolean",props:{trueText:{en:"Yes",nl:"Ja"},falseText:{en:"No",nl:"Nee"}}});
+ });
+
+ test("accepts a plugin's declared extension and checks its props", () => {
+  const authored=parseYaml(readFileSync(join(import.meta.dir,"..","..","..","config","authoring","catalogs","components.yaml"),"utf8")) as ComponentCatalog;
+  const extended=composeComponentCatalog({...authored,
+   components:{...authored.components,WeeklyAvailability:{kind:"extension",description:"A plugin's weekly availability editor.",props:["layout","labelWidth","weekStart"]}}} as ComponentCatalog);
+  expect(resolveRender({...text,render:{component:"WeeklyAvailability",props:{weekStart:"monday",labelWidth:"384"}}},extended)).toEqual({component:"WeeklyAvailability",props:{weekStart:"monday",labelWidth:"384"}});
+  expect(()=>resolveRender({...text,render:{component:"WeeklyAvailability",props:{days:7}}},extended)).toThrow("name: WeeklyAvailability does not declare presentation props days.");
+ });
+
+ test("a hand-written component may not take a design-system field's name, and fields names only Figma's", () => {
+  const authored=parseYaml(readFileSync(join(import.meta.dir,"..","..","..","config","authoring","catalogs","components.yaml"),"utf8")) as ComponentCatalog;
+  expect(()=>composeComponentCatalog({...authored,components:{...authored.components,FieldSingleLine:{kind:"field",description:"x",props:[]}}})).toThrow("FieldSingleLine is a design-system field");
+  expect(()=>composeComponentCatalog({...authored,fields:{...authored.fields,FieldRating:{}}})).toThrow("fields.FieldRating is no design-system field");
+ });
+
+ test("inherited defaults apply only where the chosen component takes them", () => {
+  const semantic={label:{en:"Rate"},baseType:"number",props:{unit:"%",rows:3}} as OsfTypeDefinition;
+  expect(resolveRender({key:"rate",osfType:"rate",baseType:"number",render:{component:"FieldPercentage"}} as Field,real,semantic).props).toEqual({unit:"%"});
+ });
 });

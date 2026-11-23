@@ -150,7 +150,7 @@ export function materializeVariableSuggestionAsFieldDefinition(
     ...(suggestion.referentieGroep
       ? {
           render: {
-            component: "ReferenceSelect",
+            component: "FieldSingleRelatedRecord",
             props: { referentieGroep: suggestion.referentieGroep },
           },
         }

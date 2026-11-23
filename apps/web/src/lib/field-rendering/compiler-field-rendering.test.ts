@@ -8,18 +8,18 @@ describe("default field controls resolve through the one type axis", () => {
     // supplies `osfType: integer` and nothing else about presentation. A text
     // box would submit "123" for a contract that validates an integer.
     expect(resolveFieldInputRender({ key: "division", osfType: "integer" })).toMatchObject({
-      component: "NumberInput",
+      component: "FieldIntegerDecimal",
       source: "fieldType",
     });
-    expect(resolveFieldInputRender({ key: "enabled", osfType: "boolean" }).component).toBe("Switch");
+    expect(resolveFieldInputRender({ key: "enabled", osfType: "boolean" }).component).toBe("FieldNullableBoolean");
     expect(resolveFieldInputRender({ key: "tags", osfType: "string", cardinality: "collection" }).source).toBe("fieldType");
   });
 
   test("a compiled field's baseType and a catalog key resolve the same way; an unknown osfType is refused", () => {
-    expect(resolveFieldInputRender({ key: "count", osfType: "count", baseType: "integer" }).component).toBe("NumberInput");
+    expect(resolveFieldInputRender({ key: "count", osfType: "count", baseType: "integer" }).component).toBe("FieldIntegerDecimal");
     expect(resolveFieldInputRender({ key: "note", osfType: "multilineText" }).source).toBe("osfType");
     expect(() => resolveFieldInputRender({ key: "x", osfType: "noSuchType" })).toThrow("x: unknown osfType noSuchType.");
     // No osfType at all: nothing to resolve, the generic input.
-    expect(resolveFieldInputRender({ key: "free" })).toEqual({ component: "Input", source: "fallback" });
+    expect(resolveFieldInputRender({ key: "free" })).toEqual({ component: "FieldSingleLine", source: "fallback" });
   });
 });

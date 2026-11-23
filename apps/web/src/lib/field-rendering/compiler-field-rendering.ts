@@ -66,13 +66,10 @@ export type ResolvedFieldRender = {
 };
 
 const COMPONENT_ALIASES: Record<string, string> = {
-  // Map catalogue-native field names to this host's supported scalar controls.
-  // Rich Battery hosts can render the native components directly.
-  TextArea: "InputMultiline",
-  Textarea: "InputMultiline",
-  TextInput: "Input",
-  Toggle: "Switch",
-  FieldMoney: "NumberInput",
+  // This host's own controls for the design system's fields it draws as a
+  // plain textarea or number box; the Battery host draws the fields themselves.
+  FieldMultiline: "InputMultiline",
+  FieldMoney: "FieldIntegerDecimal",
 };
 
 function getOsfTypeKey(field: RendererAwareField) {
@@ -105,6 +102,11 @@ export function getCompilerOsfTypeDefinition(
 
 export function getFieldOsfTypeDefinition(field: RendererAwareField) {
   return getCompilerOsfTypeDefinition(getOsfTypeKey(field));
+}
+
+/** A type default's props; a default without settings has none. */
+function defaultProps(render: ReturnType<typeof getDefaultFieldTypeRender>) {
+  return render && "props" in render ? render.props : undefined;
 }
 
 function getDefaultFieldTypeRender(field: RendererAwareField) {
@@ -161,14 +163,14 @@ export function resolveFieldInputRender(field: RendererAwareField): ResolvedFiel
 
   const fieldTypeRender = buildResolvedRender(
     getDefaultFieldTypeRender(field)?.component,
-    getDefaultFieldTypeRender(field)?.props,
+    defaultProps(getDefaultFieldTypeRender(field)),
     "fieldType",
   );
   if (fieldTypeRender) {
     return fieldTypeRender;
   }
 
-  return { component: "Input", source: "fallback" };
+  return { component: "FieldSingleLine", source: "fallback" };
 }
 
 export function resolveFieldDisplayRender(field: RendererAwareField): ResolvedFieldRender {
@@ -198,15 +200,15 @@ export function resolveFieldDisplayRender(field: RendererAwareField): ResolvedFi
     "readOnly" in fieldTypeDefault &&
     fieldTypeDefault.readOnly === true;
   const fieldTypeRender = buildResolvedRender(
-    isReadOnlyFieldType ? fieldTypeDefault.component : "TextDisplay",
-    isReadOnlyFieldType ? fieldTypeDefault.props : undefined,
+    isReadOnlyFieldType ? fieldTypeDefault.component : "FieldSingleLine",
+    isReadOnlyFieldType ? defaultProps(fieldTypeDefault) : undefined,
     "fieldType",
   );
   if (fieldTypeRender) {
     return fieldTypeRender;
   }
 
-  return { component: "TextDisplay", source: "fallback" };
+  return { component: "FieldSingleLine", source: "fallback" };
 }
 
 export function resolveFieldValidation(field: RendererAwareField) {

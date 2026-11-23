@@ -271,7 +271,7 @@ interfaces:
     fields:
       code:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: PAYMENTMETHODCODE
             clearable: false

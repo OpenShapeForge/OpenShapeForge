@@ -293,11 +293,11 @@ interfaces:
     fields:
       workedAt:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 3
             maxLength: 500

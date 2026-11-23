@@ -355,21 +355,21 @@ interfaces:
     fields:
       assetKind:
         render:
-          component: ReferenceSelect
+          component: FieldSingleRelatedRecord
           props:
             referentieGroep: ASSETKIND
             clearable: false
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 5000
       acquiredAt:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}
       decommissionedAt:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

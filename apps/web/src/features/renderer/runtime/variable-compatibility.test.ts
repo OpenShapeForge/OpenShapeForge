@@ -48,7 +48,7 @@ describe("variable compatibility inferred from canonical fields", () => {
 
   test("a base osfType does not hide an explicit runtime value type", () => {
     expect(getVariableFilterForField(field({
-      render: { component: "Input", props: { expectedValueType: "number" } },
+      render: { component: "FieldSingleLine", props: { expectedValueType: "number" } },
     }))).toEqual({ valueType: "number" });
   });
 

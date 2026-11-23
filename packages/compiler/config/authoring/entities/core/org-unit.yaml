@@ -284,11 +284,11 @@ interfaces:
     fields:
       description:
         render:
-          component: Textarea
+          component: FieldMultiline
           props:
             rows: 4
             maxLength: 1000
       establishedAt:
         render:
-          component: DatePicker
+          component: FieldDate
           props: {}

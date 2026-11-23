@@ -94,7 +94,7 @@ function resolveCellDisplayValue(
 
   const value = String(rawValue);
 
-  if (col.render?.component === "ReferenceSelect") {
+  if (col.render?.component === "FieldSingleRelatedRecord" || col.render?.component === "FieldMultipleRelatedRecords") {
     const groep = resolveColumnReferentieGroep(col);
     if (groep) {
       const { items } = resolveReferentieGroepItems(groep);

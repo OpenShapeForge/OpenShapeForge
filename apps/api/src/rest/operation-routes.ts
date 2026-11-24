@@ -352,10 +352,6 @@ export function registerOperationRestRoutes(
 }
 
 /**
- * Stable adapter for entity and record-derived Operations. Definitions stay
- * dynamic and session-filtered; adding a stored Operation never adds a route.
- */
-/**
  * The record offers of a list page in the compact format, when the caller
  * asked for it (`offerFormat: "compact"`, see @openshapeforge/operations
  * compact-offers.ts). Every other answer — a failure, an acceptance, a
@@ -377,6 +373,10 @@ export function projectRecordOfferFormat(
   } as RuntimeOperationExecutionResult;
 }
 
+/**
+ * Stable adapter for entity and record-derived Operations. Definitions stay
+ * dynamic and session-filtered; adding a stored Operation never adds a route.
+ */
 export function registerRuntimeOperationRestRoutes(
   app: FastifyInstance,
   runtime: ModuleRuntimeContext,

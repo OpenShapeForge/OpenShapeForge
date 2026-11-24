@@ -7,6 +7,8 @@ import { createDatabaseRuntime } from '../db/connection.js';
 import { withDbSession } from '../db/session.js';
 import { blockOrganizationAccount, restoreOrganizationAccount } from './account-management.js';
 import { assertMemberAccessActive } from '../auth/member-access-state.js';
+import { admitResolvedSession } from '../auth/identity.js';
+import { hasAuthorizationProfileAccess } from '../auth/authorization-profile-decision.js';
 import { readSessionLink, cachedLinkState, linkCacheKey } from '../auth/identity-link-session.js';
 
 const url = process.env.OSF_ACCESS_TEST_DATABASE_URL;
@@ -61,11 +63,26 @@ test('blocking is tenant-only, preserves assignments, rejects cached sessions an
     expect(cachedLinkState(cacheKey)).toBeUndefined();
     await expect(assertMemberAccessActive(runtime.db, member)).rejects.toMatchObject({ status: 403, code: 'MEMBER_ACCESS_BLOCKED' });
     await assertMemberAccessActive(runtime.db, { ...member, tenantId: otherId });
+    // The whole admission step refuses the blocked member too, and binds no rules for them.
+    const blockedAdmission = { ...member };
+    await expect(admitResolvedSession(new Headers(), blockedAdmission, { db: runtime.db })).rejects.toMatchObject({ status: 403, code: 'MEMBER_ACCESS_BLOCKED' });
+    expect(hasAuthorizationProfileAccess(blockedAdmission)).toBe(false);
     expect(await admin`select relation_id,roles,needs_role_assignment from platform.identity_relations where tenant_id=${tenantId} and identity_id=${identityId}`).toEqual(before);
     await expect(withDbSession(runtime.db, member, tx => sql`update platform.identity_relations set access_blocked=false
       where tenant_id=${tenantId}::uuid and identity_id=${identityId}::uuid`.execute(tx))).rejects.toThrow();
     expect(await restoreOrganizationAccount({ id: identityId, revision: await revision(identityId) }, context)).toMatchObject({ value: { updated: true } });
     await assertMemberAccessActive(runtime.db, member);
+    // Admission reads the member state and the authorization rules in ONE transaction.
+    let begins = 0;
+    const counted = createDatabaseRuntime({ databaseUrl: appUrl.toString(), maxConnections: 1, log: event => { if (/^\s*begin/i.test(event.query.sql)) begins += 1; } });
+    try {
+      const admitted = { ...member };
+      expect(await admitResolvedSession(new Headers(), admitted, { db: counted.db })).toBe(admitted);
+      expect(begins).toBe(1);
+      // Rules already bound: only the member check is left, on its own.
+      await admitResolvedSession(new Headers(), admitted, { db: counted.db });
+      expect(begins).toBe(2);
+    } finally { await counted.close(); }
     expect(await admin`select relation_id,roles,needs_role_assignment from platform.identity_relations where tenant_id=${tenantId} and identity_id=${identityId}`).toEqual(before);
     await admin`update platform.identity_relations set roles=ARRAY['org_admin'] where tenant_id=${tenantId} and identity_id=${identityId}`;
     expect(await blockOrganizationAccount({ id: identityId, revision: await revision(identityId), confirmed: true }, context)).toMatchObject({ code: 'LAST_ADMINISTRATOR' });

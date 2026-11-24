@@ -9,13 +9,13 @@
  * so a handler that fails leaves the grant usable, and a single-use grant
  * that succeeded can never be replayed.
  *
- * Refusals are `HttpError`s with the status-and-code pairs the compiler
+ * Refusals are `OperationRefusal`s with the status-and-code pairs the compiler
  * appended to every capability Operation (`CAPABILITY_GRANT_ERRORS`).
  */
 import { sql, type Kysely, type Transaction } from "kysely";
 import type { DB } from "../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
-import { HttpError } from "../rest/http-error.js";
+import { OperationRefusal } from "./operation-refusal.js";
 import type { CapabilityGrantSession, TrustedSessionContext } from "../auth/trusted-context.js";
 import { appendScopedEntityEventInTransaction } from "../platform/entity-events.js";
 import {
@@ -60,8 +60,8 @@ const REFUSALS: Record<CapabilityGrantRefusalCode, { status: number; message: st
   GRANT_LOCKED: { status: 423, message: "Too many failed attempts; the grant is temporarily locked." },
 };
 
-export function capabilityGrantRefusal(code: CapabilityGrantRefusalCode): HttpError {
-  return new HttpError(REFUSALS[code].status, code, REFUSALS[code].message);
+export function capabilityGrantRefusal(code: CapabilityGrantRefusalCode): OperationRefusal {
+  return new OperationRefusal(REFUSALS[code].status, code, REFUSALS[code].message);
 }
 
 export type CapabilityOperationShape = {
@@ -145,7 +145,7 @@ async function recordFailedAttempt(
 }
 
 /**
- * Resolve a token for one Operation. Every refusal is an `HttpError`; the
+ * Resolve a token for one Operation. Every refusal is an `OperationRefusal`; the
  * attempt bookkeeping it caused is already committed when it is thrown.
  */
 export async function resolveCapabilityGrantSession(

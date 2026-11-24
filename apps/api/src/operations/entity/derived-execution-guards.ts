@@ -32,7 +32,7 @@ import {
   type PublicationRowReader,
 } from "../../mcp/publication-validation.js";
 import { runtimeBindingReader, runtimeRowsByFilter } from "../../mcp/session-connections.js";
-import { HttpError } from "../../rest/http-error.js";
+import { OperationRefusal } from "../operation-refusal.js";
 import { generatedCrudError, getGeneratedCrudTables } from "./catalog.js";
 import { fieldNameForColumn } from "./columns.js";
 import type { GeneratedCrudTable, GeneratedEntityRow } from "./types.js";
@@ -204,7 +204,7 @@ function overlayRowReader(
 }
 
 function rethrowPublishable(error: unknown): never {
-  if (error instanceof HttpError && error.code === "NOT_PUBLISHABLE") {
+  if (error instanceof OperationRefusal && error.code === "NOT_PUBLISHABLE") {
     throw generatedCrudError(error.message, "NOT_PUBLISHABLE");
   }
   throw error;

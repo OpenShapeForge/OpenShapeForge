@@ -443,6 +443,11 @@ export function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
   return definition;
 }
 
+/**
+ * Nested Operations and entity plugins consume validated Operation failures.
+ * GraphQL resolver errors belong to the separate GraphQL contribution surface;
+ * arbitrary exceptions from a handler are not declared Operation failures.
+ */
 export function runtimeOperationError(error: unknown) {
   const projected = error instanceof DeclaredOperationError
     ? error.body

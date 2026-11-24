@@ -30,7 +30,7 @@ import { assertUniqueToolNames, decorateMcpTools, moduleTools } from "../modules
 import { SESSION_INFO_TOOL, SESSION_INFO_TOOL_NAME } from "./session-info.js";
 import { searchableSessionOperationAvailability, searchableCoveredToolNames, type SearchableSessionAvailability } from "./searchable-session-operations.js";
 import { secureOperationTool, searchableOperationTools } from "./operation-search.js";
-import { type ProjectedRuntimeOperationTool, catalog, catalogDerivedTools } from "./catalog.js";
+import { type ProjectedRuntimeOperationTool, catalog, catalogDerivedTools, generatedOperationToolProjection } from "./catalog.js";
 import { projectRuntimeOperationTool } from "./catalog-rows.js";
 import { derivedToolsForSession } from "./derived-session-tools.js";
 import { operationMayInvoke, projectCatalogOperationTool } from "./entity-tool-invocation.js";
@@ -295,6 +295,20 @@ export function createToolListing(scope: ServerScope) {
   });
 
   const findTool = async (name: string): Promise<ListedTool | undefined> => {
+    // The generated search tool is fixed. Resolve that one contract here;
+    // the handler will authorize and project the Operations it can return.
+    // Legacy row-derived tools and alternate names retain full resolution.
+    if (operationToolProjection.mode === "searchable" && modulePlatform &&
+        name === searchableOperationToolNames.search && name === generatedOperationToolProjection.search &&
+        !catalogDerivedTools.some((entry) => !entry.compatibility) &&
+        coreStaticToolNames(operationToolProjection).filter((owned) => owned === name).length === 1) {
+      const context = projectionContext();
+      const projected = await moduleTools(runtimeModules, context, name);
+      await assertModuleToolNamesAvailable(projected, name);
+      const tool = searchableOperationTools(searchableOperationToolNames).find((candidate) => candidate.name === name);
+      if (tool) return decorateMcpTools([{ tool, source: "operation" }], runtimeModules, context)[0];
+    }
+
     // Namespaced module tools cannot be named by stored Operation/Service
     // keys. Keep the grammar check explicit so an expanded derived namespace
     // automatically returns to the complete resolver. Resolve the live module

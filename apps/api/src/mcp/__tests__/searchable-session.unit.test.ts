@@ -6,6 +6,7 @@ import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime"
 import accountsRuntime from "../../accounts/runtime.js";
 import documentsRuntime from "@openshapeforge/documents/runtime";
 import versioningRuntime from "@openshapeforge/versioning/runtime";
+import type { RuntimeModule } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { __buildGeneratedMcpServerForTests } from "../generated-mcp-server.js";
 import { coreOwnsStaticToolName } from "../session-projection.js";
@@ -24,7 +25,7 @@ function providerDefinition(index: number): RuntimeOperationDefinition {
     effects: { data: "read", external: "read" }, reliability: { idempotency: { mode: "natural" } },
   };
 }
-async function fixture(count: number, roles: string[], run: (client: Client) => Promise<void>, tenantId = tenant, secure = false) {
+async function fixture(count: number, roles: string[], run: (client: Client) => Promise<void>, tenantId = tenant, secure = false, extraModules: readonly RuntimeModule[] = []) {
   const db = emptyCatalogDatabase();
   const platform = new ModulePlatformRuntime(db);
   const definitions = Array.from({ length: count }, (_, index) => providerDefinition(index));
@@ -41,7 +42,7 @@ async function fixture(count: number, roles: string[], run: (client: Client) => 
     modules: [accountsRuntime, documentsRuntime as never, versioningRuntime as never, { name: "notebook", operationHandlers: { importNotebook: async () => ({ value: undefined }),
       // The entity now carries a second canonical Operation; a module that
       // supplies any handler must supply all of them.
-      deliverToNotebook: () => { throw new Error("This test does not exercise Notebook.deliver."); } } }],
+      deliverToNotebook: () => { throw new Error("This test does not exercise Notebook.deliver."); } } }, ...extraModules],
     operationToolProjection: { mode: "searchable", search: "osf_search_operations", execute: "osf_execute_operation" },
   });
   const client = new Client({ name: "service-management", version: "1" }, { capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } } });
@@ -70,11 +71,7 @@ describe("complete searchable MCP session", () => {
       expect(result.isError).toBeFalsy(); expect(result.structuredContent).toMatchObject({ data: { tenantId: tenant, value: "last service" } });
     });
   });
-  test("a search or an execution enumerates the providers once for its catalog", async () => {
-    // Resolving the called tool name lists the session's tools, providers
-    // included, for every tool call; that is one enumeration. The search or
-    // execution itself takes one snapshot of the Operations and their
-    // provider ids, never a second provider listing beside it.
+  test("operation search lists providers once and records-only search skips providers", async () => {
     await fixture(3, ["Organization.All.ReadWrite"], async (client) => {
       providerListings = 0;
       await client.listTools();
@@ -82,12 +79,37 @@ describe("complete searchable MCP session", () => {
       providerListings = 0;
       const page = data(await client.callTool({ name: "osf_search_operations", arguments: { query: "example.service.", limit: 2 } }));
       expect(page.operations).toHaveLength(2);
-      expect(providerListings).toBe(2);
+      expect(providerListings).toBe(1);
       providerListings = 0;
-      const result = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: providerDefinition(2).id, input: { value: "x" } } });
-      expect(result.isError).toBeFalsy();
+      const records = data(await client.callTool({ name: "osf_search_operations", arguments: { records: { query: "Customer Success" } } }));
+      expect(records.operations).toEqual([]);
+      expect(providerListings).toBe(0);
+      const executed = await client.callTool({ name: "osf_execute_operation", arguments: { operationId: providerDefinition(2).id, input: { value: "x" } } });
+      expect(executed.isError).toBeFalsy();
       expect(providerListings).toBe(2);
     });
+  });
+  test("direct search retains module decoration and rejects a module claim to its name", async () => {
+    const name = "osf_search_operations";
+    const decoratedSources: string[] = [];
+    let claimsName = false;
+    const module: RuntimeModule = { name: "search-fixture", mcp: {
+      getTool: async (requested) => claimsName && requested === name ? { name, inputSchema: { type: "object" } } : undefined,
+      decorateTool: (tool, source) => {
+        if (tool.name === name) decoratedSources.push(source);
+        return tool;
+      },
+    } };
+    await fixture(1, ["Organization.All.ReadWrite"], async (client) => {
+      expect(data(await client.callTool({ name, arguments: { query: "example.service." } })).operations).toHaveLength(1);
+      expect(decoratedSources).toEqual(["operation"]);
+      claimsName = true;
+      providerListings = 0;
+      const collision = await client.callTool({ name, arguments: {} });
+      expect(collision.isError).toBe(true);
+      expect(collision.structuredContent).toMatchObject({ error: { code: "INTERNAL_SERVER_ERROR" } });
+      expect(providerListings).toBe(0);
+    }, tenant, false, [module]);
   });
   test("entity CRUD is discoverable with its exact schema and uses the existing MCP validator", async () => {
     const operation = getEntityOperationContracts().find((candidate) => candidate.intent === "get" && catalog.tools.some((tool) => tool.operationId === candidate.id))!;

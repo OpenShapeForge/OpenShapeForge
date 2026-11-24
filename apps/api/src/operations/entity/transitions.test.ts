@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import rawCatalog from "../../generated/operations/catalog.json" with { type: "json" };
-import { bindOperationHandlers, type OperationContract } from "../runtime.js";
+import { bindOperationHandlers } from "../composition.js";
+import { type OperationContract } from "../runtime.js";
 import { getGeneratedCrudTables } from "./catalog.js";
 import { referencedInHoldsKey, transitionBinding, transitionRefusal, TRANSITIONS_PLUGIN, type TransitionBinding, type TransitionReferencedRow } from "./transitions.js";
 

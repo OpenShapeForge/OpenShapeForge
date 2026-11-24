@@ -43,16 +43,20 @@ import {
 } from "./execution-receipts.js";
 import {
   bindOperationHandlers as bindCanonicalOperationHandlers,
+  runtimeStaticOperationRegistrations,
+} from "./composition.js";
+import {
   DeclaredOperationError,
   invokeOperation,
-  operationGraphqlContribution,
+  requireOperationAuthorization,
+  type OperationContract,
+} from "./runtime.js";
+import { operationGraphqlContribution } from "../graphql/operation-contribution.js";
+import {
   operationRestInput,
   registerOperationRestRoutes,
   registerRuntimeOperationRestRoutes,
-  requireOperationAuthorization,
-  runtimeStaticOperationRegistrations,
-  type OperationContract,
-} from "./runtime.js";
+} from "../rest/operation-routes.js";
 
 // Full-catalog transport tests need the actual modules declared by generated
 // Operations. Keep explicitly supplied unit-test catalogs isolated instead.

@@ -27,7 +27,8 @@ import {
   canonicalEditLeaseOperationIdsForSession,
   getEntityOperationContracts,
 } from "./entity/index.js";
-import { bindOperationHandlers, invokeOperation } from "./runtime.js";
+import { bindOperationHandlers } from "./composition.js";
+import { invokeOperation } from "./runtime.js";
 
 const update = getEntityOperationContracts().find(({ id }) => id === "Relation.update")!;
 const editor = update.authorization.roles[0]!;

@@ -10,7 +10,8 @@ import { runMigrationChain } from "../db/migration-chain.js";
 import { APP_ROLE } from "../db/migrations/app-role.js";
 import { jsonbLiteral } from "../db/sql-helpers.js";
 import { getGeneratedCrudTables } from "../operations/entity/catalog.js";
-import { listOperationContracts, runtimeStaticOperationRegistrations } from "../operations/runtime.js";
+import { listOperationContracts } from "../operations/runtime.js";
+import { runtimeStaticOperationRegistrations } from "../operations/composition.js";
 import type { RuntimeModule } from "./contract.js";
 import { ModulePlatformRuntime, withModuleOperationSession } from "./platform.js";
 

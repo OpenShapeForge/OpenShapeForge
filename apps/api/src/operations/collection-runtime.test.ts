@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { describe, expect, test } from "bun:test";
 import { nativeCollectionBinding, nativeCollectionHandler } from "./collection-runtime.js";
-import { bindOperationHandlers, invokeOperation, operationModulesConfigured, runtimeStaticOperationRegistrations, type OperationContract } from "./runtime.js";
+import {
+  bindOperationHandlers,
+  operationModulesConfigured,
+  runtimeStaticOperationRegistrations,
+} from "./composition.js";
+import { invokeOperation, type OperationContract } from "./runtime.js";
 import { operationContractFingerprint } from "./contract-fingerprint.js";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 

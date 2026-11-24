@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from "bun:test";
 import { expandCompactRecordOffers, type OperationOffer } from "@openshapeforge/operations";
-import { projectRecordOfferFormat } from "./runtime.js";
+import { projectRecordOfferFormat } from "../rest/operation-routes.js";
 
 const offers = (id: string): OperationOffer[] => [
   {

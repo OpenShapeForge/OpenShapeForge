@@ -36,11 +36,8 @@ import {
   ModulePlatformRuntime,
   withModuleOperationSession,
 } from "../../modules/platform.js";
-import {
-  listOperationContracts,
-  runtimeStaticOperationRegistrations,
-  type OperationContract,
-} from "../../operations/runtime.js";
+import { listOperationContracts, type OperationContract } from "../../operations/runtime.js";
+import { runtimeStaticOperationRegistrations } from "../../operations/composition.js";
 import {
   EXECUTION_NOT_PERMITTED,
   registerOperationExecutionPolicies,

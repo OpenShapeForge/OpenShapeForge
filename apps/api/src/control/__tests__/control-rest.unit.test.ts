@@ -15,7 +15,7 @@ import { createSign, generateKeyPairSync, type KeyObject } from "node:crypto";
 import Fastify, { type FastifyInstance } from "fastify";
 import { Kysely, PostgresAdapter, PostgresIntrospector, PostgresQueryCompiler } from "kysely";
 import type { DB } from "../../generated/db/types.js";
-import { registerOperationRestRoutes } from "../../operations/runtime.js";
+import { registerOperationRestRoutes } from "../../rest/operation-routes.js";
 import { __resetControlVerifiersForTests, PLATFORM_OPERATOR_ROLE } from "../authorization.js";
 import type { ControlPlaneConfig } from "../config.js";
 import { PLATFORM_GUIDE } from "../platform-tools.js";

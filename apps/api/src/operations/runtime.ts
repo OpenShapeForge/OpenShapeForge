@@ -1,55 +1,26 @@
-import { nativeColorPaletteHandler } from "./color-palette.js";
 // SPDX-License-Identifier: BUSL-1.1
 import { withConnectionDelegationOrigin, withConnectionGrantSubject } from "../mcp/connection-delegation.js";
 import { assertCurrentAccountAuthority } from "../accounts/account-current-authority.js";
-import { nativeCollectionOptionsHandler } from "./collection-options.js";
 import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
 import { resolveAuthorizationProfileAccess } from "../auth/authorization-profile-session.js";
-import { nativeApplicationSearchHandler } from "./application-search.js";
 import { withAuditContext } from "../platform/audit-context.js";
 import { liveMaintenanceRunner } from "../modules/maintenance.js";
-import { blueprintOperationHandler } from "./entity/blueprints.js";
-import { TRANSITIONS_PLUGIN, transitionAvailabilityHandler, transitionOperationHandler } from "./entity/transitions.js";
-import { CONTROL_PLUGIN, controlOperationHandler } from "../control/operations.js";
-import { AUDIT_PLUGIN, auditOperationHandler } from "../platform/history-operations.js";
-import { JOBS_PLUGIN, jobsOperationHandler } from "../jobs/operations.js";
-import {
-  bearerIssuerOf,
-  controlSessionHttpError,
-  resolveControlSession,
-} from "../control/control-session.js";
 import { type ValidateFunction } from "ajv/dist/2020.js";
-import { GraphQLError } from "graphql";
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { sql, type Transaction } from "kysely";
 import rawCatalog from "../generated/operations/catalog.json" with { type: "json" };
-import { resolveSessionContext } from "../auth/identity.js";
-import { SessionAuthenticationUnavailableError } from "../auth/session-unavailable.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
-import type { GraphqlContext } from "../graphql/context.js";
-import { headersFromFastify } from "../http/headers.js";
 import type {
-  ModuleGraphqlContribution,
   ModuleOperationErrorResult,
   ModuleOperationHandler,
   ModuleOperationAvailabilityHandler,
   ModuleOperationResult,
   ModuleOperationSuccessResult,
-  ModulePlatformServices,
-  ModuleRuntimeContext,
   RuntimeModule,
 } from "../modules/contract.js";
-import type {
-  RuntimeOperationDefinition,
-  RuntimeOperationExecutionResult,
-  RuntimeOperationRequest,
-} from "@openshapeforge/plugin-runtime";
+import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import {
-  compactRecordOffers,
-  isOperationAccepted,
   operationFailure,
   type OperationEnvelope,
-  type OperationOffer,
   type OperationError,
   type OperationPrerequisite,
 } from "@openshapeforge/operations";
@@ -58,7 +29,6 @@ import {
   invokeModuleHostOperation,
   withModuleOperationSession,
   withModuleOperationTransaction,
-  type ModuleStaticOperationRegistration,
 } from "../modules/platform.js";
 import {
   consumeEntityConfirmationInTransaction,
@@ -74,8 +44,12 @@ import { policyOperation } from "./entity/subtype-scope.js";
 import { withConsumedCollectionLeaseInTransaction } from "./entity/collection-lease-context.js";
 import { getGeneratedCrudTables, recordActionTable } from "./entity/catalog.js";
 import { resolvePrincipalClass } from "../db/session.js";
-import { applyOwnedEntityFields, assertOwnedTarget, captureOwnedTarget } from "./entity/owned-fields.js";
-import { getEntityOperationOffers, isWithheldOperation } from "./entity/runtime.js";
+import {
+  applyOwnedEntityFields,
+  assertOwnedTarget,
+  captureOwnedTarget,
+} from "./entity/owned-fields.js";
+import { getEntityOperationOffers } from "./entity/runtime.js";
 import { entityBusinessUnavailability } from "./entity/availability.js";
 import type { EntityOperationContract, GeneratedCrudTable } from "./entity/types.js";
 import {
@@ -86,10 +60,7 @@ import {
   type RecordPermissionAction,
   recordActionDeclaration,
 } from "./entity/record-permissions.js";
-import {
-  withAdmittedRecordAction,
-  type AdmittedRecordAction,
-} from "./entity/record-action-admission.js";
+import { withAdmittedRecordAction, type AdmittedRecordAction } from "./entity/record-action-admission.js";
 import { normalizeTimestampToken } from "../db/timestamps.js";
 import { HttpError, toHttpError } from "../rest/http-error.js";
 import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
@@ -100,26 +71,7 @@ import { executeKeyedOperation } from "./execution-receipts.js";
 import type { DB } from "../generated/db/types.js";
 import { evaluateOperationAvailability } from "./availability.js";
 import { assertOperationAdmitted } from "./execution-policy.js";
-import { nativeEntityTypeListHandler } from "./entity-type-list.js";
-import { API_KEYS_PLUGIN, apiKeyOperationHandler } from "./api-key-operations.js";
-import {
-  RECORD_ACTIONS_PLUGIN,
-  recordActionsOperationHandler,
-} from "./record-action-assignments/operations.js";
-import { GRANTS_PLUGIN, grantsOperationHandler } from "./grants-operations.js";
-import { SOURCE_SYNC_PLUGIN, sourceSyncOperationHandler } from "./source-sync-operations.js";
-import { EDIT_LEASES_PLUGIN, editLeaseOperationHandler } from "./edit-lease-operations.js";
-import { BILLING_PLUGIN, billingOperationHandler } from "./billing/module.js";
-import {
-  capabilityGrantRefusal,
-  consumeCapabilityGrantInTransaction,
-  resolveCapabilityGrantSession,
-} from "./capability-grant-resolution.js";
-import { grantTokenFromAuthorization } from "./capability-grant-token.js";
-import { nativeOwnedDeleteHandler } from "./owned-delete-runtime.js";
-import { nativeCollectionHandler } from "./collection-runtime.js";
-import { nativeConstrainedReferenceCreateHandler } from "./constrained-reference-create.js";
-import { EXTENSIONS_PLUGIN, nativeExtensionHandler } from "./entity/extensions/operations.js";
+import { capabilityGrantRefusal, consumeCapabilityGrantInTransaction } from "./capability-grant-resolution.js";
 
 export type OperationContract = {
   /** Compiler-owned source-adapter normalization. No shape guessing or authored override. */
@@ -198,8 +150,6 @@ const catalog = rawCatalog as unknown as {
   entityOperations?: EntityOperationContract[];
 };
 const ajv = createOperationAjv();
-const queryAjv = createOperationAjv(true);
-const queryValidators = new WeakMap<OperationContract, ValidateFunction>();
 const defaultErrorSchema = {
   type: "object",
   required: ["error"],
@@ -254,6 +204,17 @@ function validatorsFor(operation: OperationContract) {
     validators.set(operation, validation);
   }
   return validation;
+}
+
+/** Validate a fixed adapter error against the canonical Operation declaration. */
+export function isDeclaredOperationErrorBody(
+  operation: OperationContract,
+  status: number,
+  code: string,
+  body: unknown,
+): boolean {
+  const validate = validatorsFor(operation).errors.get(errorKey(status, code));
+  return isJsonValue(body) && validate?.(body) === true;
 }
 
 /** Validated declared failure carried to each transport's error projection. */
@@ -432,7 +393,11 @@ function operationIntent(
 // control Operation by being returned under an operator session.
 const runtimeDefinitionAuthModes = new WeakMap<RuntimeOperationDefinition, OperationContract["auth"]["mode"]>();
 
-function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
+export function runtimeDefinitionAuthMode(definition: RuntimeOperationDefinition): OperationContract["auth"]["mode"] | undefined {
+  return runtimeDefinitionAuthModes.get(definition);
+}
+
+export function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
   const definition: RuntimeOperationDefinition = {
     id: entry.operation.key,
     key: entry.operation.key,
@@ -513,77 +478,6 @@ export function runtimeOperationError(error: unknown) {
   };
 }
 
-/** Bind compiler-contributed static Operations into the same runtime registry. */
-export function runtimeStaticOperationRegistrations(
-  modules: readonly RuntimeModule[],
-  runtime: ModuleRuntimeContext,
-  operations: readonly OperationContract[] = catalog.operations,
-): readonly ModuleStaticOperationRegistration[] {
-  const bound = bindOperationHandlers(modules, operations);
-  return [...bound.values()].map((entry) => {
-    const definition = runtimeDefinition(entry);
-    return {
-      definition,
-      available: (session) => {
-        try {
-          requireOperationAuthorization(entry.operation, session);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      execute: async (session, request, options): Promise<RuntimeOperationExecutionResult> => {
-        options?.signal?.throwIfAborted();
-        const input = { ...(request.input ?? {}) };
-        // Workflow workers already send their persisted command key on every
-        // attempt. Use it as the optional source-page effect key so existing
-        // import graphs can recover the same receipt without a graph edit.
-        if (entry.operation.key === "source-sync.apply-page" &&
-            request.idempotencyKey !== undefined && input.effectKey === undefined) {
-          input.effectKey = request.idempotencyKey;
-        }
-        if (entry.operation.idempotency.mode === "idempotency-key") {
-          const field = entry.operation.idempotency.inputField!;
-          const key = request.idempotencyKey ?? (typeof input[field] === "string" ? input[field] as string : undefined);
-          if (!key?.trim()) {
-            return {
-              error: {
-                code: "IDEMPOTENCY_KEY_REQUIRED",
-                message: "This Operation requires an idempotency key.",
-                retryable: false,
-              },
-            };
-          }
-          if (field in input && input[field] !== key) {
-            return {
-              error: {
-                code: "BAD_USER_INPUT",
-                message: "The Operation input conflicts with its idempotency key.",
-                retryable: false,
-              },
-            };
-          }
-          input[field] = key;
-        }
-        try {
-          const result = await invokeOperation(entry, input, {
-            ...runtime,
-            transport: "operation",
-            session,
-            ...(options?.signal ? { signal: options.signal } : {}),
-          });
-          options?.signal?.throwIfAborted();
-          return result.resultKind === "operation-envelope"
-            ? result.value as OperationEnvelope<unknown>
-            : { data: result.value, operations: [] };
-        } catch (error) {
-          return { error: runtimeOperationError(error) };
-        }
-      },
-    };
-  });
-}
-
 export type BoundOperation = {
   operation: OperationContract;
   handler: ModuleOperationHandler;
@@ -591,219 +485,6 @@ export type BoundOperation = {
   availability?: ModuleOperationAvailabilityHandler;
 };
 type Bound = BoundOperation;
-const bindingCache = new WeakMap<readonly RuntimeModule[], Map<string, Bound>>();
-
-/**
- * Whether any module in this process claims a canonical operation.
- *
- * A build with no such module — a core-only deployment, or a test that
- * resolves no modules — advertises no operation tools rather than failing
- * every request over a handler nothing was ever going to provide. The moment
- * one operation module is present, every operation has to bind, and
- * `bindOperationHandlers` throws for the ones that cannot. REST boot
- * (roles/api.ts) and the MCP server (mcp/generated-mcp-server.ts) read this
- * one rule, so the two transports cannot disagree about whether operations
- * exist.
- */
-export function operationModulesConfigured(
-  modules: readonly Pick<RuntimeModule, "name">[],
-  operations: readonly OperationContract[] = catalog.operations,
-): boolean {
-  const plugins = new Set(operations.map((operation) => operation.plugin));
-  return modules.some((module) => plugins.has(module.name));
-}
-
-export type BindOperationOptions = {
-  /**
-   * Whether plugin operations must bind. "required" is what a host that
-   * configured an operation module wants — including one whose module failed
-   * to load, so the failure stops boot instead of silently deleting the API.
-   * "absent" is a process without any operation module: the core operations
-   * bind, the plugin ones are absent rather than broken. Defaults to what the
-   * given modules say ({@link operationModulesConfigured}).
-   */
-  pluginOperations?: "required" | "absent";
-};
-
-export function bindOperationHandlers(
-  modules: readonly RuntimeModule[],
-  operations: readonly OperationContract[] = catalog.operations,
-  options: BindOperationOptions = {},
-): Map<string, Bound> {
-  const pluginOperations = options.pluginOperations ??
-    (operationModulesConfigured(modules, operations) ? "required" : "absent");
-  const usesGeneratedCatalog = operations === catalog.operations;
-  const cached = usesGeneratedCatalog && pluginOperations === "required" ? bindingCache.get(modules) : undefined;
-  if (cached) return cached;
-  const modulesByName = new Map(modules.map((module) => [module.name, module]));
-  const bound = new Map<string, Bound>();
-  const knownOperations = usesGeneratedCatalog
-    ? [...catalog.operations, ...entityPluginOperationContracts()]
-    : operations;
-  for (const operation of operations) {
-    if (bound.has(operation.key)) {
-      throw new Error(
-        `Canonical operation id "${operation.key}" is duplicated at runtime.`,
-      );
-    }
-    if (operation.plugin === "osf-blueprints") {
-      if (modulesByName.has("osf-blueprints")) throw new Error("The core blueprint runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: blueprintOperationHandler(operation.handler) });
-      continue;
-    }
-    // Status transitions declared on entity fields are core too: one generic
-    // handler plus the offer policy that hides a rule whose `from` does not
-    // hold, so what a caller is offered is what the write will accept.
-    if (operation.plugin === TRANSITIONS_PLUGIN) {
-      if (modulesByName.has(TRANSITIONS_PLUGIN)) throw new Error("The core transition runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, {
-        operation,
-        handler: transitionOperationHandler(operation),
-        availability: transitionAvailabilityHandler(operation),
-      });
-      continue;
-    }
-    // The platform's own administration is core too: its handlers ship with
-    // the runtime (control/operations.ts) and bind in every process, so a
-    // core-only deployment administers itself without an operation module.
-    if (operation.plugin === CONTROL_PLUGIN) {
-      if (modulesByName.has(CONTROL_PLUGIN)) throw new Error("The core control runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: controlOperationHandler(operation) });
-      continue;
-    }
-    // The durable job queue is core as well: its handlers (jobs/operations.ts)
-    // bind in every process, so a deployment administers its outbox without
-    // an operation module.
-    if (operation.plugin === AUDIT_PLUGIN) {
-      if (modulesByName.has(AUDIT_PLUGIN)) throw new Error("The core audit runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: auditOperationHandler(operation) });
-      continue;
-    }
-    if (operation.plugin === JOBS_PLUGIN) {
-      if (modulesByName.has(JOBS_PLUGIN)) throw new Error("The core jobs runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: jobsOperationHandler(operation) });
-      continue;
-    }
-    if (operation.plugin === GRANTS_PLUGIN) {
-      if (modulesByName.has(GRANTS_PLUGIN)) throw new Error("The core capability grant runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: grantsOperationHandler(operation) });
-      continue;
-    }
-    // The integration/API-key catalog is core as well: its handlers
-    // (operations/api-key-operations.ts) call the one provisioning service and
-    // therefore the one privilege ceiling, so they bind wherever the
-    // authentication path they provision for binds.
-    if (operation.plugin === API_KEYS_PLUGIN) {
-      if (modulesByName.has(API_KEYS_PLUGIN)) throw new Error("The core API key catalog runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: apiKeyOperationHandler(operation) });
-      continue;
-    }
-    // The named record-action axis is core as well, BOTH halves of it: the
-    // one Operation that may write the axis
-    // (operations/record-action-operations.ts) and the manager's view of what
-    // it wrote (operations/record-action-assignments). Emphatically not
-    // replaceable — a plugin standing in for the writer would be a second
-    // writer of the axis, which is the one thing the single-writer design
-    // exists to prevent — and bound once, so one plugin name cannot acquire
-    // two differently-guarded bindings.
-    if (operation.plugin === RECORD_ACTIONS_PLUGIN) {
-      if (modulesByName.has(RECORD_ACTIONS_PLUGIN)) throw new Error("The core record action runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: recordActionsOperationHandler(operation) });
-      continue;
-    }
-    // Importing records from an external source system by their base source
-    // fields is core: it writes through the entities' own CRUD, so it binds
-    // wherever those entities do (operations/source-sync-operations.ts).
-    if (operation.plugin === SOURCE_SYNC_PLUGIN) {
-      if (modulesByName.has(SOURCE_SYNC_PLUGIN)) throw new Error("The core source-sync runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: sourceSyncOperationHandler(operation) });
-      continue;
-    }
-    // The central edit-lease service is core too: it is the same service the
-    // generated entity Operations and every interface adapter already use
-    // (operations/edit-lease-operations.ts), so it binds wherever they do.
-    if (operation.plugin === EDIT_LEASES_PLUGIN) {
-      if (modulesByName.has(EDIT_LEASES_PLUGIN)) throw new Error("The core edit-lease runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: editLeaseOperationHandler(operation) });
-      continue;
-    }
-    // Billing is core as well: the milestone run and the milestone create
-    // (operations/billing) bind in every process, entity-authored plugin
-    // Operations included, so the ERP entities carry their own behaviour.
-    // Tenant field definitions and referencedBy are core as well
-    // (operations/entity/extensions): the compiler emits them for every
-    // extensible entity and reference target, with no module behind them.
-    if (operation.plugin === EXTENSIONS_PLUGIN) {
-      if (modulesByName.has(EXTENSIONS_PLUGIN)) throw new Error("The core tenant field runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: nativeExtensionHandler(operation) });
-      continue;
-    }
-    if (operation.plugin === BILLING_PLUGIN) {
-      if (modulesByName.has(BILLING_PLUGIN)) throw new Error("The core billing runtime cannot be replaced by a plugin.");
-      bound.set(operation.key, { operation, handler: billingOperationHandler(operation) });
-      continue;
-    }
-    if (operation.implementation?.type === "collection-options") {
-      bound.set(operation.key, { operation, handler: nativeCollectionOptionsHandler(operation, modules) });
-      continue;
-    }
-    if (operation.implementation?.type === "application-search") {
-      bound.set(operation.key, { operation, handler: nativeApplicationSearchHandler(operation) });
-      continue;
-    }
-    if (operation.implementation?.type === "color-palette") {
-      bound.set(operation.key, { operation, handler: nativeColorPaletteHandler(operation) });
-      continue;
-    }
-    if (operation.implementation?.type === "entity-type-list") {
-      bound.set(operation.key, { operation, handler: nativeEntityTypeListHandler(operation) });
-      continue;
-    }
-    if (operation.implementation?.type === "ownedDelete") {
-      bound.set(operation.key, { operation, handler: nativeOwnedDeleteHandler(operation) });
-      continue;
-    }
-    if (operation.implementation?.type === "collection") {
-      bound.set(operation.key, { operation, handler: nativeCollectionHandler(operation) });
-      continue;
-    }
-    if (operation.implementation?.type === "constrained-reference-create") {
-      bound.set(operation.key, { operation, handler: nativeConstrainedReferenceCreateHandler(operation) });
-      continue;
-    }
-
-    if (pluginOperations === "absent") continue;
-    const module = modulesByName.get(operation.plugin);
-    if (!module) {
-      throw new Error(`Canonical operation "${operation.key}" has no loaded runtime module "${operation.plugin}".`);
-    }
-    const handler = module?.operationHandlers?.[operation.handler];
-    if (!handler) {
-      throw new Error(`Canonical operation "${operation.key}" has no runtime handler "${operation.handler}" in module "${operation.plugin}".`);
-    }
-    const availability = module.operationAvailabilityHandlers?.[operation.handler];
-    if (availability && (operation.auth.mode !== "session" || operation.tenancy.mode !== "required" ||
-      operation.target?.scope !== "record" || !operation.target.inputField)) {
-      throw new Error(`Operation "${operation.key}" availability requires an authenticated tenant record target.`);
-    }
-    bound.set(operation.key, { operation, handler, maintenanceOwner: module, ...(availability ? { availability } : {}) });
-  }
-  for (const module of modules) {
-    const moduleOperations = knownOperations.filter((operation) => !operation.implementation && operation.plugin === module.name);
-    // Explicit test/embedded catalogs validate only modules represented by that
-    // catalog; production's generated catalog still validates every module.
-    if (!usesGeneratedCatalog && moduleOperations.length === 0) continue;
-    const declared = new Set(moduleOperations.map((operation) => operation.handler));
-    const extras = Object.keys(module.operationHandlers ?? {}).filter((handler) => !declared.has(handler));
-    if (extras.length > 0) {
-      throw new Error(`Runtime module "${module.name}" has operation handlers absent from its compiler contract: ${extras.sort().join(", ")}.`);
-    }
-    const extraAvailability = Object.keys(module.operationAvailabilityHandlers ?? {}).filter(key => !declared.has(key));
-    if (extraAvailability.length > 0) throw new Error(`Runtime module "${module.name}" has availability handlers absent from its compiler contract.`);
-  }
-  if (usesGeneratedCatalog && pluginOperations === "required") bindingCache.set(modules, bound);
-  return bound;
-}
 
 export function requireOperationAuthorization(
   operation: OperationContract,
@@ -912,7 +593,7 @@ function recordActionPrincipalReachable(
   }
 }
 
-function asInput(value: unknown): Record<string, unknown> {
+export function asInput(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new HttpError(400, "BAD_USER_INPUT", "Operation input must be an object.");
   }
@@ -1507,6 +1188,20 @@ export type InvokeOperationOptions = {
   ) => Promise<ModuleOperationSuccessResult> | ModuleOperationSuccessResult;
 };
 
+/**
+ * REST binds its own input, and this check applies on every path into a
+ * capability Operation, a handler's nested execute included.
+ */
+function assertGrantSubjectTarget(
+  operation: OperationContract,
+  session: TrustedSessionContext | undefined,
+  input: Record<string, unknown>,
+): void {
+  if (operation.auth.mode !== "capability") return;
+  const field = operation.target?.inputField;
+  if (field && input[field] !== session?.grant?.subject.id) throw capabilityGrantRefusal("GRANT_SCOPE");
+}
+
 export async function invokeOperation(
   bound: Bound,
   inputValue: unknown,
@@ -1825,669 +1520,4 @@ export async function invokeOperation(
     });
     },
   ), context.session?.principalKind));
-}
-
-function applyErrorResponseMetadata(
-  reply: FastifyReply,
-  response: {
-    headers?: Record<string, string> | undefined;
-    contentType?: string | undefined;
-  },
-): void {
-  for (const [name, value] of Object.entries(response.headers ?? {})) {
-    reply.header(name, value);
-  }
-  if (response.contentType) reply.header("content-type", response.contentType);
-}
-
-function sendDeclaredRestError(
-  reply: FastifyReply,
-  response: {
-    status: number;
-    body: unknown;
-    headers?: Record<string, string> | undefined;
-    contentType?: string | undefined;
-  },
-) {
-  const headerContentType = Object.entries(response.headers ?? {})
-    .find(([name]) => name.toLowerCase() === "content-type")?.[1];
-  const contentType = response.contentType ?? headerContentType ?? "application/json";
-  applyErrorResponseMetadata(reply, { ...response, contentType });
-  const serialized = JSON.stringify(response.body);
-  if (serialized === undefined) {
-    throw new HttpError(
-      500,
-      "HANDLER_CONTRACT_VIOLATION",
-      "Operation error body is not JSON serializable.",
-    );
-  }
-  return reply.status(response.status).send(Buffer.from(serialized));
-}
-
-function fixedDeclaredRestError(
-  operation: OperationContract,
-  error: unknown,
-): { status: number; body: unknown; contentType?: string } | undefined {
-  if (!(error instanceof HttpError)) return undefined;
-  const declaration = operation.errors.find((candidate) =>
-    candidate.status === error.status && candidate.code === error.code
-  );
-  if (!declaration?.rest || !Object.hasOwn(declaration.rest, "body")) return undefined;
-  const validate = validatorsFor(operation).errors.get(errorKey(error.status, error.code));
-  if (!isJsonValue(declaration.rest.body) || !validate?.(declaration.rest.body)) {
-    throw new HttpError(
-      500,
-      "HANDLER_CONTRACT_VIOLATION",
-      "Operation contract contains an invalid fixed REST error body.",
-    );
-  }
-  if (
-    !declaration.schema &&
-    (declaration.rest.body as { error?: { code?: unknown } }).error?.code !== declaration.code
-  ) {
-    throw new HttpError(
-      500,
-      "HANDLER_CONTRACT_VIOLATION",
-      "Operation contract contains a fixed REST body inconsistent with its error code.",
-    );
-  }
-  return {
-    status: declaration.status,
-    body: declaration.rest.body,
-    contentType: declaration.rest.contentType ?? "application/json",
-  };
-}
-
-function sendOperationRestFailure(
-  reply: FastifyReply,
-  operation: OperationContract,
-  error: unknown,
-  allowFixedRepresentation: boolean,
-) {
-  const projectedError = error instanceof SessionAuthenticationUnavailableError
-    ? new HttpError(503, "AUTHENTICATION_UNAVAILABLE", error.message)
-    : error;
-  if (projectedError instanceof DeclaredOperationError) {
-    return sendDeclaredRestError(reply, projectedError);
-  }
-  const fixed = allowFixedRepresentation
-    ? fixedDeclaredRestError(operation, projectedError)
-    : undefined;
-  if (fixed) return sendDeclaredRestError(reply, fixed);
-  const { status, body } = toHttpError(projectedError);
-  return reply.status(status).send(body);
-}
-
-export function operationRestInput(
-  request: FastifyRequest,
-  operation: OperationContract,
-  bind: (input: Record<string, unknown>) => Record<string, unknown> = (input) => input,
-): Record<string, unknown> {
-  let body: Record<string, unknown> = {};
-  if (request.body instanceof Uint8Array) {
-    if (request.body.byteLength === 0) {
-      return operationRestInputFromParts(request, operation, body, bind);
-    }
-    try {
-      const parsed = JSON.parse(new TextDecoder().decode(request.body));
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("not an object");
-      }
-      body = parsed as Record<string, unknown>;
-    } catch {
-      throw new HttpError(400, "BAD_USER_INPUT", "Operation body must be a valid JSON object.");
-    }
-  } else if (request.body && typeof request.body === "object" && !Array.isArray(request.body)) {
-    body = request.body as Record<string, unknown>;
-  }
-  return operationRestInputFromParts(request, operation, body, bind);
-}
-
-function operationRestInputFromParts(
-  request: FastifyRequest,
-  operation: OperationContract,
-  body: Record<string, unknown>,
-  bind: (input: Record<string, unknown>) => Record<string, unknown>,
-): Record<string, unknown> {
-  const query = request.query && typeof request.query === "object" ? request.query as Record<string, unknown> : {};
-  const params = request.params && typeof request.params === "object" ? request.params as Record<string, unknown> : {};
-  const pathParameters = new Set(
-    [...operation.transports.rest.path.matchAll(/:([_A-Za-z][_0-9A-Za-z]*)/g)]
-      .map((match) => match[1]!),
-  );
-  for (const name of pathParameters) {
-    if (name in body || name in query) {
-      throw new HttpError(400, "BAD_USER_INPUT", `Path parameter "${name}" must only be supplied in the URL.`);
-    }
-  }
-  const readsInputFromQuery = operation.transports.rest.method === "GET" ||
-    operation.transports.rest.method === "DELETE";
-  if (readsInputFromQuery && Object.keys(body).length > 0) {
-    throw new HttpError(400, "BAD_USER_INPUT", "This operation accepts input through path and query parameters, not a request body.");
-  }
-  if (!readsInputFromQuery) {
-    const declared = operation.inputSchema.properties && typeof operation.inputSchema.properties === "object"
-      ? operation.inputSchema.properties as Record<string, unknown>
-      : {};
-    const collisions = Object.keys(query).filter((name) => name in declared);
-    if (collisions.length > 0) {
-      throw new HttpError(400, "BAD_USER_INPUT", `Declared operation input must not be supplied through query parameters: ${collisions.sort().join(", ")}.`);
-    }
-  }
-  // Server-supplied input (a capability grant's subject) joins before the
-  // query is validated: a GET whose record target the grant names must not be
-  // refused for leaving out the field the caller may not choose.
-  // URL path components always arrive as strings, including on POST/PATCH.
-  // Only convert a canonical integer when the Operation declares that exact
-  // type; malformed and unsafe numbers stay strings and fail validation.
-  const typedParams = { ...params };
-  const properties = operation.inputSchema.properties && typeof operation.inputSchema.properties === "object"
-    ? operation.inputSchema.properties as Record<string, unknown> : {};
-  for (const name of pathParameters) {
-    const schema = properties[name];
-    const value = params[name];
-    if (!schema || typeof schema !== "object" || Array.isArray(schema) || (schema as Record<string,unknown>).type!=="integer" || typeof value!=="string")continue;
-    const canonical=/^(?:0|-?[1-9]\d*)$/.test(value) && Number.isSafeInteger(Number(value));
-    if(canonical)typedParams[name]=Number(value);
-    // Query coercion must not turn a rejected path spelling into a valid int.
-    else if(readsInputFromQuery)throw new HttpError(400,"BAD_USER_INPUT","Operation integer path input must use a canonical safe integer.");
-  }
-  const input = bind(readsInputFromQuery ? { ...query, ...typedParams } : { ...body, ...typedParams });
-  if (operation.idempotency.mode === "idempotency-key") {
-    const field = operation.idempotency.inputField!;
-    if (field in input) {
-      throw new HttpError(400, "BAD_USER_INPUT", `Idempotency input "${field}" must only be supplied through the ${operation.idempotency.header} header on REST.`);
-    }
-    const header = request.headers[operation.idempotency.header!.toLowerCase()];
-    if (typeof header === "string") input[field] = header;
-  }
-  if (readsInputFromQuery) {
-    let validate = queryValidators.get(operation);
-    if (!validate) {
-      validate = queryAjv.compile(operation.inputSchema);
-      queryValidators.set(operation, validate);
-    }
-    if (!validate(input)) {
-      throw new HttpError(400, "BAD_USER_INPUT", "Operation query input does not match its canonical schema.");
-    }
-  }
-  return input;
-}
-
-/**
- * The session for a control Operation on REST: the control realm's own
- * verifier, never the tenant one. An unconfigured control plane answers the
- * 503 every control Operation declares, naming what is missing, rather than
- * a 401 that would send an operator looking at their token.
- */
-async function resolveControlRestSession(
-  request: FastifyRequest,
-  context: ModuleRuntimeContext,
-): Promise<TrustedSessionContext> {
-  const control = context.control;
-  if (!control) {
-    throw new HttpError(503, "CONTROL_PLANE_NOT_CONFIGURED", "The control plane is not assembled in this process.");
-  }
-  if (!control.config.ok) {
-    throw new HttpError(
-      503,
-      "CONTROL_PLANE_NOT_CONFIGURED",
-      `The control plane is not configured. Missing environment: ${control.config.missing.join(", ")}.`,
-    );
-  }
-  try {
-    return await resolveControlSession(headersFromFastify(request.headers), control.config.config, { mcpAppResource: true });
-  } catch (error) {
-    throw controlSessionHttpError(error);
-  }
-}
-
-/**
- * A capability Operation is authenticated by its grant token alone: no bearer
- * is consulted, and the database is required because the grant row is the
- * credential.
- */
-async function resolveCapabilityRestSession(
-  request: FastifyRequest,
-  context: ModuleRuntimeContext,
-  operation: OperationContract,
-): Promise<TrustedSessionContext> {
-  if (!context.db) throw new HttpError(503, "DATABASE_NOT_CONFIGURED", "Capability grants require a database.");
-  const header = request.headers.authorization;
-  const token = grantTokenFromAuthorization(Array.isArray(header) ? header[0] : header);
-  return resolveCapabilityGrantSession(context.db, token, {
-    key: operation.key,
-    ...(operation.target ? { target: { entityName: operation.target.entityName } } : {}),
-  });
-}
-
-/**
- * The grant names the one record; when the Operation declares a record
- * target the runtime supplies it, so the caller cannot point the Operation
- * at another record than the grant was issued for.
- */
-function bindGrantSubject(
-  operation: OperationContract,
-  session: TrustedSessionContext | undefined,
-  input: Record<string, unknown>,
-): Record<string, unknown> {
-  if (operation.auth.mode !== "capability" || !session?.grant) return input;
-  const field = operation.target?.inputField;
-  if (!field) return input;
-  if (field in input && input[field] !== session.grant.subject.id) throw capabilityGrantRefusal("GRANT_SCOPE");
-  return { ...input, [field]: session.grant.subject.id };
-}
-
-/**
- * The binding above completes REST input; this holds on every path into a
- * capability Operation, a handler's nested execute included.
- */
-function assertGrantSubjectTarget(
-  operation: OperationContract,
-  session: TrustedSessionContext | undefined,
-  input: Record<string, unknown>,
-): void {
-  if (operation.auth.mode !== "capability") return;
-  const field = operation.target?.inputField;
-  if (field && input[field] !== session?.grant?.subject.id) throw capabilityGrantRefusal("GRANT_SCOPE");
-}
-
-export function registerOperationRestRoutes(
-  app: FastifyInstance,
-  modules: readonly RuntimeModule[],
-  context: ModuleRuntimeContext,
-  operations: readonly OperationContract[] = catalog.operations,
-  options: BindOperationOptions = {},
-): void {
-  const bound = bindOperationHandlers(modules, operations, options);
-  for (const entry of bound.values()) {
-    const handler = async (request: FastifyRequest, reply: FastifyReply) => {
-      let session: TrustedSessionContext | undefined;
-      try {
-        session = entry.operation.auth.mode === "custom"
-          ? undefined
-          : entry.operation.auth.mode === "control"
-          ? await resolveControlRestSession(request, context)
-          : entry.operation.auth.mode === "capability"
-          ? await resolveCapabilityRestSession(request, context, entry.operation)
-          : await resolveSessionContext(headersFromFastify(request.headers), { db: context.db, mcpAppResource: true });
-      } catch (error) {
-        return sendOperationRestFailure(reply, entry.operation, error, true);
-      }
-      let input: Record<string, unknown>;
-      try {
-        input = operationRestInput(request, entry.operation, (parts) => bindGrantSubject(entry.operation, session, parts));
-      } catch (error) {
-        return sendOperationRestFailure(reply, entry.operation, error, false);
-      }
-      try {
-        requireOperationAuthorization(entry.operation, session);
-      } catch (error) {
-        return sendOperationRestFailure(reply, entry.operation, error, true);
-      }
-      try {
-        const result = await invokeOperation(entry, input, {
-          ...context,
-          transport: "rest",
-          ...(session ? { session } : {}),
-          request,
-          reply,
-        });
-        for (const [name, value] of Object.entries(result.headers ?? {})) reply.header(name, value);
-        if (result.contentType ?? entry.operation.transports.rest.response.contentType) {
-          reply.type(result.contentType ?? entry.operation.transports.rest.response.contentType!);
-        }
-        return reply.status(result.status ?? entry.operation.transports.rest.response.status ?? 200).send(result.value);
-      } catch (error) {
-        return sendOperationRestFailure(reply, entry.operation, error, false);
-      }
-    };
-    app.route({
-      method: entry.operation.transports.rest.method as "GET",
-      url: entry.operation.transports.rest.path,
-      handler,
-    });
-  }
-}
-
-/**
- * Stable adapter for entity and record-derived Operations. Definitions stay
- * dynamic and session-filtered; adding a stored Operation never adds a route.
- */
-/**
- * What a caller may address by id. An Operation its entity withholds from every
- * interface is written through by another Operation, under that one's lease and
- * version; a caller naming it directly would have neither. Other Operations
- * still reach it through the platform port.
- */
-const addressable = <T extends { id: string }>(definitions: readonly T[]): T[] =>
-  definitions.filter((definition) => !isWithheldOperation(definition.id));
-
-/**
- * The record offers of a list page in the compact format, when the caller
- * asked for it (`offerFormat: "compact"`, see @openshapeforge/operations
- * compact-offers.ts). Every other answer — a failure, an acceptance, a
- * non-list result — is returned as it is, and so is a page of any other shape.
- */
-export function projectRecordOfferFormat(
-  result: RuntimeOperationExecutionResult,
-  format: "full" | "compact" | undefined,
-): RuntimeOperationExecutionResult {
-  if (format !== "compact" || !result || typeof result !== "object" || "error" in result || isOperationAccepted(result)) return result;
-  const data = (result as { data?: unknown }).data as { items?: unknown } | null | undefined;
-  const items = data && typeof data === "object" ? data.items : undefined;
-  if (!Array.isArray(items) || !items.every((item) => item && typeof item === "object" &&
-    Object.hasOwn(item, "data") && Array.isArray((item as { operations?: unknown }).operations))) return result;
-  const compact = compactRecordOffers(items as { data: unknown; operations: OperationOffer[] }[]);
-  return {
-    ...result,
-    data: { ...data, items: compact.items, offerFormat: "compact", offerTemplates: compact.offerTemplates },
-  } as RuntimeOperationExecutionResult;
-}
-
-function executeForCaller(
-  platform: ModulePlatformServices,
-  session: TrustedSessionContext,
-  request: RuntimeOperationRequest,
-): Promise<RuntimeOperationExecutionResult> {
-  if (!isWithheldOperation(request.operation.id)) return platform.operations.execute(session, request);
-  return Promise.resolve({ error: { code: "OPERATION_NOT_FOUND", message: "The requested Operation is not available.", retryable: false } });
-}
-
-export function registerRuntimeOperationRestRoutes(
-  app: FastifyInstance,
-  runtime: ModuleRuntimeContext,
-): void {
-  if (!runtime.platform || !runtime.db) return;
-  const withSession = async <T>(
-    request: FastifyRequest,
-    work: (session: TrustedSessionContext, definition?: RuntimeOperationDefinition) => Promise<T>,
-    operationId?: string,
-  ): Promise<T> => {
-    const headers = headersFromFastify(request.headers);
-    const control = runtime.control?.config.ok ? runtime.control.config.config : undefined;
-    const controlCandidate = control && bearerIssuerOf(headers) === control.operator.issuer;
-    const active = <R>(session: TrustedSessionContext, action: (session: TrustedSessionContext) => Promise<R>) =>
-      withModuleOperationSession(runtime.platform!, session, (verified) => action(verified!));
-    const available = (session: TrustedSessionContext) => active(
-      session, (verified) => runtime.platform!.operations.get(verified, operationId!),
-    );
-    // A person may be both an organization member and a platform operator.
-    // Choose the Operation's available canonical context before execution;
-    // never merge the two sessions or retry a business refusal under another.
-    let tenant: TrustedSessionContext | undefined;
-    let tenantError: unknown;
-    // A distinct control issuer cannot be a tenant credential. Do not consult
-    // an unrelated or intentionally absent tenant verifier in that deployment.
-    if (!controlCandidate || control?.operator.issuer === process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER) {
-      try {
-        const resolved = await resolveSessionContext(headers, { db: runtime.db, mcpAppResource: true });
-        if (resolved.userId && resolved.credential !== "none") tenant = resolved;
-      } catch (error) {
-        tenantError = error;
-      }
-    }
-    // Discovery has one catalog: an admitted tenant wins deterministically.
-    let tenantDefinition: RuntimeOperationDefinition | undefined;
-    if (tenant && (operationId === undefined || !controlCandidate || (tenantDefinition = await available(tenant)))) {
-      return active(tenant, (session) => work(session, tenantDefinition));
-    }
-    let operator: TrustedSessionContext | undefined;
-    let controlError: unknown;
-    if (control && controlCandidate) {
-      try {
-        operator = await resolveControlSession(headers, control, { mcpAppResource: true });
-      } catch (error) {
-        controlError = controlSessionHttpError(error);
-      }
-    }
-    if (operator) {
-      const definition = operationId === undefined ? undefined : await available(operator);
-      if (operationId === undefined || (definition && runtimeDefinitionAuthModes.get(definition) === "control")) {
-        return active(operator, (session) => work(session, definition));
-      }
-    }
-    // Preserve normal unavailable-Operation results without widening authority.
-    // An admission failure remains a failure for a tenant/provider Operation.
-    if (tenant) return active(tenant, work);
-    if (tenantError) throw tenantError;
-    if (operator) throw new HttpError(404, "NOT_FOUND", "Operation is not available.");
-    if (controlError) throw controlError;
-    throw new HttpError(401, "UNAUTHENTICATED", "Operation discovery requires an authenticated session.");
-  };
-
-  const failed = (reply: FastifyReply, error: unknown) => {
-    const response = toHttpError(error);
-    return reply.status(response.status).send(response.body);
-  };
-
-  // createApiApp keeps JSON as bytes for GraphQL Yoga. Runtime Operation
-  // routes own ordinary JSON and therefore parse it in an encapsulated scope,
-  // just like generated CRUD and edit-lease routes do.
-  void app.register(async (instance) => {
-    instance.removeContentTypeParser("application/json");
-    instance.addContentTypeParser(
-      "application/json",
-      { parseAs: "string" },
-      (_request, body, done) => {
-        try {
-          done(null, body ? JSON.parse(body as string) : {});
-        } catch {
-          done(new HttpError(400, "BAD_USER_INPUT", "Request body is not valid JSON."), undefined);
-        }
-      },
-    );
-    instance.setErrorHandler((error, _request, reply) => {
-      void failed(reply, error);
-    });
-
-    instance.get("/api/operations", async (request, reply) => {
-      try {
-        return await withSession(
-          request,
-          async (session) => addressable(await runtime.platform!.operations.list(session)),
-        );
-      } catch (error) {
-        return failed(reply, error);
-      }
-    });
-    instance.get("/api/operations/:id", async (request, reply) => {
-      try {
-        const id = (request.params as { id?: unknown }).id;
-        if (typeof id !== "string" || id.length === 0) {
-          throw new HttpError(400, "BAD_USER_INPUT", "Operation id is required.");
-        }
-        const definition = await withSession(
-          request,
-          async (session, definition) => definition ?? runtime.platform!.operations.get(session, id),
-          id,
-        );
-        if (!definition || isWithheldOperation(id)) {
-          throw new HttpError(404, "NOT_FOUND", "Operation is not available.");
-        }
-        return definition;
-      } catch (error) {
-        return failed(reply, error);
-      }
-    });
-    instance.post("/api/operations/:id/execute", async (request, reply) => {
-      try {
-        const id = (request.params as { id?: unknown }).id;
-        if (typeof id !== "string" || id.length === 0) {
-          throw new HttpError(400, "BAD_USER_INPUT", "Operation id is required.");
-        }
-        const body = asInput(request.body ?? {});
-        if (typeof body.intent !== "string" || body.intent.length === 0) {
-          throw new HttpError(400, "BAD_USER_INPUT", "Operation intent is required.");
-        }
-        const operationInput = body.input === undefined
-          ? undefined
-          : asInput(body.input);
-        const expectedContractFingerprint = body.expectedContractFingerprint;
-        if (expectedContractFingerprint !== undefined &&
-          (typeof expectedContractFingerprint !== "string" ||
-            !/^sha256:[0-9a-f]{64}$/.test(expectedContractFingerprint))) {
-          throw new HttpError(
-            400,
-            "BAD_USER_INPUT",
-            "Expected Operation contract fingerprint is invalid.",
-          );
-        }
-        const offerFormat = body.offerFormat;
-        if (offerFormat !== undefined && offerFormat !== "full" && offerFormat !== "compact") {
-          throw new HttpError(400, "BAD_USER_INPUT", "offerFormat must be \"full\" or \"compact\".");
-        }
-        if (offerFormat === "compact" && body.intent !== "list") {
-          throw new HttpError(400, "BAD_USER_INPUT", "offerFormat \"compact\" applies to a list only.");
-        }
-        const idempotencyKey = request.headers["idempotency-key"];
-        if (idempotencyKey !== undefined && typeof idempotencyKey !== "string") {
-          throw new HttpError(
-            400,
-            "BAD_USER_INPUT",
-            "Idempotency-Key must have exactly one value.",
-          );
-        }
-        const result = await withSession(
-          request,
-          (session) => executeForCaller(runtime.platform!, session, {
-            operation: { id, intent: body.intent as string },
-            ...(operationInput ? { input: operationInput } : {}),
-            ...(idempotencyKey ? { idempotencyKey } : {}),
-            ...(expectedContractFingerprint
-              ? { expectedContractFingerprint }
-              : {}),
-          }),
-          id,
-        );
-        // Taken over by an operation override: answered, not yet in effect.
-        if (isOperationAccepted(result)) return reply.status(202).send(result);
-        return projectRecordOfferFormat(result, offerFormat);
-      } catch (error) {
-        return failed(reply, error);
-      }
-    });
-  });
-}
-
-export function operationGraphqlContribution(
-  modules: readonly RuntimeModule[],
-  runtime: ModuleRuntimeContext,
-): RuntimeModule | undefined {
-  // The core jobs, transition, billing and tenant field Operations project in
-  // every process, as their REST and MCP surfaces do: the handlers ship with
-  // the runtime, not with a module.
-  const activePlugins = new Set([...modules.map((module) => module.name), JOBS_PLUGIN, TRANSITIONS_PLUGIN, BILLING_PLUGIN, EXTENSIONS_PLUGIN]);
-  const projected = catalog.operations.filter((operation) =>
-    (activePlugins.has(operation.plugin) || operation.implementation?.type === "ownedDelete") && operation.transports.graphql.enabled
-  );
-  if (projected.length === 0 && !runtime.platform) return undefined;
-  const bound = projected.length > 0 ? bindOperationHandlers(modules) : new Map();
-  const runtimeQueryFields = runtime.platform
-    ? [
-        "operationCatalog: JSON!",
-        "operationDefinition(id: String!): JSON",
-      ]
-    : [];
-  const runtimeMutationFields = runtime.platform
-    ? [
-        "executeOperation(id: String!, intent: String!, input: JSON, idempotencyKey: String): JSON!",
-      ]
-    : [];
-  const queryFields = [
-    ...runtimeQueryFields,
-    ...projected
-      .filter((operation) => operation.transports.graphql.kind === "query")
-      .map((operation) => `${operation.transports.graphql.field}(input: JSON!): JSON!`),
-  ].join("\n");
-  const mutationFields = [
-    ...runtimeMutationFields,
-    ...projected
-      .filter((operation) => operation.transports.graphql.kind === "mutation")
-      .map((operation) => `${operation.transports.graphql.field}(input: JSON!): JSON!`),
-  ].join("\n");
-  const resolvers = { Query: {} as Record<string, unknown>, Mutation: {} as Record<string, unknown> };
-  const withRuntimeSession = async <T>(
-    context: GraphqlContext,
-    work: (session: TrustedSessionContext) => Promise<T>,
-  ): Promise<T> => {
-    if (!runtime.platform || !context.session?.userId) {
-      throw new HttpError(
-        401,
-        "UNAUTHENTICATED",
-        "Operation discovery requires an authenticated session.",
-      );
-    }
-    return withModuleOperationSession(
-      runtime.platform,
-      context.session,
-      (session) => work(session!),
-    );
-  };
-  if (runtime.platform) {
-    resolvers.Query.operationCatalog = (
-      _parent: unknown,
-      _args: unknown,
-      context: GraphqlContext,
-    ) => withRuntimeSession(
-      context,
-      async (session) => addressable(await runtime.platform!.operations.list(session)),
-    );
-    resolvers.Query.operationDefinition = (
-      _parent: unknown,
-      args: { id: string },
-      context: GraphqlContext,
-    ) => withRuntimeSession(
-      context,
-      async (session) => isWithheldOperation(args.id) ? undefined : runtime.platform!.operations.get(session, args.id),
-    );
-    resolvers.Mutation.executeOperation = (
-      _parent: unknown,
-      args: {
-        id: string;
-        intent: string;
-        input?: unknown;
-        idempotencyKey?: string;
-      },
-      context: GraphqlContext,
-    ) => withRuntimeSession(context, (session) => {
-      const input = args.input === undefined ? undefined : asInput(args.input);
-      return executeForCaller(runtime.platform!, session, {
-        operation: { id: args.id, intent: args.intent },
-        ...(input ? { input } : {}),
-        ...(args.idempotencyKey
-          ? { idempotencyKey: args.idempotencyKey }
-          : {}),
-      });
-    });
-  }
-  for (const operation of projected) {
-    const target = operation.transports.graphql.kind === "query" ? resolvers.Query : resolvers.Mutation;
-    target[operation.transports.graphql.field!] = async (_parent: unknown, args: { input: unknown }, context: GraphqlContext) => {
-      try {
-        if (operation.idempotency.mode === "idempotency-key" && (!runtime.db || !runtime.platform)) {
-          throw operationFailure({
-            code: "IDEMPOTENCY_RECEIPT_UNAVAILABLE",
-            message: "The Operation cannot persist its required idempotency receipt.",
-            retryable: true,
-          });
-        }
-        return (await invokeOperation(bound.get(operation.key)!, args.input, {
-          ...runtime,
-          transport: "graphql",
-          session: context.session,
-        })).value;
-      } catch (error) {
-        if (error instanceof DeclaredOperationError) {
-          throw new GraphQLError(error.message, {
-            extensions: { code: error.code, status: error.status, body: error.body },
-          });
-        }
-        const { status, body } = toHttpError(error);
-        throw new GraphQLError(body.error.message, { extensions: { code: body.error.code, status, retryable: body.error.retryable } });
-      }
-    };
-  }
-  const contribution: ModuleGraphqlContribution = { queryFields, mutationFields, resolvers };
-  return { name: "__canonical_operations", graphql: () => contribution };
 }

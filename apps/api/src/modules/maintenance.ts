@@ -612,11 +612,11 @@ async function withJobOwner<T>(
   const { createRuntimeHostOperationExecutor } =
     await import("../mcp/runtime-executors.js");
   const {
-    bindOperationHandlers,
     listOperationContracts,
     entityPluginOperationContracts,
-    runtimeStaticOperationRegistrations,
   } = await import("../operations/runtime.js");
+  const { bindOperationHandlers, runtimeStaticOperationRegistrations } =
+    await import("../operations/composition.js");
   const { createEntityPluginExecutor, registerEntityPluginExecutor } =
     await import("../operations/entity/plugin-executor.js");
   if (initialized && !initialized.modules.includes(module))

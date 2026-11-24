@@ -50,7 +50,8 @@ import { runMigrationChain } from "../db/migration-chain.js";
 import { APP_ROLE } from "../db/migrations/app-role.js";
 import { ModulePlatformRuntime, withModuleOperationSession } from "./platform.js";
 import { loadRuntimeModules } from "./registry.js";
-import { bindOperationHandlers, invokeOperation } from "../operations/runtime.js";
+import { bindOperationHandlers } from "../operations/composition.js";
+import { invokeOperation } from "../operations/runtime.js";
 import { HttpError } from "../rest/http-error.js";
 import type { ModuleOperationHandler, RuntimeModule } from "./contract.js";
 

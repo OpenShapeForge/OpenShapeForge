@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from 'bun:test';
 import rawCatalog from '../generated/operations/catalog.json' with { type: 'json' };
-import { bindOperationHandlers, invokeOperation, type OperationContract } from '../operations/runtime.js';
+import { bindOperationHandlers } from "../operations/composition.js";
+import { invokeOperation, type OperationContract } from "../operations/runtime.js";
 
 test('member access Operations enforce acknowledgement before stripping it from handler input', async () => {
   for (const key of ['accounts.request-member-password-reset',

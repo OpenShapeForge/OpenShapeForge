@@ -65,7 +65,8 @@ import { withDbSession, type DbSessionInput } from "../session.js";
 import type { DB } from "../../generated/db/types.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { loadRuntimeModules } from "../../modules/registry.js";
-import { bindOperationHandlers, invokeOperation } from "../../operations/runtime.js";
+import { bindOperationHandlers } from "../../operations/composition.js";
+import { invokeOperation } from "../../operations/runtime.js";
 import { HttpError } from "../../rest/http-error.js";
 import type { ModuleOperationHandler, RuntimeModule } from "../../modules/contract.js";
 

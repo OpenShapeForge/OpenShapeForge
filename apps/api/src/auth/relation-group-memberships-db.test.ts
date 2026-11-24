@@ -11,6 +11,7 @@ import { runMigrationChain } from "../db/migration-chain.js";
 import { APP_ROLE } from "../db/migrations/app-role.js";
 import { withDbSession } from "../db/session.js";
 import { resolveGroupRoles } from "./group-roles.js";
+import { personOrganizationAuthority } from "./bearer-session.js";
 import { resolveRelationGroupMembershipIds } from "./relation-group-memberships.js";
 
 const ADMIN_URL = process.env.SCRATCH_ADMIN_DATABASE_URL ??
@@ -197,6 +198,21 @@ test("dated memberships, grant revocation and non-admin escalation guards", asyn
   expect(await resolveRelationGroupMembershipIds(restricted.db, session, identity)).toEqual([activeGroupId]);
   expect(await resolveGroupRoles(restricted.db, session, [activeGroupId])).toEqual(['Finance.Budget.ReadWrite']);
   expect(await resolveGroupRoles(restricted.db, { ...session, tenantId: otherTenantId }, [activeGroupId])).toEqual([]);
+  // A person's authority reads the memberships and their group roles in ONE transaction.
+  let begins = 0;
+  const counted = createDatabaseRuntime({
+    databaseUrl: scratchUrl({ username: APP_ROLE, password: "openshapeforge_app" }),
+    maxConnections: 1,
+    log: event => { if (/^\s*begin/i.test(event.query.sql)) begins += 1; },
+  });
+  try {
+    const authority = await personOrganizationAuthority(counted.db, {
+      tenantId, userId, groups: [], issuerRoles: [], identity,
+    }, { identityId, issuer: identity.issuer, subject: identity.subject, status: "linked", relationId, displayName: null, relationType: "person", roles: [] } as never, undefined);
+    expect(authority.relationGroupIds).toEqual([activeGroupId]);
+    expect(authority.roles).toContain('Finance.Budget.ReadWrite');
+    expect(begins).toBe(1);
+  } finally { await counted.close(); }
   await expect(withDbSession(restricted.db, session, async trx => {
     await sql`update erp.relation_group_memberships set end_date=null
       where tenant_id=${tenantId}::uuid and relation_group_id=${activeGroupId}::uuid`.execute(trx);

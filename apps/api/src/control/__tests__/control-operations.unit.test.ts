@@ -12,7 +12,7 @@
 import { describe, expect, it } from "bun:test";
 import type { TrustedSessionContext } from "../../auth/trusted-context.js";
 import type { ModuleOperationContext, RuntimeModule } from "../../modules/contract.js";
-import { bindOperationHandlers } from "../../operations/runtime.js";
+import { bindOperationHandlers } from "../../operations/composition.js";
 import { ControlAuthorizationError } from "../authorization.js";
 import { controlSessionFor } from "../control-session.js";
 import { ControlServiceError } from "../errors.js";

@@ -21,7 +21,8 @@ import {
   __setOperationExecutionReceiptExecutorForTests,
   keyedOperationReceiptIdentity,
 } from "../../operations/execution-receipts.js";
-import { bindOperationHandlers, entityPluginOperationContract } from "../../operations/runtime.js";
+import { bindOperationHandlers } from "../../operations/composition.js";
+import { entityPluginOperationContract } from "../../operations/runtime.js";
 import type { ModuleOperationHandler } from "../contract.js";
 import { ModulePlatformRuntime } from "../platform.js";
 

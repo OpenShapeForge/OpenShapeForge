@@ -14,7 +14,10 @@ import { createGraphqlContext } from "../graphql/context.js";
 import { createControlRuntime } from "../control/runtime.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
 import type { RuntimeModule } from "../modules/contract.js";
-import { operationGraphqlContribution, registerRuntimeOperationRestRoutes, runtimeStaticOperationRegistrations, type OperationContract } from "./runtime.js";
+import { operationGraphqlContribution } from "../graphql/operation-contribution.js";
+import { registerRuntimeOperationRestRoutes } from "../rest/operation-routes.js";
+import { runtimeStaticOperationRegistrations } from "./composition.js";
+import { type OperationContract } from "./runtime.js";
 import { getEntityOperationContracts } from "./entity/runtime.js";
 
 const issuer = "https://identity.example.test/realms/dual-context";

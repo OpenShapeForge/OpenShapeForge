@@ -2,7 +2,8 @@
 import { expect, test } from 'bun:test';
 import type { ModuleOperationSuccessResult, RuntimeModule } from '../modules/contract.js';
 import type { TrustedSessionContext } from '../auth/trusted-context.js';
-import { runtimeStaticOperationRegistrations, type OperationContract } from './runtime.js';
+import { runtimeStaticOperationRegistrations } from "./composition.js";
+import { type OperationContract } from "./runtime.js";
 
 // Explicit catalogs keep this executor boundary independent of optional
 // example plugins. The real Account catalog/offers are covered by the DB proof.

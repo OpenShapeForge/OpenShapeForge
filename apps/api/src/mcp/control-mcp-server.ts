@@ -75,8 +75,8 @@ import type {
   ModuleRuntimeContext,
   RuntimeModule,
 } from "../modules/contract.js";
+import { bindOperationHandlers } from "../operations/composition.js";
 import {
-  bindOperationHandlers,
   type BoundOperation,
   DeclaredOperationError,
   invokeOperation,

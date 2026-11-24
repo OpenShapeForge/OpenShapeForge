@@ -160,7 +160,8 @@ const { runMigrationChain } = await import("../../../db/migration-chain.js");
 const { APP_ROLE } = await import("../../../db/migrations/app-role.js");
 const { ModulePlatformRuntime } = await import("../../../modules/platform.js");
 const { loadRuntimeModules } = await import("../../../modules/registry.js");
-const { bindOperationHandlers, invokeOperation } = await import("../../../operations/runtime.js");
+const { bindOperationHandlers } = await import("../../../operations/composition.js");
+const { invokeOperation } = await import("../../../operations/runtime.js");
 const { HttpError } = await import("../../../rest/http-error.js");
 
 type DatabaseRuntime = Awaited<ReturnType<typeof createDatabaseRuntime>>;

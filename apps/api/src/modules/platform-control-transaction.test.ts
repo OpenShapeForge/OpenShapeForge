@@ -4,7 +4,8 @@ import { DummyDriver, Kysely, PostgresAdapter, PostgresIntrospector, PostgresQue
   type CompiledQuery, type DatabaseConnection } from "kysely";
 import { controlSessionFor } from "../control/control-session.js";
 import type { DB } from "../generated/db/types.js";
-import { bindOperationHandlers, invokeOperation, type OperationContract } from "../operations/runtime.js";
+import { bindOperationHandlers } from "../operations/composition.js";
+import { invokeOperation, type OperationContract } from "../operations/runtime.js";
 import type { RuntimeModule } from "./contract.js";
 import { ModulePlatformRuntime } from "./platform.js";
 

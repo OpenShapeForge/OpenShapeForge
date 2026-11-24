@@ -17,7 +17,8 @@ import {
 } from "kysely";
 import rawCatalog from "../generated/operations/catalog.json" with { type: "json" };
 import { KeycloakAdminError } from "../control/keycloak-organization-admin.js";
-import { bindOperationHandlers, invokeOperation, type OperationContract } from "../operations/runtime.js";
+import { bindOperationHandlers } from "../operations/composition.js";
+import { invokeOperation, type OperationContract } from "../operations/runtime.js";
 import { inviteAccount } from "./invite.js";
 
 const operation = rawCatalog.operations.find((row) => row.key === "accounts.create") as OperationContract;

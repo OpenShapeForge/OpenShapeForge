@@ -4,6 +4,8 @@ import type { McpToolShape } from "./mcp-tool-shape.js";
 
 export const MAX_OPERATION_SEARCH_RESULTS = 20;
 export const DEFAULT_OPERATION_SEARCH_RESULTS = 10;
+/** The most record references one search response carries across all entities. */
+export const MAX_RECORD_SEARCH_RESULTS = 20;
 
 export type SearchableOperationToolNames = {
   search: string;
@@ -27,7 +29,10 @@ export function searchableOperationToolDefinitions(
         "full current contract (the exact input and output schema, errors and controls the " +
         "executor validates), or nothing when this session cannot use it. Reuse a contract you " +
         "already have instead of repeating broad or synonymous searches. An available Operation " +
-        "or stored connection does not prove a provider read will succeed.",
+        "or stored connection does not prove a provider read will succeed. Add records to also find " +
+        "records by name: it returns authorized {entity, id, label} references (records.groups), " +
+        "each group with its own nextCursor; continue one with records {query, entity, cursor}. " +
+        "records alone skips Operation ranking. Equal labels need clarifying before an id is used.",
       inputSchema: {
         type: "object",
         properties: {
@@ -55,6 +60,23 @@ export function searchableOperationToolDefinitions(
             maximum: MAX_OPERATION_SEARCH_RESULTS,
             default: DEFAULT_OPERATION_SEARCH_RESULTS,
           },
+          records: {
+            type: "object",
+            description: "Also search application records by name, independent of the Operation query and cursor.",
+            properties: {
+              query: { type: "string", minLength: 1, maxLength: 200, description: "The record name or phrase." },
+              entity: { type: "string", minLength: 1, maxLength: 200, description: "Limit to one entity, as named by a records group." },
+              cursor: {
+                type: "string",
+                minLength: 1,
+                maxLength: 4096,
+                description: "nextCursor of one records group; needs entity and the same query.",
+              },
+            },
+            required: ["query"],
+            not: { required: ["cursor"], not: { required: ["entity"] } },
+            additionalProperties: false,
+          },
         },
         additionalProperties: false,
         // A lookup and a search are two requests: operationId stands alone.
@@ -63,6 +85,7 @@ export function searchableOperationToolDefinitions(
             { required: ["operationId", "query"] },
             { required: ["operationId", "cursor"] },
             { required: ["operationId", "limit"] },
+            { required: ["operationId", "records"] },
           ],
         },
       },
@@ -75,6 +98,38 @@ export function searchableOperationToolDefinitions(
             type: "array",
             items: { type: "string" },
             description: "Query words no available Operation matches: the results answer the other words only.",
+          },
+          records: {
+            type: "object",
+            properties: {
+              status: {
+                type: "string",
+                enum: ["ok", "incomplete", "unavailable"],
+                description: "incomplete: some authorized results are missing; unavailable: no record search here or it failed.",
+              },
+              groups: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    entity: { type: "string" },
+                    items: {
+                      type: "array",
+                      items: { type: "object", properties: { id: { type: "string" }, label: { type: "string" } }, required: ["id", "label"] },
+                    },
+                    nextCursor: { type: "string" },
+                  },
+                  required: ["entity", "items"],
+                },
+              },
+              truncated: {
+                type: "array",
+                items: { type: "string" },
+                description: "Entities whose groups the response budget dropped: search them with records.entity.",
+              },
+            },
+            required: ["status", "groups"],
+            additionalProperties: false,
           },
         },
         required: ["operations"],

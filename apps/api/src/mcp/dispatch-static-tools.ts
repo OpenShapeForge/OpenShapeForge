@@ -15,7 +15,8 @@ import { searchableSessionOperations } from "./searchable-session-operations.js"
 import { entityOperationContract } from "../operations/entity/index.js";
 import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import { entityIsGeneric } from "./generic-tool-projection.js";
-import { assertOperationExecutionRoute, parseOperationExecuteArguments, searchOperationDefinitions } from "./operation-search.js";
+import { assertOperationExecutionRoute, parseOperationExecuteArguments, isRecordsOnlySearch, parseOperationSearchArguments, searchOperationDefinitions } from "./operation-search.js";
+import { APPLICATION_SEARCH_OPERATION_ID, searchRecords } from "./record-search.js";
 import { fittingRecordPage, isRecordPage, modelRecord, recordFieldSelection } from "./model-view.js";
 import { invokeOperation } from "../operations/runtime.js";
 import {
@@ -156,19 +157,35 @@ export async function staticToolCall(
       );
     }
     try {
-      assertParentInvocationActive?.();
-      assertInterceptorActive?.();
-      const { definitions, allowedIds, canonicalText, entityLabels, entityFields, resolveName } = await searchableSessionOperations(ctx);
-      return ok(searchOperationDefinitions({
-        definitions,
-        allowedIds,
-        canonicalText,
-        entityLabels,
-        entityFields,
-        resolveName,
-        arguments: request.params.arguments ?? {},
+      const args = parseOperationSearchArguments(request.params.arguments);
+      const assertRequestActive = () => {
+        assertParentInvocationActive?.();
+        assertInterceptorActive?.();
+        if (signal?.aborted) throw new HttpError(499, "REQUEST_CANCELLED", "The request was cancelled.");
+      };
+      assertRequestActive();
+      const discovery = isRecordsOnlySearch(args) ? undefined : await searchableSessionOperations(ctx);
+      const found = discovery
+        ? searchOperationDefinitions({ ...discovery, locale }, args)
+        : { operations: [] };
+      assertRequestActive();
+      if (!("records" in args) || !args.records) return ok(found);
+      const { operations: canonical } = modulePlatform.services;
+      const recordResult = await searchRecords({
+        records: args.records,
+        eligible: async () => searchableStaticOperationIds.has(APPLICATION_SEARCH_OPERATION_ID) && (
+          discovery
+            ? discovery.definitions.some(({ id }) => id === APPLICATION_SEARCH_OPERATION_ID)
+            : Boolean(await canonical.get(moduleSession, APPLICATION_SEARCH_OPERATION_ID))
+        ),
         locale,
-      }));
+        assertRequestActive,
+        execute: (op, options) => canonical.execute(moduleSession, op, options),
+        ...(signal ? { signal } : {}),
+      });
+      // A cancelled request publishes nothing, not a partial mix.
+      assertRequestActive();
+      return ok({ ...found, records: recordResult });
     } catch (error) {
       return failed(error);
     }

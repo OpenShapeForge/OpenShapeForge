@@ -167,6 +167,7 @@ export { ARTIFACT_UPLOAD_TOOL_NAME, uploadToolDefinition } from "./mcp-upload-to
 export { EDIT_LEASE_TOOL_NAMES, editLeaseToolDefinitions } from "./mcp-edit-lease-tools.js";
 export {
   DEFAULT_OPERATION_SEARCH_RESULTS,
+  MAX_RECORD_SEARCH_RESULTS,
   MAX_OPERATION_SEARCH_RESULTS,
   searchableOperationToolDefinitions,
 } from "./mcp-search-tools.js";

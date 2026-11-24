@@ -269,7 +269,7 @@ describe("searchable MCP Operations", () => {
     const [search] = searchableOperationTools({ search: "osf_search_operations", execute: "osf_execute_operation" });
     expect(search?.inputSchema).toMatchObject({
       properties: { operationId: { type: "string", minLength: 1 } },
-      not: { anyOf: [{ required: ["operationId", "query"] }, { required: ["operationId", "cursor"] }, { required: ["operationId", "limit"] }] },
+      not: { anyOf: [{ required: ["operationId", "query"] }, { required: ["operationId", "cursor"] }, { required: ["operationId", "limit"] }, { required: ["operationId", "records"] }] },
     });
   });
 

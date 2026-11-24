@@ -19,7 +19,38 @@ export type SearchableOperationToolNames = CoreSearchableOperationToolNames;
 
 export type OperationSearchArguments =
   | { operationId: string }
-  | { query?: string; cursor?: string; limit: number };
+  | { query?: string; cursor?: string; limit: number; records?: RecordSearchArguments };
+
+/** The additive record branch: canonical `application.search`'s phrase, entity and per-entity cursor. */
+export type RecordSearchArguments = { query: string; entity?: string; cursor?: string };
+
+/** A request with only `records` skips Operation ranking and answers `operations: []`. */
+export function isRecordsOnlySearch(args: OperationSearchArguments): boolean {
+  return "limit" in args && args.records !== undefined && args.query === undefined && args.cursor === undefined;
+}
+
+function parseRecordSearchArguments(value: unknown): RecordSearchArguments {
+  const input = objectInput(value, "Record search input");
+  rejectUnknownKeys(input, ["query", "entity", "cursor"], "Record search input");
+  const { query, entity, cursor } = input;
+  if (typeof query !== "string" || query.trim().length === 0 || query.length > 200) {
+    throw new HttpError(400, "BAD_USER_INPUT", "A record search phrase of 1 to 200 characters is required.");
+  }
+  if (entity !== undefined && (typeof entity !== "string" || entity.trim().length === 0 || entity.length > 200)) {
+    throw new HttpError(400, "BAD_USER_INPUT", "Record search entity is invalid.");
+  }
+  if (cursor !== undefined && (typeof cursor !== "string" || cursor.length === 0 || cursor.length > 4096)) {
+    throw new HttpError(400, "BAD_USER_INPUT", "Record search cursor is invalid.");
+  }
+  if (cursor !== undefined && entity === undefined) {
+    throw new HttpError(400, "BAD_USER_INPUT", "A record cursor continues one entity: pass its entity too.");
+  }
+  return {
+    query: query.trim(),
+    ...(typeof entity === "string" ? { entity: entity.trim() } : {}),
+    ...(typeof cursor === "string" ? { cursor } : {}),
+  };
+}
 
 function objectInput(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -126,7 +157,7 @@ export function assertOperationExecutionRoute(definition: RuntimeOperationDefini
 
 export function parseOperationSearchArguments(value: unknown): OperationSearchArguments {
   const input = objectInput(value ?? {}, "Operation search input");
-  rejectUnknownKeys(input, ["operationId", "query", "cursor", "limit"], "Operation search input");
+  rejectUnknownKeys(input, ["operationId", "query", "cursor", "limit", "records"], "Operation search input");
   if (input.operationId !== undefined) {
     // The same identity rule the executor applies to its operationId.
     if (typeof input.operationId !== "string" || input.operationId.trim().length === 0) {
@@ -134,6 +165,9 @@ export function parseOperationSearchArguments(value: unknown): OperationSearchAr
     }
     if (["query", "cursor", "limit"].some((key) => input[key] !== undefined)) {
       throw new HttpError(400, "BAD_USER_INPUT", "An operationId lookup takes no query, cursor or limit.");
+    }
+    if (input.records !== undefined) {
+      throw new HttpError(400, "BAD_USER_INPUT", "An operationId lookup takes no records search.");
     }
     return { operationId: input.operationId.trim() };
   }
@@ -161,6 +195,7 @@ export function parseOperationSearchArguments(value: unknown): OperationSearchAr
     ...(typeof query === "string" && query.trim() ? { query: query.trim() } : {}),
     ...(typeof cursor === "string" ? { cursor } : {}),
     limit,
+    ...(input.records !== undefined ? { records: parseRecordSearchArguments(input.records) } : {}),
   };
 }
 
@@ -529,10 +564,10 @@ function inlineContracts(
 export function searchOperationDefinitions(input: {
   definitions: readonly RuntimeOperationDefinition[];
   allowedIds: ReadonlySet<string>;
-  arguments: unknown;
+  arguments?: unknown;
   locale: ResolvedLocale;
-} & OperationSearchContext): { operations: Record<string, unknown>[]; nextCursor?: string; unmatchedWords?: string[] } {
-  const args = parseOperationSearchArguments(input.arguments);
+} & OperationSearchContext, args = parseOperationSearchArguments(input.arguments)): { operations: Record<string, unknown>[]; nextCursor?: string; unmatchedWords?: string[] } {
+  if (isRecordsOnlySearch(args)) return { operations: [] };
   const available = input.definitions.filter((definition) => input.allowedIds.has(definition.id));
   const shown = (definition: RuntimeOperationDefinition) => {
     const name = localizedText(definition.name, input.locale) ?? definition.id;

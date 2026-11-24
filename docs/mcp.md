@@ -397,9 +397,19 @@ interaction and prerequisite metadata. A schema handed to a model keeps every
 validation keyword and description and omits `title` and the `x-osf-*`
 annotations a form needs.
 An id this session cannot use returns nothing; ids are compared exactly, never
-case-folded or guessed. `operationId` cannot be combined with `query`, `cursor`
-or `limit`. Covered
-CRUD, authored operation and provider tools no longer consume individual slots
+case-folded or guessed. `operationId` must be the only argument.
+
+Use `records: { query: "Customer Success", entity: "Team" }` to find records
+by name through the same authorized application search as the web interface.
+Send `records` alone for record matches, or add an Operation `query` to get
+both in one call. Record results contain the entity, id, and label. Continue a
+group by passing its `nextCursor` as `records.cursor`, with the same phrase
+and the group's entity. Duplicate labels require disambiguation. When the
+record branch is incomplete, inspect its group cursors and search the entities
+listed under `records.truncated` individually. If the record branch is
+unavailable, the call can still return Operation matches.
+
+Covered CRUD, authored operation and provider tools no longer consume individual slots
 in `tools/list`; tools without a canonical replacement remain advertised.
 The dedicated projection continues to offer its authored tool names.
 

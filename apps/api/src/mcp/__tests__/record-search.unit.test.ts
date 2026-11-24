@@ -30,7 +30,7 @@ function run(data: unknown, options: { allowed?: boolean; fail?: boolean; record
     execute: async (request) => {
       calls.push(request.input);
       if (options.fail) throw new Error("db password leaked");
-      return { data: typeof data === "function" ? data(request.input) : data };
+      return { data };
     },
   });
   return { result, calls };
@@ -123,30 +123,31 @@ describe("searchRecords", () => {
     expect(result.groups.find((group) => group.entity === "A")!.nextCursor).toBe("A-next");
   });
 
-  test("re-reads oversized continuations and advances with the smaller page's cursor", async () => {
-    const items = Array.from({ length: 11 }, (_, i) => ({
-      id: String(i),
-      label: "🧭".repeat(i === 10 ? 2_500 : 200),
-    }));
-    const read = ({ first, after }: Record<string, unknown>) => {
-      const start = Number(after);
-      const end = start + Number(first);
-      return {
-        groups: [{ entity: "Team", items: items.slice(start, end), nextCursor: end < items.length ? String(end) : null }],
-      };
-    };
-    const continuation = run(read, { records: { query: "q", entity: "Team", cursor: "0" } });
-    expect(await continuation.result).toEqual({
-      status: "ok",
-      groups: [{ entity: "Team", items: [items[0]], nextCursor: "1" }],
+  test("preserves IDs and cursor in an oversized canonical continuation without issuing another read", async () => {
+    // The first of ten matches had a null label and was omitted by the canonical read.
+    const items = Array.from({ length: 9 }, (_, i) => ({ id: String(i + 1), label: "🧭".repeat(300) }));
+    const { result, calls } = run({ groups: [{ entity: "Team", items, nextCursor: "10" }] }, {
+      records: { query: "q", entity: "Team", cursor: "0" },
     });
-    expect(continuation.calls.map(({ after, first }) => [after, first])).toEqual([["0", 10], ["0", 1]]);
+    const page = await result;
+    expect(page.status).toBe("ok");
+    const [group] = page.groups;
+    expect(group?.nextCursor).toBe("10");
+    expect(group?.items.map(({ id }) => id)).toEqual(items.map(({ id }) => id));
+    expect(group?.items.every(({ label }) => /^🧭+…$/u.test(label))).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(group))).toBeLessThanOrEqual(8_000);
+    expect(calls.map(({ after, first }) => [after, first])).toEqual([["0", 10]]);
+  });
 
-    const last = run(read, { records: { query: "q", entity: "Team", cursor: "10" } });
-    expect(await last.result).toEqual({
-      status: "ok",
-      groups: [{ entity: "Team", items: [{ id: "10", label: "🧭".repeat(400) + "…" }] }],
-    });
+  test("retains a single very long label's ID and bounds its JSON-encoded preview", async () => {
+    const page = await run({ groups: [{ entity: "Team", items: [{ id: "one", label: "\u0001".repeat(9_000) }], nextCursor: "next" }] }, {
+      records: { query: "q", entity: "Team" },
+    }).result;
+    const [group] = page.groups;
+    expect(page.status).toBe("ok");
+    expect(group?.nextCursor).toBe("next");
+    expect(group?.items[0]).toMatchObject({ id: "one", label: expect.stringMatching(/^\u0001+…$/u) });
+    expect(Buffer.byteLength(JSON.stringify(group))).toBeLessThanOrEqual(8_000);
   });
 
   test("an ineligible session is unavailable without calling the operation", async () => {

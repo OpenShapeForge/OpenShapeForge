@@ -406,9 +406,9 @@ both in one call. Record results contain the entity, id, and label. Continue a
 group by passing its `nextCursor` as `records.cursor`, with the same phrase
 and the group's entity. Duplicate labels require disambiguation. When the
 record branch is incomplete, inspect its group cursors and search the entities
-listed under `records.truncated` individually. A targeted search can return a
-smaller page to fit the response, and an exceptionally long label may include
-an ellipsis. If the record branch is unavailable, the call can still return
+listed under `records.truncated` individually. A targeted search can shorten
+long display labels with an ellipsis to preserve the full page of IDs and its
+cursor. If the record branch is unavailable, the call can still return
 Operation matches.
 
 Covered CRUD, authored operation and provider tools no longer consume individual slots

@@ -280,7 +280,7 @@ export async function refreshConnectionRowLocked(input: {
           if (!tokenBindingCurrent(input.profile, values)) {
             throw new OAuthTokenLifecycleError(
               "REAUTHORIZATION_REQUIRED",
-              "Stored OAuth tokens were issued for another resource or server; authorization is required again.",
+              "The OAuth resource, authorization server, or allowed audiences changed; authorization is required again.",
             );
           }
           const expiresAt = values.accessTokenExpiresAt == null

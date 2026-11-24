@@ -117,6 +117,17 @@ describe("connect holds a sign-in to its grant", () => {
     expect(handoffs[0]).toMatchObject({ profile: { resource } });
   });
 
+  it("requires consent again when the Adapter changes the approved audience", async () => {
+    const previous = "ari:cloud:jira::site/first";
+    const next = "ari:cloud:jira::site/second";
+    personal.values = { ...stored, oauthBinding: { ...bound, additionalAudiences: [previous] } };
+    const changed = { ...scoped, auth: { ...scoped.auth, expectedAudiences: [next] } };
+    const result = await connectProviderStep(context(), 0, changed);
+    expect(result?.structuredContent).toMatchObject({ action: "authorize" });
+    expect(refreshCalls).toHaveLength(0);
+    expect(handoffs[0]).toMatchObject({ profile: { resource, audiences: [resource, next] } });
+  });
+
   it("re-consents a legacy token when the Adapter starts declaring a resource", async () => {
     await connectProviderStep(context(), 0, scoped);
     expect(refreshCalls).toHaveLength(0);

@@ -112,6 +112,16 @@ describe("tenant member administration", () => {
     expect(roles.tenantLock()).toBe("for no key update");
   });
 
+  test("API-key creation grants cannot be assigned through an admission", async () => {
+    const { db, queries } = recordingDatabase();
+    const deps = { db, administrator, members: membersClient().client };
+    for (const grant of ["Platform.ApiKeys.PersonalCreate", "Platform.ApiKeys.IntegrationCreate"]) {
+      await expect(changeTenantMemberRoles(deps, "acme", "m0", ["org_employee", grant], "assign"))
+        .rejects.toMatchObject({ code: "MEMBER_NOT_SIGNED_IN" });
+    }
+    expect(queries.some(sql => /insert into platform\.employee_invitations/.test(sql))).toBe(false);
+  });
+
   test("listing a large tenant keeps at most 8 credential reads in flight and keeps member order", async () => {
     const { db } = recordingDatabase();
     const { client, state } = membersClient(50);

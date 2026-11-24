@@ -112,11 +112,12 @@ export async function writeMembershipRoles(
   tenantId: string,
   identityId: string,
   roles: readonly string[],
+  { preservePendingRoleAssignment = false } = {},
 ): Promise<boolean> {
   const result = await sql<{ identity_id: string }>`
     update platform.identity_relations
        set roles = ${rolesArray(roles)},
-           needs_role_assignment = false,
+           needs_role_assignment = ${preservePendingRoleAssignment ? sql`needs_role_assignment` : sql`false`},
            updated_at = now()
      where identity_id = ${identityId}
        and tenant_id = ${tenantId}

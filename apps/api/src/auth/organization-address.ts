@@ -49,22 +49,12 @@ async function tenantSlug(db: OpenShapeForgeDatabase, session: TenantSession): P
   if (tenantSlugOverride) return tenantSlugOverride(session.tenantId);
   const cached = tenantSlugCache.get(session.tenantId);
   if (cached && cached.expiresAtMs > Date.now()) return cached.slug;
-  const slug = await withDbSession(
-    db,
-    {
-      tenantId: session.tenantId,
-      userId: session.userId,
-      roles: session.roles,
-      groups: session.groups,
-      scope: session.scope,
-    },
-    async (trx) => {
-      const result = await sql<{ slug: string }>`
-        select slug from platform.tenants where id = ${session.tenantId}::uuid
-      `.execute(trx);
-      return result.rows[0]?.slug ?? null;
-    },
-  );
+  const slug = await withDbSession(db, session, async (trx) => {
+    const result = await sql<{ slug: string }>`
+      select slug from platform.tenants where id = ${session.tenantId}::uuid
+    `.execute(trx);
+    return result.rows[0]?.slug ?? null;
+  });
   if (slug) {
     // Slugs are immutable after creation (platform-schema.yaml), so a cached
     // answer never goes stale in the direction that matters.

@@ -58,6 +58,14 @@ describe("records search arguments", () => {
     expect(() => parseOperationSearchArguments({ operationId: "a.b", records: { query: "x" } })).toThrow();
   });
 
+  test("validates record argument lengths in Unicode code points", () => {
+    const records = { query: "🧭".repeat(200), entity: "🧭".repeat(200), cursor: "🧭".repeat(4096) };
+    expect(parseOperationSearchArguments({ records })).toEqual({ limit: 10, records });
+    for (const [field, value] of Object.entries(records)) {
+      expect(() => parseOperationSearchArguments({ records: { ...records, [field]: value + "🧭" } })).toThrow();
+    }
+  });
+
   test("records-only skips ranking and returns no operations", () => {
     const found = searchOperationDefinitions({
       definitions: [readDefinition], allowedIds: new Set([readDefinition.id]),
@@ -113,6 +121,33 @@ describe("searchRecords", () => {
     expect(result.groups.map((group) => group.entity)).toEqual(["A", "C"]);
     expect(result.truncated).toEqual(["B"]);
     expect(result.groups.find((group) => group.entity === "A")!.nextCursor).toBe("A-next");
+  });
+
+  test("preserves IDs and cursor in an oversized canonical continuation without issuing another read", async () => {
+    // The first of ten matches had a null label and was omitted by the canonical read.
+    const items = Array.from({ length: 9 }, (_, i) => ({ id: String(i + 1), label: "🧭".repeat(300) }));
+    const { result, calls } = run({ groups: [{ entity: "Team", items, nextCursor: "10" }] }, {
+      records: { query: "q", entity: "Team", cursor: "0" },
+    });
+    const page = await result;
+    expect(page.status).toBe("ok");
+    const [group] = page.groups;
+    expect(group?.nextCursor).toBe("10");
+    expect(group?.items.map(({ id }) => id)).toEqual(items.map(({ id }) => id));
+    expect(group?.items.every(({ label }) => /^🧭+…$/u.test(label))).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(group))).toBeLessThanOrEqual(8_000);
+    expect(calls.map(({ after, first }) => [after, first])).toEqual([["0", 10]]);
+  });
+
+  test("retains a single very long label's ID and bounds its JSON-encoded preview", async () => {
+    const page = await run({ groups: [{ entity: "Team", items: [{ id: "one", label: "\u0001".repeat(9_000) }], nextCursor: "next" }] }, {
+      records: { query: "q", entity: "Team" },
+    }).result;
+    const [group] = page.groups;
+    expect(page.status).toBe("ok");
+    expect(group?.nextCursor).toBe("next");
+    expect(group?.items[0]).toMatchObject({ id: "one", label: expect.stringMatching(/^\u0001+…$/u) });
+    expect(Buffer.byteLength(JSON.stringify(group))).toBeLessThanOrEqual(8_000);
   });
 
   test("an ineligible session is unavailable without calling the operation", async () => {

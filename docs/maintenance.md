@@ -99,10 +99,14 @@ that the discovered graph is exactly the named identity set, that every member
 carries the registered source authority, and that no member or named version
 was ever written by another actor. The privileged routine then re-establishes
 for itself that the named versions are the document's complete version set and
-retain no managed content, clears the version pointer and removes them. Every
-other rule is the canonical one and still applies: shared references, record
-permissions, locked children, extension references and the retention policy.
-A Document whose retention clock has started is refused like any other record.
+retain no managed content, clears the version pointer and removes them.
+Shared references, record permissions, locked children, and extension
+references still block removal. A proven synthetic Document whose minimum
+retention clock began at publication or registration can be removed after
+the seed proof. A clock started only by receipt still applies, as does any
+active legal hold represented by a bound hold field. The default Document
+model has no bound hold field. The ordinary Document Operation keeps its
+original retention checks.
 
 ## Managed tenant provisioning command
 

@@ -33,13 +33,13 @@ function parseRecordSearchArguments(value: unknown): RecordSearchArguments {
   const input = objectInput(value, "Record search input");
   rejectUnknownKeys(input, ["query", "entity", "cursor"], "Record search input");
   const { query, entity, cursor } = input;
-  if (typeof query !== "string" || query.trim().length === 0 || query.length > 200) {
+  if (typeof query !== "string" || query.trim().length === 0 || [...query].length > 200) {
     throw new HttpError(400, "BAD_USER_INPUT", "A record search phrase of 1 to 200 characters is required.");
   }
-  if (entity !== undefined && (typeof entity !== "string" || entity.trim().length === 0 || entity.length > 200)) {
+  if (entity !== undefined && (typeof entity !== "string" || entity.trim().length === 0 || [...entity].length > 200)) {
     throw new HttpError(400, "BAD_USER_INPUT", "Record search entity is invalid.");
   }
-  if (cursor !== undefined && (typeof cursor !== "string" || cursor.length === 0 || cursor.length > 4096)) {
+  if (cursor !== undefined && (typeof cursor !== "string" || cursor.length === 0 || [...cursor].length > 4096)) {
     throw new HttpError(400, "BAD_USER_INPUT", "Record search cursor is invalid.");
   }
   if (cursor !== undefined && entity === undefined) {

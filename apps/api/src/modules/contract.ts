@@ -70,6 +70,7 @@ import type {
   RuntimeInboundEndpointServices,
   RuntimeReadProgressServices,
   RuntimeScriptedCapabilitySandbox,
+  RuntimeProviderReadGraphServices,
   RuntimeWorkerContextContract,
   RuntimeWorkerContract,
   RuntimeWorkerHandle,
@@ -298,6 +299,8 @@ export type ModulePlatformServices = {
   readonly declarativeServiceCapabilities?: RuntimeDeclarativeServiceCapabilities;
   readonly readProgress?: RuntimeReadProgressServices<TrustedSessionContext>;
   readonly scriptedCapabilitySandbox?: RuntimeScriptedCapabilitySandbox<TrustedSessionContext>;
+  readonly providerReadGraph?: RuntimeProviderReadGraphServices<TrustedSessionContext>;
+  readonly assertLiveTenantRole?: (session: TrustedSessionContext, requiredRole: string) => Promise<void>;
   readonly webhookSecrets?: RuntimeWebhookSecretServices<TrustedSessionContext>;
   readonly inboundEndpoints?: RuntimeInboundEndpointServices<TrustedSessionContext>;
   readonly records: RuntimeRecordAccessServices<TrustedSessionContext>;

@@ -21,7 +21,12 @@ import { WORKER_PATH } from "./local-channel.js";
 
 export interface SandboxDaemonOptions {
   socketPath: string;
-  /** Simultaneous runs; a connection beyond this is closed without starting a worker. */
+  /**
+   * Simultaneous runs; a connection beyond this is closed without starting a
+   * worker. It is also what bounds buffered transfer memory: the daemon itself
+   * buffers no payload, and each admitted run holds at most its own
+   * `maxTransferBytes` on either side of the socket.
+   */
   maxConnections?: number;
   /** A peer must deliver its first complete frame within this time or is dropped. */
   admissionMs?: number;
@@ -43,9 +48,13 @@ const DEFAULTS = {
   maxConnections: 4,
   admissionMs: 5_000,
   lifetimeMs: LIMIT_CEILINGS.deadlineMs + 2_000,
-  // Largest legitimate run: source+input, then maxReads results of maxReadResultBytes.
-  maxInboundBytes: LIMIT_CEILINGS.maxReads * (LIMIT_CEILINGS.maxReadResultBytes + 1024) + 2 * MAX_FRAME_BYTES,
-  maxOutboundBytes: 4 * MAX_FRAME_BYTES,
+  // Largest legitimate run in either direction: the whole transfer budget, which
+  // read results and the data result share, plus frame envelopes and the one
+  // source+input frame. A payload embedded in a JSON frame grows by its escapes,
+  // so the budget is doubled here; the run's own byte accounting is exact and
+  // this stays a coarse backstop that no honest run reaches.
+  maxInboundBytes: 2 * LIMIT_CEILINGS.maxTransferBytes + 2 * MAX_FRAME_BYTES,
+  maxOutboundBytes: 2 * LIMIT_CEILINGS.maxTransferBytes + 2 * MAX_FRAME_BYTES,
 };
 /** After the worker finished, how long a peer may keep its side open before we drop it. */
 const LINGER_MS = 2_000;

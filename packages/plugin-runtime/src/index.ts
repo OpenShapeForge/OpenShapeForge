@@ -540,11 +540,25 @@ export type RuntimeConnectionUseGrantServices<Session> = {
 };
 
 /** A host-approved binding for one non-paginated REST GET. */
-export type RuntimePinnedProviderRead = {
+export type RuntimeProviderReadTarget = {
   adapterKey: string;
   capabilityKey: string;
   origin: string;
   pathname: string;
+};
+
+export type RuntimeProviderReadGraphServices<Session> = {
+  fingerprint(session: Session, input: {
+    definition: RuntimeDeclarativeServiceDefinition;
+    target: RuntimeProviderReadTarget;
+    connectionId: string;
+    sampleInput: Record<string, unknown>;
+  }): Promise<string>;
+};
+
+export type RuntimePinnedProviderRead = RuntimeProviderReadTarget & {
+  /** Digest returned by the host when the script revision is published. */
+  executionFingerprint: string;
 };
 
 export type RuntimeDeclarativeServiceRequest = {
@@ -905,6 +919,8 @@ export type PluginPlatformServices = {
   readonly mcpDiagnostics?: import("./diagnostics.js").RuntimeMcpDiagnosticServices<PluginSessionContext>;
   readonly readProgress?: RuntimeReadProgressServices<PluginSessionContext>;
   readonly scriptedCapabilitySandbox?: RuntimeScriptedCapabilitySandbox<PluginSessionContext>;
+  /** Reads one authorized Service execution graph without opening credentials or invoking it. */
+  readonly providerReadGraph?: RuntimeProviderReadGraphServices<PluginSessionContext>;
   /**
    * What the host's declarative Service engine enforces (see
    * `RuntimeDeclarativeServiceCapabilities`). Published only by a runtime that
@@ -914,6 +930,8 @@ export type PluginPlatformServices = {
    * it BEFORE invoking a Service with the control, never after.
    */
   readonly declarativeServiceCapabilities?: RuntimeDeclarativeServiceCapabilities;
+  /** Rechecks a mutable tenant role inside the caller’s existing transaction. */
+  readonly assertLiveTenantRole?: (session: PluginSessionContext, requiredRole: string) => Promise<void>;
   /** Core alone opens Connection values; retained or foreign sessions are refused.
    * Absent on runtimes without this capability; consumers must fail closed. */
   readonly secrets?: {

@@ -168,7 +168,7 @@
     },
     "packages/auth": {
       "name": "@openshapeforge/auth",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "jose": "^6.2.1",
       },
@@ -206,7 +206,7 @@
     },
     "packages/documents": {
       "name": "@openshapeforge/documents",
-      "version": "0.2.35",
+      "version": "0.2.37",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "@openshapeforge/versioning": "workspace:*",
@@ -231,7 +231,7 @@
     },
     "packages/interface-web": {
       "name": "@openshapeforge/interface-web",
-      "version": "0.2.37",
+      "version": "0.2.39",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
       },
@@ -269,7 +269,7 @@
     },
     "packages/operations": {
       "name": "@openshapeforge/operations",
-      "version": "0.2.28",
+      "version": "0.2.29",
       "dependencies": {
         "re2js": "2.9.1",
       },
@@ -281,7 +281,7 @@
     },
     "packages/plugin-runtime": {
       "name": "@openshapeforge/plugin-runtime",
-      "version": "0.1.44",
+      "version": "0.1.47",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
         "fastify": "^5.8.2",
@@ -317,7 +317,7 @@
     },
     "packages/versioning": {
       "name": "@openshapeforge/versioning",
-      "version": "0.1.29",
+      "version": "0.1.31",
       "dependencies": {
         "@openshapeforge/operations": "workspace:*",
       },

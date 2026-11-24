@@ -8,6 +8,7 @@ import { withDbSession } from '../db/session.js';
 import { blockOrganizationAccount, restoreOrganizationAccount } from './account-management.js';
 import { assertMemberAccessActive } from '../auth/member-access-state.js';
 import { admitResolvedSession } from '../auth/identity.js';
+import { ORGANIZATION_ADDRESS_HEADER } from '../mcp/organization-resource.js';
 import { hasAuthorizationProfileAccess } from '../auth/authorization-profile-decision.js';
 import { readSessionLink, cachedLinkState, linkCacheKey } from '../auth/identity-link-session.js';
 
@@ -76,12 +77,16 @@ test('blocking is tenant-only, preserves assignments, rejects cached sessions an
     let begins = 0;
     const counted = createDatabaseRuntime({ databaseUrl: appUrl.toString(), maxConnections: 1, log: event => { if (/^\s*begin/i.test(event.query.sql)) begins += 1; } });
     try {
-      const admitted = { ...member };
-      expect(await admitResolvedSession(new Headers(), admitted, { db: counted.db })).toBe(admitted);
+      const admitted = { ...member, principalKind: 'person' as const, auditIdentityId: identityId };
+      const addressed = new Headers({ [ORGANIZATION_ADDRESS_HEADER]: 'block-' + tenantId });
+      expect(await admitResolvedSession(addressed, admitted, { db: counted.db })).toBe(admitted);
       expect(begins).toBe(1);
       // Rules already bound: only the member check is left, on its own.
       await admitResolvedSession(new Headers(), admitted, { db: counted.db });
       expect(begins).toBe(2);
+      const wrongAddress = new Headers({ [ORGANIZATION_ADDRESS_HEADER]: 'block-' + otherId });
+      await expect(admitResolvedSession(wrongAddress, { ...admitted }, { db: counted.db }))
+        .rejects.toMatchObject({ status: 403, code: 'ORGANIZATION_RESOURCE_FORBIDDEN' });
     } finally { await counted.close(); }
     expect(await admin`select relation_id,roles,needs_role_assignment from platform.identity_relations where tenant_id=${tenantId} and identity_id=${identityId}`).toEqual(before);
     await admin`update platform.identity_relations set roles=ARRAY['org_admin'] where tenant_id=${tenantId} and identity_id=${identityId}`;

@@ -441,7 +441,7 @@ const applySourcePage: ModuleOperationHandler = async (input, context) => {
     // read authority the caller holds now — the roles it had when the page was
     // written do not survive in the receipt. The writes of a first attempt keep
     // their own create/update/delete checks inside the batch handlers.
-    authorizeReplay: async () => {
+    authorizeStoredResult: async () => {
       for (const batch of batches) {
         assertEntityOperationAuthorization(batch.source.table, "list", session);
       }

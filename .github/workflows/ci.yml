@@ -288,9 +288,11 @@ jobs:
       # This job is the SPI's gate, so its unit tests run here (the image
       # build and the e2e job only need the jar and keep skipping them).
       - name: Package SPI
-        run: mvn -B -f packages/keycloak-spi/pom.xml package
+        timeout-minutes: 10
+        run: mvn -B -C -s .github/maven-spi-settings.xml -f packages/keycloak-spi/pom.xml package
       - name: Test local development Keycloak provider
-        run: mvn -B -f packages/keycloak-spi/local-development/pom.xml test
+        timeout-minutes: 10
+        run: mvn -B -C -s .github/maven-spi-settings.xml -f packages/keycloak-spi/local-development/pom.xml test
 
   helm:
     name: Lint and template Helm chart

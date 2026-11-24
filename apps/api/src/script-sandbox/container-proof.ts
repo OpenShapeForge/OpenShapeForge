@@ -26,6 +26,23 @@ const source = "async function run(i) { const r = await host.read('exact.balance
 const reads = { "exact.balance": (args: JsonValue) => ({ amount: (args as { id: number }).id * 10 }) };
 expect(JSON.stringify(await run({ source, input: { id: 4 }, reads })) === JSON.stringify({ sum: 6, amount: 40 }), "deterministic value and brokered read through the socket");
 
+const journal = Array.from({ length: 1_000 }, (_, index) => ({
+  id: index + 1,
+  description: "Synthetic journal reconciliation rule – café – " + "x".repeat(150),
+}));
+const journalBytes = Buffer.byteLength(JSON.stringify(journal));
+expect(journalBytes > 128 * 1024, "journal fixture exceeds the single-payload budget");
+const fullPage = await run({
+  source: "async function run() { return await host.read('provider.page', null); }",
+  input: null,
+  reads: { "provider.page": () => journal },
+  // The budgets of a brokered page run; the deadline covers a cold worker in
+  // the container plus the chunked transfer in both directions.
+  limits: { deadlineMs: 12_000, memoryBytes: 32 * 1024 * 1024, maxReadResultBytes: 1024 * 1024,
+    maxResultBytes: 1024 * 1024, maxTransferBytes: 3 * 1024 * 1024 },
+});
+expect(JSON.stringify(fullPage) === JSON.stringify(journal), "whole journal page is transferred through the isolated container");
+
 const controller = new AbortController();
 const cancelled = run({
   source: "async function run() { return await host.read('slow', null); }", input: null, signal: controller.signal,

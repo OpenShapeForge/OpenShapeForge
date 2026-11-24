@@ -597,6 +597,7 @@ export function inheritConnectionControls(
   );
   return {
     ...(expectedConnection ? { expectedConnection } : {}),
+    ...(inherited?.pinnedProviderRead ? { pinnedProviderRead: inherited.pinnedProviderRead } : {}),
     connectionUse: createConnectionUseRecorder(inherited?.connectionUse),
   };
 }

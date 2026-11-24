@@ -2,14 +2,20 @@
 /**
  * Parent side of the script sandbox: opens a channel to a fresh fixed worker
  * (local subprocess fixture or container socket), brokers named reads over it
- * and owns deadline, cancellation, read budget and cleanup. See worker.ts for
- * the isolate side and daemon.ts for the container side.
+ * and owns deadline, cancellation, read budget, transfer budget and cleanup.
+ * See worker.ts for the isolate side and daemon.ts for the container side.
+ *
+ * A read result or data result larger than one safe frame crosses as bounded
+ * chunks. The parent sizes and counts every chunk it sends and receives against
+ * `maxChunkBytes`, the per-payload cap and the run's `maxTransferBytes`
+ * aggregate, and only ever sends or accepts a payload it already holds whole:
+ * a payload over budget is refused entire, never trimmed or half-delivered.
  */
 import type { OpenWorkerChannel, WorkerChannel } from "./channel.js";
 import { openLocalWorker } from "./local-channel.js";
 import {
-  ALIAS_PATTERN, DEFAULT_LIMITS, encodeFrame, FrameDecoder, parseJson, parseWorkerMessage, ProtocolError,
-  serializeJson, utf8Bytes, validateLimits,
+  ALIAS_PATTERN, ChunkedPayload, DEFAULT_LIMITS, encodeFrame, FrameDecoder, parseJson, parseWorkerMessage,
+  ProtocolError, serializeJson, splitTextByBytes, utf8Bytes, validateLimits,
   type JsonValue, type ParentMessage, type ReadDenialCode, type ScriptErrorCode, type ScriptLimits,
 } from "./protocol.js";
 
@@ -67,6 +73,8 @@ export async function runScriptWith(open: OpenWorkerChannel, request: RunScriptR
 
   let worker: WorkerChannel | undefined;
   let watchdog: ReturnType<typeof setTimeout> | undefined;
+  /** Chunks of a data result still arriving; released whatever ends the run. */
+  const incoming = new ChunkedPayload(limits.maxResultBytes, limits.maxChunkBytes);
   const onAbort = () => fail("cancelled");
 
   const stop = () => {
@@ -120,6 +128,25 @@ export async function runScriptWith(open: OpenWorkerChannel, request: RunScriptR
     let queue: Promise<void> = Promise.resolve();
     const deny = (id: number, code: ReadDenialCode) => write({ type: "read.denied", id, code });
 
+    // Aggregate over the whole run, both directions: every read result sent plus
+    // the data result received. It is what bounds a run that moves whole pages.
+    let transferred = 0;
+    const withinTransferBudget = (bytes: number): boolean => {
+      if (transferred + bytes > limits.maxTransferBytes) return false;
+      transferred += bytes;
+      return true;
+    };
+
+    /** Sends a payload the parent already holds whole, chunked when it must be. */
+    const sendPayload = async (id: number, value: string, bytes: number): Promise<void> => {
+      if (bytes <= limits.maxChunkBytes) return write({ type: "read.ok", id, value });
+      for (const part of splitTextByBytes(value, limits.maxChunkBytes)) {
+        if (settled) return; // the worker drops its partial buffer; nothing partial is usable
+        await write({ type: "read.part", id, value: part });
+      }
+      await write({ type: "read.end", id, bytes });
+    };
+
     const serveRead = async (id: number, alias: string, argsText: string): Promise<void> => {
       // Re-checked here: a run that ended while this read was queued must not reach the broker.
       if (!executionActive()) return;
@@ -133,8 +160,17 @@ export async function runScriptWith(open: OpenWorkerChannel, request: RunScriptR
         return deny(id, "read_failed");
       }
       if (settled) return;
+      // Over the per-read cap or the run aggregate: refuse the whole read. The
+      // script learns only the code, so it cannot mistake this for a short page.
       if (value === null) return deny(id, "read_failed");
-      await write({ type: "read.ok", id, value });
+      const bytes = utf8Bytes(value);
+      if (!withinTransferBudget(bytes)) return deny(id, "read_failed");
+      await sendPayload(id, value, bytes);
+    };
+
+    const completeResult = (text: string) => {
+      const parsed = parseJson(text, limits.maxResultBytes);
+      return parsed.ok ? succeed(parsed.value) : fail("invalid_result");
     };
 
     const onMessage = (raw: unknown) => {
@@ -143,9 +179,31 @@ export async function runScriptWith(open: OpenWorkerChannel, request: RunScriptR
       if (!message) return fail("protocol_violation");
       if (message.type === "failed") return fail(message.code);
       if (message.type === "result") {
-        if (utf8Bytes(message.value) > limits.maxResultBytes) return fail("result_too_large");
-        const parsed = parseJson(message.value, limits.maxResultBytes);
-        return parsed.ok ? succeed(parsed.value) : fail("invalid_result");
+        const bytes = utf8Bytes(message.value);
+        if (bytes > limits.maxResultBytes || !withinTransferBudget(bytes)) return fail("result_too_large");
+        return completeResult(message.value);
+      }
+      if (message.type === "result.part") {
+        const bytes = utf8Bytes(message.value);
+        // A chunk outside the negotiated frame size is a broken sender, not a
+        // large result: it is refused before it is buffered at all.
+        if (bytes === 0 || bytes > limits.maxChunkBytes) {
+          incoming.drop();
+          return fail("protocol_violation");
+        }
+        // Counted on arrival, so a worker streaming past the budget is stopped
+        // while it streams rather than after the whole payload is buffered.
+        if (!withinTransferBudget(bytes) || !incoming.add(message.value)) {
+          incoming.drop();
+          return fail("result_too_large");
+        }
+        return;
+      }
+      if (message.type === "result.end") {
+        const text = incoming.finish(message.bytes);
+        // A declared size that does not match what arrived is a broken transfer,
+        // not a smaller result: nothing partial is parsed or returned.
+        return text === null ? fail("protocol_violation") : completeResult(text);
       }
       if (message.id <= lastId) return fail("protocol_violation");
       lastId = message.id;
@@ -176,6 +234,7 @@ export async function runScriptWith(open: OpenWorkerChannel, request: RunScriptR
   } finally {
     settled = true;
     clearTimeout(watchdog);
+    incoming.drop();
     request.signal?.removeEventListener("abort", onAbort);
     stop();
     if (worker) {

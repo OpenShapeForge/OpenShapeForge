@@ -86,6 +86,7 @@ function editRole(input: Record<string, unknown>, c: ModuleOperationContext, cha
   const id=typeof input.key==='string' ? customRoleId(input.key):undefined;
   if(!id) throw new HttpError(409,'READ_ONLY_ROLE','Default roles are read-only. Create a custom role instead.');
   return withDbSession(c.db!,s,async tx=>{
+    await sql`select pg_advisory_xact_lock(hashtextextended(${s.tenantId}::uuid::text, 7921))`.execute(tx);
     const rows=await sql<RoleRow>`select id,label,permissions,version from platform.organization_access_roles
       where tenant_id=${s.tenantId}::uuid and id=${id}::uuid for update`.execute(tx);
     const row=rows.rows[0];

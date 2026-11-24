@@ -1820,7 +1820,7 @@ operations:
     - { status: 403, code: FORBIDDEN, description: "The operator lacks a required control-realm role." }
     - { status: 404, code: NOT_FOUND, description: "The tenant, organization, entry or notice does not exist." }
     - { status: 409, code: CONFLICT, description: "The request contradicts the current platform state." }
-    - { status: 409, code: MEMBER_NOT_SIGNED_IN, description: "The account has not signed in to this tenant yet; create a tenant invitation with the intended role so it is applied on first sign-in." }
+    - { status: 409, code: MEMBER_NOT_SIGNED_IN, description: "The account has not signed in to this tenant yet. Persona assignments can use tenant admission. API-key creation grants require an existing linked membership." }
     - { status: 409, code: MEMBER_LINK_PENDING, description: "The member's sign-in awaits confirmation of its candidate Relation; confirm_tenant_member_link first, then assign roles." }
     - { status: 409, code: MEMBER_NOT_LINKED, description: "The member's sign-in matched no Relation to confirm; an organization administrator of the tenant links them to their Relation first." }
     - { status: 502, code: IDENTITY_PROVIDER_ERROR, description: "The identity provider refused or failed the request." }

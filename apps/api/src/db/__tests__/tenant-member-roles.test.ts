@@ -102,6 +102,7 @@ describe("tenant member roles from the control plane", () => {
           values (${TENANT}, 'acme', 'Acme', 'active', 'openshapeforge', 'org-acme'),
                  (${OTHER_TENANT}, 'other', 'Other', 'active', 'openshapeforge', 'org-other')
         `.execute(adminDb);
+        const creationGrants = ["Platform.ApiKeys.IntegrationCreate", "Platform.ApiKeys.PersonalCreate"];
         const subject = randomUUID();
         const claims = { issuer: ISSUER, subject, email: "nora@example.com", givenName: "Nora", familyName: "Tester" };
         const deps = { db: appDb, administrator, members: membersClient(subject, "nora@example.com") };
@@ -152,6 +153,8 @@ describe("tenant member roles from the control plane", () => {
         await expect(
           changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign"),
         ).rejects.toMatchObject({ status: 409, code: "MEMBER_LINK_PENDING", message: expect.stringContaining('candidate Relation "Pat Existing"') });
+        await expect(changeTenantMemberRoles(patDeps, "acme", pendingSubject, creationGrants, "assign"))
+          .rejects.toMatchObject({ status: 409, code: "MEMBER_LINK_PENDING" });
         const patRow = async () => (await sql<{ roles: string[]; status: string; linked_by: string | null }>`
             select ir.roles, ir.status, ir.linked_by from platform.identity_relations ir join platform.identities i on i.id = ir.identity_id
              where i.subject = ${pendingSubject} and ir.tenant_id = ${TENANT}
@@ -201,6 +204,14 @@ describe("tenant member roles from the control plane", () => {
         expect(await patRow()).toMatchObject({ status: "linked", linked_by: expect.stringContaining("#operator") });
         await expect(confirmTenantMemberLink(patDeps, "acme", pendingSubject))
           .rejects.toMatchObject({ status: 409, detail: "NO_PENDING_LINK" });
+        await sql`update platform.identity_relations ir set needs_role_assignment = true
+          from platform.identities i where ir.identity_id = i.id and i.subject = ${pendingSubject} and ir.tenant_id = ${TENANT}`.execute(adminDb);
+        await changeTenantMemberRoles(patDeps, "acme", pendingSubject, creationGrants, "assign");
+        const marker = await sql<{ needs_role_assignment: boolean }>`select ir.needs_role_assignment
+          from platform.identity_relations ir join platform.identities i on ir.identity_id = i.id
+          where i.subject = ${pendingSubject} and ir.tenant_id = ${TENANT}`.execute(adminDb);
+        expect(marker.rows[0]?.needs_role_assignment).toBe(true);
+        await changeTenantMemberRoles(patDeps, "acme", pendingSubject, creationGrants, "remove");
         expect(await changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign"))
           .toMatchObject({ roles: [IDENTITY_LINK_ADMIN_ROLE, "org_admin"] });
 
@@ -247,6 +258,15 @@ describe("tenant member roles from the control plane", () => {
         expect((await listTenantMembers(patDeps, "acme")).members[0]).toMatchObject({ linkStatus: null, roles: [] });
         expect(await patRow()).toMatchObject({ status: "linked" });
         await sql`delete from platform.identities where issuer = 'https://elsewhere.example/realms/other'`.execute(adminDb);
+
+        const originalRoles = (await getTenantMember(deps, "acme", subject)).roles;
+        expect(await changeTenantMemberRoles(deps, "acme", subject, creationGrants, "assign"))
+          .toMatchObject({ roles: [...originalRoles, ...creationGrants].sort(), action: "assigned" });
+        expect((await getTenantMember(deps, "other", subject)).roles).toEqual(originalRoles);
+        await expect(changeTenantMemberRoles(deps, "acme", subject, ["Platform.ApiKeys.Manage"], "assign"))
+          .rejects.toThrow("allowlisted tenant member roles");
+        expect(await changeTenantMemberRoles(deps, "acme", subject, creationGrants, "remove"))
+          .toMatchObject({ roles: originalRoles, action: "removed" });
 
         const assigned = await changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "assign");
         expect(assigned).toMatchObject({

@@ -78,7 +78,7 @@ type MembershipRow = {
  * of its rows, and `membershipOf` refuses to pick one rather than act on the
  * wrong person.
  */
-async function membershipsBySubject(trx: Transaction<DB>, tenantId: string, subject?: string): Promise<Map<string, MembershipRow[]>> {
+async function membershipsBySubject(trx: Transaction<DB>, tenantId: string, subject?: string, lock = false): Promise<Map<string, MembershipRow[]>> {
   const party = actingPartyColumns();
   const relations = sql.table(actingPartyTable());
   const rows = await sql<MembershipRow>`
@@ -88,7 +88,7 @@ async function membershipsBySubject(trx: Transaction<DB>, tenantId: string, subj
       join platform.identities i on i.id = ir.identity_id
       left join ${relations} r on r.${sql.id(party.id)} = ir.relation_id and r.${sql.id(party.tenantId)} = ir.tenant_id
       left join ${relations} c on c.${sql.id(party.id)} = ir.candidate_relation_id and c.${sql.id(party.tenantId)} = ir.tenant_id
-     where ir.tenant_id = ${tenantId}::uuid${subject === undefined ? sql`` : sql` and i.subject = ${subject}`}
+     where ir.tenant_id = ${tenantId}::uuid${subject === undefined ? sql`` : sql` and i.subject = ${subject}`}${lock ? sql` for update of ir` : sql``}
   `.execute(trx);
   const bySubject = new Map<string, MembershipRow[]>();
   for (const row of rows.rows) bySubject.set(row.subject, [...(bySubject.get(row.subject) ?? []), row]);
@@ -96,8 +96,8 @@ async function membershipsBySubject(trx: Transaction<DB>, tenantId: string, subj
 }
 
 /** The member's one membership row here, none, or a refusal when the member id is ambiguous across issuers. */
-async function membershipOf(trx: Transaction<DB>, tenantId: string, memberId: string): Promise<MembershipRow | undefined> {
-  const rows = (await membershipsBySubject(trx, tenantId, memberId)).get(memberId) ?? [];
+async function membershipOf(trx: Transaction<DB>, tenantId: string, memberId: string, lock = false): Promise<MembershipRow | undefined> {
+  const rows = (await membershipsBySubject(trx, tenantId, memberId, lock)).get(memberId) ?? [];
   if (rows.length > 1) {
     throw new ControlOperationError(409, "CONFLICT", "AMBIGUOUS_MEMBER_IDENTITY",
       "Sign-ins from more than one identity provider carry this member id in the tenant; nothing was changed. Resolve the duplicate identity first.");
@@ -233,9 +233,11 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
   return withTenant(deps, `control.${mode}-tenant-member-roles`, slug, `member="${memberId}"`, "write", async (tenant, trx, afterCommit) => {
     const member = await memberWithSummary(deps, trx, tenant, memberId);
     const selected = roles(input);
-    const membership = await membershipOf(trx, tenant.id, memberId);
+    const membership = await membershipOf(trx, tenant.id, memberId, true);
+    const creationGrantsOnly = selected.every((role) => linkedMemberGrants.has(role));
     if (!membership) {
-      if (mode === "remove" || selected.some((role) => linkedMemberGrants.has(role))) throw new ControlOperationError(409, "MEMBER_NOT_SIGNED_IN", "MEMBER_NOT_SIGNED_IN", "This role change requires an existing linked tenant membership.");
+      if (mode === "remove") throw new ControlOperationError(409, "MEMBER_NOT_SIGNED_IN", "MEMBER_NOT_SIGNED_IN", "No membership to remove roles from; revoke any pending admission instead.");
+      if (selected.some((role) => linkedMemberGrants.has(role))) throw new ControlOperationError(409, "MEMBER_NOT_SIGNED_IN", "MEMBER_NOT_SIGNED_IN", "The member must sign in and be linked before receiving API-key creation grants.");
       if (tenant.status !== "active" || !member.enabled || !member.email) {
         throw new ControlInputError("Assigning admission requires an active tenant and an enabled member with an email address.");
       }
@@ -246,7 +248,7 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
         { email: member.email, roles: selected, firstName: member.firstName ?? undefined, lastName: member.lastName ?? undefined });
       return { tenantSlug: slug, memberId, roles: [], action: "awaiting_sign_in", invitationId: invitation.id, ...invitationOutcome(slug, "no_email_existing_account") };
     }
-    const grants = new Set(selected.flatMap((role) => linkedMemberGrants.has(role) ? [role] : employeeInvitationRoleGrants(role)));
+    const grants = new Set(selected.flatMap(employeeInvitationRoleGrants));
     const current = new Set(membership.roles ?? []);
     const next = mode === "assign"
       ? [...new Set([...current, ...grants])]
@@ -254,7 +256,7 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
     // Linked rows only, like canonical Account role Operations: roles on an unconfirmed link
     // would be honoured the moment the person confirms a Relation nobody
     // verified is theirs.
-    if (!(await writeMembershipRoles(trx, tenant.id, membership.identity_id, next))) throw memberLinkPending(member.candidateRelationName, membership.candidate_relation_id !== null);
+    if (!(await writeMembershipRoles(trx, tenant.id, membership.identity_id, next, { preservePendingRoleAssignment: creationGrantsOnly }))) throw memberLinkPending(member.candidateRelationName, membership.candidate_relation_id !== null);
     afterCommit(() => invalidateIdentityLink(membership.issuer, membership.subject, tenant.id));
     return { tenantSlug: slug, memberId, roles: [...next].sort(), action: mode === "assign" ? "assigned" : "removed" };
   });

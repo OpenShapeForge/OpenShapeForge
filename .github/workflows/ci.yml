@@ -218,7 +218,7 @@ jobs:
           src/accounts/member-confirmation.test.ts
           src/accounts/source-query.unit.test.ts
           src/mcp/organization-profile-tools.test.ts
-          src/mcp/connection-delegation.test.ts
+          src/auth/connection-delegation.test.ts
           src/modules/connection-grant-fingerprint.test.ts
           src/auth/employee-invitations.unit.test.ts
           src/auth/organization-resource-client.test.ts

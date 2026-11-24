@@ -7,8 +7,8 @@ test("canonical execution does not directly import transport adapters", async ()
   const source = await Bun.file(new URL("./runtime.ts", import.meta.url)).text();
   const imports = new Bun.Transpiler({ loader: "ts" }).scanImports(source);
   const reverseDependencies = imports.map(({ path }) => path).filter(
-    (path) => path === "fastify" || path === "graphql" || path === "../rest/operation-routes.js" ||
-      path === "../graphql/operation-contribution.js",
+    (path) => path === "fastify" || path === "graphql" ||
+      /^\.\.\/(rest|graphql|mcp)\//.test(path),
   );
   expect(reverseDependencies).toEqual([]);
 });

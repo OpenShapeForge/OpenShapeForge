@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
-import { withConnectionDelegationOrigin, withConnectionGrantSubject } from "../mcp/connection-delegation.js";
+import { withConnectionDelegationOrigin, withConnectionGrantSubject } from "../auth/connection-delegation.js";
 import { assertCurrentAccountAuthority } from "../accounts/account-current-authority.js";
 import { authorizationProfileDecision } from "../auth/authorization-profile-decision.js";
 import { resolveAuthorizationProfileAccess } from "../auth/authorization-profile-session.js";
@@ -62,7 +62,8 @@ import {
 } from "./entity/record-permissions.js";
 import { withAdmittedRecordAction, type AdmittedRecordAction } from "./entity/record-action-admission.js";
 import { normalizeTimestampToken } from "../db/timestamps.js";
-import { HttpError, toHttpError } from "../rest/http-error.js";
+import { classifyOperationFailure } from "./operation-failure-classification.js";
+import { OperationRefusal } from "./operation-refusal.js";
 import { issueOperationPrerequisiteReceipt } from "./prerequisite-receipts.js";
 import { sessionOperationRoleGroupsAllow, sessionOperationRolesAllow } from "./session-authorization.js";
 import { operationContractFingerprint } from "./contract-fingerprint.js";
@@ -445,7 +446,7 @@ export function runtimeDefinition(entry: Bound): RuntimeOperationDefinition {
 export function runtimeOperationError(error: unknown) {
   const projected = error instanceof DeclaredOperationError
     ? error.body
-    : toHttpError(error).body;
+    : classifyOperationFailure(error).body;
   const candidate = projected && typeof projected === "object"
     ? (projected as { error?: Record<string, unknown> }).error
     : undefined;
@@ -496,10 +497,10 @@ export function requireOperationAuthorization(
   // the realm roles it needs is the Operation's own any-of list.
   if (operation.auth.mode === "control") {
     if (!session || session.credential !== "control-bearer" || !session.userId) {
-      throw new HttpError(401, "UNAUTHENTICATED", "Operation requires a control-realm operator token.");
+      throw new OperationRefusal(401, "UNAUTHENTICATED", "Operation requires a control-realm operator token.");
     }
     if (!sessionOperationRolesAllow(operation.auth.roles, session.roles)) {
-      throw new HttpError(403, "FORBIDDEN", "Operator lacks a required control-realm role.");
+      throw new OperationRefusal(403, "FORBIDDEN", "Operator lacks a required control-realm role.");
     }
     return;
   }
@@ -524,28 +525,28 @@ export function requireOperationAuthorization(
     !session || session.credential === "none" || session.credential === "control-bearer" ||
     session.credential === "grant" || !session.userId
   ) {
-    throw new HttpError(401, "UNAUTHENTICATED", "Operation requires an authenticated bearer session.");
+    throw new OperationRefusal(401, "UNAUTHENTICATED", "Operation requires an authenticated bearer session.");
   }
   if (operation.tenancy.mode === "required" && !session.tenantId) {
-    throw new HttpError(401, "TENANT_REQUIRED", "Operation requires an authenticated tenant context.");
+    throw new OperationRefusal(401, "TENANT_REQUIRED", "Operation requires an authenticated tenant context.");
   }
   const profile = authorizationProfileDecision(session, operation.key, operation.target?.entityName);
   if (profile === false || (profile !== true && !sessionOperationRolesAllow(operation.auth.roles, session.roles))) {
-    throw new HttpError(403, "FORBIDDEN", "Session lacks a required operation role.");
+    throw new OperationRefusal(403, "FORBIDDEN", "Session lacks a required operation role.");
   }
   if (!sessionOperationRoleGroupsAllow(operation.auth.roleGroups, session.roles)) {
-    throw new HttpError(403, "FORBIDDEN", "Session lacks a required operation role group.");
+    throw new OperationRefusal(403, "FORBIDDEN", "Session lacks a required operation role group.");
   }
   const requiredScopes = operation.auth.scopes ?? [];
   if ((session.credential === "api-key" || session.credential === "personal-key") && requiredScopes.length > 0) {
-    throw new HttpError(403, "INSUFFICIENT_SCOPE", "OAuth-scoped operations cannot be invoked with an API key.");
+    throw new OperationRefusal(403, "INSUFFICIENT_SCOPE", "OAuth-scoped operations cannot be invoked with an API key.");
   }
   const heldScopes = new Set(session.oauthScopes ?? []);
   if (requiredScopes.some((scope) => !heldScopes.has(scope))) {
-    throw new HttpError(403, "INSUFFICIENT_SCOPE", "Session lacks a required OAuth scope.");
+    throw new OperationRefusal(403, "INSUFFICIENT_SCOPE", "Session lacks a required OAuth scope.");
   }
   if (!recordActionPrincipalReachable(operation, session)) {
-    throw new HttpError(
+    throw new OperationRefusal(
       403,
       "FORBIDDEN",
       "This Operation is authorized by a record action no session of this kind can hold.",
@@ -595,7 +596,7 @@ function recordActionPrincipalReachable(
 
 export function asInput(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new HttpError(400, "BAD_USER_INPUT", "Operation input must be an object.");
+    throw new OperationRefusal(400, "BAD_USER_INPUT", "Operation input must be an object.");
   }
   return value as Record<string, unknown>;
 }
@@ -1247,7 +1248,7 @@ export async function invokeOperation(
     // acknowledgement, lease, version or challenge handling can have side
     // effects. The handler receives only authored business input below.
     if (!validation.input(input)) {
-      throw new HttpError(400, "BAD_USER_INPUT", "Operation input does not match its canonical schema.");
+      throw new OperationRefusal(400, "BAD_USER_INPUT", "Operation input does not match its canonical schema.");
     }
     const invokeHandler = async (
       handlerInput: Record<string, unknown>,
@@ -1257,7 +1258,7 @@ export async function invokeOperation(
         result = await bound.handler(handlerInput, activeContext);
       } catch (error) {
         if (error instanceof DeclaredOperationError) {
-          throw new HttpError(
+          throw new OperationRefusal(
             500,
             "HANDLER_CONTRACT_VIOLATION",
             "Operation handlers must return declared errors instead of forwarding a transport error.",
@@ -1266,14 +1267,14 @@ export async function invokeOperation(
         throw error;
       }
       if (!result || typeof result !== "object" || Array.isArray(result)) {
-        throw new HttpError(
+        throw new OperationRefusal(
           500,
           "HANDLER_CONTRACT_VIOLATION",
           "Operation handler must return an operation result object.",
         );
       }
       if ("ok" in result && result.ok !== true && result.ok !== false) {
-        throw new HttpError(
+        throw new OperationRefusal(
           500,
           "HANDLER_CONTRACT_VIOLATION",
           "Operation handler returned an invalid result discriminant.",
@@ -1284,14 +1285,14 @@ export async function invokeOperation(
           error.status === result.status && error.code === result.code
         );
         if (!declaration) {
-          throw new HttpError(
+          throw new OperationRefusal(
             500,
             "HANDLER_CONTRACT_VIOLATION",
             "Operation handler returned an undeclared error status or code.",
           );
         }
         if (!isJsonValue(result.body)) {
-          throw new HttpError(
+          throw new OperationRefusal(
             500,
             "HANDLER_CONTRACT_VIOLATION",
             "Operation handler returned a non-serializable error body.",
@@ -1299,7 +1300,7 @@ export async function invokeOperation(
         }
         const validate = validation.errors.get(errorKey(result.status, result.code))!;
         if (!validate(result.body)) {
-          throw new HttpError(
+          throw new OperationRefusal(
             500,
             "HANDLER_CONTRACT_VIOLATION",
             "Operation handler returned a body outside its declared error schema.",
@@ -1308,7 +1309,7 @@ export async function invokeOperation(
         if (!declaration.schema) {
           const bodyCode = (result.body as { error?: { code?: unknown } }).error?.code;
           if (bodyCode !== result.code) {
-            throw new HttpError(
+            throw new OperationRefusal(
               500,
               "HANDLER_CONTRACT_VIOLATION",
               "Operation handler returned an error code inconsistent with the default error body.",
@@ -1323,7 +1324,7 @@ export async function invokeOperation(
           (result.contentType !== undefined && result.contentType !== declaredContentType) ||
           (headerContentType !== undefined && headerContentType !== declaredContentType)
         ) {
-          throw new HttpError(
+          throw new OperationRefusal(
             500,
             "HANDLER_CONTRACT_VIOLATION",
             "Operation handler returned an error content type outside its declaration.",
@@ -1338,7 +1339,7 @@ export async function invokeOperation(
         const id = record?.[projection.idField];
         if (success.resultKind || !record || typeof record !== "object" || Array.isArray(record) ||
             typeof id !== "string" || id !== input[bound.operation.target?.inputField ?? "id"]) {
-          throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "The source adapter must return the requested record, not an envelope or another target.");
+          throw new OperationRefusal(500, "HANDLER_CONTRACT_VIOLATION", "The source adapter must return the requested record, not an envelope or another target.");
         }
         const visible = getEntityOperationOffers(projection.entityName, activeContext.session!, [], {}, { id, row: record });
         const unavailable = activeContext.db && activeContext.session
@@ -1351,7 +1352,7 @@ export async function invokeOperation(
       if (options.prepareSuccess) {
         success = await options.prepareSuccess(success, activeContext);
         if (!success || typeof success !== "object" || Array.isArray(success)) {
-          throw new HttpError(
+          throw new OperationRefusal(
             500,
             "HANDLER_CONTRACT_VIOLATION",
             "Core Operation result normalization returned an invalid success result.",
@@ -1360,17 +1361,17 @@ export async function invokeOperation(
       }
       if (success.resultKind !== undefined &&
         (success.resultKind !== "operation-envelope" || !isCanonicalSuccessEnvelope(success.value))) {
-        throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an invalid canonical success envelope.");
+        throw new OperationRefusal(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an invalid canonical success envelope.");
       }
       const declaredStatus = bound.operation.transports.rest.response.status ?? 200;
       if (success.status !== undefined && success.status !== declaredStatus) {
-        throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an undeclared success status.");
+        throw new OperationRefusal(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned an undeclared success status.");
       }
       if (bound.operation.transports.rest.response.kind === "json" && !validation.output(success.value)) {
-        throw new HttpError(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned a value outside its canonical output schema.");
+        throw new OperationRefusal(500, "HANDLER_CONTRACT_VIOLATION", "Operation handler returned a value outside its canonical output schema.");
       }
       if (success.mcp !== undefined && !isMcpProjection(success.mcp)) {
-        throw new HttpError(
+        throw new OperationRefusal(
           500,
           "HANDLER_CONTRACT_VIOLATION",
           "Operation handler returned an MCP projection that is not a list of well-formed content blocks.",

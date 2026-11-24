@@ -8,6 +8,9 @@ import { runMigrationChain } from "../db/migration-chain.js";
 import { SYSTEM_BYPASS_ROLE, withSystemSession, type DbSessionInput } from "../db/session.js";
 import { jsonbLiteral } from "../db/sql-helpers.js";
 import type { DB } from "../generated/db/types.js";
+import type { RuntimeModule } from "../modules/contract.js";
+import { runRegisteredSeedJob } from "../modules/maintenance.js";
+import { ModulePlatformRuntime } from "../modules/platform.js";
 import {
   removeSeedOwnedDocument,
   type SeedOwnedDocumentRemoval,
@@ -45,8 +48,8 @@ test("seed-owned document removal proves the graph, shares the caller transactio
     const tenant = randomUUID(), foreignTenant = randomUUID(), seedActor = randomUUID();
     const db = privileged.db;
     for (const id of [tenant, foreignTenant]) {
-      await sql`insert into platform.tenants(id,slug,name,status) values(${id}::uuid,${id},'Seed removal fixture','active')`.execute(db);
-      await sql`insert into erp.tenants(id,tenant_id,slug,name,tenant_kind) values(${id}::uuid,${id}::uuid,${id},'Seed removal fixture','customer')`.execute(db);
+      await sql`insert into platform.tenants(id,slug,name,status) values(${id}::uuid,${'fixture-' + id},'Seed removal fixture','active')`.execute(db);
+      await sql`insert into erp.tenants(id,tenant_id,slug,name,tenant_kind) values(${id}::uuid,${id}::uuid,${'fixture-' + id},'Seed removal fixture','customer')`.execute(db);
       await sql`insert into erp.document_types(tenant_id,code,name) values(${id}::uuid,'note','Note')`.execute(db);
     }
 
@@ -223,6 +226,65 @@ test("seed-owned document removal proves the graph, shares the caller transactio
       await sql`select document_internal.remove_seed_document_versions(
         ${first.document}::uuid, array[${first.version}]::uuid[], ${AUTHORITY}) as removed`.execute(trx);
     })).rejects.toThrow(/requires a maintenance session/);
+
+    // Exercise the real maintenance port of a disposable tenant with a
+    // ledger. It pairs the protected document deletion with the host's own
+    // ledger update, using the same transaction identity for both.
+    const fixture = await seedGraph();
+    await sql`create table platform.seed_document_removal_fixture_ledger (
+      tenant_id uuid not null, document_id uuid not null, primary key (tenant_id, document_id)
+    )`.execute(db);
+    await sql`grant select, delete on platform.seed_document_removal_fixture_ledger to openshapeforge_app`.execute(db);
+    await sql`insert into platform.seed_document_removal_fixture_ledger values
+      (${tenant}::uuid, ${fixture.document}::uuid), (${tenant}::uuid, ${registered.document}::uuid)`.execute(db);
+    const contribution = {
+      name: "seed-document-removal-proof",
+      actorId: seedActor,
+      operations: ["Document.deleteWithContents"],
+      actingRelation: { sourceAuthority: AUTHORITY },
+      storeConnection: "application" as const,
+    };
+    const owner: RuntimeModule = {
+      name: "seed-removal-proof",
+      maintenance: [contribution],
+      seeds: [{ name: "seed-removal-proof", maintenanceOptIn: () => true,
+        apply: async () => ({ present: true, skipped: false, rows: 0 }) }],
+    };
+    const platform = new ModulePlatformRuntime(restricted.db);
+    const previousDatabase = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = url.toString();
+    const runRemoval = (graph: Graph, rollback = false) => runRegisteredSeedJob(
+      owner, db, owner.name, "synthetic seed removal proof",
+      runner => runner({ contribution: contribution.name, tenantSlug: "fixture-" + tenant, reason: "remove fixture seed" },
+        context => context.store.transaction(async tx => {
+          const pending = await tx.query(
+            "select document_id from platform.seed_document_removal_fixture_ledger where tenant_id=$1 and document_id=$2",
+            [tenant, graph.document],
+          );
+          if (pending.length === 0) return 0;
+          if (!context.documents) throw new Error("Missing registered seed document capability");
+          await context.documents.removeSeedOwned(tx, graph.removal);
+          await tx.query("delete from platform.seed_document_removal_fixture_ledger where tenant_id=$1 and document_id=$2",
+            [tenant, graph.document]);
+          if (rollback) throw new Error("fixture removal rollback");
+          return 1;
+        })),
+      { platform: platform.services, modules: [owner] },
+    );
+    try {
+      await expect(runRemoval(fixture, true)).rejects.toThrow("fixture removal rollback");
+      expect(await counts(fixture)).toEqual(intact);
+      expect(await runRemoval(fixture)).toBe(1);
+      expect(await counts(fixture)).toEqual({ documents: "0", versions: "0", variants: "0", blocks: "0" });
+      expect(await runRemoval(fixture)).toBe(0);
+      await expect(runRemoval(registered)).rejects.toThrow(/retention/i);
+      expect(await counts(registered)).toEqual(intact);
+      const remaining = await sql<{ document_id: string }>`select document_id from platform.seed_document_removal_fixture_ledger`.execute(db);
+      expect(remaining.rows.map(row => row.document_id)).toEqual([registered.document]);
+    } finally {
+      if (previousDatabase === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = previousDatabase;
+    }
 
     // The committed removal.
     const result = await remove(tenant, first.removal);

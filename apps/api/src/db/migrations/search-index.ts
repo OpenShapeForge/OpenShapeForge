@@ -75,6 +75,10 @@ export async function applySearchIndex(
 }
 
 async function installSearchIndex(db: OpenShapeForgeDatabase, tables: readonly GeneratedCrudTable[], sources: readonly SearchIndexSource[]) {
+  // Composed hosts can adopt the API before regenerating their database schema.
+  const table = await sql<{ present: boolean }>`select to_regclass('platform.search_entries') is not null as present`.execute(db);
+  if (!table.rows[0]?.present) return { installed: false, entities: 0, rebuilt: [] };
+
   // A database that does not offer the extensions keeps working without the index.
   await sql.raw(`do $$ begin
     begin create extension if not exists pg_trgm; create extension if not exists btree_gin;

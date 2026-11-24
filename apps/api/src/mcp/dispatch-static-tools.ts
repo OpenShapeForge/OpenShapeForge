@@ -11,11 +11,12 @@ import { connectorGovernor, connectorKeyring, connectorRegistry } from "../conne
 import { invokeConnectorOperation } from "../connectors/runtime.js";
 import { SESSION_INFO_TOOL_NAME } from "./session-info.js";
 import { sessionInfoToolResult } from "./session-describe.js";
-import { searchableSessionOperations } from "./searchable-session-operations.js";
+import { projectSearchableOperationContract, searchableSessionOperationAvailability, searchableSessionOperations } from "./searchable-session-operations.js";
 import { entityOperationContract } from "../operations/entity/index.js";
 import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import { entityIsGeneric } from "./generic-tool-projection.js";
-import { assertOperationExecutionRoute, parseOperationExecuteArguments, searchOperationDefinitions } from "./operation-search.js";
+import { assertOperationExecutionRoute, parseOperationExecuteArguments, isRecordsOnlySearch, parseOperationSearchArguments, searchOperationDefinitions } from "./operation-search.js";
+import { APPLICATION_SEARCH_OPERATION_ID, searchRecords } from "./record-search.js";
 import { fittingRecordPage, isRecordPage, modelRecord, recordFieldSelection } from "./model-view.js";
 import { invokeOperation } from "../operations/runtime.js";
 import {
@@ -156,19 +157,35 @@ export async function staticToolCall(
       );
     }
     try {
-      assertParentInvocationActive?.();
-      assertInterceptorActive?.();
-      const { definitions, allowedIds, canonicalText, entityLabels, entityFields, resolveName } = await searchableSessionOperations(ctx);
-      return ok(searchOperationDefinitions({
-        definitions,
-        allowedIds,
-        canonicalText,
-        entityLabels,
-        entityFields,
-        resolveName,
-        arguments: request.params.arguments ?? {},
+      const args = parseOperationSearchArguments(request.params.arguments);
+      const assertRequestActive = () => {
+        assertParentInvocationActive?.();
+        assertInterceptorActive?.();
+        if (signal?.aborted) throw new HttpError(499, "REQUEST_CANCELLED", "The request was cancelled.");
+      };
+      assertRequestActive();
+      const discovery = isRecordsOnlySearch(args) ? undefined : await searchableSessionOperations(ctx);
+      const found = discovery
+        ? searchOperationDefinitions({ ...discovery, locale }, args)
+        : { operations: [] };
+      assertRequestActive();
+      if (!("records" in args) || !args.records) return ok(found);
+      const { operations: canonical } = modulePlatform.services;
+      const recordResult = await searchRecords({
+        records: args.records,
+        eligible: async () => searchableStaticOperationIds.has(APPLICATION_SEARCH_OPERATION_ID) && (
+          discovery
+            ? discovery.definitions.some(({ id }) => id === APPLICATION_SEARCH_OPERATION_ID)
+            : Boolean(await canonical.get(moduleSession, APPLICATION_SEARCH_OPERATION_ID))
+        ),
         locale,
-      }));
+        assertRequestActive,
+        execute: (op, options) => canonical.execute(moduleSession, op, options),
+        ...(signal ? { signal } : {}),
+      });
+      // A cancelled request publishes nothing, not a partial mix.
+      assertRequestActive();
+      return ok({ ...found, records: recordResult });
     } catch (error) {
       return failed(error);
     }
@@ -192,11 +209,12 @@ export async function staticToolCall(
       );
       assertParentInvocationActive?.();
       assertInterceptorActive?.();
-      const { definitions, entities } = await searchableSessionOperations(ctx);
-      const definition = definitions.find((candidate) => candidate.id === parsed.operationId);
-      if (!definition) {
+      const { definitions, entities } = await searchableSessionOperationAvailability(ctx);
+      const available = definitions.find((candidate) => candidate.id === parsed.operationId);
+      if (!available) {
         throw new HttpError(404, "NOT_FOUND", "The requested Operation is not available.");
       }
+      const definition = projectSearchableOperationContract(ctx, entities, available);
       assertOperationExecutionRoute(definition, name === searchableOperationToolNames.secureExecute, searchableOperationToolNames);
       observeDiagnosticOperation(definition);
       if (needsPrivateOutput(definition)) return await startPrivateOutput(ctx, definition, parsed.input);
@@ -331,8 +349,9 @@ export async function staticToolCall(
       assertInterceptorActive?.();
       const bound = operations.get(operationTool.key)!;
       if(hasSensitiveOutput(operationTool.outputSchema)) {
-        const { definitions } = await searchableSessionOperations(ctx);
-        const definition = definitions.find(d => d.id === operationTool.key);
+        const { definitions, entities } = await searchableSessionOperationAvailability(ctx);
+        const available = definitions.find(d => d.id === operationTool.key);
+        const definition = available && projectSearchableOperationContract(ctx, entities, available);
         if(!definition || !needsPrivateOutput(definition))throw new HttpError(409,"INTERACTION_REQUIRED","The confidential Operation has no matching private execution contract.");
         return await startPrivateOutput(ctx, definition, request.params.arguments ?? {});
       }

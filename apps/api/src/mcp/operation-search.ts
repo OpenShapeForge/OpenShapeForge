@@ -19,7 +19,38 @@ export type SearchableOperationToolNames = CoreSearchableOperationToolNames;
 
 export type OperationSearchArguments =
   | { operationId: string }
-  | { query?: string; cursor?: string; limit: number };
+  | { query?: string; cursor?: string; limit: number; records?: RecordSearchArguments };
+
+/** The additive record branch: canonical `application.search`'s phrase, entity and per-entity cursor. */
+export type RecordSearchArguments = { query: string; entity?: string; cursor?: string };
+
+/** A request with only `records` skips Operation ranking and answers `operations: []`. */
+export function isRecordsOnlySearch(args: OperationSearchArguments): boolean {
+  return "limit" in args && args.records !== undefined && args.query === undefined && args.cursor === undefined;
+}
+
+function parseRecordSearchArguments(value: unknown): RecordSearchArguments {
+  const input = objectInput(value, "Record search input");
+  rejectUnknownKeys(input, ["query", "entity", "cursor"], "Record search input");
+  const { query, entity, cursor } = input;
+  if (typeof query !== "string" || query.trim().length === 0 || query.length > 200) {
+    throw new HttpError(400, "BAD_USER_INPUT", "A record search phrase of 1 to 200 characters is required.");
+  }
+  if (entity !== undefined && (typeof entity !== "string" || entity.trim().length === 0 || entity.length > 200)) {
+    throw new HttpError(400, "BAD_USER_INPUT", "Record search entity is invalid.");
+  }
+  if (cursor !== undefined && (typeof cursor !== "string" || cursor.length === 0 || cursor.length > 4096)) {
+    throw new HttpError(400, "BAD_USER_INPUT", "Record search cursor is invalid.");
+  }
+  if (cursor !== undefined && entity === undefined) {
+    throw new HttpError(400, "BAD_USER_INPUT", "A record cursor continues one entity: pass its entity too.");
+  }
+  return {
+    query: query.trim(),
+    ...(typeof entity === "string" ? { entity: entity.trim() } : {}),
+    ...(typeof cursor === "string" ? { cursor } : {}),
+  };
+}
 
 function objectInput(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -126,7 +157,7 @@ export function assertOperationExecutionRoute(definition: RuntimeOperationDefini
 
 export function parseOperationSearchArguments(value: unknown): OperationSearchArguments {
   const input = objectInput(value ?? {}, "Operation search input");
-  rejectUnknownKeys(input, ["operationId", "query", "cursor", "limit"], "Operation search input");
+  rejectUnknownKeys(input, ["operationId", "query", "cursor", "limit", "records"], "Operation search input");
   if (input.operationId !== undefined) {
     // The same identity rule the executor applies to its operationId.
     if (typeof input.operationId !== "string" || input.operationId.trim().length === 0) {
@@ -134,6 +165,9 @@ export function parseOperationSearchArguments(value: unknown): OperationSearchAr
     }
     if (["query", "cursor", "limit"].some((key) => input[key] !== undefined)) {
       throw new HttpError(400, "BAD_USER_INPUT", "An operationId lookup takes no query, cursor or limit.");
+    }
+    if (input.records !== undefined) {
+      throw new HttpError(400, "BAD_USER_INPUT", "An operationId lookup takes no records search.");
     }
     return { operationId: input.operationId.trim() };
   }
@@ -161,6 +195,7 @@ export function parseOperationSearchArguments(value: unknown): OperationSearchAr
     ...(typeof query === "string" && query.trim() ? { query: query.trim() } : {}),
     ...(typeof cursor === "string" ? { cursor } : {}),
     limit,
+    ...(input.records !== undefined ? { records: parseRecordSearchArguments(input.records) } : {}),
   };
 }
 
@@ -361,6 +396,8 @@ export type OperationSearchContext = {
    * or undefined. Only an id that is itself available is ever answered.
    */
   resolveName?: (name: string) => string | undefined;
+  /** Project the exact MCP schema for an already eligible result. */
+  projectContract?: (definition: RuntimeOperationDefinition) => RuntimeOperationDefinition;
 };
 
 /**
@@ -493,6 +530,7 @@ const INLINE_CONTRACT_CHARACTERS = 14_000;
 function inlineContracts(
   page: readonly RuntimeOperationDefinition[],
   named: (definition: RuntimeOperationDefinition) => boolean,
+  projectContract: NonNullable<OperationSearchContext["projectContract"]>,
 ): Map<string, Record<string, unknown>> {
   const first = page[0];
   if (!first) return new Map();
@@ -503,7 +541,8 @@ function inlineContracts(
   ].filter((definition): definition is RuntimeOperationDefinition => definition !== undefined).slice(0, INLINE_CONTRACTS);
   const inline = new Map<string, Record<string, unknown>>();
   let used = 0;
-  for (const definition of picked) {
+  for (const candidate of picked) {
+    const definition = projectContract(candidate);
     const inputSchema = modelSchema(canonicalRuntimeOperationSchema(definition.input, definition.id, "input"));
     const size = JSON.stringify(inputSchema).length;
     if (inline.size > 0 && used + size > INLINE_CONTRACT_CHARACTERS) continue;
@@ -529,11 +568,12 @@ function inlineContracts(
 export function searchOperationDefinitions(input: {
   definitions: readonly RuntimeOperationDefinition[];
   allowedIds: ReadonlySet<string>;
-  arguments: unknown;
+  arguments?: unknown;
   locale: ResolvedLocale;
-} & OperationSearchContext): { operations: Record<string, unknown>[]; nextCursor?: string; unmatchedWords?: string[] } {
-  const args = parseOperationSearchArguments(input.arguments);
+} & OperationSearchContext, args = parseOperationSearchArguments(input.arguments)): { operations: Record<string, unknown>[]; nextCursor?: string; unmatchedWords?: string[] } {
+  if (isRecordsOnlySearch(args)) return { operations: [] };
   const available = input.definitions.filter((definition) => input.allowedIds.has(definition.id));
+  const projectContract = input.projectContract ?? ((definition: RuntimeOperationDefinition) => definition);
   const shown = (definition: RuntimeOperationDefinition) => {
     const name = localizedText(definition.name, input.locale) ?? definition.id;
     return { name, description: localizedText(definition.description, input.locale) ?? name };
@@ -542,7 +582,7 @@ export function searchOperationDefinitions(input: {
     const found = lookup(available, args.operationId, input.resolveName);
     if (!found) return { operations: [] };
     const { name, description } = shown(found);
-    return { operations: [operationContract(found, name, description)] };
+    return { operations: [operationContract(projectContract(found), name, description)] };
   }
   const query = queryWords(args.query);
   // A verb ("find", "zoek") says what to do with the subject; a query of only
@@ -628,7 +668,7 @@ export function searchOperationDefinitions(input: {
   const last = page.at(-1);
   // Only a first page: a model that pages on has already passed over the best matches.
   const inline = start === 0
-    ? inlineContracts(page.map(({ definition }) => definition), (definition) => covered(definition) > 0)
+    ? inlineContracts(page.map(({ definition }) => definition), (definition) => covered(definition) > 0, projectContract)
     : new Map<string, Record<string, unknown>>();
   return {
     operations: page.map(({ definition }) => {

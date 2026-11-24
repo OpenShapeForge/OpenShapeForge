@@ -17,6 +17,7 @@ const FANOUT_PAGE = 5;
 const SINGLE_ENTITY_PAGE = 10;
 // Leave room for executable Operation schemas and keep full labels and cursors together.
 const MAX_RECORD_GROUP_BYTES = 8_000;
+const MAX_LABEL_PREVIEW_CHARACTERS = 400;
 
 export type RecordSearchStatus = "ok" | "incomplete" | "unavailable";
 export type RecordGroup = { entity: string; items: { id: string; label: string }[]; nextCursor?: string };
@@ -41,26 +42,31 @@ export async function searchRecords(input: {
   signal?: AbortSignal;
 }): Promise<RecordSearchResult> {
   const { query, entity, cursor } = input.records;
-  let response: unknown;
-  try {
-    if (!await input.eligible()) return { status: "unavailable", groups: [] };
+  const search = async (first: number): Promise<RecordSearchResult> => {
     input.assertRequestActive();
-    response = await input.execute({
+    const response = await input.execute({
       operation: { id: APPLICATION_SEARCH_OPERATION_ID, intent: "invoke" },
       input: {
         query,
         locale: input.locale.tag === "nl" ? "nl" : "en",
         ...(entity ? { entity } : {}),
         ...(cursor ? { after: cursor } : {}),
-        first: entity ? SINGLE_ENTITY_PAGE : FANOUT_PAGE,
+        first,
       },
     }, input.signal ? { signal: input.signal } : {});
+    const data = (response as { data?: unknown } | null)?.data as { groups?: unknown; incomplete?: unknown } | undefined;
+    if (!data || typeof data !== "object" || !Array.isArray(data.groups)) return { status: "unavailable", groups: [] };
+    return budgeted(data.groups, data.incomplete === true, first === 1);
+  };
+  try {
+    if (!await input.eligible()) return { status: "unavailable", groups: [] };
+    const result = await search(entity ? SINGLE_ENTITY_PAGE : FANOUT_PAGE);
+    // Re-read an oversized targeted page at the same position for a usable cursor.
+    if (entity && result.truncated?.includes(entity)) return await search(1);
+    return result;
   } catch {
     return { status: "unavailable", groups: [] };
   }
-  const data = (response as { data?: unknown } | null)?.data as { groups?: unknown; incomplete?: unknown } | undefined;
-  if (!data || typeof data !== "object" || !Array.isArray(data.groups)) return { status: "unavailable", groups: [] };
-  return budgeted(data.groups, data.incomplete === true);
 }
 
 /**
@@ -68,7 +74,7 @@ export async function searchRecords(input: {
  * its items would leave its cursor pointing past results the caller never saw.
  * Dropped authorized groups make the result incomplete and are named.
  */
-function budgeted(raw: readonly unknown[], incomplete: boolean): RecordSearchResult {
+function budgeted(raw: readonly unknown[], incomplete: boolean, allowLabelPreview: boolean): RecordSearchResult {
   const groups: RecordGroup[] = [];
   const truncated: string[] = [];
   let total = 0;
@@ -88,7 +94,13 @@ function budgeted(raw: readonly unknown[], incomplete: boolean): RecordSearchRes
       items,
       ...(typeof group.nextCursor === "string" && group.nextCursor ? { nextCursor: group.nextCursor } : {}),
     };
-    const size = Buffer.byteLength(JSON.stringify(projected));
+    let size = Buffer.byteLength(JSON.stringify(projected));
+    if (allowLabelPreview && items.length === 1 && size > MAX_RECORD_GROUP_BYTES) {
+      // One long label must not make its record or the rest of the page unreachable.
+      const item = items[0]!;
+      item.label = [...item.label].slice(0, MAX_LABEL_PREVIEW_CHARACTERS).join("") + "…";
+      size = Buffer.byteLength(JSON.stringify(projected));
+    }
     if (total + items.length > MAX_RECORD_SEARCH_RESULTS || bytes + size > MAX_RECORD_GROUP_BYTES) {
       truncated.push(group.entity);
       continue;

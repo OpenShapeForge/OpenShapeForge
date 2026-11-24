@@ -236,6 +236,21 @@ describe("the stored token binding", () => {
     expect(tokenBindingCurrent(legacy, null)).toBe(true);
     expect(tokenBindingCurrent(legacy, { oauthBinding: tokenBindingOf(profile) })).toBe(false);
   });
+
+  it("invalidates an existing grant when the approved audience set changes", () => {
+    const forAudiences = (...expectedAudiences: string[]) => oauthClientProfile({ ...PUBLIC_AUTH, expectedAudiences });
+    const first = "ari:cloud:jira::site/first";
+    const second = "ari:cloud:jira::site/second";
+    const firstBinding = { oauthBinding: tokenBindingOf(forAudiences(first)) };
+    const previousBinding = { oauthBinding: tokenBindingOf(profile) };
+    expect(tokenBindingCurrent(forAudiences(first), firstBinding)).toBe(true);
+    expect(tokenBindingCurrent(forAudiences(second), firstBinding)).toBe(false);
+    expect(tokenBindingCurrent(profile, firstBinding)).toBe(false);
+    expect(tokenBindingCurrent(forAudiences(first), previousBinding)).toBe(false);
+    expect(tokenBindingCurrent(forAudiences(first, second), {
+      oauthBinding: tokenBindingOf(forAudiences(second, first, second)),
+    })).toBe(true);
+  });
 });
 
 describe("grantedScopesOf", () => {

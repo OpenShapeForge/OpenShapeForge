@@ -42,10 +42,11 @@ export type OAuthClientProfile = {
   strictGrants: boolean;
 };
 
-/** Where a token set came from; a change of either needs a fresh consent. */
+/** OAuth policy at token exchange. A change requires fresh consent. */
 export type OAuthTokenBinding = {
   resource: string | null;
   issuer: string | null;
+  additionalAudiences?: string[];
 };
 
 function misconfigured(message: string): HttpError {
@@ -236,7 +237,15 @@ export function assertOAuthEndpoints(
 }
 
 export function tokenBindingOf(profile: OAuthClientProfile | undefined): OAuthTokenBinding {
-  return { resource: profile?.resource ?? null, issuer: profile?.issuer ?? null };
+  const resource = profile?.resource ?? null;
+  const additionalAudiences = resource
+    ? [...new Set(profile?.audiences.filter((audience) => !sameAudience(audience, resource)))].sort()
+    : [];
+  return {
+    resource,
+    issuer: profile?.issuer ?? null,
+    ...(additionalAudiences.length > 0 ? { additionalAudiences } : {}),
+  };
 }
 
 /**
@@ -247,9 +256,13 @@ export function tokenBindingOf(profile: OAuthClientProfile | undefined): OAuthTo
 export function tokenBindingCurrent(profile: OAuthClientProfile, values: unknown): boolean {
   const stored = asRecord(asRecord(values)?.oauthBinding);
   const expected = tokenBindingOf(profile);
+  const audiences = stored?.additionalAudiences === undefined ? [] : stored.additionalAudiences;
+  const expectedAudiences = expected.additionalAudiences ?? [];
   return (
     (stored?.resource ?? null) === expected.resource &&
-    (stored?.issuer ?? null) === expected.issuer
+    (stored?.issuer ?? null) === expected.issuer &&
+    Array.isArray(audiences) && audiences.length === expectedAudiences.length &&
+    expectedAudiences.every((audience, index) => audiences[index] === audience)
   );
 }
 

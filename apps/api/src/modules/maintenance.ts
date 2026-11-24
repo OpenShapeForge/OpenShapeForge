@@ -40,7 +40,7 @@ import {
   withModuleOperationSession,
 } from "./platform.js";
 import { acquireEditLeaseForEntityOperation } from "../operations/entity/index.js";
-import { removeSeedOwnedDocument, SEED_DOCUMENT_REMOVAL_OPERATION } from "../operations/seed-document-removal.js";
+import { removeSeedOwnedDocument, SEED_DOCUMENT_REMOVAL_OPERATION } from "../db/maintenance/remove-seed-documents.js";
 import generatedCatalog from "../generated/operations/catalog.json" with { type: "json" };
 
 const outsideInvocation = AsyncLocalStorage.snapshot();

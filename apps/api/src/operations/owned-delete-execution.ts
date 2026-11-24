@@ -7,7 +7,7 @@
  * It lives apart from the Operation handler because a second, internal caller
  * needs exactly these guarantees inside a transaction it already owns: the
  * registered maintenance seeding path that removes a proven seed-owned
- * document graph (seed-document-removal.ts). That caller differs from the
+ * document graph (db/maintenance/remove-seed-documents.ts). That caller differs from the
  * canonical Operation in one declared way — {@link OwnedDeleteExecution} — and
  * shares everything else, so the two cannot drift apart.
  */
@@ -16,6 +16,7 @@ import { operationFailure, type OwnedDeletePlan } from "@openshapeforge/operatio
 import { assertBlockInclusionRemoval } from "@openshapeforge/documents/content-commands";
 import { ownedDeleteForeignKeyIdentity, readOwnedDeleteForeignKeys } from "../db/owned-delete-foreign-keys.js";
 import { postgresArrayLiteral } from "../db/sql-helpers.js";
+import { entityColumnName } from "../db/manifest-lookup.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import type { DB } from "../generated/db/types.js";
 import { withTenantBypassInTransaction, type DbSessionInput } from "../db/session.js";
@@ -173,13 +174,17 @@ export type OwnedDeleteExecution = {
    * refused. `proven` is reserved for an internal caller whose own `prove`
    * establishes removability of the published members by other means.
    */
-  lifecycle: "draft-only" | "proven";
+  lifecycle: "draft-only";
+  prove?: never;
+} | {
+  operationKey: string;
+  lifecycle: "proven";
   /**
    * Runs under the row locks, after every generic guard and before the
    * boundary re-check and any owned-graph effect. Throwing refuses the whole
    * removal; the caller's transaction is what rolls it back.
    */
-  prove?: (proof: OwnedDeleteProof) => Promise<void>;
+  prove: (proof: OwnedDeleteProof) => Promise<void>;
 };
 
 /**
@@ -265,7 +270,14 @@ export async function executeOwnedDeleteGraph(
       const row = locked.get(step.entity)!.get(id)!;
       if (step.childLock && row[step.childLock] !== false) refuse();
       await guardColorWrite(trx, session, table, new Map(), row, true);
-      await assertHardDeleteAllowedInTransaction(trx, session, table, id, row, tables);
+      // Only a proven synthetic publication or registration gets a clock
+      // exception. The proof below must succeed before the delete can complete.
+      const syntheticDocumentPublicationOrRegistration = execution.lifecycle === "proven" &&
+        plan.root === "Document" && step.entity === plan.root &&
+        (row[entityColumnName("Document", "publishedAt")] != null ||
+          row[entityColumnName("Document", "registeredAt")] != null);
+      await assertHardDeleteAllowedInTransaction(trx, session, table, id, row, tables,
+        syntheticDocumentPublicationOrRegistration ? { syntheticDocumentPublicationOrRegistration: true } : undefined);
       for (const carrier of entityValueCarriers(table)) await assertBlockInclusionRemoval(carrier, row);
       await assertPublishableRelatedMutationInTransaction(trx, session, table, {
         kind: "delete", id, row: businessFields(table, row),

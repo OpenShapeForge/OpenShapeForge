@@ -15,7 +15,7 @@ import {
   removeSeedOwnedDocument,
   type SeedOwnedDocumentRemoval,
   type SeedOwnedDocumentRemovalResult,
-} from "./seed-document-removal.js";
+} from "../db/maintenance/remove-seed-documents.js";
 
 const AUTHORITY = "openshapeforge:test:seed-fixtures";
 
@@ -213,12 +213,20 @@ test("seed-owned document removal proves the graph, shares the caller transactio
     expect(await counts(retained)).toEqual(intact);
 
     const registered = await seedGraph();
+    const published = await seedGraph();
+    const received = await seedGraph();
     await asSeed(db, async (trx) => {
       await sql`update erp.documents set registered_at = now()
         where id = ${registered.document}::uuid`.execute(trx);
+      await sql`update erp.documents set published_at = now()
+        where id = ${published.document}::uuid`.execute(trx);
+      await sql`update erp.documents set received_at = now()
+        where id = ${received.document}::uuid`.execute(trx);
+      await sql`update erp.documents set registered_at = now()
+        where id = ${retained.document}::uuid`.execute(trx);
     });
-    await expect(remove(tenant, registered.removal)).rejects.toThrow(/retention/i);
-    expect(await counts(registered)).toEqual(intact);
+    await expect(remove(tenant, received.removal)).rejects.toThrow(/retention/i);
+    expect(await counts(received)).toEqual(intact);
 
     // The privileged routine is unreachable outside a maintenance session.
     await expect(restricted.db.transaction().execute(async (trx) => {
@@ -236,7 +244,8 @@ test("seed-owned document removal proves the graph, shares the caller transactio
     )`.execute(db);
     await sql`grant select, delete on platform.seed_document_removal_fixture_ledger to openshapeforge_app`.execute(db);
     await sql`insert into platform.seed_document_removal_fixture_ledger values
-      (${tenant}::uuid, ${fixture.document}::uuid), (${tenant}::uuid, ${registered.document}::uuid)`.execute(db);
+      (${tenant}::uuid, ${fixture.document}::uuid), (${tenant}::uuid, ${registered.document}::uuid),
+      (${tenant}::uuid, ${published.document}::uuid), (${tenant}::uuid, ${retained.document}::uuid)`.execute(db);
     const contribution = {
       name: "seed-document-removal-proof",
       actorId: seedActor,
@@ -277,10 +286,14 @@ test("seed-owned document removal proves the graph, shares the caller transactio
       expect(await runRemoval(fixture)).toBe(1);
       expect(await counts(fixture)).toEqual({ documents: "0", versions: "0", variants: "0", blocks: "0" });
       expect(await runRemoval(fixture)).toBe(0);
-      await expect(runRemoval(registered)).rejects.toThrow(/retention/i);
-      expect(await counts(registered)).toEqual(intact);
+      for (const graph of [registered, published]) {
+        expect(await runRemoval(graph)).toBe(1);
+        expect(await counts(graph)).toEqual({ documents: "0", versions: "0", variants: "0", blocks: "0" });
+      }
+      await expect(runRemoval(retained)).rejects.toThrow(/retains managed content/);
+      expect(await counts(retained)).toEqual(intact);
       const remaining = await sql<{ document_id: string }>`select document_id from platform.seed_document_removal_fixture_ledger`.execute(db);
-      expect(remaining.rows.map(row => row.document_id)).toEqual([registered.document]);
+      expect(remaining.rows.map(row => row.document_id)).toEqual([retained.document]);
     } finally {
       if (previousDatabase === undefined) delete process.env.DATABASE_URL;
       else process.env.DATABASE_URL = previousDatabase;

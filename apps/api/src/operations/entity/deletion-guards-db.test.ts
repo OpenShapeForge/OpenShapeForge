@@ -57,9 +57,14 @@ function table(options: { minimum?: boolean; maximum?: boolean; hold?: boolean; 
   };
 }
 
-async function allows(definition: GeneratedCrudTable, id: string, row: GeneratedEntityRow) {
+async function allows(
+  definition: GeneratedCrudTable,
+  id: string,
+  row: GeneratedEntityRow,
+  options?: Parameters<typeof assertHardDeleteAllowedInTransaction>[5],
+) {
   return runtime!.db.transaction().execute((trx) =>
-    assertHardDeleteAllowedInTransaction(trx, session, definition, id, row, [definition, versionTable]));
+    assertHardDeleteAllowedInTransaction(trx, session, definition, id, row, [definition, versionTable], options));
 }
 
 describe("canonical hard-delete guards", () => {
@@ -96,6 +101,13 @@ describe("canonical hard-delete guards", () => {
       .resolves.toBeUndefined();
     await expect(allows(table({ maximum: true, hold: true }), randomUUID(), { retention_at: null, legal_hold: true }))
       .rejects.toMatchObject({ operationError: { code: "OPERATION_REFUSED" } });
+  });
+
+  test("preserves an active legal hold for synthetic document registrations", async () => {
+    await expect(allows(table({ minimum: true, hold: true }), randomUUID(),
+      { retention_at: new Date().toISOString(), legal_hold: true },
+      { syntheticDocumentPublicationOrRegistration: true }))
+      .rejects.toMatchObject({ operationError: { code: "OPERATION_REFUSED", message: expect.stringMatching(/legal hold/) } });
   });
 
   test("uses durable publication history rather than the current lifecycle label", async () => {

@@ -33,16 +33,16 @@
  */
 import { operationFailure, type OwnedDeletePlan } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";
-import { postgresArrayLiteral } from "../db/sql-helpers.js";
-import type { DbSessionInput } from "../db/session.js";
-import type { DB } from "../generated/db/types.js";
-import { getGeneratedCrudTables } from "./entity/catalog.js";
-import { fieldNameForColumn } from "./entity/columns.js";
-import { executeOwnedDeleteGraph, type OwnedDeleteProof } from "./owned-delete-execution.js";
+import { postgresArrayLiteral } from "../sql-helpers.js";
+import type { DbSessionInput } from "../session.js";
+import type { DB } from "../../generated/db/types.js";
+import { getGeneratedCrudTables } from "../../operations/entity/catalog.js";
+import { fieldNameForColumn } from "../../operations/entity/columns.js";
+import { executeOwnedDeleteGraph, type OwnedDeleteProof } from "../../operations/owned-delete-execution.js";
 // The compiled catalogue, not the Operation runtime: the runtime owns the
 // maintenance entry point, so importing it here would close an import cycle.
-import rawCatalog from "../generated/operations/catalog.json" with { type: "json" };
-import type { OperationContract } from "./runtime.js";
+import rawCatalog from "../../generated/operations/catalog.json" with { type: "json" };
+import type { OperationContract } from "../../operations/runtime.js";
 
 /** The canonical owned delete whose compiled plan defines the owned graph. */
 export const SEED_DOCUMENT_REMOVAL_OPERATION = "Document.deleteWithContents";

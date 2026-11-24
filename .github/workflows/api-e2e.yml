@@ -96,7 +96,8 @@ jobs:
       # tag-lockstep trick (the tag is read out of the SPI's own Dockerfile)
       # while start-dev picks the provider up without a kc.sh build.
       - name: Build the Keycloak SPI
-        run: mvn -B -q -f packages/keycloak-spi/pom.xml -DskipTests package
+        timeout-minutes: 10
+        run: mvn -B -C -q -s .github/maven-spi-settings.xml -f packages/keycloak-spi/pom.xml -DskipTests package
 
       # Started before the migrations rather than after, so its ~40s of
       # startup overlaps work that does not need it. Readiness is waited for

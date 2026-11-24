@@ -160,6 +160,14 @@ test("seed-owned document removal proves the graph, shares the caller transactio
     await expect(remove(tenant, unexpectedVersion.removal)).rejects.toThrow(/do not match the seed plan/);
     expect(await counts(unexpectedVersion)).toEqual({ ...intact, versions: "2" });
 
+    const adoptedVersion = await seedGraph();
+    await asSeed(db, async (trx) => {
+      await sql`update erp.document_versions set source_authority = null
+        where id = ${adoptedVersion.version}::uuid`.execute(trx);
+    });
+    await expect(remove(tenant, adoptedVersion.removal)).rejects.toThrow(/version is not owned by this seed/);
+    expect(await counts(adoptedVersion)).toEqual(intact);
+
     // A child a user owns rather than the seed.
     const userOwned = await seedGraph();
     await asSeed(db, async (trx) => {

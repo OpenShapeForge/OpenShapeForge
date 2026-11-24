@@ -61,7 +61,7 @@ async function allows(
   definition: GeneratedCrudTable,
   id: string,
   row: GeneratedEntityRow,
-  options?: Parameters<typeof assertHardDeleteAllowedInTransaction>[5],
+  options?: Parameters<typeof assertHardDeleteAllowedInTransaction>[6],
 ) {
   return runtime!.db.transaction().execute((trx) =>
     assertHardDeleteAllowedInTransaction(trx, session, definition, id, row, [definition, versionTable], options));

@@ -1,43 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
-/**
- * Single translation point from canonical operation failures and remaining
- * protocol-local failures to REST HTTP responses. Keeping the mapping here
- * means REST handlers delegate to the shared operation runtime without
- * duplicating error policy.
- */
 import { GraphQLError } from "graphql";
-import { operationErrorOf } from "@openshapeforge/operations";
-import { classifyDatabaseError } from "../db/database-refusals.js";
-import {
-  failureBody,
-  httpStatusForCode,
-  providerOutcomeOf,
-  type FailureBody,
-} from "../connectors/provider-outcome.js";
+import { httpStatusForCode, type FailureBody } from "../connectors/provider-outcome.js";
+import { classifyOperationFailure, type ClassifiedOperationFailure } from "../operations/operation-failure-classification.js";
 
+export { OperationRefusal as HttpError } from "../operations/operation-refusal.js";
 export type HttpErrorBody = FailureBody;
-
-/** REST-local error for conditions that never pass through the CRUD layer. */
-export class HttpError extends Error {
-  readonly status: number;
-  readonly code: string;
-  /** Authored detail/hint carried along when the error relays a database rule's refusal. */
-  readonly detail: string | undefined;
-  readonly hint: string | undefined;
-
-  constructor(
-    status: number,
-    code: string,
-    message: string,
-    authored?: { detail?: string; hint?: string },
-  ) {
-    super(message);
-    this.status = status;
-    this.code = code;
-    this.detail = authored?.detail;
-    this.hint = authored?.hint;
-  }
-}
 
 /**
  * @fastify/rate-limit rejects with an error carrying `statusCode: 429`. It is a
@@ -55,36 +22,8 @@ function rateLimitStatus(error: unknown): number | undefined {
   return status === 429 ? 429 : undefined;
 }
 
-/**
- * Connector errors are plain classes rather than GraphQLErrors, so they need
- * recognising here or the mapper redacts them. Matched on the `code` field
- * against the canonical table in provider-outcome.ts — the same one the
- * connector REST routes and the MCP renderer read, so the three cannot drift.
- * An unknown code still falls through to a redacted 500, which is the right
- * default for something nobody classified.
- */
-function connectorErrorCode(error: unknown): string | undefined {
-  if (!(error instanceof Error)) return undefined;
-  const named = error.name;
-  if (
-    named !== "ConnectorInvocationError" &&
-    named !== "ConnectorExecutionError" &&
-    named !== "ConnectorBoundaryError" &&
-    named !== "ConnectorServiceError" &&
-    named !== "ConnectorAuthorizationError" &&
-    named !== "ConnectorConfigurationError" &&
-    named !== "ProviderOutcomeError"
-  ) {
-    return undefined;
-  }
-  const code = (error as Error & { code?: unknown }).code;
-  return typeof code === "string" ? code : undefined;
-}
-
-export function toHttpError(error: unknown): {
-  status: number;
-  body: HttpErrorBody;
-} {
+/** Preserve rate-limit and legacy GraphQL refusals at the interface boundary. */
+export function toHttpError(error: unknown): ClassifiedOperationFailure {
   if (rateLimitStatus(error) !== undefined) {
     // Mirrors errorResponseBuilder in roles/api.ts: no limiter internals in the
     // body. Retry-After is set by the plugin and survives on the reply.
@@ -98,43 +37,6 @@ export function toHttpError(error: unknown): {
         },
       },
     };
-  }
-
-  const operationError = operationErrorOf(error);
-  if (operationError !== undefined) {
-    return {
-      // OperationFailure is an intentional, server-authored refusal. Unknown
-      // domain codes therefore remain conflicts rather than becoming 500s;
-      // unexpected exceptions never reach this branch.
-      status: httpStatusForCode(operationError.code) ?? 409,
-      body: { error: operationError },
-    };
-  }
-
-  if (error instanceof HttpError) {
-    return {
-      status: error.status,
-      body: {
-        error: {
-          code: error.code,
-          message: error.message,
-          retryable: false,
-          ...(error.detail !== undefined ? { detail: error.detail } : {}),
-          ...(error.hint !== undefined ? { data: { hint: error.hint } } : {}),
-        },
-      },
-    };
-  }
-
-  const connectorCode = connectorErrorCode(error);
-  if (connectorCode !== undefined) {
-    const status = httpStatusForCode(connectorCode);
-    if (status !== undefined) {
-      return {
-        status,
-        body: failureBody(connectorCode, (error as Error).message, providerOutcomeOf(error)),
-      };
-    }
   }
 
   if (error instanceof GraphQLError) {
@@ -168,35 +70,5 @@ export function toHttpError(error: unknown): {
     }
   }
 
-  // A database refusal that did not pass through the generated CRUD layer
-  // (a module or derived tool writing on its own): the same narrow classifier
-  // decides, without table context, so constraint answers are generic here.
-  const refusal = classifyDatabaseError(error);
-  if (refusal !== undefined) {
-    return {
-      status: refusal.status,
-      body: {
-        error: {
-          code: refusal.code,
-          message: refusal.message,
-          retryable: refusal.retryable === true,
-          ...(refusal.detail !== undefined ? { detail: refusal.detail } : {}),
-          ...(refusal.hint !== undefined ? { data: { hint: refusal.hint } } : {}),
-        },
-      },
-    };
-  }
-
-  // Anything else (driver errors, bugs) is redacted — parity with the
-  // GraphQL endpoint, where Yoga masks unexpected errors.
-  return {
-    status: 500,
-    body: {
-      error: {
-        code: "INTERNAL_SERVER_ERROR",
-        message: "Internal server error.",
-        retryable: false,
-      },
-    },
-  };
+  return classifyOperationFailure(error);
 }

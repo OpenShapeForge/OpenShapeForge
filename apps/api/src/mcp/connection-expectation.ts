@@ -84,7 +84,7 @@
  * both pass; two that name different rows leave no row able to pass, which is
  * the fail-closed answer rather than a choice between them.
  */
-import { isDelegatedConnection } from "./connection-delegation.js";
+import { isDelegatedConnection } from "../auth/connection-delegation.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { ownedByActingRelation } from "../db/acting-relation.js";
 import { HttpError } from "../rest/http-error.js";

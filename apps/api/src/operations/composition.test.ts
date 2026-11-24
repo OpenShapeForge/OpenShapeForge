@@ -7,10 +7,27 @@ test("canonical execution does not directly import transport adapters", async ()
   const source = await Bun.file(new URL("./runtime.ts", import.meta.url)).text();
   const imports = new Bun.Transpiler({ loader: "ts" }).scanImports(source);
   const reverseDependencies = imports.map(({ path }) => path).filter(
-    (path) => path === "fastify" || path === "graphql" || path === "../rest/operation-routes.js" ||
-      path === "../graphql/operation-contribution.js",
+    (path) => path === "fastify" || path === "graphql" ||
+      /^\.\.\/(rest|graphql|mcp)\//.test(path),
   );
   expect(reverseDependencies).toEqual([]);
+});
+
+test("Operation modules import the canonical refusal without going through REST", async () => {
+  const sources = new Bun.Glob("**/*.ts");
+  const directory = new URL("./", import.meta.url);
+  const transpiler = new Bun.Transpiler({ loader: "ts" });
+  const restErrorAdapter = new URL("../rest/http-error.js", directory);
+  const adapterConsumers: string[] = [];
+  for await (const path of sources.scan(directory.pathname)) {
+    if (path.endsWith(".test.ts")) continue;
+    const source = new URL(path, directory);
+    const imports = transpiler.scanImports(await Bun.file(source).text());
+    if (imports.some(({ path }) => path.startsWith(".") && new URL(path, source).href === restErrorAdapter.href)) {
+      adapterConsumers.push(path);
+    }
+  }
+  expect(adapterConsumers).toEqual([]);
 });
 
 test("canonical execution cannot reach billing or composition through static API imports", async () => {

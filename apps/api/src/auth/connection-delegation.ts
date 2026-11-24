@@ -4,8 +4,8 @@
  * may mint this authority, and every credential boundary revalidates it.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { HttpError } from '../rest/http-error.js';
-import type { TrustedSessionContext } from '../auth/trusted-context.js';
+import { OperationRefusal } from '../operations/operation-refusal.js';
+import type { TrustedSessionContext } from './trusted-context.js';
 
 type Identity = Readonly<{
   tenantId: string;
@@ -20,7 +20,7 @@ type Identity = Readonly<{
 
 type Authority = { readonly identity: Identity; readonly validate: () => Promise<boolean>; open: boolean; providerStatus?: number };
 const active = new AsyncLocalStorage<Authority | null>();
-const refusal = () => new HttpError(403, 'CONNECTION_CONSENT_REQUIRED', 'The calendar permission is unavailable or no longer valid.');
+const refusal = () => new OperationRefusal(403, 'CONNECTION_CONSENT_REQUIRED', 'The calendar permission is unavailable or no longer valid.');
 
 /** Internal only: invoke after the host resolves the registered domain policy.
  * Nested unrelated operations must enter withoutConnectionDelegation.

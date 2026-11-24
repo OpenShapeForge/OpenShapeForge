@@ -4,7 +4,7 @@
  * dispatch-derived-connection.ts, verbatim; the branch starts from the same
  * initial values the shared prelude gave it.
  */
-import { revalidateConnectionDelegation } from "./connection-delegation.js";
+import { revalidateConnectionDelegation } from "../auth/connection-delegation.js";
 import { actingRelationId } from "../db/acting-relation.js";
 import { randomUUID } from "node:crypto";
 import { resolveTemplate } from "./declarative-execution.js";

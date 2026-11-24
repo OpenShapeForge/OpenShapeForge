@@ -8,7 +8,7 @@ import { operationContractFingerprint } from "../operations/contract-fingerprint
 import { HttpError } from "../rest/http-error.js";
 import { createHandoff, readLatestHandoffForSession, consumeHandoffForSession } from "./handoff-store.js";
 import { ENTITY_CONFIGURATION_APP_URI, elicitedKeyring, supportsMcpApp } from "./handoff-config.js";
-import { searchableSessionOperations } from "./searchable-session-operations.js";
+import { projectSearchableOperationContract, searchableSessionOperationAvailability } from "./searchable-session-operations.js";
 import { ok, failed, type ToolResult } from "./tool-results.js";
 import type { DirectCallScope } from "./tool-dispatch.js";
 
@@ -53,8 +53,9 @@ export async function completePrivateOutput(ctx: DirectCallScope): Promise<ToolR
     // Session selection happens before lookup: another actor cannot inspect or consume the handoff.
     const held = await readLatestHandoffForSession<Pending>({ db: ctx.db, keyring, kind: "operation_output", session: ctx.session, id: args.handoffId });
     if (!held || held.payload.tenantId !== ctx.session.tenantId || held.payload.userId !== ctx.session.userId) throw new HttpError(410, "EXPIRED", "This private Operation expired or was already submitted. Do not automatically repeat it.");
-    const { definitions } = await searchableSessionOperations(ctx);
-    const definition = definitions.find(d => d.id === held.payload.operationId);
+    const { definitions, entities } = await searchableSessionOperationAvailability(ctx);
+    const available = definitions.find(d => d.id === held.payload.operationId);
+    const definition = available && projectSearchableOperationContract(ctx, entities, available);
     if (!definition || !needsPrivateOutput(definition) || operationContractFingerprint(definition) !== held.payload.fingerprint) throw new HttpError(403, "FORBIDDEN", "The Operation is no longer available with this contract.");
     ctx.signal?.throwIfAborted(); ctx.assertParentInvocationActive?.(); ctx.assertInterceptorActive?.();
     if (!await consumeHandoffForSession({ db: ctx.db, kind: "operation_output", session: ctx.session, id: held.id })) throw new HttpError(410, "EXPIRED", "This private Operation was already submitted.");

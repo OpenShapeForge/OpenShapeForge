@@ -1,0 +1,10 @@
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0">
+  <mirrors>
+    <mirror>
+      <id>central</id>
+      <url>https://repo.maven.apache.org/maven2</url>
+      <!-- Keycloak's transitive repository declarations also resolve these released SPI dependencies from Central. -->
+      <mirrorOf>central,jboss-public-repository,jboss-public-repository-group</mirrorOf>
+    </mirror>
+  </mirrors>
+</settings>

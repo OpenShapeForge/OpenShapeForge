@@ -269,7 +269,7 @@ describe("searchable MCP Operations", () => {
     const [search] = searchableOperationTools({ search: "osf_search_operations", execute: "osf_execute_operation" });
     expect(search?.inputSchema).toMatchObject({
       properties: { operationId: { type: "string", minLength: 1 } },
-      not: { anyOf: [{ required: ["operationId", "query"] }, { required: ["operationId", "cursor"] }, { required: ["operationId", "limit"] }] },
+      not: { anyOf: [{ required: ["operationId", "query"] }, { required: ["operationId", "cursor"] }, { required: ["operationId", "limit"] }, { required: ["operationId", "records"] }] },
     });
   });
 
@@ -308,6 +308,30 @@ describe("searchable MCP Operations", () => {
     }).operations.map((entry) => (entry.operation as { id: string }).id);
     expect(search("kennis")).toEqual([]);
     expect(search("kennis", new Map([["KnowledgeItem", { en: "Knowledge item", nl: "Kennisitem" }]]))).toEqual(["KnowledgeItem.list"]);
+  });
+
+  test("projects contracts for inline matches and exact lookups only", () => {
+    const definitions = ["a", "b", "c"].map((id) => definition(`Demo.${id}`, { name: "Demo" }));
+    const projected: string[] = [];
+    const search = (args: unknown) => searchOperationDefinitions({
+      definitions,
+      allowedIds: new Set(definitions.map(({ id }) => id)),
+      arguments: args,
+      locale,
+      projectContract: (candidate) => {
+        projected.push(candidate.id);
+        return candidate;
+      },
+    });
+    const first = search({ query: "Demo", limit: 2 });
+    expect(first.operations).toHaveLength(2);
+    expect(projected).toEqual(["Demo.a"]);
+    expect(first.nextCursor).toBeDefined();
+    search({ query: "Demo", cursor: first.nextCursor });
+    expect(projected).toEqual(["Demo.a"]);
+    search({ operationId: "Demo.c" });
+    search({ operationId: "missing" });
+    expect(projected).toEqual(["Demo.a", "Demo.c"]);
   });
 
   test("cursors are bound to their query and refuse tampering", () => {

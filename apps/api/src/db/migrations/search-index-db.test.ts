@@ -42,6 +42,7 @@ test("entries are built once, kept by every writer whatever its session, and nev
   const runtime = createDatabaseRuntime({ databaseUrl: url.toString(), maxConnections: 1 });
   const entries = async () => (await sql<{ tenant: string; text: string }>`select tenant_id::text as tenant, text_norm as text from platform.search_entries where entity='ProbeNote' order by text_norm`.execute(privileged.db)).rows;
   try {
+    expect(await applySearchIndex(privileged.db, [], [])).toEqual({ installed: false, entities: 0, rebuilt: [] });
     const chain = await privileged.db.connection().execute(connection => runMigrationChain(connection));
     expect(chain).toBeDefined();
     // The chain installed the product's own index; a second run rebuilds nothing.

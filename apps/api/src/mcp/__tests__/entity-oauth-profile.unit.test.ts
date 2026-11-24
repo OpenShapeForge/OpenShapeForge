@@ -247,8 +247,15 @@ describe("the stored token binding", () => {
     expect(tokenBindingCurrent(forAudiences(second), firstBinding)).toBe(false);
     expect(tokenBindingCurrent(profile, firstBinding)).toBe(false);
     expect(tokenBindingCurrent(forAudiences(first), previousBinding)).toBe(false);
+    expect(tokenBindingCurrent(forAudiences(first, second), firstBinding)).toBe(false);
+    expect(tokenBindingCurrent(forAudiences(first), {
+      oauthBinding: { ...tokenBindingOf(profile), additionalAudiences: first },
+    })).toBe(false);
     expect(tokenBindingCurrent(forAudiences(first, second), {
       oauthBinding: tokenBindingOf(forAudiences(second, first, second)),
+    })).toBe(true);
+    expect(tokenBindingCurrent(forAudiences("https://api.example.test"), {
+      oauthBinding: tokenBindingOf(forAudiences("https://api.example.test/")),
     })).toBe(true);
   });
 });

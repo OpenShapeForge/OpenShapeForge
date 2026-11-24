@@ -154,16 +154,15 @@ confidential client: its organization Connection holds `clientId` and
 (`apps/api/src/mcp/entity-oauth-profile.ts`) describe a public client or an
 audience-restricted resource, such as a remote MCP server:
 
-Integrations exposes `clientAuthentication` and `resource` as typed Adapter
-fields. The metadata fields and expected audiences below are core runtime
-contracts only; they are not yet exposed by that authoring schema or a
-discovery flow.
+The Integrations Adapter schema can expose `clientAuthentication`, `resource`
+and `expectedAudiences` as typed fields. Verify the provider's metadata before
+declaring it in the runtime profile.
 
 | Key | Meaning |
 | --- | --- |
 | `clientAuthentication` | `client_secret_post` (default) or `none`. `none` is a public client: the Connection needs only `clientId`, and no secret reaches the token endpoint. Other methods are refused, including ones the server advertises. |
 | `resource` | The RFC 8707 resource indicator, sent on the authorization request, the code exchange and every refresh. Its host must be in the Adapter's egress hosts. |
-| `expectedAudiences` | `aud` values that also identify `resource`, for a server whose audience differs from the resource URI. |
+| `expectedAudiences` | `aud` values that also identify `resource`, for a server whose audience differs from the resource URI. Adding, removing or changing an accepted audience requires fresh consent. |
 | `serverMetadata` | An RFC 8414 document, as verified by the Adapter's author. It must name the declared endpoints and offer the client authentication, the `authorization_code` grant, the `code` response type and PKCE `S256`. Its `issuer` is compared with the callback's RFC 9207 `iss`, which is required when the document sets `authorization_response_iss_parameter_supported`. A server without the `refresh_token` grant goes back to consent instead of refreshing. |
 | `protectedResourceMetadata` | An RFC 9728 document. It must name `resource` and list the `serverMetadata` issuer. |
 
@@ -177,8 +176,8 @@ or callback can name a URL it will use. Declaring `clientAuthentication: none`,
 - A token response whose `resource` or `aud`, or whose JWT `aud` claim, names
   another audience is refused. An opaque token without those fields is accepted;
   the resource server remains the final judge.
-- Connection values record the `oauthBinding` (resource and issuer). A row minted
-  for anything else needs a fresh consent, even while its token is live. Tokens
+- Connection values record the `oauthBinding` (resource, issuer and additional
+  audience set). Changes require fresh consent even while the token is live. Tokens
   stay on the Connection of their own Adapter, so a REST grant and an MCP grant
   of one provider are separate rows.
 

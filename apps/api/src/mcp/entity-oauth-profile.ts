@@ -239,7 +239,7 @@ export function assertOAuthEndpoints(
 export function tokenBindingOf(profile: OAuthClientProfile | undefined): OAuthTokenBinding {
   const resource = profile?.resource ?? null;
   const additionalAudiences = resource
-    ? [...new Set(profile?.audiences.filter((audience) => !sameAudience(audience, resource)))].sort()
+    ? [...new Set(profile?.audiences.filter((audience) => !sameAudience(audience, resource)).map(audienceKey))].sort()
     : [];
   return {
     resource,
@@ -249,9 +249,9 @@ export function tokenBindingOf(profile: OAuthClientProfile | undefined): OAuthTo
 }
 
 /**
- * Whether stored tokens were minted for what the Adapter declares now. Absent
- * on both sides is the legacy case. Reads only the plain fields, so it cannot
- * throw for a row whose Adapter is otherwise misconfigured.
+ * Whether stored tokens were minted for what the Adapter declares now.
+ * Older rows did not record additional audiences and can only be reused if
+ * the current policy has none. This reads only the stored plain fields.
  */
 export function tokenBindingCurrent(profile: OAuthClientProfile, values: unknown): boolean {
   const stored = asRecord(asRecord(values)?.oauthBinding);
@@ -287,13 +287,16 @@ function audiencesOfJwt(token: string): unknown {
   }
 }
 
-function sameAudience(left: string, right: string): boolean {
-  if (left === right) return true;
+function audienceKey(audience: string): string {
   try {
-    return new URL(left).href === new URL(right).href;
+    return new URL(audience).href;
   } catch {
-    return false;
+    return audience;
   }
+}
+
+function sameAudience(left: string, right: string): boolean {
+  return audienceKey(left) === audienceKey(right);
 }
 
 /**

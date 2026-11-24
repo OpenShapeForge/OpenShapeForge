@@ -13,7 +13,8 @@ import { controlSessionFor } from "../../control/control-session.js";
 import type { PlatformAdministrator } from "../../control/platform-admin.js";
 import { createControlRuntime } from "../../control/runtime.js";
 import { controlOperationContract, controlOperationContracts } from "../../control/__tests__/control-operation-fixtures.js";
-import { bindOperationHandlers, invokeOperation } from "../../operations/runtime.js";
+import { bindOperationHandlers } from "../../operations/composition.js";
+import { invokeOperation } from "../../operations/runtime.js";
 import { createDatabaseRuntime } from "../connection.js";
 import { runMigrationChain } from "../migration-chain.js";
 import {

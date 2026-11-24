@@ -1775,6 +1775,52 @@ layer explicitly; `.dockerignore` keeps local overlays out of production
 images. `bun scripts/check-test-fixture-composition.ts production` (or `test`)
 checks the currently generated database, REST, GraphQL, MCP and web artifacts.
 
+### Collection table labels and numeric totals
+
+Use `emptyLabel` on a table column value with a `path`. It also works
+with a path into a declared read binding. The renderer shows this localized
+label when the readable value is null, missing, or an empty string after
+applying any configured default. Zero and false remain values. Loading and
+unreadable results keep their own status.
+
+A numeric footer uses `totals.parts` to select top-level numeric properties
+from an Operation's output, in display order. Each part has a unique
+`path`, a localized `label` and optional `decimalPlaces` from zero to six.
+For example, an Employee table can display a headcount and total FTE.
+
+```yaml
+interfaces:
+  web:
+    views:
+      collection:
+        route: /workforce
+        columns: [{ key: endDate }]
+        table:
+          heading: { title: { en: Workforce, nl: Workforce } }
+          views: { tree: { en: By team, nl: Per team }, flat: { en: All, nl: Alle } }
+          label: { en: Employee, nl: Medewerker }
+          columns:
+            - key: end
+              label: { en: Contract end, nl: Contracteinde }
+              values:
+                - path: endDate
+                  emptyLabel: { en: Indefinite, nl: Onbepaald }
+          totals:
+            entity: Employee
+            operation: workforce.totals
+            parts:
+              - { path: people, label: { en: people, nl: mensen } }
+              - { path: fte, label: { en: FTE, nl: FTE }, decimalPlaces: 1 }
+```
+
+In this example, `endDate` is a readable field on the table record.
+`workforce.totals` must be a canonical collection read with no external
+effects or confirmation. Its input accepts the collection filter as an
+optional object and has no required fields. Its output declares
+`status` with `available`, `unavailable`, and `failed` and the numeric
+`people` and `fte` properties named by the parts. Use one footer per
+table. Choose a summary, numeric totals, or per-currency totals.
+
 ### Collection boards
 
 An entity can also define a read-only temporal threshold over a stored

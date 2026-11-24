@@ -7,7 +7,7 @@
 import { withDbSession } from "../db/session.js";
 import { pinnedReadRefused, providerReadExecutionFingerprint } from "./pinned-provider-read.js";
 import { delegatedConnectionRow, connectionGrantFingerprint } from "../modules/connection-use-grants.js";
-import { observeDelegatedProviderFailure, revalidateConnectionDelegation, isDelegatedConnection } from "./connection-delegation.js";
+import { observeDelegatedProviderFailure, revalidateConnectionDelegation, isDelegatedConnection } from "../auth/connection-delegation.js";
 import { ownedByActingRelation } from "../db/acting-relation.js";
 import { createHash } from "node:crypto";
 import { type DerivedToolsCatalogEntry } from "./derived-tools.js";

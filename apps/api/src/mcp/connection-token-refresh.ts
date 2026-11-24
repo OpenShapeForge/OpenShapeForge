@@ -14,7 +14,7 @@
  * implementation is the point: the HTTP execution path and the module seam
  * cannot drift on leeway, locking, rotation or audit order.
  */
-import { revalidateConnectionDelegation } from "./connection-delegation.js";
+import { revalidateConnectionDelegation } from "../auth/connection-delegation.js";
 import { randomUUID } from "node:crypto";
 import { operationFailure } from "@openshapeforge/operations";
 import { sql, type Transaction } from "kysely";

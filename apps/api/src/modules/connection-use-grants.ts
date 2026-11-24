@@ -17,7 +17,7 @@ import { runtimeJsonSchemas } from './field-schemas.js';
 import { HttpError } from '../rest/http-error.js';
 import { rlsBypassToken } from '../db/rls-bypass.js';
 import {classifyDatabaseError} from '../db/database-refusals.js';
-import { connectionDelegationOrigin, connectionGrantSubject, revalidateConnectionDelegation, withVerifiedConnectionDelegation } from '../mcp/connection-delegation.js';
+import { connectionDelegationOrigin, connectionGrantSubject, revalidateConnectionDelegation, withVerifiedConnectionDelegation } from '../auth/connection-delegation.js';
 
 const refused = () => new HttpError(403, 'CONNECTION_CONSENT_REQUIRED', 'The connection permission is unavailable or no longer valid.');
 import { canonicalGrantValue as canonical, connectionGrantFingerprint } from './connection-grant-fingerprint.js';

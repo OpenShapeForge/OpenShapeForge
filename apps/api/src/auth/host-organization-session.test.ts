@@ -12,11 +12,9 @@ import type { RuntimeResolvedOperationWork } from "@openshapeforge/plugin-runtim
 import { configuredDurableWorkerBroker } from "../operations/durable-worker.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
 import { createControlRuntime } from "../control/runtime.js";
-import {
-  registerRuntimeOperationRestRoutes,
-  runtimeStaticOperationRegistrations,
-  type OperationContract,
-} from "../operations/runtime.js";
+import { registerRuntimeOperationRestRoutes } from "../rest/operation-routes.js";
+import { runtimeStaticOperationRegistrations } from "../operations/composition.js";
+import { type OperationContract } from "../operations/runtime.js";
 import { mintApiKey } from "./api-key/format.js";
 import { __resetExchangeCacheForTests } from "./api-key/exchange.js";
 import { encryptSecret, keyringFromEnv } from "../platform/secrets.js";

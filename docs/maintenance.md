@@ -73,6 +73,41 @@ app connection; `OPENSHAPEFORGE_MIGRATE_DATABASE_URL` owns privileged store work
 A superuser or `BYPASSRLS` app connection is refused. Actual opened store and app connections must report the same server address/port, postmaster start, database name and database OID; live maintenance also checks the verified invocation platform connection. Credentials and URL aliases are not compared. A database override that selects a different database fails before the maintenance callback. Installed module load/init
 failures identify their module and reason and prevent a partial headless runtime.
 
+## Removing a seed-owned document graph
+
+A seed that has to take its own fixture documents back out cannot do so with
+generic SQL: `Document.currentVersionId` is server-managed and a
+`DocumentVersion` is immutable to the application role, so both writes raise.
+The canonical `Document.deleteWithContents` does not close that gap either —
+it opens its own Operation transaction, refuses a versioned Document that is
+not `draft`, and is blocked by the inbound version reference.
+
+`context.documents.removeSeedOwned(query, removal)` is the internal capability
+for exactly that case. It appears only for a contribution that registered
+`Document.deleteWithContents` (so the session genuinely holds its roles) and an
+acting relation's source authority. Pass the query the enclosing
+`store.transaction` handed you: the removal runs in that transaction, and a
+refusal rolls back with it.
+
+`removal` carries exact identities from the host's own plan — `documentId`,
+`versionIds`, and `ownedMembers` keyed by authoring entity name, which must
+cover the compiled owned graph exactly. Nothing in it is authority: the tenant
+is the invocation's, and the source authority is the registered one.
+
+Under the row locks the canonical owned delete already takes, core re-proves
+that the discovered graph is exactly the named identity set, that every member
+carries the registered source authority, and that no member or named version
+was ever written by another actor. The privileged routine then re-establishes
+for itself that the named versions are the document's complete version set and
+retain no managed content, clears the version pointer and removes them.
+Shared references, record permissions, locked children, and extension
+references still block removal. A proven synthetic Document whose minimum
+retention clock began at publication or registration can be removed after
+the seed proof. A clock started only by receipt still applies, as does any
+active legal hold represented by a bound hold field. The default Document
+model has no bound hold field. The ordinary Document Operation keeps its
+original retention checks.
+
 ## Managed tenant provisioning command
 
 The API OCI image also owns a closed trusted-process command:

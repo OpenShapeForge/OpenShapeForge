@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import { expect, test } from 'bun:test';
-import type { TrustedSessionContext } from '../auth/trusted-context.js';
+import type { TrustedSessionContext } from './trusted-context.js';
 import { withVerifiedConnectionDelegation, withoutConnectionDelegation, verifiedConnectionDelegation, withConnectionDelegationOrigin, connectionDelegationOrigin, isDelegatedConnection } from './connection-delegation.js';
 const session = { tenantId: 'tenant', userId: 'service' } as TrustedSessionContext;
 const identity = { tenantId: 'tenant', actorId: 'service', connectionId: 'connection', ownerRelationId: 'owner', operationId: 'availability', consentId: 'consent' };

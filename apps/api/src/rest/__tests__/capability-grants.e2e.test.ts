@@ -25,11 +25,8 @@ import type { RuntimeModule } from "../../modules/contract.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import { HttpError } from "../http-error.js";
 import { CAPABILITY_GRANT_ATTEMPT_POLICY } from "../../operations/capability-grant-resolution.js";
-import {
-  listOperationContracts,
-  registerOperationRestRoutes,
-  type OperationContract,
-} from "../../operations/runtime.js";
+import { listOperationContracts, type OperationContract } from "../../operations/runtime.js";
+import { registerOperationRestRoutes } from "../operation-routes.js";
 
 const ADMIN_URL =
   process.env.SCRATCH_ADMIN_DATABASE_URL ??

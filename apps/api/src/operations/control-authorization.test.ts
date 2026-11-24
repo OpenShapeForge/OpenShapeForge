@@ -12,7 +12,8 @@ import { controlOperationContract, controlOperationContracts } from "../control/
 import type { DB } from "../generated/db/types.js";
 import { __operationMayInvokeForTests } from "../mcp/generated-mcp-server.js";
 import { HttpError } from "../rest/http-error.js";
-import { requireOperationAuthorization, runtimeStaticOperationRegistrations, type OperationContract } from "./runtime.js";
+import { requireOperationAuthorization, type OperationContract } from "./runtime.js";
+import { runtimeStaticOperationRegistrations } from "./composition.js";
 
 const administrator = {
   subject: "0b2a3f1e-8a6b-4f30-9d2f-5f1c7a8e9b10",

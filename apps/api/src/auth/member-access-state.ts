@@ -6,10 +6,15 @@ import { HttpError } from '../rest/http-error.js';
 import type { TrustedSessionContext } from './trusted-context.js';
 import { SessionAuthenticationUnavailableError } from './session-unavailable.js';
 
+/** Whether {@link assertMemberAccessActive} reads the membership row for this session. */
+export function memberAccessIsRead(session: TrustedSessionContext): boolean {
+  if (!session.tenantId || !session.userId || !session.issuer) return false;
+  return session.credential !== 'control-bearer' && session.credential !== 'grant' && session.credential !== 'none';
+}
+
 /** Deliberately uncached: blocking takes effect on the next request on every replica. */
 export async function assertMemberAccessActive(db: OpenShapeForgeDatabase | undefined, session: TrustedSessionContext) {
-  if (!db || !session.tenantId || !session.userId || !session.issuer) return;
-  if (session.credential === 'control-bearer' || session.credential === 'grant' || session.credential === 'none') return;
+  if (!db || !memberAccessIsRead(session)) return;
   let blocked: boolean;
   try {
     blocked = await withDbSession(db, session, async tx => {

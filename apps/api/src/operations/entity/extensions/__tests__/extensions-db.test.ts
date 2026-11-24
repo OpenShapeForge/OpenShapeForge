@@ -27,7 +27,8 @@ import { invokeTool } from "../../../../mcp/entity-tool-invocation.js";
 import { hasExtensibleEntities, primeSessionExtensions, withExtensionTool } from "../../../../mcp/extension-schemas.js";
 import { renderTypeDefinition } from "../../../../graphql/generated-entity-schema.js";
 import { createModuleSessionCapability, ModulePlatformRuntime } from "../../../../modules/platform.js";
-import { bindOperationHandlers, invokeOperation, type OperationContract } from "../../../runtime.js";
+import { bindOperationHandlers } from "../../../composition.js";
+import { invokeOperation, type OperationContract } from "../../../runtime.js";
 import rawCatalog from "../../../../generated/operations/catalog.json" with { type: "json" };
 import { createExtensionFixture, ENTITY, holdsMaintain, MANAGER_ROLE, READER_ROLE, sessionFor, TARGET_ENTITY, WRITER_ROLE, type ExtensionFixture } from "./fixture.js";
 

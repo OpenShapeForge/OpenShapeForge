@@ -7,7 +7,7 @@
  * database, OAuth, egress and nested Operations. Split out of
  * generated-mcp-server.ts, verbatim.
  */
-import { delegatedProviderFailure } from "./connection-delegation.js";
+import { delegatedProviderFailure } from "../auth/connection-delegation.js";
 import { withStoredConnectionGrant } from "../modules/connection-use-grants.js";
 import { randomUUID } from "node:crypto";
 import { DECLARATIVE_PROVIDER_FAILURE } from "@openshapeforge/plugin-runtime";

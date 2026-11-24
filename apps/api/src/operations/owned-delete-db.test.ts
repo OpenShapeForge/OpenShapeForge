@@ -9,7 +9,9 @@ import migrateOwnedDelete from "../db/migrations/versioned/0030_owned-delete-for
 import { readOwnedDeleteForeignKeys } from "../db/owned-delete-foreign-keys.js";
 import { jsonbLiteral } from "../db/sql-helpers.js";
 import { ModulePlatformRuntime, withModuleOperationSession } from "../modules/platform.js";
-import { listOperationContracts, operationGraphqlContribution, runtimeStaticOperationRegistrations } from "./runtime.js";
+import { listOperationContracts } from "./runtime.js";
+import { operationGraphqlContribution } from "../graphql/operation-contribution.js";
+import { runtimeStaticOperationRegistrations } from "./composition.js";
 
 test("compiled document delete requires confirmation and role, removes owned rows and audits the actor", async () => {
   const adminUrl = process.env.SCRATCH_ADMIN_DATABASE_URL ?? "postgres://openshapeforge:openshapeforge@localhost:5434/postgres";

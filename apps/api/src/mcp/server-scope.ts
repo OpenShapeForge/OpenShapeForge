@@ -48,7 +48,7 @@ import { projectAgentSkills, visibleAgentSkills, SKILLS_EXTENSION } from "./agen
 import { BUILTIN_AGENT_SKILL_MODULE } from "./builtin-agent-skills.js";
 import { API_KEY_AGENT_SKILL_MODULE } from "./api-key-agent-skill.js";
 import { type SearchableOperationToolNames } from "./operation-search.js";
-import { bindOperationHandlers } from "../operations/runtime.js";
+import { bindOperationHandlers } from "../operations/composition.js";
 import { describeTool, entityDescription, entityTitle } from "./entity-tool-projection.js";
 import { entitiesForSession, entityResourceUri } from "./entity-resources.js";
 import {

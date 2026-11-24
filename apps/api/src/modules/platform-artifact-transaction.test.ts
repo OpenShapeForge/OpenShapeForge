@@ -15,7 +15,8 @@ import {
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { DB } from "../generated/db/types.js";
 import type { RuntimeModule } from "./contract.js";
-import { bindOperationHandlers, invokeOperation, type OperationContract } from "../operations/runtime.js";
+import { bindOperationHandlers } from "../operations/composition.js";
+import { invokeOperation, type OperationContract } from "../operations/runtime.js";
 
 const providerId = "test-artifact-provider";
 

@@ -17,12 +17,8 @@ import {
 } from "../db/connection.js";
 import { runMigrationChain } from "../db/migration-chain.js";
 import { withDbSession } from "../db/session.js";
-import {
-  bindOperationHandlers,
-  invokeOperation,
-  runtimeStaticOperationRegistrations,
-  type OperationContract,
-} from "../operations/runtime.js";
+import { bindOperationHandlers, runtimeStaticOperationRegistrations } from "../operations/composition.js";
+import { invokeOperation, type OperationContract } from "../operations/runtime.js";
 import type { RuntimeModule } from "./contract.js";
 import {
   loadRuntimeModules,

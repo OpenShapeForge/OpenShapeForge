@@ -113,8 +113,9 @@ export async function assertHardDeleteAllowedInTransaction(
   id: string,
   row: GeneratedEntityRow,
   tables: readonly GeneratedCrudTable[],
+  options?: { syntheticDocumentPublicationOrRegistration?: true },
 ): Promise<void> {
   assertNoActiveHold(table, row);
-  await assertMinimumElapsed(trx, table, row);
+  if (!options?.syntheticDocumentPublicationOrRegistration) await assertMinimumElapsed(trx, table, row);
   await assertNeverPublished(trx, session, table, id, tables);
 }

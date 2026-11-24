@@ -18,7 +18,8 @@ import {
   recordActionOperationHandlerNames,
 } from "./record-action-operations.js";
 import { RECORD_ACTION_DELEGATION_OPERATION } from "./entity/index.js";
-import { bindOperationHandlers, invokeOperation } from "./runtime.js";
+import { bindOperationHandlers } from "./composition.js";
+import { invokeOperation } from "./runtime.js";
 
 const recordId = "11111111-1111-4111-8111-111111111111";
 const integrationId = "22222222-2222-4222-8222-222222222222";

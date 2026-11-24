@@ -53,7 +53,7 @@ import {
 import type { GraphqlContext } from "./context.js";
 import type { ModuleRuntimeContext, RuntimeModule } from "../modules/contract.js";
 import { composeModuleGraphql, declaredFieldNames } from "../modules/graphql-composition.js";
-import { operationGraphqlContribution } from "../operations/runtime.js";
+import { operationGraphqlContribution } from "./operation-contribution.js";
 import { assertSingleModuleEgressOwner } from "../modules/registry.js";
 
 // The connector catalog types are static — identical across deployments — so a

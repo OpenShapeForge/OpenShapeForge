@@ -1804,8 +1804,8 @@ operations:
             uniqueItems: true
             items:
               type: string
-              enum: [org_admin, org_employee]
-              x-osf-i18n: { enum: { org_admin: { en: Organization administrator, nl: Organisatiebeheerder }, org_employee: { en: Employee, nl: Medewerker } } }
+              enum: [org_admin, org_employee, Platform.ApiKeys.PersonalCreate, Platform.ApiKeys.IntegrationCreate]
+              x-osf-i18n: { enum: { org_admin: { en: Organization administrator, nl: Organisatiebeheerder }, org_employee: { en: Employee, nl: Medewerker }, Platform.ApiKeys.PersonalCreate: { en: Create personal API keys, nl: Persoonlijke API-sleutels maken }, Platform.ApiKeys.IntegrationCreate: { en: Create integration API keys, nl: Integratie-API-sleutels maken } } }
             x-osf-i18n: { title: { en: Roles, nl: Rollen } }
         required: [slug, memberId, roles]
     output: { schema: *id004 }

@@ -36,11 +36,17 @@ const administrator: PlatformAdministrator = {
   name: null, email: null, authorizedParty: "platform-mcp", expiresAtMs: null,
 };
 
-function recordingDatabase() {
+function recordingDatabase(membership?: { status: "linked" | "pending_confirmation"; roles: string[] }) {
   const queries: string[] = [];
   const connection: DatabaseConnection = {
     async executeQuery<R>(query: CompiledQuery): Promise<QueryResult<R>> {
       queries.push(query.sql);
+      if (membership && /from platform\.identity_relations ir/.test(query.sql)) {
+        return { rows: [{ identity_id: "identity-1", issuer: "https://identity.example.test", subject: "m0", ...membership }] as R[] };
+      }
+      if (membership?.status === "linked" && /update platform\.identity_relations/.test(query.sql)) {
+        return { rows: [{ identity_id: "identity-1" }] as R[] };
+      }
       return { rows: (query.sql === "select app.bypass_rls() as accepted" ? [{accepted:true}] : /from platform\.tenants/.test(query.sql) ? [TENANT] : []) as R[] };
     },
     async *streamQuery<R>(): AsyncIterableIterator<QueryResult<R>> { throw new Error("Unexpected stream"); },
@@ -110,6 +116,30 @@ describe("tenant member administration", () => {
       "acme", "m0", ["org_employee"], "assign")).rejects.toMatchObject({ code: "CONFLICT" });
     expect(roles.queries.some(sql => /insert into platform\.employee_invitations/.test(sql))).toBe(true);
     expect(roles.tenantLock()).toBe("for no key update");
+  });
+
+  test("API-key creation grants cannot be assigned through an admission", async () => {
+    const { db, queries } = recordingDatabase();
+    const deps = { db, administrator, members: membersClient().client };
+    for (const grant of ["Platform.ApiKeys.PersonalCreate", "Platform.ApiKeys.IntegrationCreate"]) {
+      await expect(changeTenantMemberRoles(deps, "acme", "m0", ["org_employee", grant], "assign"))
+        .rejects.toMatchObject({ code: "MEMBER_NOT_SIGNED_IN" });
+    }
+    expect(queries.some(sql => /insert into platform\.employee_invitations/.test(sql))).toBe(false);
+  });
+
+  test("a linked member can receive and lose exact API-key creation grants", async () => {
+    const grants = ["Platform.ApiKeys.IntegrationCreate", "Platform.ApiKeys.PersonalCreate"];
+    const membership = { status: "linked" as const, roles: ["org_employee"] };
+    const { db } = recordingDatabase(membership);
+    const deps = { db, administrator, members: membersClient().client };
+    await expect(changeTenantMemberRoles(deps, "acme", "m0", grants, "assign"))
+      .resolves.toMatchObject({ roles: [...grants, "org_employee"], action: "assigned" });
+    membership.roles.push(...grants);
+    await expect(changeTenantMemberRoles(deps, "acme", "m0", grants, "remove"))
+      .resolves.toMatchObject({ roles: ["org_employee"], action: "removed" });
+    await expect(changeTenantMemberRoles(deps, "acme", "m0", ["Platform.ApiKeys.Manage"], "assign"))
+      .rejects.toThrow("allowlisted tenant member roles");
   });
 
   test("listing a large tenant keeps at most 8 credential reads in flight and keeps member order", async () => {

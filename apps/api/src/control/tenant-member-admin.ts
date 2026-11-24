@@ -15,7 +15,6 @@ import {
   employeeInvitationRoleGrants,
   recordEmployeeInvitation,
   isEmployeeInvitationRole,
-  type EmployeeInvitationRole,
 } from "../auth/employee-invitations.js";
 import { actingPartyColumns, actingPartyTable } from "../auth/identity-contract.js";
 import { invalidateIdentityLink } from "../auth/identity-link.js";
@@ -208,11 +207,18 @@ export async function getTenantCredential(deps: Dependencies, slug: string, memb
   });
 }
 
-function roles(input: unknown): EmployeeInvitationRole[] {
-  if (!Array.isArray(input) || input.length === 0 || input.some((role) => typeof role !== "string" || !isEmployeeInvitationRole(role))) {
-    throw new ControlInputError("roles must contain only org_admin or org_employee.");
+const linkedMemberGrants = new Set([
+  "Platform.ApiKeys.PersonalCreate",
+  "Platform.ApiKeys.IntegrationCreate",
+]);
+
+function roles(input: unknown): string[] {
+  if (!Array.isArray(input) || input.length === 0 || input.some((role) =>
+    typeof role !== "string" ||
+    (!isEmployeeInvitationRole(role) && !linkedMemberGrants.has(role)))) {
+    throw new ControlInputError("roles must contain only allowlisted tenant member roles.");
   }
-  return [...new Set(input as EmployeeInvitationRole[])];
+  return [...new Set<string>(input)];
 }
 
 /**
@@ -229,7 +235,7 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
     const selected = roles(input);
     const membership = await membershipOf(trx, tenant.id, memberId);
     if (!membership) {
-      if (mode === "remove") throw new ControlOperationError(409, "MEMBER_NOT_SIGNED_IN", "MEMBER_NOT_SIGNED_IN", "No membership to remove roles from; revoke any pending admission instead.");
+      if (mode === "remove" || selected.some((role) => linkedMemberGrants.has(role))) throw new ControlOperationError(409, "MEMBER_NOT_SIGNED_IN", "MEMBER_NOT_SIGNED_IN", "This role change requires an existing linked tenant membership.");
       if (tenant.status !== "active" || !member.enabled || !member.email) {
         throw new ControlInputError("Assigning admission requires an active tenant and an enabled member with an email address.");
       }
@@ -240,7 +246,7 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
         { email: member.email, roles: selected, firstName: member.firstName ?? undefined, lastName: member.lastName ?? undefined });
       return { tenantSlug: slug, memberId, roles: [], action: "awaiting_sign_in", invitationId: invitation.id, ...invitationOutcome(slug, "no_email_existing_account") };
     }
-    const grants = new Set(selected.flatMap((role) => employeeInvitationRoleGrants(role)));
+    const grants = new Set(selected.flatMap((role) => linkedMemberGrants.has(role) ? [role] : employeeInvitationRoleGrants(role)));
     const current = new Set(membership.roles ?? []);
     const next = mode === "assign"
       ? [...new Set([...current, ...grants])]

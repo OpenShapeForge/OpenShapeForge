@@ -39,7 +39,7 @@ import {
   type StoredSecret,
 } from "../connectors/secrets.js";
 import { ambientConnectionControls, assertConnectionControls } from "../mcp/connection-expectation.js";
-import { connectionGrantSubject } from "../mcp/connection-delegation.js";
+import { connectionGrantSubject } from "../auth/connection-delegation.js";
 import { auditContext } from "../platform/audit-context.js";
 import { getGeneratedCrudTables } from "../operations/entity/catalog.js";
 import { fieldNameForColumn } from "../operations/entity/columns.js";

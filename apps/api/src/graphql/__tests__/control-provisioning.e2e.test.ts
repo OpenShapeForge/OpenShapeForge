@@ -63,7 +63,7 @@ import { readControlPlaneConfig, type ControlPlaneConfig } from "../../control/c
 import { createControlRuntime } from "../../control/runtime.js";
 import { controlOperationContracts } from "../../control/__tests__/control-operation-fixtures.js";
 import { SYSTEM_BYPASS_ROLE, withSystemSession } from "../../db/session.js";
-import { registerOperationRestRoutes } from "../../operations/runtime.js";
+import { registerOperationRestRoutes } from "../../rest/operation-routes.js";
 import {
   describe,
   getRuntime,

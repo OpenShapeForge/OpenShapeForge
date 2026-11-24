@@ -5,7 +5,7 @@
  */
 import { HttpError } from "../rest/http-error.js";
 import { delegatedConnectionRow } from "../modules/connection-use-grants.js";
-import { connectionDelegationIdentity, isDelegatedConnection } from "./connection-delegation.js";
+import { connectionDelegationIdentity, isDelegatedConnection } from "../auth/connection-delegation.js";
 import { actingRelationId, ownedByActingRelation } from "../db/acting-relation.js";
 import { compareCodeUnits } from "@openshapeforge/operations";
 import { withDbSession } from "../db/session.js";

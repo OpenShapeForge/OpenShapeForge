@@ -108,14 +108,18 @@ import {
 } from "./api-readiness.js";
 import {
   bindOperationHandlers,
-  entityPluginOperationContracts,
   operationModulesConfigured,
-  listOperationContracts,
-  registerRuntimeOperationRestRoutes,
-  registerOperationRestRoutes,
   runtimeStaticOperationRegistrations,
+} from "../operations/composition.js";
+import {
+  entityPluginOperationContracts,
+  listOperationContracts,
   type OperationContract,
 } from "../operations/runtime.js";
+import {
+  registerRuntimeOperationRestRoutes,
+  registerOperationRestRoutes,
+} from "../rest/operation-routes.js";
 import {
   createEntityPluginExecutor,
   registerEntityPluginExecutor,

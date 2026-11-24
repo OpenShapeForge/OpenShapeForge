@@ -29,6 +29,10 @@ export const documentColumn = columnsOf("Document", [
   "currentVersionId", "documentType", "caseFileId", "caseId", "relationId",
 ] as const);
 
+/** Renditions are owned by a DocumentVersion and carry managed binary content. */
+const documentRenditions = sql.table(entityTableName("DocumentRendition"));
+const documentRenditionColumn = columnsOf("DocumentRendition", ["sourceDocumentVersion"] as const);
+
 /** Physical columns of the DocumentVersion fields the invariants touch. */
 export const documentVersionColumn = columnsOf("DocumentVersion", [
   "documentId", "accountId", "versionLabel", "versionNumber", "snapshot", "contentHash",
@@ -353,12 +357,125 @@ export async function applyDocumentCommands(db: OpenShapeForgeDatabase): Promise
     end;
     $function$;
 
+    -- Registered maintenance seeding removes a proven seed-owned document
+    -- graph inside the transaction it already owns. The two document
+    -- invariants the app role may never lift itself stand in the way of that
+    -- and of nothing else: a DocumentVersion is immutable to the app role,
+    -- and currentVersionId is server-managed. Both are lifted here, for one
+    -- document of the current tenant and for exactly the version identities
+    -- the caller names, after this function has re-established under its own
+    -- row lock that those identities are the document's complete version set
+    -- and that none of them retains managed content. Reachable only from a
+    -- maintenance session: app.bypass_rls() is true for a caller that
+    -- presented the operator credential and never for an ordinary request
+    -- session on the same role. Every statement names the tenant regardless.
+    create or replace function document_internal.remove_seed_document_versions(
+      target_document_id uuid,
+      version_ids uuid[],
+      source_authority_expected text
+    ) returns integer
+    language plpgsql
+    security definer
+    set search_path = pg_catalog, pg_temp
+    as $function$
+    declare
+      tenant uuid := app.current_tenant();
+      actor uuid := app.current_user_id();
+      named uuid[];
+      removed integer;
+    begin
+      -- The definer identity must not make the legacy literal bypass valid
+      -- for a runtime login. Require its operator credential here.
+      if (app.session_is_runtime_login() and current_setting('app.bypass_rls', true) = 'true')
+        or not app.bypass_rls() then
+        raise exception 'Seed document version removal requires a maintenance session';
+      end if;
+      if tenant is null or actor is null then
+        raise exception 'An authenticated tenant and user session is required';
+      end if;
+      if version_ids is null or array_position(version_ids, null::uuid) is not null then
+        raise exception 'Seed document version identities are required';
+      end if;
+      select coalesce(array_agg(distinct candidate), array[]::uuid[]) into named
+      from unnest(version_ids) as candidate;
+      if cardinality(named) <> cardinality(version_ids) then
+        raise exception 'Seed document version identities must be distinct';
+      end if;
+
+      perform 1
+      from ${documents}
+      where id = target_document_id and tenant_id = tenant
+      for update;
+      if not found then
+        raise exception 'Document not found';
+      end if;
+
+      if exists (
+        select 1 from ${documentVersions} version
+        where version.tenant_id = tenant
+          and version.${sql.ref(version.documentId)} = target_document_id
+          and not (version.id = any(named))
+      ) or (
+        select count(*) from ${documentVersions} version
+        where version.tenant_id = tenant
+          and version.${sql.ref(version.documentId)} = target_document_id
+          and version.id = any(named)
+      ) <> cardinality(named) then
+        raise exception 'The document versions do not match the seed plan';
+      end if;
+
+      perform 1 from ${documentVersions} version
+      where version.tenant_id = tenant and version.id = any(named)
+      order by version.id
+      for update;
+      if source_authority_expected is null or source_authority_expected = '' or exists (
+        select 1 from ${documentVersions} version
+        where version.tenant_id = tenant and version.id = any(named)
+          and version.source_authority is distinct from source_authority_expected
+      ) then
+        raise exception 'A document version is not owned by this seed';
+      end if;
+
+      if exists (
+        select 1 from ${documentVersions} version
+        where version.tenant_id = tenant and version.id = any(named)
+          and (version.${sql.ref(version.artifactId)} is not null
+            or version.${sql.ref(version.storageLocation)} is not null)
+      ) then
+        raise exception 'A seed document version retains managed content';
+      end if;
+
+      if exists (
+        select 1 from ${documentRenditions} rendition
+        where rendition.tenant_id = tenant
+          and rendition.${sql.ref(documentRenditionColumn.sourceDocumentVersion)} = any(named)
+      ) then
+        raise exception 'A seed document version retains renditions';
+      end if;
+
+      update ${documents}
+      set ${sql.ref(document.currentVersionId)} = null, updated_at = now()
+      where id = target_document_id and tenant_id = tenant
+        and ${sql.ref(document.currentVersionId)} is not null;
+
+      delete from ${documentVersions}
+      where tenant_id = tenant
+        and ${sql.ref(version.documentId)} = target_document_id
+        and id = any(named);
+      get diagnostics removed = row_count;
+      return removed;
+    end;
+    $function$;
+
     revoke all on function document_internal.create_with_first_version(jsonb, jsonb) from public;
     revoke all on function document_internal.append_version(uuid, jsonb) from public;
     revoke all on function document_internal.create_with_first_version(jsonb, jsonb) from ${sql.ref(WORKER_ROLE)};
     revoke all on function document_internal.append_version(uuid, jsonb) from ${sql.ref(WORKER_ROLE)};
+    revoke all on function document_internal.remove_seed_document_versions(uuid, uuid[], text) from public;
+    revoke all on function document_internal.remove_seed_document_versions(uuid, uuid[], text) from ${sql.ref(WORKER_ROLE)};
     grant execute on function document_internal.create_with_first_version(jsonb, jsonb) to ${sql.ref(APP_ROLE)};
     grant execute on function document_internal.append_version(uuid, jsonb) to ${sql.ref(APP_ROLE)};
+    grant execute on function document_internal.remove_seed_document_versions(uuid, uuid[], text) to ${sql.ref(APP_ROLE)};
   `.execute(db);
   const avatarAccess = readFileSync(new URL("./tenant-avatar-access.sql", import.meta.url), "utf8")
     .replaceAll("__OSF_APP_ROLE__", sql.ref(APP_ROLE).compile(db).sql);

@@ -16,7 +16,7 @@ import { runMigrationChain } from "../../db/migration-chain.js";
 import { applyAuditHistory, auditTableConfigs } from "../../db/migrations/audit-history.js";
 import manifest from "../../generated/db/manifest.json" with { type: "json" };
 import { registerConfigurationHandoffRoutes } from "../../mcp/configuration-handoff-routes.js";
-import { withConnectionGrantSubject } from "../../mcp/connection-delegation.js";
+import { withConnectionGrantSubject } from "../../auth/connection-delegation.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import type { ModuleEgressRequest } from "../../modules/contract.js";
 import { withAuditContext } from "../../platform/audit-context.js";

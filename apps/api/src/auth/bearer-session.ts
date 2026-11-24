@@ -30,6 +30,7 @@ import {
 } from "./tenant-resolution.js";
 import type { SessionScope, TrustedSessionContext } from "./trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
+import { withDbSession } from "../db/session.js";
 import type { ResolveSessionOptions } from "./session-resolver.js";
 import { EMPTY_SESSION, hostOrganizationContext, resolveScope } from "./session-scope.js";
 
@@ -124,14 +125,16 @@ export async function personOrganizationAuthority(
   const groups = [...person.groups];
   let roles = personSessionRoles({ roles: [...person.issuerRoles] }, relation, realm);
   let scope = resolveScope(roles, groups);
-  const relationGroupIds = [...await resolveRelationGroupMembershipIds(
-    db,
-    { tenantId: person.tenantId, userId: person.userId, roles, groups, scope },
-    person.identity,
-  )];
-  const groupRoles = await resolveGroupRoles(db, {
-    tenantId: person.tenantId, userId: person.userId, roles, groups, scope,
-  }, relationGroupIds);
+  // The memberships and the roles of those groups are read on the SAME
+  // session (the membership-row roles, nothing resolved from groups yet), so
+  // they share one transaction: the inner reads rejoin it instead of each
+  // opening their own. Nothing is cached and no session is widened.
+  const membershipSession = { tenantId: person.tenantId, userId: person.userId, roles, groups, scope };
+  const { relationGroupIds, groupRoles } = await withDbSession(db, membershipSession, async () => {
+    const relationGroupIds = [...await resolveRelationGroupMembershipIds(db, membershipSession, person.identity)];
+    const groupRoles = await resolveGroupRoles(db, membershipSession, relationGroupIds);
+    return { relationGroupIds, groupRoles };
+  });
   roles = personSessionRoles({ roles: [...person.issuerRoles] }, {
     ...relation, roles: [...relation.roles, ...groupRoles],
   }, realm);

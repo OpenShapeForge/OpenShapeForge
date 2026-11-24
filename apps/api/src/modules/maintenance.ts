@@ -2,15 +2,17 @@
 /** Core owner of trusted maintenance SQL and ordinary RLS canonical execution. */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
-import { sql } from "kysely";
+import { sql, type Transaction } from "kysely";
 import type {
   MaintenanceContext,
   MaintenanceConnection,
   MaintenanceQuery,
+  MaintenanceSeedDocumentRemoval,
   RunMaintenanceSeed,
   RuntimeMaintenanceContribution,
   RuntimeOperationRequest,
 } from "@openshapeforge/plugin-runtime";
+import type { DB } from "../generated/db/types.js";
 import {
   assertSameDatabase,
   createDatabaseRuntime,
@@ -38,6 +40,7 @@ import {
   withModuleOperationSession,
 } from "./platform.js";
 import { acquireEditLeaseForEntityOperation } from "../operations/entity/index.js";
+import { removeSeedOwnedDocument, SEED_DOCUMENT_REMOVAL_OPERATION } from "../db/maintenance/remove-seed-documents.js";
 import generatedCatalog from "../generated/operations/catalog.json" with { type: "json" };
 
 const outsideInvocation = AsyncLocalStorage.snapshot();
@@ -72,6 +75,17 @@ type Owner = {
   job?: { name: string; appliedBy: string };
   operator?: { subject: string; issuer: string };
 };
+
+/**
+ * The open transaction behind a transaction query port. A typed capability
+ * that must run in the caller's own maintenance transaction takes the port it
+ * was handed and resolves it here, so it cannot be pointed at another
+ * transaction, at a pinned connection, or at a port whose transaction closed.
+ */
+const transactionPorts = new WeakMap<
+  MaintenanceQuery,
+  { trx: Transaction<DB>; assertOpen: () => void; children: Promise<unknown>[] }
+>();
 
 function queryPort(
   db: OpenShapeForgeDatabase,
@@ -241,14 +255,12 @@ async function lifecycle<T>(
         withSystemSession(db, { ...system, tenantId }, async (trx) => {
           let open = true;
           const children: Promise<unknown>[] = [];
-          const port = queryPort(
-            trx,
-            () => {
-              check();
-              if (!open) throw new Error("Maintenance transaction is closed.");
-            },
-            children,
-          );
+          const assertOpen = () => {
+            check();
+            if (!open) throw new Error("Maintenance transaction is closed.");
+          };
+          const port = queryPort(trx, assertOpen, children);
+          transactionPorts.set(port, { trx, assertOpen, children });
           try {
             const result = await storeFrame.run(token, () =>
               transactionFrame.run(token, () => callback(port)),
@@ -451,6 +463,35 @@ async function lifecycle<T>(
         if (!verified) throw new Error("Maintenance artifact session is unavailable.");
         return owner.platform.artifacts.stage(verified, input);
       }))) }) } : {}),
+    // Offered only to a contribution that registered the canonical owned
+    // delete — so the session genuinely holds its roles — and a source
+    // authority to prove ownership against. The authority is the registered
+    // one; the seed names identities, never the authority they must carry.
+    ...(allowed.has(SEED_DOCUMENT_REMOVAL_OPERATION) && contribution.actingRelation
+      ? { documents: Object.freeze({
+          removeSeedOwned: (query: MaintenanceQuery, removal: MaintenanceSeedDocumentRemoval) =>
+            tracked(async () => {
+              const bound = transactionPorts.get(query);
+              if (!bound)
+                throw new Error("Seed document removal needs its maintenance transaction query.");
+              bound.assertOpen();
+              // Hold the transaction open for this work exactly as a query on
+              // the same port would; an unawaited removal must not commit late.
+              const running = removeSeedOwnedDocument(
+                bound.trx,
+                { ...session, roles: [...session.roles] },
+                {
+                  tenantId,
+                  sourceAuthority: contribution.actingRelation!.sourceAuthority,
+                  removal,
+                },
+              );
+              bound.children.push(running);
+              void running.catch(() => {});
+              return running;
+            }),
+        }) }
+      : {}),
   });
   try {
     const result = await scope.run(token, () => work(context));
@@ -571,11 +612,11 @@ async function withJobOwner<T>(
   const { createRuntimeHostOperationExecutor } =
     await import("../mcp/runtime-executors.js");
   const {
-    bindOperationHandlers,
     listOperationContracts,
     entityPluginOperationContracts,
-    runtimeStaticOperationRegistrations,
   } = await import("../operations/runtime.js");
+  const { bindOperationHandlers, runtimeStaticOperationRegistrations } =
+    await import("../operations/composition.js");
   const { createEntityPluginExecutor, registerEntityPluginExecutor } =
     await import("../operations/entity/plugin-executor.js");
   if (initialized && !initialized.modules.includes(module))

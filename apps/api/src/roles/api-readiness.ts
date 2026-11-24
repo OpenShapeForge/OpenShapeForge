@@ -21,7 +21,7 @@ import type { ModuleSeed, RuntimeModule } from "../modules/contract.js";
 import type { InitializedMaintenanceOwner } from "../modules/maintenance.js";
 import type { ModuleRegistry } from "../modules/registry.js";
 import { listOperationContracts } from "../operations/runtime.js";
-import { verifyOwnedDeleteDatabase } from "../operations/owned-delete-runtime.js";
+import { verifyOwnedDeleteDatabase } from "../operations/owned-delete-execution.js";
 
 const DRIFT_CHECK_TIMEOUT_MS = 5_000;
 const READINESS_CHECK_NAME = /^[a-z][a-z0-9_]*$/;

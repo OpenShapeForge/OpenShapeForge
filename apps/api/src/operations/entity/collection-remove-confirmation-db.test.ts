@@ -7,7 +7,8 @@ import { createDatabaseRuntime, type DatabaseRuntime } from "../../db/connection
 import { runMigrationChain } from "../../db/migration-chain.js";
 import { jsonbLiteral } from "../../db/sql-helpers.js";
 import { ModulePlatformRuntime, withModuleOperationSession } from "../../modules/platform.js";
-import { listOperationContracts, runtimeStaticOperationRegistrations, type OperationContract } from "../runtime.js";
+import { listOperationContracts, type OperationContract } from "../runtime.js";
+import { runtimeStaticOperationRegistrations } from "../composition.js";
 
 /** The compiled remove as an author who declares the acknowledgement gets it: the control in its closed input. */
 function acknowledged(operation: OperationContract): OperationContract {

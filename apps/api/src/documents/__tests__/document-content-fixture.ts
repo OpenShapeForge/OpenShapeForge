@@ -27,7 +27,8 @@ import { generatedRuntimeFieldSchemas, runtimeJsonSchemas } from "../../modules/
 import { RecordAccessRuntime } from "../../modules/record-access.js";
 import { ModulePlatformRuntime } from "../../modules/platform.js";
 import type { RuntimeModule } from "../../modules/contract.js";
-import { listOperationContracts, runtimeStaticOperationRegistrations } from "../../operations/runtime.js";
+import { listOperationContracts } from "../../operations/runtime.js";
+import { runtimeStaticOperationRegistrations } from "../../operations/composition.js";
 import { createCollectionMutationExecutor } from "../../operations/entity/collection-mutations.js";
 import { getGeneratedCrudTables } from "../../operations/entity/catalog.js";
 import type { EntityOperationContract } from "../../operations/entity/types.js";

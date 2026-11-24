@@ -4,7 +4,8 @@ import { DummyDriver, Kysely, PostgresAdapter, PostgresIntrospector, PostgresQue
 import type { DB } from "../generated/db/types.js";
 import { ModulePlatformRuntime } from "../modules/platform.js";
 import type { RuntimeModule } from "../modules/contract.js";
-import { bindOperationHandlers, invokeOperation, type OperationContract } from "./runtime.js";
+import { bindOperationHandlers } from "./composition.js";
+import { invokeOperation, type OperationContract } from "./runtime.js";
 
 test("canonical non-write handlers cannot use or promote the owned-field capability", async () => {
   for (const data of ["read", "delete"] as const) {

@@ -9,7 +9,8 @@ import {getGeneratedCrudTables} from './catalog.js';
 import type {GeneratedCrudColumn} from './types.js';
 import {jsonbLiteral} from '../../db/sql-helpers.js';
 import {ModulePlatformRuntime,withModuleOperationSession} from '../../modules/platform.js';
-import {listOperationContracts,runtimeStaticOperationRegistrations} from '../runtime.js';
+import { listOperationContracts } from "../runtime.js";
+import { runtimeStaticOperationRegistrations } from "../composition.js";
 test('a typed parent saves Document blocks atomically through canonical Operations and rejects stale or denied writes',async()=>{
  const adminUrl=process.env.SCRATCH_ADMIN_DATABASE_URL??'postgres://openshapeforge:openshapeforge@localhost:5434/postgres';
  const url=new URL(adminUrl);if(!['localhost','127.0.0.1','[::1]'].includes(url.hostname)||url.pathname!=='/postgres')throw Error('A scratch admin endpoint is required');

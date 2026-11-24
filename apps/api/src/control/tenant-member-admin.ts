@@ -248,7 +248,7 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
         { email: member.email, roles: selected, firstName: member.firstName ?? undefined, lastName: member.lastName ?? undefined });
       return { tenantSlug: slug, memberId, roles: [], action: "awaiting_sign_in", invitationId: invitation.id, ...invitationOutcome(slug, "no_email_existing_account") };
     }
-    const grants = new Set(selected.flatMap(employeeInvitationRoleGrants));
+    const grants = new Set(selected.flatMap((role) => employeeInvitationRoleGrants(role)));
     const current = new Set(membership.roles ?? []);
     const next = mode === "assign"
       ? [...new Set([...current, ...grants])]

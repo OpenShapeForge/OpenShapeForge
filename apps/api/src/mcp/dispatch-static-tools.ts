@@ -11,7 +11,7 @@ import { connectorGovernor, connectorKeyring, connectorRegistry } from "../conne
 import { invokeConnectorOperation } from "../connectors/runtime.js";
 import { SESSION_INFO_TOOL_NAME } from "./session-info.js";
 import { sessionInfoToolResult } from "./session-describe.js";
-import { searchableSessionOperations } from "./searchable-session-operations.js";
+import { projectSearchableOperationContract, searchableSessionOperationAvailability, searchableSessionOperations } from "./searchable-session-operations.js";
 import { entityOperationContract } from "../operations/entity/index.js";
 import { pluginEntityTransportInput } from "../operations/entity/transport-input.js";
 import { entityIsGeneric } from "./generic-tool-projection.js";
@@ -209,11 +209,12 @@ export async function staticToolCall(
       );
       assertParentInvocationActive?.();
       assertInterceptorActive?.();
-      const { definitions, entities } = await searchableSessionOperations(ctx);
-      const definition = definitions.find((candidate) => candidate.id === parsed.operationId);
-      if (!definition) {
+      const { definitions, entities } = await searchableSessionOperationAvailability(ctx);
+      const available = definitions.find((candidate) => candidate.id === parsed.operationId);
+      if (!available) {
         throw new HttpError(404, "NOT_FOUND", "The requested Operation is not available.");
       }
+      const definition = projectSearchableOperationContract(ctx, entities, available);
       assertOperationExecutionRoute(definition, name === searchableOperationToolNames.secureExecute, searchableOperationToolNames);
       observeDiagnosticOperation(definition);
       if (needsPrivateOutput(definition)) return await startPrivateOutput(ctx, definition, parsed.input);
@@ -348,8 +349,9 @@ export async function staticToolCall(
       assertInterceptorActive?.();
       const bound = operations.get(operationTool.key)!;
       if(hasSensitiveOutput(operationTool.outputSchema)) {
-        const { definitions } = await searchableSessionOperations(ctx);
-        const definition = definitions.find(d => d.id === operationTool.key);
+        const { definitions, entities } = await searchableSessionOperationAvailability(ctx);
+        const available = definitions.find(d => d.id === operationTool.key);
+        const definition = available && projectSearchableOperationContract(ctx, entities, available);
         if(!definition || !needsPrivateOutput(definition))throw new HttpError(409,"INTERACTION_REQUIRED","The confidential Operation has no matching private execution contract.");
         return await startPrivateOutput(ctx, definition, request.params.arguments ?? {});
       }

@@ -105,15 +105,22 @@ export function schemaInLanguage(schema: unknown, language: string): unknown {
   return localized;
 }
 
+/** The public description includes the same write reminder in listings and search. */
+export function advertisedEntityToolDescription(
+  tool: Pick<EntityToolAdvertisement, "operation" | "description" | "descriptionLanguage">,
+  language = "en",
+): string {
+  return tool.operation === "create" || tool.operation === "update"
+    ? `${tool.description}${DATA_ACQUISITION_TOOL_FOOTER_BY_LANGUAGE[tool.descriptionLanguage ?? language] ?? DATA_ACQUISITION_TOOL_FOOTER}`
+    : tool.description;
+}
+
 /** The listed tool: write reminder appended, title mirrored, app link attached, schemas in one language. */
 export function advertisedEntityTool(tool: EntityToolAdvertisement, language = "en"): McpToolShape {
-  const write = tool.operation === "create" || tool.operation === "update";
   return {
     name: tool.name,
     ...(tool.title !== undefined ? { title: tool.title } : {}),
-    description: write
-      ? `${tool.description}${DATA_ACQUISITION_TOOL_FOOTER_BY_LANGUAGE[tool.descriptionLanguage ?? language] ?? DATA_ACQUISITION_TOOL_FOOTER}`
-      : tool.description,
+    description: advertisedEntityToolDescription(tool, language),
     inputSchema: schemaInLanguage(tool.inputSchema, language) as Record<string, unknown>,
     ...(tool.outputSchema
       ? { outputSchema: schemaInLanguage(tool.outputSchema, language) as Record<string, unknown> }

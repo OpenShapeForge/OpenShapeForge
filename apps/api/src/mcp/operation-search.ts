@@ -396,6 +396,8 @@ export type OperationSearchContext = {
    * or undefined. Only an id that is itself available is ever answered.
    */
   resolveName?: (name: string) => string | undefined;
+  /** Project the exact MCP schema for an already eligible result. */
+  projectContract?: (definition: RuntimeOperationDefinition) => RuntimeOperationDefinition;
 };
 
 /**
@@ -528,6 +530,7 @@ const INLINE_CONTRACT_CHARACTERS = 14_000;
 function inlineContracts(
   page: readonly RuntimeOperationDefinition[],
   named: (definition: RuntimeOperationDefinition) => boolean,
+  projectContract: NonNullable<OperationSearchContext["projectContract"]>,
 ): Map<string, Record<string, unknown>> {
   const first = page[0];
   if (!first) return new Map();
@@ -538,7 +541,8 @@ function inlineContracts(
   ].filter((definition): definition is RuntimeOperationDefinition => definition !== undefined).slice(0, INLINE_CONTRACTS);
   const inline = new Map<string, Record<string, unknown>>();
   let used = 0;
-  for (const definition of picked) {
+  for (const candidate of picked) {
+    const definition = projectContract(candidate);
     const inputSchema = modelSchema(canonicalRuntimeOperationSchema(definition.input, definition.id, "input"));
     const size = JSON.stringify(inputSchema).length;
     if (inline.size > 0 && used + size > INLINE_CONTRACT_CHARACTERS) continue;
@@ -569,6 +573,7 @@ export function searchOperationDefinitions(input: {
 } & OperationSearchContext, args = parseOperationSearchArguments(input.arguments)): { operations: Record<string, unknown>[]; nextCursor?: string; unmatchedWords?: string[] } {
   if (isRecordsOnlySearch(args)) return { operations: [] };
   const available = input.definitions.filter((definition) => input.allowedIds.has(definition.id));
+  const projectContract = input.projectContract ?? ((definition: RuntimeOperationDefinition) => definition);
   const shown = (definition: RuntimeOperationDefinition) => {
     const name = localizedText(definition.name, input.locale) ?? definition.id;
     return { name, description: localizedText(definition.description, input.locale) ?? name };
@@ -577,7 +582,7 @@ export function searchOperationDefinitions(input: {
     const found = lookup(available, args.operationId, input.resolveName);
     if (!found) return { operations: [] };
     const { name, description } = shown(found);
-    return { operations: [operationContract(found, name, description)] };
+    return { operations: [operationContract(projectContract(found), name, description)] };
   }
   const query = queryWords(args.query);
   // A verb ("find", "zoek") says what to do with the subject; a query of only
@@ -663,7 +668,7 @@ export function searchOperationDefinitions(input: {
   const last = page.at(-1);
   // Only a first page: a model that pages on has already passed over the best matches.
   const inline = start === 0
-    ? inlineContracts(page.map(({ definition }) => definition), (definition) => covered(definition) > 0)
+    ? inlineContracts(page.map(({ definition }) => definition), (definition) => covered(definition) > 0, projectContract)
     : new Map<string, Record<string, unknown>>();
   return {
     operations: page.map(({ definition }) => {

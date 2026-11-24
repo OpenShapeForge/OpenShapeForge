@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { advertisedEntityToolDescription } from "@openshapeforge/operations";
 import type { RuntimeOperationDefinition } from "@openshapeforge/plugin-runtime";
 import { catalog } from "./catalog.js";
 import { generatedCrudTools, matchNativeCrudTool } from "./native-crud-tool.js";
-import { describeTool, withheldClassifiedFields } from "./entity-tool-projection.js";
+import { describeTool, localizedToolText, withheldClassifiedFields } from "./entity-tool-projection.js";
 import { toolsForSession } from "./session-projection.js";
 import type { ServerScope } from "./server-scope.js";
 
@@ -53,19 +54,36 @@ export async function searchableSessionOperations(scope: ServerScope) {
     definitions: definitions.filter((definition) => allowedIds.has(definition.id)).map((definition): RuntimeOperationDefinition => {
       const entry = entities.get(definition.id);
       if (!entry) return definition;
-      // Exact interface schema: preserve classified-field withholding and the
-      // existing secure-input adapter rather than exposing the raw core input.
-      const tool = describeTool(entry.tool, entry.entity, scope.tables.get(entry.tool.table), scope.session, scope.locale);
+      const text = localizedToolText(entry.tool, scope.locale);
       canonicalText.set(definition.id, { name: definition.name, description: definition.description });
-      const schema = tool.outputSchema;
-      if (!schema) throw new Error(`CRUD Operation ${definition.id} has no output schema.`);
-      const branches = [schema, ...((schema.oneOf ?? []) as Record<string, unknown>[])];
-      const data = branches.map((branch) => (branch.properties as Record<string, Record<string, unknown>> | undefined)?.data).find(Boolean);
-      if (!data) throw new Error(`CRUD Operation ${definition.id} has no data output schema.`);
-      const output = { ...data, ...(schema.$defs ? { $defs: schema.$defs } : {}) };
-      return { ...definition, name: tool.title ?? definition.name, description: tool.description, input: { kind: "json-schema", schema: tool.inputSchema }, output: { kind: "json-schema", schema: output } };
+      return {
+        ...definition,
+        name: text.title ?? definition.name,
+        description: advertisedEntityToolDescription({ operation: entry.tool.operation, ...text }, scope.locale.tag),
+      };
     }),
+    projectContract: (definition: RuntimeOperationDefinition) => projectSearchableOperationContract(scope, entities, definition),
   };
+}
+
+/** Project the exact MCP schema only when a caller needs this Operation's contract. */
+export function projectSearchableOperationContract(
+  scope: ServerScope,
+  entities: SearchableSessionAvailability["entities"],
+  definition: RuntimeOperationDefinition,
+): RuntimeOperationDefinition {
+  const entry = entities.get(definition.id);
+  if (!entry) return definition;
+  // Exact interface schema: preserve classified-field withholding and the
+  // existing secure-input adapter rather than exposing the raw core input.
+  const tool = describeTool(entry.tool, entry.entity, scope.tables.get(entry.tool.table), scope.session, scope.locale);
+  const schema = tool.outputSchema;
+  if (!schema) throw new Error(`CRUD Operation ${definition.id} has no output schema.`);
+  const branches = [schema, ...((schema.oneOf ?? []) as Record<string, unknown>[])];
+  const data = branches.map((branch) => (branch.properties as Record<string, Record<string, unknown>> | undefined)?.data).find(Boolean);
+  if (!data) throw new Error(`CRUD Operation ${definition.id} has no data output schema.`);
+  const output = { ...data, ...(schema.$defs ? { $defs: schema.$defs } : {}) };
+  return { ...definition, name: tool.title ?? definition.name, description: tool.description, input: { kind: "json-schema", schema: tool.inputSchema }, output: { kind: "json-schema", schema: output } };
 }
 
 /**

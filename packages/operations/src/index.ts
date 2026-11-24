@@ -191,6 +191,7 @@ export {
   DATA_ACQUISITION_TOOL_FOOTER,
   ENTITY_CONFIGURATION_APP_URI,
   advertisedEntityTool,
+  advertisedEntityToolDescription,
   localizedEntityToolText,
   schemaInLanguage,
 } from "./mcp-entity-tool-shape.js";

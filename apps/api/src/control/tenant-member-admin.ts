@@ -16,7 +16,7 @@ import {
   recordEmployeeInvitation,
   isEmployeeInvitationRole,
 } from "../auth/employee-invitations.js";
-import { actingPartyColumns, actingPartyTable } from "../auth/identity-contract.js";
+import { actingPartyColumns, actingPartyTable, IDENTITY_CONTRACT } from "../auth/identity-contract.js";
 import { invalidateIdentityLink } from "../auth/identity-link.js";
 import { confirmCandidateLink, relationsWithEmail, writeMembershipRoles } from "../auth/identity-link-store.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -250,6 +250,11 @@ export async function changeTenantMemberRoles(deps: Dependencies, slug: string, 
     }
     const grants = new Set(selected.flatMap((role) => employeeInvitationRoleGrants(role)));
     const current = new Set(membership.roles ?? []);
+    // Earlier admissions stored these grants beside Employee. Keep revocation
+    // of an assigned Employee equivalent for those existing memberships.
+    if (mode === "remove" && selected.includes("org_employee") && current.has("org_employee")) {
+      for (const role of IDENTITY_CONTRACT.memberRoles) grants.add(role);
+    }
     const next = mode === "assign"
       ? [...new Set([...current, ...grants])]
       : [...current].filter((role) => !grants.has(role));

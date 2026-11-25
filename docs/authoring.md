@@ -1276,8 +1276,10 @@ the party a login acts as (`actingParty`: the Relation, its name, type,
 status and profile fields, and which type values are a person and an
 organization), the person record created beside it (`person`), where a
 party's e-mail addresses live (`loginContact`), the role that administers an
-organization (`administratorRole`) and the roles a just-in-time member holds
-until an administrator assigns some (`memberRoles`). Exactly one
+organization (`administratorRole`) and the permissions older releases stored
+beside Employee (`memberRoles`). Platform-operator revocation still removes
+those copied grants when revoking Employee. New assignments use the Employee
+composite. Exactly one
 authorization file declares it; the compiler checks every named field's
 shape against the compiled entities (single string or boolean scalars, the
 relation fields as `belongsTo` references to the acting party), every role

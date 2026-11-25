@@ -120,12 +120,7 @@ export function declaredEmployeeInvitationRoles(): string[] {
 }
 
 /**
- * The organization-scoped roles each invited role carries — what lands in
- * `platform.identity_relations.roles` for the tenant, as DECLARED names. One
- * table, read by both the automatic path (first sign-in) and the manual one
- * (Account.assignRole in accounts/account-management.ts) — a second copy of a table
- * that decides what an administrator can do is the kind of duplication that
- * drifts silently.
+ * Roles persisted by invitation admission and platform-operator assignment.
  *
  * Persist the selected persona so the realm's generated composites determine
  * its effective permissions at session time. The administrator also receives

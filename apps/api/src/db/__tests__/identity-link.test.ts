@@ -16,7 +16,7 @@ import { APP_ROLE } from "../migrations/app-role.js";
 import { withDbSession } from "../session.js";
 import { updateGeneratedEntity } from "../../operations/entity/mutations.js";
 import { admitInvitedPerson } from "../../auth/identity-link-admission.js";
-import { personSessionRoles } from "../../auth/person-roles.js";
+import { expandRoleComposites, personSessionRoles } from "../../auth/person-roles.js";
 import { IDENTITY_LINK_ADMIN_ROLE } from "../../auth/organization-roles.js";
 import {
   __resetIdentityLinkForTests,
@@ -457,10 +457,11 @@ describe("identity ↔ Relation link", () => {
         )).resolves.toBeDefined();
 
         const employee = await signIn(appDb, hal, tenantA);
+        expect(employee.state!.roles).toEqual(["org_employee"]);
         const employeeRoles = personSessionRoles({ roles: [] }, employee.state!, "openshapeforge");
         // An employee holds their own personal API keys (Platform.ApiKeys.Personal)
         // and nothing that writes business records.
-        expect(employeeRoles).toEqual(["Relations.All.Read", "Platform.ApiKeys.Personal", "org_employee"].sort());
+        expect(employeeRoles).toEqual(expandRoleComposites("openshapeforge", ["org_employee"]));
         await expect(
           updateGeneratedEntity(
             appDb,

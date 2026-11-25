@@ -10,6 +10,9 @@ import { encodeStreamFrame, parseStreamCursor, readChangeBatch } from "../platfo
 import type { ResourceChangeAuthorizer } from "../platform/entity-change-stream.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 
+const STREAM_ROTATION_MS = 55_000;
+const STREAM_LIFETIME_MS = 60_000;
+
 /** Authenticated SSE. No credentials or business payloads are accepted in URLs. */
 export function registerEntityChangeStream(app: FastifyInstance, options: { db?: OpenShapeForgeDatabase; authorizeResource?:(session: TrustedSessionContext, entity:string, id:string) => Promise<boolean> }) {
   const active = new Map<string, number>();
@@ -38,6 +41,7 @@ export function registerEntityChangeStream(app: FastifyInstance, options: { db?:
     const release = () => {
       if (released) return;
       released = true;
+      clearTimeout(expiration);
       reply.raw.off("close", close);
       request.raw.off("aborted", close);
       socket?.off("close", close);
@@ -46,6 +50,16 @@ export function registerEntityChangeStream(app: FastifyInstance, options: { db?:
       if (remaining) active.set(key, remaining); else active.delete(key);
     };
     const close = () => { abort.abort(); release(); };
+    // Bound the admission even if the response stops being consumed. An async
+    // generator suspended at a yield cannot observe elapsed time or run its
+    // finally block until the HTTP transport pulls it again.
+    const stream = Readable.from(frames());
+    const expiration = setTimeout(() => {
+      close();
+      stream.destroy();
+    }, STREAM_LIFETIME_MS);
+    expiration.unref();
+    stream.once("close", close);
     // A client that goes away must release its stream slot at once. Under Bun
     // the reply never emits "close" for a disconnected client — the request
     // emits "aborted" and its socket "close" — so a navigation left its stream
@@ -60,10 +74,9 @@ export function registerEntityChangeStream(app: FastifyInstance, options: { db?:
       const started = Date.now();
       let validateCursor = true;
       try {
-        // Rotate periodically so reauthentication/renewal cannot leave a stale stream.
-        while (!abort.signal.aborted && Date.now() - started < 55_000) {
+        while (!abort.signal.aborted && Date.now() - started < STREAM_ROTATION_MS) {
           const current = await resolveSessionContext(headers, { db, mcpAppResource: true });
-          if (current.tenantId !== session.tenantId || current.userId !== session.userId) break;
+          if (abort.signal.aborted || current.tenantId !== session.tenantId || current.userId !== session.userId) break;
           const authorize: ResourceChangeAuthorizer | undefined = options.authorizeResource
             ? (_dbSession, entity, id) => options.authorizeResource!(current, entity, id)
             : undefined;
@@ -83,6 +96,6 @@ export function registerEntityChangeStream(app: FastifyInstance, options: { db?:
     }
     return reply.header("content-type", "text/event-stream; charset=utf-8")
       .header("cache-control", "no-cache, no-store").header("x-accel-buffering", "no")
-      .send(Readable.from(frames()));
+      .send(stream);
   });
 }

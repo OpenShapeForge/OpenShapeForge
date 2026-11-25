@@ -9,7 +9,8 @@ import { randomUUID } from "node:crypto";
 import { SQL } from "bun";
 import { sql, type Kysely } from "kysely";
 import type { DB } from "../../generated/db/types.js";
-import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "../../auth/organization-roles.js";
+import { IDENTITY_CONTRACT } from "../../auth/identity-contract.js";
+import { IDENTITY_LINK_ADMIN_ROLE } from "../../auth/organization-roles.js";
 import { __resetIdentityLinkForTests, confirmPendingLink, resolveIdentityLink } from "../../auth/identity-link.js";
 import type { KeycloakTenantMemberAdminClient } from "../../control/keycloak-organization-members.js";
 import type { PlatformAdministrator } from "../../control/platform-admin.js";
@@ -271,7 +272,7 @@ describe("tenant member roles from the control plane", () => {
         const assigned = await changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "assign");
         expect(assigned).toMatchObject({
           action: "assigned",
-          roles: [...new Set([...NEEDS_ROLE_ASSIGNMENT_ROLES, IDENTITY_LINK_ADMIN_ROLE, "org_admin", "org_employee"])].sort(),
+          roles: [IDENTITY_LINK_ADMIN_ROLE, "org_admin", "org_employee"].sort(),
         });
         const listed = await listTenantMembers(deps, "acme");
         expect(listed.members[0]).toMatchObject({ memberId: subject, roles: assigned.roles, linkStatus: "linked" });
@@ -280,12 +281,24 @@ describe("tenant member roles from the control plane", () => {
         // The other tenant's row is untouched, and so is the next session there.
         __resetIdentityLinkForTests();
         const inOther = await resolveIdentityLink(appDb, { tenantId: OTHER_TENANT, userId: subject, roles: [], groups: [], scope: "self" }, claims);
-        expect(inOther!.roles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
+        expect(inOther!.roles).toEqual(["org_employee"]);
         const inAcme = await resolveIdentityLink(appDb, { tenantId: TENANT, userId: subject, roles: [], groups: [], scope: "self" }, claims);
         expect(inAcme!.roles).toEqual(assigned.roles);
 
         const removed = await changeTenantMemberRoles(deps, "acme", subject, ["org_admin"], "remove");
-        expect(removed.roles).toEqual([...NEEDS_ROLE_ASSIGNMENT_ROLES, "org_employee"].sort());
+        expect(removed.roles).toEqual(["org_employee"]);
+        // A membership created by the previous invitation contract may still
+        // carry its individual Employee permissions.
+        const legacyRoles = ["org_employee", ...IDENTITY_CONTRACT.memberRoles, ...creationGrants];
+        await adminDb.transaction().execute(async (trx) => {
+          await sql`select set_config('app.roles', ${IDENTITY_LINK_ADMIN_ROLE}, true)`.execute(trx);
+          await sql`update platform.identity_relations set roles = array[${sql.join(legacyRoles)}]::text[]
+            where tenant_id = ${TENANT}::uuid and identity_id = ${inAcme!.identityId}::uuid`.execute(trx);
+        });
+        expect(await changeTenantMemberRoles(deps, "acme", subject, ["org_employee"], "remove"))
+          .toMatchObject({ roles: [...creationGrants].sort(), action: "removed" });
+        expect((await getTenantMember(deps, "other", subject)).roles).toEqual(["org_employee"]);
+
         // Nothing in Keycloak was asked to grant anything: the stub has no such method.
         expect("grantClientRoles" in deps.members).toBe(false);
 

@@ -11,14 +11,13 @@ import {
 import identity from '../generated/compiler/identity.json' with { type: 'json' };
 
 describe("employeeInvitationRoleGrants", () => {
-  test("records the persona name beside the OSF authorization baseline", () => {
+  test("records Employee as a persona and preserves the administrator grant", () => {
     expect(employeeInvitationRoleGrants("org_admin", {})).toEqual([
       "org_admin",
       identity.administratorRole,
     ]);
     expect(employeeInvitationRoleGrants("org_employee", {})).toEqual([
       "org_employee",
-      ...identity.memberRoles,
     ]);
   });
 
@@ -30,7 +29,7 @@ describe("employeeInvitationRoleGrants", () => {
       employeeInvitationRoleGrants("org_employee", {
         OPENSHAPEFORGE_ORG_EMPLOYEE_CLIENT_ROLE: "example_employee",
       }),
-    ).toEqual(["org_employee", ...identity.memberRoles, "example_employee"]);
+    ).toEqual(["org_employee", "example_employee"]);
   });
 });
 

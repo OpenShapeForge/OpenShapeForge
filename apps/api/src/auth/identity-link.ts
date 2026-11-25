@@ -81,7 +81,7 @@ import type { DB } from "../generated/db/types.js";
 import { withDbSession, type DbSessionInput } from "../db/session.js";
 import { __resetIdentityLinkCacheForTests, cachedLinkState, invalidateIdentityLink, linkCacheKey, linkGeneration, storeLinkState, type SessionInput } from "./identity-link-session.js";
 import { HttpError } from "../rest/http-error.js";
-import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "./organization-roles.js";
+import { IDENTITY_LINK_ADMIN_ROLE } from "./organization-roles.js";
 // This module and ./employee-invitations.ts import each other: an invitation
 // is what admits a person (here), and admission is what accepts an invitation
 // (there). The cycle is safe — every binding crossing it is read at call
@@ -102,7 +102,7 @@ import {
 // Both re-exported so every existing importer of this module keeps working;
 // they live in ./organization-roles.ts because a `const` may not cross the
 // cycle with ./employee-invitations.ts. See that file.
-export { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES };
+export { IDENTITY_LINK_ADMIN_ROLE };
 
 /**
  * A verified token whose person this tenant has never heard of and nobody

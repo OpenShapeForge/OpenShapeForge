@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 import {expect,test} from 'bun:test';
-import {copyBlueprintGraph,planBlueprintGraph,type BlueprintGraphRecord} from './blueprint-graph.js';
+import {snapshotContainsRecord,copyBlueprintGraph,planBlueprintGraph,type BlueprintGraphRecord} from './blueprint-graph.js';
 const record=(entity:string,sourceId:string,values:Record<string,unknown>={},references:BlueprintGraphRecord['references']={}):BlueprintGraphRecord=>({entity,sourceId,values,references});
 test('Copy values and reconnect parents, formula references and external periods',async()=>{
  const graph=[record('Term','term',{coefficient:-1},{line:{entity:'Line',sourceId:'result'},source:{entity:'Line',sourceId:'cost'}}),record('Value','value',{amount:'120000'},{line:{entity:'Line',sourceId:'cost'},period:{entity:'Period',sourceId:'source-jan'}}),record('Line','cost',{name:'Hosting'},{budget:{entity:'Budget',sourceId:'budget'},parent:{entity:'Line',sourceId:'group'}}),record('Line','result',{name:'Profit'},{budget:{entity:'Budget',sourceId:'budget'}}),record('Line','group',{name:'COGS'},{budget:{entity:'Budget',sourceId:'budget'}}),record('Budget','budget',{name:'Budget 2027'})];
@@ -24,4 +24,12 @@ test('Missing external binding, duplicate identity and cycles fail before creati
 });
 test('Scalar values cannot smuggle source relationship identities',()=>{
  expect(()=>planBlueprintGraph([record('A','a',{parent:'source'},{parent:null})])).toThrow('scalar');
+});
+
+
+test("publication preconditions compare an included child's exact snapshot value", () => {
+  const values = { name: "Example", $graph: [record("Line", "one", { name: "Included" })] };
+  expect(snapshotContainsRecord("Parent", values, { entity: "Line", field: "name", value: "Included" })).toBe(true);
+  expect(snapshotContainsRecord("Parent", values, { entity: "Line", field: "name", value: "Missing" })).toBe(false);
+  expect(snapshotContainsRecord("Parent", values, { entity: "Other", field: "name", value: "Included" })).toBe(false);
 });

@@ -18,7 +18,23 @@ export function collectBlueprintOperations(entities: readonly Pick<CompiledEntit
       list: { properties: { search: titled({ type: "string", maxLength: 200 }, "Search", "Zoeken"), limit: titled({ type: "integer", minimum: 1, maximum: 100 }, "Limit", "Limiet"), cursor: titled({ type: "string" }, "Cursor", "Cursor") }, required: [] },
       status: { properties: { id }, required: ["id"] },
       reset: { properties: { id, expectedVersion, blueprintVersion: version, confirmed: { const: true } }, required: ["id", "expectedVersion", "blueprintVersion", "confirmed"] },
-      publish: { properties: { id, expectedVersion, thumbnail:titled({type:["string","null"],maxLength:BLUEPRINT_THUMBNAIL_MAX_LENGTH,pattern:BLUEPRINT_THUMBNAIL_PATTERN},"Thumbnail","Voorbeeldafbeelding"), retired:titled({type:"boolean"},"Retired","Ingetrokken") }, required: ["id", "expectedVersion"] },
+      publish: {
+        properties: {
+          id, expectedVersion,
+          expectedLatestVersion: titled({ type: "integer", minimum: 0 }, "Expected latest publication", "Verwachte laatste publicatie"),
+          requiredSnapshotRecord: titled({
+            type: "object", additionalProperties: false, required: ["entity", "field", "value"],
+            properties: {
+              entity: titled({ type: "string", minLength: 1, maxLength: 128 }, "Entity", "Entiteit"),
+              field: titled({ type: "string", minLength: 1, maxLength: 128 }, "Field", "Veld"),
+              value: titled({ type: "string", maxLength: 1000 }, "Required string value", "Vereiste tekstwaarde"),
+            },
+          }, "Required snapshot record", "Vereist snapshotrecord"),
+          thumbnail: titled({ type: ["string", "null"], maxLength: BLUEPRINT_THUMBNAIL_MAX_LENGTH, pattern: BLUEPRINT_THUMBNAIL_PATTERN }, "Thumbnail", "Voorbeeldafbeelding"),
+          retired: titled({ type: "boolean" }, "Retired", "Ingetrokken"),
+        },
+        required: ["id", "expectedVersion"],
+      },
     };
     const outputs = {
       list: { type: "object", additionalProperties: false, required: ["items", "nextCursor"], properties: { items: titled({ type: "array", items: source }, "Blueprints", "Blueprints"), nextCursor: titled({ type: ["string", "null"] }, "Next page", "Volgende pagina") } },

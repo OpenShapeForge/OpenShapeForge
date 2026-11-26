@@ -28,6 +28,8 @@ test("blueprint Operations preserve edit controls and separate publication right
   expect(publish.inputSchema.required).toEqual(["id", "expectedVersion", "leaseToken"]);
   expect(publish.inputSchema.properties).toHaveProperty("thumbnail");
   expect(publish.inputSchema.properties).toHaveProperty("retired");
+  expect(publish.inputSchema.properties).toHaveProperty("expectedLatestVersion");
+  expect(publish.inputSchema.properties).toHaveProperty("requiredSnapshotRecord");
   const list=operations.find(operation=>operation.handler==="Template.list")!;
   expect((list.outputSchema as any).properties.items.items.properties).toHaveProperty("thumbnail");
 });

@@ -706,7 +706,6 @@
         "input": "FieldSingleRelatedRecord"
       },
       "props": {
-        "searchable": false,
         "clearable": false
       }
     },

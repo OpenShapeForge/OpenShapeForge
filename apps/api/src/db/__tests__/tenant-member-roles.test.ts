@@ -208,11 +208,12 @@ describe("tenant member roles from the control plane", () => {
         await sql`update platform.identity_relations ir set needs_role_assignment = true
           from platform.identities i where ir.identity_id = i.id and i.subject = ${pendingSubject} and ir.tenant_id = ${TENANT}`.execute(adminDb);
         await changeTenantMemberRoles(patDeps, "acme", pendingSubject, creationGrants, "assign");
-        const marker = await sql<{ needs_role_assignment: boolean }>`select ir.needs_role_assignment
-          from platform.identity_relations ir join platform.identities i on ir.identity_id = i.id
+        const readMarker = () => sql<{ needs_role_assignment: boolean }>`select ir.needs_role_assignment
+          from platform.identity_relations ir join platform.identities i on i.id = ir.identity_id
           where i.subject = ${pendingSubject} and ir.tenant_id = ${TENANT}`.execute(adminDb);
-        expect(marker.rows[0]?.needs_role_assignment).toBe(true);
+        expect((await readMarker()).rows[0]?.needs_role_assignment).toBe(true);
         await changeTenantMemberRoles(patDeps, "acme", pendingSubject, creationGrants, "remove");
+        expect((await readMarker()).rows[0]?.needs_role_assignment).toBe(true);
         expect(await changeTenantMemberRoles(patDeps, "acme", pendingSubject, ["org_admin"], "assign"))
           .toMatchObject({ roles: [IDENTITY_LINK_ADMIN_ROLE, "org_admin"] });
 

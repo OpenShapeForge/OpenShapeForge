@@ -23,6 +23,13 @@ let privileged: DatabaseRuntime;
 let runtime: DatabaseRuntime;
 const app = Fastify({ logger: false });
 let origin: string;
+let stallStream: (() => Promise<void>) | undefined;
+app.addHook("onSend", async (request, reply, payload) => {
+  if (request.headers["x-sse-test-stall"] === "yes" && reply.getHeader("content-type")?.toString().startsWith("text/event-stream")) {
+    await stallStream?.();
+  }
+  return payload;
+});
 const previousSecret = process.env.OPENSHAPEFORGE_INTERNAL_CONTEXT_SECRET;
 const previousIssuer = process.env.OPENSHAPEFORGE_API_VERIFY_BEARER_ISSUER;
 const secret = "sse-synthetic-test-context-secret";
@@ -160,3 +167,37 @@ test("a client that disconnects releases its stream slot at once (#886)", async 
   }
   expect(statuses).toEqual([200, 200, 200, 200, 200, 200, 200]);
 }, 15_000);
+
+test("an unconsumed response cannot hold a stream slot past its lifetime", async () => {
+  const headers = new Headers({ accept: "text/event-stream" });
+  applyTrustedContextHeaders(headers, { ...reader, userId: randomUUID() }, { secret });
+  const blocked = new AbortController();
+  const stalled = new Headers(headers);
+  stalled.set("x-sse-test-stall", "yes");
+  let entered = 0;
+  let allEntered!: () => void;
+  let resume!: () => void;
+  const ready = new Promise<void>(resolve => { allEntered = resolve; });
+  const paused = new Promise<void>(resolve => { resume = resolve; });
+  stallStream = async () => {
+    if (++entered === 5) allEntered();
+    await paused;
+  };
+  const requests = Array.from({ length: 5 }, () =>
+    fetch(`${origin}/api/events`, { headers: stalled, signal: blocked.signal }).catch(() => undefined));
+  try {
+    await Promise.race([ready, delay(5_000).then(() => { throw new Error("Five response streams did not reach onSend"); })]);
+    const refused = await fetch(`${origin}/api/events`, { headers });
+    expect(refused.status).toBe(429);
+    await refused.body?.cancel();
+    await delay(61_000);
+    const admitted = await fetch(`${origin}/api/events`, { headers, signal: AbortSignal.timeout(5_000) });
+    expect(admitted.status).toBe(200);
+    await admitted.body?.cancel();
+  } finally {
+    blocked.abort();
+    resume();
+    stallStream = undefined;
+    await Promise.all(requests);
+  }
+}, 75_000);

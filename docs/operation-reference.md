@@ -17,6 +17,13 @@ The existing `osf-blueprints.<Entity>.publish` Operation accepts optional
 these under reserved `$presentation`; they are not copied entity fields.
 Labels and descriptions continue to come from the configured source fields.
 
+For conditional publication, `expectedLatestVersion` requires the current
+publication version (`0` for the first publication). `requiredSnapshotRecord`
+requires an exact string value in a published field of the root or an included
+record of the named entity. Both optional preconditions are checked against
+the assembled snapshot and the latest version before the same transaction
+inserts the publication. A mismatch returns `VERSION_CONFLICT`.
+
 A thumbnail is a base64 PNG, JPEG, GIF or WebP data URI, at most 96 KiB decoded,
 with a matching raster signature. PNG dimensions are additionally bounded to
 2048 by 2048 pixels. External URLs, SVG and active content are

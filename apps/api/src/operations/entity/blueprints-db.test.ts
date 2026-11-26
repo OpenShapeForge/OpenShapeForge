@@ -42,14 +42,15 @@ test('publish handlers persist presentation, retire new choices, preserve copy p
   };
   const publish=(values:Record<string,unknown>)=>invoke('publish',{id:root.id,...values});
   const list=()=>invoke('list',{},customer);
-  await publish({thumbnail:png});
+  await publish({thumbnail:png,expectedLatestVersion:0});
   expect((await list()).items[0]).toMatchObject({blueprintId:'published-proof',label:'Published name',description:'Published description',thumbnail:png,version:1});
   const table=getGeneratedCrudTables().find(row=>row.source?.authoringEntityName==='RelationGroup')!;
   const copy=await createFromBlueprint(runtime.db,customer,table,'published-proof',{});
+  await expect(publish({expectedLatestVersion:0})).rejects.toThrow('latest blueprint publication changed');
   await expect(publish({
    expectedLatestVersion:1,
    requiredSnapshotRecord:{entity:'Address',field:'name',value:'Missing child'},
-  })).rejects.toThrow('does not contain the required record');
+  })).rejects.toThrow('does not contain the required string value');
   expect((await list()).items[0].version).toBe(1);
   const guarded={expectedLatestVersion:1,requiredSnapshotRecord:{entity:'RelationGroup',field:'name',value:'Published name'}};
   const competing=await Promise.allSettled([publish(guarded),publish(guarded)]);

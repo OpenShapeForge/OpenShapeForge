@@ -27,7 +27,7 @@ export function collectBlueprintOperations(entities: readonly Pick<CompiledEntit
             properties: {
               entity: titled({ type: "string", minLength: 1, maxLength: 128 }, "Entity", "Entiteit"),
               field: titled({ type: "string", minLength: 1, maxLength: 128 }, "Field", "Veld"),
-              value: titled({ type: "string", maxLength: 1000 }, "Required value", "Vereiste waarde"),
+              value: titled({ type: "string", maxLength: 1000 }, "Required string value", "Vereiste tekstwaarde"),
             },
           }, "Required snapshot record", "Vereist snapshotrecord"),
           thumbnail: titled({ type: ["string", "null"], maxLength: BLUEPRINT_THUMBNAIL_MAX_LENGTH, pattern: BLUEPRINT_THUMBNAIL_PATTERN }, "Thumbnail", "Voorbeeldafbeelding"),

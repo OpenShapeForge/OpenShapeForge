@@ -60,3 +60,15 @@ export async function copyBlueprintGraph(records: readonly BlueprintGraphRecord[
  }
  return copied;
 }
+
+
+export type RequiredSnapshotRecord = { entity: string; field: string; value: string };
+
+/** Tests the exact string value in the assembled snapshot, including its nested records. */
+export function snapshotContainsRecord(
+  entity: string, values: Record<string, unknown>, required: RequiredSnapshotRecord,
+): boolean {
+  if (entity === required.entity && values[required.field] === required.value) return true;
+  return ((values.$graph as BlueprintGraphRecord[] | undefined) ?? []).some(record =>
+    record.entity === required.entity && record.values[required.field] === required.value);
+}

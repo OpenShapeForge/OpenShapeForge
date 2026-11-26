@@ -5,7 +5,7 @@
  * The identity provider says WHICH organizations the account is a member of;
  * the membership row in `platform.identity_relations` says what the person
  * may do in the one the token selected (auth/identity-link.ts), as declared
- * names — a persona (`org_admin`) and the OSF baseline beside it. Keycloak
+ * role names such as `org_employee`. Keycloak
  * used to expand such a name into its composite members when it minted the
  * token; that expansion now happens here, from the same realm export
  * (`generated/compiler/role-composites.json`, emitted beside the realm), so
@@ -22,7 +22,7 @@
  * organization A granting it would have made the person that in organization
  * B too — so a person's session never reads `resource_access`. Realm roles
  * remain issuer-wide grants by design (`Platform.*`) and are unioned in every
- * case, the just-in-time minimum included.
+ * case.
  */
 import type { AuthIdentity } from "@openshapeforge/auth";
 import generatedComposites from "../generated/compiler/role-composites.json" with { type: "json" };

@@ -79,7 +79,7 @@ import { accessPolicy, customRoleId } from '../accounts/access-policy.js';
 // From the leaf module, NOT from ./identity-link.js: this module and that one
 // import each other, and EMPLOYEE_INVITATION_ROLE_GRANTS below reads both of
 // these while evaluating. See ./organization-roles.ts.
-import { IDENTITY_LINK_ADMIN_ROLE, NEEDS_ROLE_ASSIGNMENT_ROLES } from "./organization-roles.js";
+import { IDENTITY_LINK_ADMIN_ROLE } from "./organization-roles.js";
 import {
   KeycloakAdminError,
   type KeycloakAdminErrorCode,
@@ -120,35 +120,21 @@ export function declaredEmployeeInvitationRoles(): string[] {
 }
 
 /**
- * The organization-scoped roles each invited role carries — what lands in
- * `platform.identity_relations.roles` for the tenant, as DECLARED names. One
- * table, read by both the automatic path (first sign-in) and the manual one
- * (Account.assignRole in accounts/account-management.ts) — a second copy of a table
- * that decides what an administrator can do is the kind of duplication that
- * drifts silently.
+ * Roles persisted by invitation admission and platform-operator assignment.
  *
- * Each entry starts with the persona name itself (`org_admin`,
- * `org_employee`): the realm may declare a composite of that name, and
- * auth/person-roles.ts expands it at session time exactly as Keycloak used to
- * expand it into `resource_access` — so an invited administrator holds
- * whatever the realm says an administrator holds. Where the realm declares
- * no such composite the name is inert, and the OSF baseline beside it is what
- * counts: `org_admin` carries the role that gates every organization-admin
- * surface here; `org_employee` carries the minimal read-only set a
- * JIT-created identity's session runs on. `whoami` reads the persona name
- * off the session to say what the person is.
+ * Persist the selected persona so the realm's generated composites determine
+ * its effective permissions at session time. The administrator also receives
+ * the platform permission required to manage organization access.
  */
 export const EMPLOYEE_INVITATION_ROLE_GRANTS: Readonly<
   Record<"org_admin" | "org_employee", readonly string[]>
 > = {
   org_admin: ["org_admin", IDENTITY_LINK_ADMIN_ROLE],
-  org_employee: ["org_employee", ...NEEDS_ROLE_ASSIGNMENT_ROLES],
+  org_employee: ["org_employee"],
 };
 
 /**
- * A host may attach its product persona under another name. The OSF baseline
- * always remains part of the grant: authorization of the shared invitation
- * and identity tools must not depend on a host role name.
+ * A host may attach an additional product persona under another name.
  */
 export function employeeInvitationRoleGrants(
   role: EmployeeInvitationRole | null,

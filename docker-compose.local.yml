@@ -59,7 +59,7 @@ services:
       - service-net
 
   keycloak-db:
-    image: postgres:18-alpine
+    image: postgres:19-alpine
     container_name: openshapeforge-keycloak-db
     restart: unless-stopped
     # Postgres must not be PID 1: it would reap an orphaned pg_isready from a

@@ -216,6 +216,9 @@ async function publish(db: OpenShapeForgeDatabase, session: DbSessionInput, tabl
     const blueprintId = text(fields, "externalId");
     await sql`select pg_advisory_xact_lock(hashtextextended(${`${session.tenantId}:${nameOf(table)}:${blueprintId}`}, 0))`.execute(trx);
     const last = (await sql<{ version: number; values_json: Record<string, unknown>; source_record_id: string }>`select version, values_json, source_record_id from platform.blueprint_versions where tenant_id = ${session.tenantId}::uuid and entity_name = ${nameOf(table)} and blueprint_id = ${blueprintId} order by version desc limit 1`.execute(trx)).rows[0];
+    if (input.expectedLatestVersion !== undefined && (last?.version ?? 0) !== input.expectedLatestVersion) {
+      throw generatedCrudError("The latest blueprint publication changed.", "VERSION_CONFLICT");
+    }
     if (last && last.source_record_id !== input.id) throw generatedCrudError("This blueprint identifier belongs to another record.", "BAD_USER_INPUT");
     const values = allowedValues(table, fields);
     try {
@@ -257,6 +260,15 @@ async function publish(db: OpenShapeForgeDatabase, session: DbSessionInput, tabl
         referenceKeys.push({...reference,values:graphValues(target,rule.match,graphFields(target,row))});
       }
       values.$referenceKeys=referenceKeys;
+    }
+    const required = input.requiredSnapshotRecord as { entity: string; field: string; value: string } | undefined;
+    if (required) {
+      const rootMatches = nameOf(table) === required.entity && values[required.field] === required.value;
+      const childMatches = (values.$graph as BlueprintGraphRecord[] | undefined)?.some(record =>
+        record.entity === required.entity && record.values[required.field] === required.value);
+      if (!rootMatches && !childMatches) {
+        throw generatedCrudError("The blueprint snapshot does not contain the required record.", "VERSION_CONFLICT");
+      }
     }
     const version = (last?.version ?? 0) + 1;
     const readerRoles = [...new Set([...(table.source?.authorization?.roles.create ?? []), ...(table.source?.authorization?.roles.update ?? [])])];

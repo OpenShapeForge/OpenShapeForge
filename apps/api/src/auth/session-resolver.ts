@@ -91,7 +91,7 @@ export function __resetSessionResolverForTests(): void {
  * one, and refuses personal keys rather than guessing.
  */
 let personalKeyAdmin: { config: string; lookup: (userId: string) => Promise<OwnerAccount | null> } | undefined;
-function personalKeyOwnerLookup(): ((userId: string) => Promise<OwnerAccount | null>) | undefined {
+export function personalKeyOwnerLookup(): ((userId: string) => Promise<OwnerAccount | null>) | undefined {
   const baseUrl = process.env.OPENSHAPEFORGE_KEYCLOAK_BASE_URL?.trim();
   const realm = process.env.OPENSHAPEFORGE_KEYCLOAK_REALM?.trim();
   const clientId = process.env.OPENSHAPEFORGE_KEYCLOAK_ADMIN_CLIENT_ID?.trim();

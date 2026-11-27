@@ -4,6 +4,8 @@ import { fromJsonSchema, ProtocolError, ProtocolErrorCode, type Server } from "@
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
 import { getGeneratedCrudTables, requireEntityOperation } from "../operations/entity/catalog.js";
+import { registerMcpEventWebhookHandlers } from "./event-webhook-handlers.js";
+import type { ModuleEgressDispatch } from "../modules/egress.js";
 import { parseStreamCursor, readChangeBatch } from "../platform/entity-change-stream.js";
 
 const extension = "io.modelcontextprotocol/events";
@@ -34,15 +36,19 @@ function visibleEntities(session: TrustedSessionContext): string[] {
 }
 
 export function registerMcpEvents(server: Server, db: OpenShapeForgeDatabase, session: TrustedSessionContext,
-  refresh: () => Promise<TrustedSessionContext>): void {
+  refresh: () => Promise<TrustedSessionContext>, egressOwner?: ModuleEgressDispatch["owner"]): void {
   if (!session.tenantId || !session.userId || session.appPrincipal) return;
   const entities = visibleEntities(session);
   if (!entities.length) return;
-  server.registerCapabilities({ extensions: { [extension]: {} } });
+  const webhook = registerMcpEventWebhookHandlers(server, db, session, entities, egressOwner);
+  server.registerCapabilities({ extensions: { [extension]: {} }, ...(webhook ? { events: {} } : {}) });
   server.setRequestHandler("events/list", { params: listParams }, async () => ({
     resultType: "complete",
     events: [{
-      name, description: "A new readable resource of the selected entity was created.", delivery: ["push"],
+      name, description: webhook
+        ? "A new readable resource of the selected entity was created. Webhook delivery is available for personal notifications."
+        : "A new readable resource of the selected entity was created.",
+      delivery: webhook ? ["push", "webhook"] : ["push"],
       inputSchema: { type: "object", required: ["entity"], additionalProperties: false, properties: { entity: { type: "string", enum: entities } } },
       payloadSchema: { type: "object", required: ["entity", "id"], additionalProperties: false,
         properties: { entity: { type: "string" }, id: { type: "string" } } },

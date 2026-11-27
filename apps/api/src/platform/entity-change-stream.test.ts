@@ -260,3 +260,28 @@ test("MCP Events streams a committed, authorized creation with its journal ident
     await reader.cancel();
   } finally { abort.abort(); await handler.close(); }
 }, 15_000);
+
+test("MCP event subscription metadata is isolated by actor and OAuth client", async () => {
+  const { createEventWebhookStore, eventWebhookId, openEventWebhookDelivery } = await import("../mcp/event-webhook-store.js");
+  const session = { ...reader, credential: "bearer" as const, relationGroupIds: [],
+    issuer: "https://issuer.example.test/realms/events", oauthClientId: "work-test" };
+  const principal = { tenantId: session.tenantId, userId: session.userId, issuer: session.issuer, clientId: session.oauthClientId };
+  await sql`insert into platform.tenants (id, slug, name, status)
+    values (${principal.tenantId}::uuid, 'event-test', 'Event test', 'active')`.execute(privileged.db);
+  const store = createEventWebhookStore(runtime.db, session, principal);
+  const url = new URL("https://work.example.test/events");
+  const id = eventWebhookId(principal, "Notification", url);
+  const keys = { activeKeyId: "local", keys: new Map([["local", Buffer.alloc(32, 7)]]) };
+  const secret = "whsec_" + Buffer.alloc(32, 3).toString("base64");
+  const row = await store.retain({ keys, id, entity: "Notification", url, secret, cursor: "0", expiresAt: new Date(Date.now() + 60_000) });
+  expect(row?.id).toBe(id);
+  expect(JSON.stringify(row)).not.toContain(secret);
+  expect(openEventWebhookDelivery(keys, row!)).toEqual({ url: url.href, secret });
+
+  const otherClient = { ...principal, clientId: "other-client" };
+  expect(await createEventWebhookStore(runtime.db, { ...session, oauthClientId: otherClient.clientId }, otherClient).get(id)).toBeUndefined();
+  const otherPerson = { ...principal, userId: actor.userId };
+  expect(await createEventWebhookStore(runtime.db, { ...session, userId: actor.userId }, otherPerson).get(id)).toBeUndefined();
+  await store.remove(id);
+  expect(await store.get(id)).toBeUndefined();
+});

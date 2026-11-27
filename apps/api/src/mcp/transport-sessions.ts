@@ -23,6 +23,7 @@ import { clientInfoFromEnvelopeBody, clientInfoFromInitializeBody, rememberSessi
 import { sessionOpeningSentence } from "./session-opening.js";
 import { pendingUpdateCount } from "./update-notices.js";
 import { catalogDerivedTools } from "./catalog.js";
+import { registerMcpEvents } from "./events.js";
 import { handleModernMcpRequest } from "./modern-http.js";
 import type { McpRegistrationOptions, McpRouteContext } from "./route-context.js";
 import type { BuildServer } from "./generated-mcp-server.js";
@@ -148,6 +149,7 @@ export function createTransportSessions(input: {
         undefined, undefined, undefined, includeInstructions,
         includeInstructions ? await pendingUpdateCount(db, session) : undefined,
       );
+      registerMcpEvents(server, db, session, async () => (await requireMcpSession(request)).session);
       if ((request.body as { method?: unknown } | null)?.method === "server/discover") {
         await externalDiscoveryOf(server)?.discover({ signal: currentLiveRequestSignal() });
       }

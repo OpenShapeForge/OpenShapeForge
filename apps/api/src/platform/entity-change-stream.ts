@@ -12,7 +12,7 @@ import { mayFollowFieldDefinitions } from "../operations/entity/extensions/defin
 
 export const REPLAY_WINDOW_MS = 24 * 60 * 60 * 1000;
 export type ResourceChange = { entity: string; id: string; change: "created" | "updated" | "deleted"; version?: string };
-export type ChangeBatch = { cursor: string; reset: boolean; changes: Array<{ cursor: string; data: ResourceChange }> };
+export type ChangeBatch = { cursor: string; reset: boolean; changes: Array<{ cursor: string; data: ResourceChange; eventId?: string; timestamp?: string }> };
 export type ResourceChangeAuthorizer = (session: DbSessionInput, entity:string, id:string) => Promise<boolean>;
 
 export function parseStreamCursor(value: unknown): string | undefined {
@@ -76,7 +76,7 @@ async function projectChange(trx: Transaction<DB>, session: DbSessionInput, even
 }
 
 /** Each poll is a short transaction, shared by every API replica through the journal. */
-export async function readChangeBatch(db: OpenShapeForgeDatabase, session: DbSessionInput, cursor?: string, validateCursor = true, authorizeResource?:ResourceChangeAuthorizer): Promise<ChangeBatch> {
+export async function readChangeBatch(db: OpenShapeForgeDatabase, session: DbSessionInput, cursor?: string, validateCursor = true, authorizeResource?:ResourceChangeAuthorizer, createdEntity?: string): Promise<ChangeBatch> {
   return withDbSession(db, session, async trx => {
     // Writers never acquire this lock. Only committed journal rows receive a
     // delivery cursor, so a slow transaction cannot be skipped or deadlock a writer.
@@ -111,10 +111,14 @@ export async function readChangeBatch(db: OpenShapeForgeDatabase, session: DbSes
       .where("tenant_id", "=", session.tenantId!).where("delivery_sequence", ">", cursor)
       .orderBy("delivery_sequence", "asc").limit(100).execute();
     const changes: ChangeBatch["changes"] = [];
+    const alternateName = createdEntity
+      ? getGeneratedCrudTables().find(table => table.source?.authoringEntityName === createdEntity)?.source?.graphql?.singleQueryName
+      : undefined;
     for (const row of rows) {
+      if (createdEntity && (row.event_type !== "created" || (row.aggregate_type !== createdEntity && row.aggregate_type !== alternateName))) continue;
       const event = { ...mapEntityEvent(row), sequence: row.delivery_sequence! };
       const data = await projectChange(trx, session, event, authorizeResource);
-      if (data) changes.push({ cursor: event.sequence, data });
+      if (data) changes.push({ cursor: event.sequence, data, ...(createdEntity ? { eventId: event.id, timestamp: event.occurredAt } : {}) });
     }
     return { cursor: rows.at(-1)?.delivery_sequence ?? cursor, reset: false, changes };
   });

@@ -33,10 +33,11 @@ const unsubscribeParams = fromJsonSchema<{ name: string; arguments: { entity: st
 
 export function registerMcpEventWebhookHandlers(server: Server, db: OpenShapeForgeDatabase,
   session: TrustedSessionContext, entities: readonly string[], owner: ModuleEgressDispatch["owner"]): boolean {
+  if (!owner?.pinsResolvedAddresses || !entities.includes("Notification")) return false;
   const keys = keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
   const allowlist = (process.env.OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS ?? "").split(",").map(host => host.trim()).filter(Boolean);
   const principal = eventWebhookPrincipal(session);
-  if (!principal || !keys || !owner?.pinsResolvedAddresses || !allowlist.length || !entities.includes("Notification")) return false;
+  if (!principal || !keys || !allowlist.length) return false;
   const store = createEventWebhookStore(db, session, principal);
   const dispatch: ModuleEgressDispatch = { owner, purpose: "probe", scope: {
     tenantId: principal.tenantId, actorId: principal.userId, provider: "mcp-events", operation: "callback", kind: "mutation",

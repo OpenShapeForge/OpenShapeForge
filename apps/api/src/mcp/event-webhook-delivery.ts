@@ -24,7 +24,7 @@ async function workerTransaction<T>(db: OpenShapeForgeDatabase, work: (trx: Tran
   });
 }
 
-async function claimNext(db: OpenShapeForgeDatabase): Promise<Claim | undefined> {
+async function claimNext(db: OpenShapeForgeDatabase, tenantId: string): Promise<Claim | undefined> {
   return workerTransaction(db, async trx => {
     await sql`delete from platform.mcp_event_subscriptions where id in (
       select id from platform.mcp_event_subscriptions where expires_at <= clock_timestamp()
@@ -32,7 +32,7 @@ async function claimNext(db: OpenShapeForgeDatabase): Promise<Claim | undefined>
     return (await sql<Claim>`
       with candidate as (
         select id from platform.mcp_event_subscriptions
-        where expires_at > clock_timestamp() and next_attempt_at <= clock_timestamp()
+        where tenant_id = ${tenantId}::uuid and expires_at > clock_timestamp() and next_attempt_at <= clock_timestamp()
           and (lease_expires_at is null or lease_expires_at <= clock_timestamp())
         order by next_attempt_at, id limit 1 for update skip locked
       )
@@ -51,8 +51,9 @@ export async function deliverMcpEventWebhookOnce(options: {
   keys: SecretKeyring;
   owner: NonNullable<ModuleEgressDispatch["owner"]>;
   allowlist: readonly string[];
+  tenantId: string;
 }): Promise<"idle" | "checked" | "delivered" | "retried" | "removed"> {
-  const claimed = await claimNext(options.workerDb);
+  const claimed = await claimNext(options.workerDb, options.tenantId);
   if (!claimed) return "idle";
   const { id, lease_token: lease } = claimed;
   const remove = () => workerTransaction(options.workerDb, async trx => {

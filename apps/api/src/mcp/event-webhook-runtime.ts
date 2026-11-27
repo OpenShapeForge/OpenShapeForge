@@ -7,12 +7,13 @@ import type { McpRegistrationOptions } from "./route-context.js";
 import { deliverMcpEventWebhookOnce } from "./event-webhook-delivery.js";
 
 /** Only advertise webhook subscriptions when this deployment has an active delivery loop. */
-export function attachMcpEventWebhookRuntime(app: FastifyInstance, options: McpRegistrationOptions): () => boolean {
+export function attachMcpEventWebhookRuntime(app: FastifyInstance, options: McpRegistrationOptions): (tenantId: string | null) => boolean {
   const apiDb = options.db;
   const owner = options.egressOwner;
   const url = process.env.OPENSHAPEFORGE_MCP_EVENT_WORKER_DATABASE_URL?.trim();
   const allowlist = (process.env.OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS ?? "").split(",").map(host => host.trim()).filter(Boolean);
-  if (!apiDb || !owner?.pinsResolvedAddresses || !url || !allowlist.length) return () => false;
+  const tenantId = process.env.OPENSHAPEFORGE_MCP_EVENT_PILOT_TENANT_ID?.trim();
+  if (!apiDb || !owner?.pinsResolvedAddresses || !url || !allowlist.length || !tenantId) return () => false;
   const keys = keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
   if (!keys) throw new Error("MCP event webhook secrets require the configured application keyring.");
   const pool = createDatabaseRuntime({ databaseUrl: url, maxConnections: 1 });
@@ -20,7 +21,7 @@ export function attachMcpEventWebhookRuntime(app: FastifyInstance, options: McpR
   let timer: ReturnType<typeof setTimeout> | undefined;
   let work: Promise<void> | undefined;
   const step = () => {
-    work = deliverMcpEventWebhookOnce({ apiDb, workerDb: pool.db, keys, owner, allowlist })
+    work = deliverMcpEventWebhookOnce({ apiDb, workerDb: pool.db, keys, owner, allowlist, tenantId })
       .then(() => undefined)
       .catch(() => { app.log.warn({ code: "MCP_EVENT_DELIVERY_INTERRUPTED" }, "MCP Events delivery worker will retry."); })
       .finally(() => { if (active) timer = setTimeout(step, 1000); });
@@ -43,5 +44,5 @@ export function attachMcpEventWebhookRuntime(app: FastifyInstance, options: McpR
     clearTimeout(timer);
     try { await work; } finally { await pool.close(); }
   });
-  return () => active;
+  return candidate => active && candidate === tenantId;
 }

@@ -4,6 +4,8 @@ import { SQL } from "bun";
 import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import Fastify from "fastify";
+import { Server, createMcpHandler } from "@modelcontextprotocol/server";
+import { registerMcpEvents } from "../mcp/events.js";
 import { applyTrustedContextHeaders } from "@openshapeforge/auth";
 import { sql } from "kysely";
 import { createDatabaseRuntime, type DatabaseRuntime } from "../db/connection.js";
@@ -201,3 +203,150 @@ test("an unconsumed response cannot hold a stream slot past its lifetime", async
     await Promise.all(requests);
   }
 }, 75_000);
+
+test("MCP Events streams a committed, authorized creation with its journal identity", async () => {
+  const who = { ...reader, credential: "trusted-context" } as Parameters<typeof registerMcpEvents>[2];
+  const handler = createMcpHandler(() => {
+    const server = new Server({ name: "events-test", version: "1" });
+    registerMcpEvents(server, runtime.db, who, async () => who);
+    return server;
+  }, { legacy: "reject" });
+  const abort = new AbortController();
+  const post = (method: string, params: Record<string, unknown> = {}) => handler.fetch(new Request("https://example.test/mcp", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream",
+      "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": method },
+    signal: abort.signal,
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: { ...params, _meta: {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": { extensions: { "io.modelcontextprotocol/events": {} } },
+      "io.modelcontextprotocol/clientInfo": { name: "events-test", version: "1" },
+    } } }),
+  }));
+  try {
+    expect(await (await post("server/discover")).json()).toMatchObject({
+      result: { capabilities: { extensions: { "io.modelcontextprotocol/events": {} } } },
+    });
+    expect(await (await post("events/list")).json()).toMatchObject({
+      result: { events: [{ name: "resource.created", delivery: ["push"] }] },
+    });
+    const stream = await post("events/stream", { name: "resource.created", arguments: { entity: "RelationGroup" }, cursor: null });
+    expect(stream.headers.get("content-type")).toContain("text/event-stream");
+    const reader = stream.body!.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = "";
+    async function next() {
+      while (true) {
+        const boundary = buffer.indexOf("\n\n");
+        if (boundary >= 0) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const data = frame.split("\n").find(line => line.startsWith("data: "));
+          if (data) return JSON.parse(data.slice(6));
+        } else {
+          const chunk = await reader.read();
+          if (chunk.done) throw new Error("Events stream ended early.");
+          buffer += chunk.value;
+        }
+      }
+    }
+    expect(await next()).toMatchObject({ method: "notifications/events/active", params: {
+      truncated: false, _meta: { "io.modelcontextprotocol/subscriptionId": 1 },
+    } });
+    const row = await createGeneratedEntity(runtime.db, actor, { table: "erp.relation_groups", values: { name: "MCP Events fixture", groupType: "team" } });
+    expect(await next()).toMatchObject({ method: "notifications/events/event", params: {
+      name: "resource.created", eventId: expect.any(String), timestamp: expect.any(String),
+      data: { entity: "RelationGroup", id: String(row.id) }, cursor: expect.any(String),
+    } });
+    await reader.cancel();
+  } finally { abort.abort(); await handler.close(); }
+}, 15_000);
+
+test("MCP event subscription metadata is isolated by actor and OAuth client", async () => {
+  const { createEventWebhookStore, eventWebhookId, openEventWebhookDelivery } = await import("../mcp/event-webhook-store.js");
+  const session = { ...reader, credential: "bearer" as const, relationGroupIds: [],
+    issuer: "https://issuer.example.test/realms/events", oauthClientId: "work-test" };
+  const principal = { tenantId: session.tenantId, userId: session.userId, issuer: session.issuer, clientId: session.oauthClientId };
+  await sql`insert into platform.tenants (id, slug, name, status)
+    values (${principal.tenantId}::uuid, 'event-test', 'Event test', 'active')`.execute(privileged.db);
+  const store = createEventWebhookStore(runtime.db, session, principal);
+  const url = new URL("https://work.example.test/events");
+  const id = eventWebhookId(principal, "Notification", url);
+  const keys = { activeKeyId: "local", keys: new Map([["local", Buffer.alloc(32, 7)]]) };
+  const secret = "whsec_" + Buffer.alloc(32, 3).toString("base64");
+  const row = await store.retain({ keys, id, entity: "Notification", url, secret, cursor: "0", expiresAt: new Date(Date.now() + 60_000) });
+  expect(row?.id).toBe(id);
+  expect(JSON.stringify(row)).not.toContain(secret);
+  expect(openEventWebhookDelivery(keys, row!)).toEqual({ url: url.href, secret, grant: { scope: session.scope, roles: session.roles, groups: session.groups, oauthScopes: [] } });
+
+  const otherClient = { ...principal, clientId: "other-client" };
+  expect(await createEventWebhookStore(runtime.db, { ...session, oauthClientId: otherClient.clientId }, otherClient).get(id)).toBeUndefined();
+  const otherPerson = { ...principal, userId: actor.userId };
+  expect(await createEventWebhookStore(runtime.db, { ...session, userId: actor.userId }, otherPerson).get(id)).toBeUndefined();
+  await store.remove(id);
+  expect(await store.get(id)).toBeUndefined();
+});
+
+test("MCP Events advertises, verifies and renews a webhook on the configured entity", async () => {
+  const bearerExpiresAt = Date.now() + 180_000;
+  const who: Parameters<typeof registerMcpEvents>[2] = {
+    ...reader, tenantId: randomUUID(), credential: "bearer", principalKind: "person",
+    issuer, oauthClientId: "work-test", bearerExpiresAt,
+    relation: {
+      status: "linked", identityId: randomUUID(), issuer, subject: reader.userId, relationId: randomUUID(),
+      displayName: null, relationType: "person", candidateRelationId: null, linkedBy: null,
+      needsRoleAssignment: false, roles: reader.roles,
+    },
+  };
+  await sql`insert into platform.tenants (id, slug, name, status)
+    values (${who.tenantId}::uuid, 'event-hooks-test', 'Event hooks test', 'active')`.execute(privileged.db);
+  const key = Buffer.alloc(32, 3).toString("base64");
+  const previousKeys = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+  const previousHosts = process.env.OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS;
+  process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = `test:${key}`;
+  process.env.OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS = "8.8.8.8";
+  let verifications = 0;
+  const handler = createMcpHandler(() => {
+    const server = new Server({ name: "events-test", version: "1" });
+    registerMcpEvents(server, runtime.db, who, async () => who, {
+      pinsResolvedAddresses: true,
+      fetch: async ({ init }) => {
+        verifications++;
+        expect(new Headers(init.headers).get("webhook-signature")).toMatch(/^v1,/);
+        const body = await new Response(init.body).json();
+        expect(body.type).toBe("verification");
+        return Response.json({ challenge: body.challenge });
+      },
+    }, "RelationGroup");
+    return server;
+  }, { legacy: "reject" });
+  const post = async (method: string, params: Record<string, unknown> = {}) => {
+    const response = await handler.fetch(new Request("https://example.test/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json", "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": method },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: { ...params, _meta: {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": { name: "events-test", version: "1" },
+      } } }),
+    }));
+    return response.json();
+  };
+  try {
+    expect(await post("server/discover")).toMatchObject({ result: { capabilities: { events: {} } } });
+    expect(await post("events/list")).toMatchObject({ result: { events: [{ name: "resource.created", delivery: ["push", "webhook"] }] } });
+    const args = { name: "resource.created", arguments: { entity: "RelationGroup" } };
+    const url = "https://8.8.8.8/callback";
+    const request = { ...args, delivery: { mode: "webhook", url, secret: `whsec_${key}` } };
+    const subscribed = await post("events/subscribe", request);
+    expect(subscribed).toMatchObject({ result: { id: expect.any(String), refreshBefore: new Date(bearerExpiresAt).toISOString() } });
+    expect(await post("events/subscribe", request)).toMatchObject({ result: { id: subscribed.result.id } });
+    expect(verifications).toBe(1);
+    expect(await post("events/unsubscribe", { ...args, delivery: { url } })).toMatchObject({ result: { resultType: "complete" } });
+  } finally {
+    await handler.close();
+    if (previousKeys === undefined) delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+    else process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = previousKeys;
+    if (previousHosts === undefined) delete process.env.OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS;
+    else process.env.OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS = previousHosts;
+  }
+}, 15_000);

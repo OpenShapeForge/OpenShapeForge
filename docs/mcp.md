@@ -1048,6 +1048,31 @@ application URLs continue to use `OPENSHAPEFORGE_PUBLIC_ORIGIN`. Provider
 registration instructions, authorization-code exchange and refresh all use
 the same callback. Register that exact URL in the provider's client settings.
 
+## MCP Events
+
+The modern MCP endpoint exposes `events/list` and `events/stream` for creations
+that the current session can read on realtime MCP entities. Events reference
+the existing entity row by ID and use the existing committed change journal.
+
+The Develop pilot adds `events/subscribe` and `events/unsubscribe` for the one
+entity chosen by the host. Subscription expiry is at most 15 minutes and is
+bounded by the verified OAuth token's expiration. The client refreshes before
+`refreshBefore`. The subscription keeps the delivery cursor and a sealed
+callback, signing key and authorization bounds. The delivery loop rechecks
+current access before sending the entity reference.
+
+The callback is verified with a signed, single-use challenge. Both verification
+and delivery use Standard Webhooks signing and `X-MCP-Subscription-Id` over
+HTTPS, with the deployment's address-pinning egress module and callback host
+allowlist. Delivery reuses the event ID across retries.
+
+Set `OPENSHAPEFORGE_MCP_EVENT_PILOT_TENANT_ID`,
+`OPENSHAPEFORGE_MCP_EVENT_ENTITY`, `OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS`
+and `OPENSHAPEFORGE_MCP_EVENT_WORKER_DATABASE_URL` to enable the pilot. The host
+also supplies the application keyring and the configured realm account lookup.
+The worker credential can claim sealed subscription rows. Reads of the entity
+journal and target row use the subscriber's current application authority.
+
 ## Durable executions through MCP Tasks
 
 The `io.modelcontextprotocol/tasks` extension uses the 2026-07-28 protocol.

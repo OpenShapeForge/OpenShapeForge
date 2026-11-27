@@ -162,7 +162,7 @@ configs, empty table, nothing reading it.
   emitter and the `app.*` helper functions, but no current table declares it;
   every tenant-scoped table today gets the plain
   `tenant_id = app.current_tenant()` policy. The one axis that *is* live is
-  `workerAccess`, on the `platform.jobs` queue, where it compares
+  `workerAccess`, on the explicitly declared queue tables, where it compares
   the connected database role (`openshapeforge_worker`) as well as the
   `app.worker_role` GUC — see [api.md](api.md#the-worker-axis).
 

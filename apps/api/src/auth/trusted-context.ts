@@ -125,6 +125,8 @@ export type TrustedSessionContext = {
   issuer?: string;
   /** OAuth authorized party from the verified bearer claims, never clientInfo. */
   oauthClientId?: string;
+  /** Expiration of the verified access token, in epoch milliseconds. */
+  bearerExpiresAt?: number;
   /** Display language from verified identity claims; never a permission or client input. */
   locale?: string;
   roles: string[];

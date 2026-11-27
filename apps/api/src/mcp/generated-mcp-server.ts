@@ -72,6 +72,7 @@ import { primeSessionExtensions } from "./extension-schemas.js";
 import { createMcpSessionAdmission } from "./session-admission.js";
 import { createExternalDiscovery, currentLiveRequestSignal } from "./external-discovery.js";
 import { withRuntimeSpan } from "@openshapeforge/observability";
+import { attachMcpEventWebhookRuntime } from "./event-webhook-runtime.js";
 import { createTransportSessions } from "./transport-sessions.js";
 import { registerSessionWithPlatform } from "./platform-registration.js";
 import { registerSessionExecutors } from "./session-executors.js";
@@ -348,7 +349,8 @@ export function registerGeneratedMcpServer(
 
     await registerConfigurationHandoffRoutes({ instance, options, requireMcpSession });
 
-    const { handleMcpRequest } = createTransportSessions({ options, requireMcpSession, buildServer });
+    const webhooksReady = attachMcpEventWebhookRuntime(instance, options);
+    const { handleMcpRequest } = createTransportSessions({ options, requireMcpSession, buildServer, webhooksReady });
 
     instance.route({
       url: MCP_MOUNT_PATH,

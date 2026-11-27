@@ -107,6 +107,7 @@ import { applyApiKeysMigration } from "./migrations/api-keys.js";
 import { applyOrganizationRelationLinkMigration } from "./migrations/organization-relation-link.js";
 import { applyUpdateNoticesMigration } from "./migrations/update-notices.js";
 import { applyBlueprintsMigration, applyBlueprintsGrants } from "./migrations/blueprints.js";
+import { applyMcpEventSubscriptionPolicy } from "./migrations/mcp-event-subscriptions.js";
 import { applyMcpTasksMigration } from "./migrations/mcp-tasks.js";
 import { applyOperationExecutionReceiptsMigration } from "./migrations/operation-execution-receipts.js";
 import { applyAuditHistory } from "./migrations/audit-history.js";
@@ -217,6 +218,7 @@ export async function runMigrationChain(
   await applyUpdateNoticesMigration(db);
   await applyOperationExecutionReceiptsMigration(db);
   await applyMcpTasksMigration(db);
+  await applyMcpEventSubscriptionPolicy(db);
   await applyJobsMigration(db);
   // After the queue, because an inbound receipt's dispatch rides on it.
   await applyInboundMigration(db);

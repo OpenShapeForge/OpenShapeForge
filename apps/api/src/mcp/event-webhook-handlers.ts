@@ -51,6 +51,11 @@ export function registerMcpEventWebhookHandlers(server: Server, db: OpenShapeFor
   server.setRequestHandler("events/subscribe", { params: subscribeParams }, async params => {
     const { entity } = params.arguments;
     const target = destination(params.name, entity, params.delivery.url);
+    const now = Date.now();
+    const expiresAt = new Date(Math.min(now + EVENT_WEBHOOK_TTL_MS, session.bearerExpiresAt ?? 0));
+    if (expiresAt.getTime() < now + 30_000) {
+      throw new ProtocolError(-32024, "Refresh the OAuth access token before subscribing to this event.");
+    }
     const id = eventWebhookId(principal, entity, target.url);
     let key: Buffer;
     let requested: string | undefined;
@@ -64,11 +69,10 @@ export function registerMcpEventWebhookHandlers(server: Server, db: OpenShapeFor
     const cursor = batch.reset ? batch.cursor : knownCursor!;
     try { await verifyEventWebhook(target, key, id); }
     catch { throw new ProtocolError(-32015, "Webhook callback could not be verified.", { reason: "challenge_failed" }); }
-    const expiresAt = new Date(Date.now() + EVENT_WEBHOOK_TTL_MS);
     const row = await store.retain({ keys, id, entity, url: target.url, secret: params.delivery.secret, cursor, expiresAt });
     if (!row) throw new ProtocolError(-32025, "Too many active event subscriptions.", { limit: "subscriptions", max: 5 });
     return { resultType: "complete", id, cursor: row.cursor, truncated: knownCursor !== undefined && batch.reset,
-      refreshBefore: new Date(expiresAt.getTime() - 60_000).toISOString() };
+      refreshBefore: expiresAt.toISOString() };
   });
   server.setRequestHandler("events/unsubscribe", { params: unsubscribeParams }, async params => {
     const target = destination(params.name, params.arguments.entity, params.delivery.url);

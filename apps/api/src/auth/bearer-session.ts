@@ -271,6 +271,7 @@ export async function resolveVerifiedBearerSession(
       ...(typeof claims.iss === "string" ? { issuer: claims.iss } : {}),
       ...(typeof claims.azp === "string" && claims.azp.trim() ? { oauthClientId: claims.azp } : {}),
       ...(loginSessionBinding ? { loginSessionBinding } : {}),
+      ...(typeof claims.exp === "number" ? { bearerExpiresAt: claims.exp * 1_000 } : {}),
       userDisplayName: relation?.displayName ?? null,
       ...(isPerson && claims.email_verified === true && personClaims?.email ? { verifiedEmail: personClaims.email } : {}),
       ...(typeof claims.locale === "string" && claims.locale.trim() ? { locale: claims.locale.trim() } : {}),

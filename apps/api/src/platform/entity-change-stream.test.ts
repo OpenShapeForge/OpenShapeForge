@@ -276,7 +276,7 @@ test("MCP event subscription metadata is isolated by actor and OAuth client", as
   const row = await store.retain({ keys, id, entity: "Notification", url, secret, cursor: "0", expiresAt: new Date(Date.now() + 60_000) });
   expect(row?.id).toBe(id);
   expect(JSON.stringify(row)).not.toContain(secret);
-  expect(openEventWebhookDelivery(keys, row!)).toEqual({ url: url.href, secret });
+  expect(openEventWebhookDelivery(keys, row!)).toEqual({ url: url.href, secret, grant: { scope: session.scope, roles: session.roles, groups: session.groups, oauthScopes: [] } });
 
   const otherClient = { ...principal, clientId: "other-client" };
   expect(await createEventWebhookStore(runtime.db, { ...session, oauthClientId: otherClient.clientId }, otherClient).get(id)).toBeUndefined();

@@ -7,6 +7,7 @@ import { resolveAuthorizationProfileAccess } from "../auth/authorization-profile
 import { readLinkRowByIdentity, toState } from "../auth/identity-link-store.js";
 import { assertMemberAccessActive } from "../auth/member-access-state.js";
 import { personalKeyOwnerLookup } from "../auth/session-resolver.js";
+import type { EventWebhookGrant } from "./event-webhook-store.js";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 
 export type EventWebhookPrincipal = Readonly<{
@@ -24,7 +25,7 @@ export function eventWebhookPrincipal(session: TrustedSessionContext): EventWebh
 }
 
 /** Re-evaluate the subscriber's organization authority every time delivery is attempted. */
-export async function resolveEventWebhookAuthority(db: OpenShapeForgeDatabase, principal: EventWebhookPrincipal):
+export async function resolveEventWebhookAuthority(db: OpenShapeForgeDatabase, principal: EventWebhookPrincipal, grant: EventWebhookGrant):
   Promise<TrustedSessionContext | undefined> {
   const ownerLookup = personalKeyOwnerLookup();
   const realm = realmFromIssuer(principal.issuer);
@@ -36,7 +37,8 @@ export async function resolveEventWebhookAuthority(db: OpenShapeForgeDatabase, p
   const membership: TrustedSessionContext = {
     tenantId: principal.tenantId, userId: principal.userId, issuer: principal.issuer,
     oauthClientId: principal.clientId, credential: "bearer", principalKind: "person",
-    roles: [], groups: account.groups, relationGroupIds: [], scope: "self",
+    roles: [], groups: account.groups.filter(group => grant.groups.includes(group)), relationGroupIds: [], scope: "self",
+    oauthScopes: [...grant.oauthScopes],
   };
   await assertMemberAccessActive(db, membership);
   const relation = await withDbSession(db, membership, async trx => {
@@ -45,7 +47,10 @@ export async function resolveEventWebhookAuthority(db: OpenShapeForgeDatabase, p
   });
   if (relation?.status !== "linked" || !relation.relationId) return;
   const authority = await personOrganizationAuthority(db, {
-    tenantId: principal.tenantId, userId: principal.userId, groups: account.groups, issuerRoles: [], identity,
+    tenantId: principal.tenantId, userId: principal.userId, groups: membership.groups, issuerRoles: [], identity,
   }, relation, realm);
-  return resolveAuthorizationProfileAccess({ ...membership, ...authority, relation }, db);
+  return resolveAuthorizationProfileAccess({ ...membership, ...authority, relation,
+    roles: authority.roles.filter(role => grant.roles.includes(role)),
+    scope: authority.scope === grant.scope ? authority.scope : "self",
+  }, db);
 }

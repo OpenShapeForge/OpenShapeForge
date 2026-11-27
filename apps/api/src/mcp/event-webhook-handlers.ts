@@ -32,8 +32,8 @@ const unsubscribeParams = fromJsonSchema<{ name: string; arguments: { entity: st
 });
 
 export function registerMcpEventWebhookHandlers(server: Server, db: OpenShapeForgeDatabase,
-  session: TrustedSessionContext, entities: readonly string[], owner: ModuleEgressDispatch["owner"]): boolean {
-  if (!owner?.pinsResolvedAddresses || !entities.includes("Notification")) return false;
+  session: TrustedSessionContext, entities: readonly string[], owner: ModuleEgressDispatch["owner"], webhookEntity?: string): boolean {
+  if (!owner?.pinsResolvedAddresses || !webhookEntity || !entities.includes(webhookEntity)) return false;
   const keys = keyringFromEnv(process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS);
   const allowlist = (process.env.OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS ?? "").split(",").map(host => host.trim()).filter(Boolean);
   const principal = eventWebhookPrincipal(session);
@@ -44,7 +44,7 @@ export function registerMcpEventWebhookHandlers(server: Server, db: OpenShapeFor
   } };
   function destination(name: string, entity: string, url: string) {
     if (name !== eventName) throw new ProtocolError(-32023, "Event not found.");
-    if (entity !== "Notification") throw new ProtocolError(-32024, "Event subscription is forbidden.");
+    if (entity !== webhookEntity) throw new ProtocolError(-32024, "Event subscription is forbidden.");
     try { return eventWebhookDestination(url, dispatch, allowlist); }
     catch { throw new ProtocolError(ProtocolErrorCode.InvalidParams, "Invalid webhook callback URL."); }
   }

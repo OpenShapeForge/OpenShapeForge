@@ -672,14 +672,21 @@ describe("worker-role RLS axis", () => {
             // secret, is deliberately NOT on this axis. The recompute journal
             // is a queue of the same kind: ids and a generation, swept across
             // tenants for rows whose job died.
-            expect(policies.rows.map((row) => row.qualified))
-              .toEqual(["platform.extension_field_recomputes", "platform.inbound_deliveries", "platform.jobs"]);
+            // The MCP queue stores delivery state, never notification data.
+            // Its callback and signing key are sealed to the tenant and subscription.
+            const rolesByTable = new Map([
+              ["platform.extension_field_recomputes", WORKER_GUC_ROLE],
+              ["platform.inbound_deliveries", WORKER_GUC_ROLE],
+              ["platform.jobs", WORKER_GUC_ROLE],
+              ["platform.mcp_event_subscriptions", "mcp-events-worker"],
+            ]);
+            expect([...new Set(policies.rows.map(row => row.qualified))]).toEqual([...rolesByTable.keys()]);
             // USING and WITH CHECK move together, so a claim can also write back
             // — and neither may name the GUC without the connected role beside
             // it, which is the property #223 added.
             for (const row of policies.rows) {
               for (const predicate of [row.qual, row.withcheck]) {
-                expect(predicate).toContain(WORKER_GUC_ROLE);
+                expect(predicate).toContain(rolesByTable.get(row.qualified)!);
                 expect(predicate).toContain(`CURRENT_USER = '${WORKER_ROLE}'`);
                 expect(predicate).not.toMatch(
                   /\(current_worker_role\(\) = '[^']*'::text\)(?!\))/i,

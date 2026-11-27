@@ -48,7 +48,7 @@ export function createTransportSessions(input: {
   options: McpRegistrationOptions;
   requireMcpSession: McpRouteContext["requireMcpSession"];
   buildServer: BuildServer;
-  webhooksReady?: (tenantId: string | null) => boolean;
+  webhooksReady?: (tenantId: string | null) => string | undefined;
 }) {
   const { options, requireMcpSession, buildServer } = input;
   // Stateful sessions, keyed by the SDK-issued mcp-session-id and bound to
@@ -150,7 +150,7 @@ export function createTransportSessions(input: {
         undefined, undefined, undefined, includeInstructions,
         includeInstructions ? await pendingUpdateCount(db, session) : undefined,
       );
-      registerMcpEvents(server, db, session, async () => (await requireMcpSession(request)).session, input.webhooksReady?.(session.tenantId) ? options.egressOwner : undefined);
+      registerMcpEvents(server, db, session, async () => (await requireMcpSession(request)).session, options.egressOwner, input.webhooksReady?.(session.tenantId));
       if ((request.body as { method?: unknown } | null)?.method === "server/discover") {
         await externalDiscoveryOf(server)?.discover({ signal: currentLiveRequestSignal() });
       }

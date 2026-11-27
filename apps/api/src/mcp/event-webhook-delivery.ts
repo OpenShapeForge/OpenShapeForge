@@ -52,7 +52,8 @@ export async function deliverMcpEventWebhookOnce(options: {
   owner: NonNullable<ModuleEgressDispatch["owner"]>;
   allowlist: readonly string[];
   tenantId: string;
-}): Promise<"idle" | "checked" | "delivered" | "retried" | "removed"> {
+  entity: string;
+}): Promise<"idle" | "checked" | "delivered" | "lease-lost" | "retried" | "removed"> {
   const claimed = await claimNext(options.workerDb, options.tenantId);
   if (!claimed) return "idle";
   const { id, lease_token: lease } = claimed;
@@ -61,10 +62,11 @@ export async function deliverMcpEventWebhookOnce(options: {
     return "removed" as const;
   });
   const update = (cursor: string, attempts: number, delaySeconds: number) => workerTransaction(options.workerDb, async trx => {
-    await sql`update platform.mcp_event_subscriptions
+    const result = await sql`update platform.mcp_event_subscriptions
       set cursor = ${cursor}, attempts = ${attempts}, lease_token = null, lease_expires_at = null,
         next_attempt_at = clock_timestamp() + ${delaySeconds} * interval '1 second'
       where id = ${id} and lease_token = ${lease}::uuid`.execute(trx);
+    return result.numAffectedRows === 1n;
   });
   const retry = async () => {
     const attempts = claimed.attempts + 1;
@@ -72,10 +74,11 @@ export async function deliverMcpEventWebhookOnce(options: {
     await update(claimed.cursor, attempts, Math.min(60, 2 ** attempts));
     return "retried" as const;
   };
-  if (claimed.entity !== "Notification") return remove();
+  if (claimed.entity !== options.entity) return remove();
   try {
     const principal = { tenantId: claimed.tenant_id, userId: claimed.actor_id, issuer: claimed.issuer, clientId: claimed.oauth_client_id };
-    const session = await resolveEventWebhookAuthority(options.apiDb, principal);
+    const { url, secret, grant } = openEventWebhookDelivery(options.keys, claimed);
+    const session = await resolveEventWebhookAuthority(options.apiDb, principal, grant);
     if (!session) return remove();
     const table = getGeneratedCrudTables().find(candidate => candidate.source?.authoringEntityName === claimed.entity);
     if (!table?.realtime || table.source?.mcp?.operations.get !== true) return remove();
@@ -88,7 +91,6 @@ export async function deliverMcpEventWebhookOnce(options: {
       await update(batch.cursor, 0, 3);
       return "checked";
     }
-    const { url, secret } = openEventWebhookDelivery(options.keys, claimed);
     const target = eventWebhookDestination(url, { owner: options.owner, purpose: "probe", scope: {
       tenantId: claimed.tenant_id, actorId: claimed.actor_id, provider: "mcp-events", operation: "delivery", kind: "mutation",
     } }, options.allowlist);
@@ -101,8 +103,7 @@ export async function deliverMcpEventWebhookOnce(options: {
         data: { entity: claimed.entity, id: next.data.id }, cursor: next.cursor },
     });
     if (status >= 200 && status < 300) {
-      await update(next.cursor, 0, 0);
-      return "delivered";
+      return await update(next.cursor, 0, 0) ? "delivered" : "lease-lost";
     }
     if (status === 408 || status === 429 || status >= 500) return retry();
     return remove();

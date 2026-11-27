@@ -591,11 +591,11 @@ question the database can answer.
 Nothing is bypassed, so nothing is audited — the break-glass trail stays
 readable rather than being buried under a poll loop's heartbeat.
 
-One table declares it in this repository: core's own `platform.jobs` for the
-`job-worker` ([jobs.md](jobs.md)); a plugin with a queue of its own declares
-it on that queue and on nothing else. Notably *not* the rows a job touches —
-`platform.entity_events`, for one — which are reached only after a job is
-claimed, from a session scoped to that job's tenant.
+Core declares this on `platform.jobs`, `platform.inbound_deliveries`,
+`platform.extension_field_recomputes`, and `platform.mcp_event_subscriptions`.
+The MCP worker claims subscription delivery state and sealed callback details.
+`platform.entity_events` stays tenant-scoped and the target record read uses the
+current subscriber's authorization.
 
 Two properties worth being explicit about:
 

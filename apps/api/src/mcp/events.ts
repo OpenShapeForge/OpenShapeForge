@@ -15,7 +15,7 @@ const maxLifetimeMs = 55_000;
 const maxStreamsPerUser = 5;
 const activeStreams = new Map<string, number>();
 const listParams = fromJsonSchema({ type: "object" });
-const streamParams = fromJsonSchema<{ name: string; arguments: { entity: string }; cursor?: string | null; maxAgeMs?: number }>({
+const streamParams = fromJsonSchema<{ name: string; arguments: { entity: string }; cursor?: string | null; maxAgeMs?: number; heartbeatMs?: number }>({
   type: "object", required: ["name", "arguments"], properties: {
     name: { type: "string" },
     arguments: { type: "object", required: ["entity"], additionalProperties: false, properties: { entity: { type: "string" } } },
@@ -36,11 +36,11 @@ function visibleEntities(session: TrustedSessionContext): string[] {
 }
 
 export function registerMcpEvents(server: Server, db: OpenShapeForgeDatabase, session: TrustedSessionContext,
-  refresh: () => Promise<TrustedSessionContext>, egressOwner?: ModuleEgressDispatch["owner"]): void {
+  refresh: () => Promise<TrustedSessionContext>, egressOwner?: ModuleEgressDispatch["owner"], webhookEntity?: string): void {
   if (!session.tenantId || !session.userId || session.appPrincipal) return;
   const entities = visibleEntities(session);
   if (!entities.length) return;
-  const webhook = registerMcpEventWebhookHandlers(server, db, session, entities, egressOwner);
+  const webhook = registerMcpEventWebhookHandlers(server, db, session, entities, egressOwner, webhookEntity);
   server.registerCapabilities({ extensions: { [extension]: {} }, ...(webhook ? { events: {} } : {}) });
   server.setRequestHandler("events/list", { params: listParams }, async () => ({
     resultType: "complete",
@@ -75,8 +75,8 @@ export function registerMcpEvents(server: Server, db: OpenShapeForgeDatabase, se
       lastSent = Date.now();
     };
     const deadline = lastSent + maxLifetimeMs;
-    const startsNow = cursor === undefined;
-    const earliest = startsNow ? lastSent : params.maxAgeMs === undefined ? 0 : lastSent - params.maxAgeMs;
+    const keepaliveMs = Math.max(1000, Math.min(heartbeatMs, params.heartbeatMs ?? heartbeatMs));
+    const earliest = params.maxAgeMs === undefined ? 0 : lastSent - params.maxAgeMs;
     let first = true;
     try {
       while (!signal.aborted && Date.now() < deadline) {
@@ -88,13 +88,13 @@ export function registerMcpEvents(server: Server, db: OpenShapeForgeDatabase, se
         const batch = await readChangeBatch(db, current, cursor, first, undefined, entity);
         if (signal.aborted) break;
         if (first || batch.reset) {
-          await send("active", { cursor: batch.reset ? batch.cursor : cursor, truncated: cursor !== undefined && batch.reset, heartbeatMs });
+          await send("active", { cursor: batch.reset ? batch.cursor : cursor, truncated: cursor !== undefined && batch.reset, heartbeatMs: keepaliveMs });
         }
         for (const event of batch.changes) {
           if (signal.aborted) break;
           if (!event.eventId || !event.timestamp) continue;
           if (Date.parse(event.timestamp) < earliest) {
-            if (!startsNow) await send("active", { cursor: event.cursor, truncated: true, heartbeatMs });
+            await send("active", { cursor: event.cursor, truncated: true, heartbeatMs: keepaliveMs });
             continue;
           }
           await send("event", { eventId: event.eventId, name, timestamp: event.timestamp,
@@ -102,7 +102,7 @@ export function registerMcpEvents(server: Server, db: OpenShapeForgeDatabase, se
         }
         cursor = batch.cursor;
         first = false;
-        if (!signal.aborted && Date.now() - lastSent >= heartbeatMs) await send("heartbeat", { cursor });
+        if (!signal.aborted && Date.now() - lastSent >= keepaliveMs) await send("heartbeat", { cursor });
         await delay(1000, undefined, { signal });
       }
     } catch (error) {

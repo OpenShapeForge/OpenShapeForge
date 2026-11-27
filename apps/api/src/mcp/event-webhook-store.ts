@@ -12,6 +12,12 @@ import type { EventWebhookPrincipal } from "./event-webhook-authority.js";
 const FIELD = "mcp-event-delivery";
 export const EVENT_WEBHOOK_TTL_MS = 15 * 60_000;
 
+export type EventWebhookGrant = Pick<TrustedSessionContext, "scope"> & {
+  roles: readonly string[];
+  groups: readonly string[];
+  oauthScopes: readonly string[];
+};
+
 export type EventWebhookSubscription = {
   id: string;
   tenant_id: string;
@@ -30,7 +36,7 @@ export function eventWebhookId(principal: EventWebhookPrincipal, entity: string,
   return "sub_" + createHash("sha256").update(identity).digest("base64url");
 }
 
-export function openEventWebhookDelivery(keys: SecretKeyring, row: EventWebhookSubscription): { url: string; secret: string } {
+export function openEventWebhookDelivery(keys: SecretKeyring, row: EventWebhookSubscription): { url: string; secret: string; grant: EventWebhookGrant } {
   return JSON.parse(decryptSecret(keys, row.tenant_id + ":" + row.id, FIELD, row.sealed_delivery));
 }
 
@@ -50,7 +56,9 @@ export function createEventWebhookStore(db: OpenShapeForgeDatabase, session: Tru
       (await sql`delete from platform.mcp_event_subscriptions where id = ${id}`.execute(trx)).numAffectedRows !== 0n),
     retain: (input: { keys: SecretKeyring; id: string; entity: string; url: URL; secret: string; cursor: string; expiresAt: Date }) => run(async trx => {
       const sealed = encryptSecret(input.keys, principal.tenantId + ":" + input.id, FIELD,
-        JSON.stringify({ url: input.url.href, secret: input.secret }));
+        JSON.stringify({ url: input.url.href, secret: input.secret, grant: {
+          scope: session.scope, roles: session.roles ?? [], groups: session.groups ?? [], oauthScopes: session.oauthScopes ?? [],
+        } }));
       const lock = JSON.stringify([principal.tenantId, principal.issuer, principal.userId, principal.clientId]);
       await sql`select pg_advisory_xact_lock(hashtextextended(${lock}, 0))`.execute(trx);
       await sql`delete from platform.mcp_event_subscriptions where expires_at <= clock_timestamp()`.execute(trx);

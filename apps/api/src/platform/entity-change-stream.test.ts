@@ -285,3 +285,68 @@ test("MCP event subscription metadata is isolated by actor and OAuth client", as
   await store.remove(id);
   expect(await store.get(id)).toBeUndefined();
 });
+
+test("MCP Events advertises, verifies and renews a webhook on the configured entity", async () => {
+  const bearerExpiresAt = Date.now() + 180_000;
+  const who: Parameters<typeof registerMcpEvents>[2] = {
+    ...reader, tenantId: randomUUID(), credential: "bearer", principalKind: "person",
+    issuer, oauthClientId: "work-test", bearerExpiresAt,
+    relation: {
+      status: "linked", identityId: randomUUID(), issuer, subject: reader.userId, relationId: randomUUID(),
+      displayName: null, relationType: "person", candidateRelationId: null, linkedBy: null,
+      needsRoleAssignment: false, roles: reader.roles,
+    },
+  };
+  await sql`insert into platform.tenants (id, slug, name, status)
+    values (${who.tenantId}::uuid, 'event-hooks-test', 'Event hooks test', 'active')`.execute(privileged.db);
+  const key = Buffer.alloc(32, 3).toString("base64");
+  const previousKeys = process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+  const previousHosts = process.env.OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS;
+  process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = `test:${key}`;
+  process.env.OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS = "8.8.8.8";
+  let verifications = 0;
+  const handler = createMcpHandler(() => {
+    const server = new Server({ name: "events-test", version: "1" });
+    registerMcpEvents(server, runtime.db, who, async () => who, {
+      pinsResolvedAddresses: true,
+      fetch: async ({ init }) => {
+        verifications++;
+        expect(new Headers(init.headers).get("webhook-signature")).toMatch(/^v1,/);
+        const body = await new Response(init.body).json();
+        expect(body.type).toBe("verification");
+        return Response.json({ challenge: body.challenge });
+      },
+    }, "RelationGroup");
+    return server;
+  }, { legacy: "reject" });
+  const post = async (method: string, params: Record<string, unknown> = {}) => {
+    const response = await handler.fetch(new Request("https://example.test/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json", "MCP-Protocol-Version": "2026-07-28", "Mcp-Method": method },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: { ...params, _meta: {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+        "io.modelcontextprotocol/clientInfo": { name: "events-test", version: "1" },
+      } } }),
+    }));
+    return response.json();
+  };
+  try {
+    expect(await post("server/discover")).toMatchObject({ result: { capabilities: { events: {} } } });
+    expect(await post("events/list")).toMatchObject({ result: { events: [{ name: "resource.created", delivery: ["push", "webhook"] }] } });
+    const args = { name: "resource.created", arguments: { entity: "RelationGroup" } };
+    const url = "https://8.8.8.8/callback";
+    const request = { ...args, delivery: { mode: "webhook", url, secret: `whsec_${key}` } };
+    const subscribed = await post("events/subscribe", request);
+    expect(subscribed).toMatchObject({ result: { id: expect.any(String), refreshBefore: new Date(bearerExpiresAt).toISOString() } });
+    expect(await post("events/subscribe", request)).toMatchObject({ result: { id: subscribed.result.id } });
+    expect(verifications).toBe(1);
+    expect(await post("events/unsubscribe", { ...args, delivery: { url } })).toMatchObject({ result: { resultType: "complete" } });
+  } finally {
+    await handler.close();
+    if (previousKeys === undefined) delete process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS;
+    else process.env.OPENSHAPEFORGE_ELICITED_SECRET_KEYS = previousKeys;
+    if (previousHosts === undefined) delete process.env.OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS;
+    else process.env.OPENSHAPEFORGE_MCP_EVENT_CALLBACK_HOSTS = previousHosts;
+  }
+}, 15_000);

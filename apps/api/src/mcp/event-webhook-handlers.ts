@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BUSL-1.1
+import { timingSafeEqual } from "node:crypto";
 import { fromJsonSchema, ProtocolError, ProtocolErrorCode, type Server } from "@modelcontextprotocol/server";
 import type { TrustedSessionContext } from "../auth/trusted-context.js";
 import type { OpenShapeForgeDatabase } from "../db/connection.js";
@@ -8,7 +9,7 @@ import { parseStreamCursor, readChangeBatch } from "../platform/entity-change-st
 import { eventWebhookPrincipal } from "./event-webhook-authority.js";
 import { eventWebhookDestination, verifyEventWebhook } from "./event-webhook-callback.js";
 import { decodeEventWebhookSecret } from "./event-webhook-signature.js";
-import { createEventWebhookStore, eventWebhookId, EVENT_WEBHOOK_TTL_MS } from "./event-webhook-store.js";
+import { createEventWebhookStore, eventWebhookId, openEventWebhookDelivery, EVENT_WEBHOOK_TTL_MS } from "./event-webhook-store.js";
 
 const eventName = "resource.created";
 const argsSchema = { type: "object", required: ["entity"], additionalProperties: false,
@@ -67,7 +68,12 @@ export function registerMcpEventWebhookHandlers(server: Server, db: OpenShapeFor
     const knownCursor = existing?.cursor ?? requested;
     const batch = await readChangeBatch(db, session, knownCursor, true, undefined, entity);
     const cursor = batch.reset ? batch.cursor : knownCursor!;
-    try { await verifyEventWebhook(target, key, id); }
+    try {
+      const verifiedKey = existing && decodeEventWebhookSecret(openEventWebhookDelivery(keys, existing).secret);
+      if (!verifiedKey || verifiedKey.length !== key.length || !timingSafeEqual(verifiedKey, key)) {
+        await verifyEventWebhook(target, key, id);
+      }
+    }
     catch { throw new ProtocolError(-32015, "Webhook callback could not be verified.", { reason: "challenge_failed" }); }
     const row = await store.retain({ keys, id, entity, url: target.url, secret: params.delivery.secret, cursor, expiresAt });
     if (!row) throw new ProtocolError(-32025, "Too many active event subscriptions.", { limit: "subscriptions", max: 5 });
